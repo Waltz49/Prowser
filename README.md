@@ -2,7 +2,7 @@
 
 Prowser is a native macOS image browser for Apple Silicon, built with Python, PySide6, and Qt. Browse folders of images in a thumbnail grid or fullscreen, manage files, search and sort, run slideshows, and optionally generate images locally from the **Create** menu.
 
-The latest DMG is [here](https://waltzremote.com/Prowser-0.9.0.dmg).
+The latest DMG is at the [website](https://waltzremote.com/).
 
 The first time you use AI-based features (similarity sort, text search, or Create) the app downloads and caches models; that pass can be slow, later use is much faster.
 
