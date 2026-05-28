@@ -1,0 +1,483 @@
+#!/usr/bin/env python3
+"""Infill-by-painting dialog: paint mask over active image, submit to MFLUX infill."""
+
+from __future__ import annotations
+
+import os
+from typing import Any, Dict, List, Optional
+
+from PySide6.QtCore import QEasingCurve, QPropertyAnimation, QPoint, Qt, QTimer
+from PySide6.QtGui import QGuiApplication
+from PySide6.QtWidgets import (
+    QDialog,
+    QDialogButtonBox,
+    QFrame,
+    QGraphicsOpacityEffect,
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
+    QSizePolicy,
+    QVBoxLayout,
+)
+
+from imagegen_plugins.image_gen_active_model import (
+    FUNCTION_INFILL,
+    save_active_plugin_id_for_function,
+)
+from imagegen_plugins.image_gen_dialog import (
+    ImageGenDialog,
+    apply_image_gen_dialog_shell,
+    validate_copies_require_random_seed,
+)
+from imagegen_plugins.image_gen_model_availability import confirm_model_download_if_needed
+from imagegen_plugins.image_gen_model_selector import resolve_initial_plugin
+from imagegen_plugins.image_gen_persistence import (
+    load_infill_paint_dialog_geometry_hex,
+    load_model_settings,
+    save_infill_paint_dialog_geometry_hex,
+    save_model_settings,
+)
+from imagegen_plugins.image_gen_pipeline_modes import finalize_run_values
+from imagegen_plugins.image_gen_registry import ImageGenModelPlugin
+from imagegen_plugins.infill_paint_canvas import InfillPaintCanvas
+from imagegen_plugins.image_gen_source_nav import (
+    ImageGenSourceNavRow,
+    resolve_image_gen_main_window,
+)
+from imagegen_plugins.pixelmator_export import persist_paint_infill_exports
+from theme_service import get_active_theme
+from utils import (
+    _center_styled_dialog_on_screen,
+    restore_dialog_geometry_hex,
+    save_dialog_geometry_hex,
+    show_styled_warning,
+)
+
+INFILL_PAINT_DIALOG_TITLE = "Infill by Painting"
+_SUBMIT_NOTICE_TEXT = "Infill job submitted"
+_SUBMIT_NOTICE_VISIBLE_MS = 5000
+_SUBMIT_NOTICE_FADE_MS = 1000
+_SUBMIT_NOTICE_GAP_MM = 2.0
+# Set True to show infill prompt + Import in paint infill Settings dialog.
+_SHOW_INFILL_PAINT_PROMPT_AND_IMPORT = False
+
+
+def active_image_path_for_infill(main_window) -> Optional[str]:
+    """Active image for infill paint: browse current or single thumbnail selection."""
+    if main_window is None:
+        return None
+    image_path = None
+    if main_window.current_view_mode == "browse":
+        if hasattr(main_window, "get_current_image_path"):
+            image_path = main_window.get_current_image_path()
+    elif main_window.current_view_mode == "thumbnail":
+        if hasattr(main_window, "selection_manager") and main_window.selection_manager:
+            selected_files = main_window.selection_manager.get_selected_files()
+            if selected_files and len(selected_files) == 1:
+                image_path = selected_files[0]
+    if not image_path or not os.path.isfile(image_path):
+        return None
+    return image_path
+
+
+class InfillPaintSettingsDialog(ImageGenDialog):
+    """Modal infill settings (model, prompt, steps, etc.) without Pixelmator export."""
+
+    def __init__(
+        self,
+        plugins: List[ImageGenModelPlugin],
+        source_path: str,
+        parent=None,
+        *,
+        initial_plugin_id: Optional[str] = None,
+        initial_prompt: Optional[str] = None,
+    ):
+        self._source_path = os.path.abspath(source_path)
+        super().__init__(
+            plugins,
+            FUNCTION_INFILL,
+            parent,
+            initial_plugin_id=initial_plugin_id,
+            initial_prompt=initial_prompt,
+            window_title="Infill Settings",
+        )
+        self.finished.disconnect(self._save_geometry)
+
+    def _save_geometry(self) -> None:
+        pass
+
+    def showEvent(self, event):
+        QDialog.showEvent(self, event)
+        QTimer.singleShot(0, lambda: _center_styled_dialog_on_screen(self, self.parent()))
+        QTimer.singleShot(0, self._raise_and_activate)
+
+    def closeEvent(self, event):
+        QDialog.closeEvent(self, event)
+
+    def _build_ui(self) -> None:
+        super()._build_ui()
+        buttons = self.findChild(QDialogButtonBox)
+        if buttons is not None:
+            ok_btn = buttons.button(QDialogButtonBox.StandardButton.Ok)
+            if ok_btn is not None:
+                ok_btn.setText("Done")
+        if not _SHOW_INFILL_PAINT_PROMPT_AND_IMPORT:
+            self._hide_prompt_and_import_rows()
+
+    def _populate_field_rows(self) -> None:
+        super()._populate_field_rows()
+        if not _SHOW_INFILL_PAINT_PROMPT_AND_IMPORT:
+            self._hide_prompt_and_import_rows()
+
+    def _hide_prompt_and_import_rows(self) -> None:
+        """Hide prompt/import UI while keeping widgets and import handlers intact."""
+        if self._fields_form is None:
+            return
+        entry = self._widgets.get("prompt")
+        if entry is None:
+            return
+        prompt_widget, _, _ = entry
+        row_host = prompt_widget.parent()
+        while row_host is not None and self._fields_form.indexOf(row_host) < 0:
+            row_host = row_host.parent()
+            if row_host == self:
+                row_host = None
+                break
+        if row_host is None:
+            prompt_widget.hide()
+            return
+        label = self._fields_form.labelForField(row_host)
+        if label is not None:
+            label.hide()
+        row_host.hide()
+
+    def _show_import_button(self) -> bool:
+        return bool(self._source_path)
+
+    def _active_image_path_for_import(self) -> Optional[str]:
+        return self._source_path
+
+    def _on_generate(self) -> None:
+        values = finalize_run_values(
+            self.plugin.pipeline_id, self.collect_values()
+        )
+        if not validate_copies_require_random_seed(self, values):
+            return
+        save_model_settings(self.plugin.plugin_id, values)
+        save_active_plugin_id_for_function(FUNCTION_INFILL, self.plugin.plugin_id)
+        self._result_values = values
+        self.accept()
+
+
+class ImageGenInfillPaintDialog(QDialog):
+    """Paint infill mask over the active image; submit without closing."""
+
+    def __init__(
+        self,
+        plugins: List[ImageGenModelPlugin],
+        source_path: str,
+        controller,
+        main_window,
+        parent=None,
+        *,
+        initial_prompt: Optional[str] = None,
+    ):
+        super().__init__(parent or main_window)
+        self._plugins = list(plugins)
+        self._controller = controller
+        self._main_window = main_window
+        self.source_path = os.path.abspath(source_path)
+        self._canvas: Optional[InfillPaintCanvas] = None
+        self._source_nav: Optional[ImageGenSourceNavRow] = None
+        self._values: Dict[str, Any] = {}
+        self._submit_notice: Optional[QLabel] = None
+        self._submit_notice_opacity: Optional[QGraphicsOpacityEffect] = None
+        self._submit_notice_timer: Optional[QTimer] = None
+        self._submit_notice_fade: Optional[QPropertyAnimation] = None
+        self._infill_btn: Optional[QPushButton] = None
+
+        initial = resolve_initial_plugin(
+            self._plugins,
+            function=FUNCTION_INFILL,
+        )
+        if initial is None:
+            raise ValueError("No available plugins for infill paint")
+        self.plugin = initial
+        self._reload_settings(initial_prompt=initial_prompt)
+
+        apply_image_gen_dialog_shell(
+            self,
+            window_title=INFILL_PAINT_DIALOG_TITLE,
+            min_width=800,
+            min_height=600,
+        )
+        self._build_ui()
+
+        self._geometry_restore_attempted = False
+        self._geometry_was_restored = False
+        self.finished.connect(self._save_geometry)
+
+    def _reload_settings(self, *, initial_prompt: Optional[str] = None) -> None:
+        saved = load_model_settings(self.plugin.plugin_id)
+        self._values = self.plugin.merged_values(saved)
+        if initial_prompt:
+            self._values["prompt"] = initial_prompt
+
+    def _build_ui(self) -> None:
+        layout = QVBoxLayout(self)
+
+        canvas_host = QFrame()
+        canvas_host.setFrameShape(QFrame.Shape.NoFrame)
+        canvas_host.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
+        )
+        canvas_host_layout = QVBoxLayout(canvas_host)
+        canvas_host_layout.setContentsMargins(0, 0, 0, 0)
+
+        self._canvas = InfillPaintCanvas(self.source_path, canvas_host)
+        self._canvas.setMinimumHeight(360)
+        self._source_nav = ImageGenSourceNavRow(
+            resolve_image_gen_main_window(self),
+            self._on_source_image_changed,
+            canvas_host,
+            initial_source_path=self.source_path,
+        )
+        self._source_nav.set_center_widget(self._canvas)
+        canvas_host_layout.addWidget(self._source_nav)
+        layout.addWidget(canvas_host, 1)
+
+        btn_row = QHBoxLayout()
+        btn_row.addStretch(1)
+        settings_btn = QPushButton("Settings")
+        clear_btn = QPushButton("Clear")
+        close_btn = QPushButton("Close")
+        self._infill_btn = QPushButton("Infill")
+        settings_btn.clicked.connect(self._on_settings)
+        clear_btn.clicked.connect(self._on_clear)
+        close_btn.clicked.connect(self.reject)
+        self._infill_btn.clicked.connect(self._on_infill)
+        self._infill_btn.setDefault(True)
+        self._infill_btn.setAutoDefault(True)
+
+        self._submit_notice = QLabel(_SUBMIT_NOTICE_TEXT, self)
+        self._submit_notice.setAlignment(
+            Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter
+        )
+        self._submit_notice.setAttribute(
+            Qt.WidgetAttribute.WA_TransparentForMouseEvents, True
+        )
+        self._submit_notice_opacity = QGraphicsOpacityEffect(self._submit_notice)
+        self._submit_notice.setGraphicsEffect(self._submit_notice_opacity)
+        self._style_submit_notice()
+        self._submit_notice.hide()
+
+        for btn in (settings_btn, clear_btn, close_btn, self._infill_btn):
+            btn_row.addWidget(btn)
+        layout.addLayout(btn_row)
+
+    def _on_source_image_changed(self, path: str) -> None:
+        self.source_path = os.path.abspath(path)
+        if self._canvas is not None:
+            self._canvas.set_source_path(self.source_path)
+
+    def _on_clear(self) -> None:
+        if self._canvas is not None:
+            self._canvas.clear_mask()
+
+    def _on_settings(self) -> None:
+        dlg = InfillPaintSettingsDialog(
+            self._plugins,
+            self.source_path,
+            self,
+            initial_plugin_id=self.plugin.plugin_id,
+            initial_prompt=str(self._values.get("prompt") or ""),
+        )
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+        values = dlg.accepted_values()
+        new_plugin = dlg.accepted_plugin()
+        if values:
+            self._values = dict(values)
+        if new_plugin is not None:
+            self.plugin = new_plugin
+
+    def _collect_run_values(self) -> Dict[str, Any]:
+        return finalize_run_values(self.plugin.pipeline_id, dict(self._values))
+
+    def _on_infill(self) -> None:
+        if self._canvas is None or not self._canvas.has_paint():
+            show_styled_warning(
+                self,
+                "Infill",
+                "Paint a mask over the region to infill before running.",
+            )
+            return
+
+        values = self._collect_run_values()
+        if not validate_copies_require_random_seed(self, values):
+            return
+
+        try:
+            export_meta = persist_paint_infill_exports(
+                self.source_path,
+                self._canvas.mask_image(),
+            )
+        except (OSError, RuntimeError, ValueError) as e:
+            show_styled_warning(
+                self,
+                "Infill",
+                f"Could not prepare base and mask: {e}",
+            )
+            return
+
+        values.update(export_meta)
+        save_model_settings(self.plugin.plugin_id, values)
+
+        if not confirm_model_download_if_needed(self.plugin, self._main_window):
+            return
+
+        from imagegen_plugins.image_gen_active_model import set_active_plugin_for_function
+
+        set_active_plugin_for_function(
+            self._main_window, FUNCTION_INFILL, self.plugin
+        )
+        if self._controller.start_generation(self.plugin, values):
+            self._show_submit_notice()
+
+    def _style_submit_notice(self) -> None:
+        if self._submit_notice is None:
+            return
+        theme = get_active_theme()
+        self._submit_notice.setStyleSheet(
+            f"""
+            QLabel {{
+                color: {theme.dialog_text_color_hex};
+                background-color: {theme.button_bg_default_hex};
+                border: 1px solid {theme.border_default_hex};
+                border-radius: 4px;
+                padding: 4px 8px;
+                font-size: 12px;
+            }}
+            """
+        )
+
+    def _submit_notice_gap_px(self) -> int:
+        return max(4, int(round(_SUBMIT_NOTICE_GAP_MM / 25.4 * self.logicalDpiY())))
+
+    def _position_submit_notice(self) -> None:
+        if self._submit_notice is None or self._infill_btn is None:
+            return
+        self._submit_notice.adjustSize()
+        notice_w = self._submit_notice.sizeHint().width()
+        notice_h = self._submit_notice.sizeHint().height()
+        btn_origin = self._infill_btn.mapTo(self, QPoint(0, 0))
+        x = btn_origin.x() + self._infill_btn.width() - notice_w
+        y = btn_origin.y() - self._submit_notice_gap_px() - notice_h
+        self._submit_notice.setGeometry(x, y, notice_w, notice_h)
+        self._submit_notice.raise_()
+
+    def _show_submit_notice(self) -> None:
+        if self._submit_notice is None or self._submit_notice_opacity is None:
+            return
+        if self._submit_notice_fade is not None:
+            self._submit_notice_fade.stop()
+            self._submit_notice_fade.deleteLater()
+            self._submit_notice_fade = None
+        if self._submit_notice_timer is not None:
+            self._submit_notice_timer.stop()
+            self._submit_notice_timer.deleteLater()
+            self._submit_notice_timer = None
+        self._submit_notice_opacity.setOpacity(1.0)
+        self._position_submit_notice()
+        self._submit_notice.show()
+        self._submit_notice.raise_()
+        self._submit_notice_timer = QTimer(self)
+        self._submit_notice_timer.setSingleShot(True)
+        self._submit_notice_timer.timeout.connect(self._fade_out_submit_notice)
+        self._submit_notice_timer.start(_SUBMIT_NOTICE_VISIBLE_MS)
+
+    def _fade_out_submit_notice(self) -> None:
+        if self._submit_notice is None or self._submit_notice_opacity is None:
+            return
+        self._submit_notice_fade = QPropertyAnimation(
+            self._submit_notice_opacity, b"opacity", self
+        )
+        self._submit_notice_fade.setDuration(_SUBMIT_NOTICE_FADE_MS)
+        self._submit_notice_fade.setStartValue(1.0)
+        self._submit_notice_fade.setEndValue(0.0)
+        self._submit_notice_fade.setEasingCurve(QEasingCurve.Type.InOutQuad)
+        self._submit_notice_fade.finished.connect(self._hide_submit_notice)
+        self._submit_notice_fade.start()
+
+    def _hide_submit_notice(self) -> None:
+        if self._submit_notice is None or self._submit_notice_opacity is None:
+            return
+        self._submit_notice.hide()
+        self._submit_notice_opacity.setOpacity(1.0)
+        if self._submit_notice_fade is not None:
+            self._submit_notice_fade.deleteLater()
+            self._submit_notice_fade = None
+
+    def _save_geometry(self) -> None:
+        try:
+            save_infill_paint_dialog_geometry_hex(save_dialog_geometry_hex(self))
+        except Exception:
+            pass
+
+    def showEvent(self, event):
+        if not self._geometry_restore_attempted:
+            self._geometry_restore_attempted = True
+            try:
+                geom_hex = load_infill_paint_dialog_geometry_hex()
+                if geom_hex:
+                    self._geometry_was_restored = restore_dialog_geometry_hex(
+                        self, geom_hex, self.parent()
+                    )
+            except Exception:
+                pass
+        super().showEvent(event)
+        if not self._geometry_was_restored:
+            QTimer.singleShot(0, self._apply_initial_geometry)
+        QTimer.singleShot(0, self._raise_and_activate)
+
+    def _apply_initial_geometry(self) -> None:
+        app = QGuiApplication.instance()
+        screen = app.primaryScreen() if app is not None else None
+        if screen is not None:
+            geom = screen.availableGeometry()
+            w = max(self.minimumWidth(), int(geom.width() * 0.92))
+            h = max(self.minimumHeight(), int(geom.height() * 0.92))
+            self.resize(w, h)
+        _center_styled_dialog_on_screen(self, self.parent())
+
+    def _raise_and_activate(self) -> None:
+        self.raise_()
+        self.activateWindow()
+        if self._canvas is not None:
+            self._canvas.setFocus(Qt.FocusReason.OtherFocusReason)
+
+    def closeEvent(self, event):
+        self._save_geometry()
+        super().closeEvent(event)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if (
+            self._submit_notice is not None
+            and self._submit_notice.isVisible()
+        ):
+            self._position_submit_notice()
+
+    def keyPressEvent(self, event):
+        key = event.key()
+        mods = event.modifiers()
+        if self._canvas is not None:
+            if key in (Qt.Key.Key_BracketLeft, Qt.Key.Key_BracketRight):
+                self._canvas.keyPressEvent(event)
+                event.accept()
+                return
+            if key == Qt.Key.Key_Z and mods & Qt.KeyboardModifier.ControlModifier:
+                self._canvas.keyPressEvent(event)
+                if event.isAccepted():
+                    return
+        super().keyPressEvent(event)
