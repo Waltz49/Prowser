@@ -84,9 +84,18 @@ def configure_task_info_text_browser(
 
 
 def handle_task_info_reference_link_clicked(main_window, url: QUrl) -> None:
-    if url.toString() != "reflevel://":
-        return
     if not main_window:
+        return
+    url_str = url.toString()
+    if url_str == "skipcooldown://":
+        try:
+            from imagegen_plugins.image_gen_controller import get_imagegen_controller
+
+            get_imagegen_controller(main_window).skip_copy_cooldown()
+        except ImportError:
+            pass
+        return
+    if url_str != "reflevel://":
         return
     try:
         from imagegen_plugins.image_gen_controller import get_imagegen_controller
@@ -652,21 +661,28 @@ class ClickableImageGenIndicatorLabel(QLabel):
         except ImportError:
             pass
 
-    def _refresh_live_task_info(self) -> None:
+    def _refresh_live_task_info(self, *, force: bool = False) -> None:
         browser = self._live_task_info_browser
         if browser is None or not self.main_window:
             return
         try:
             from imagegen_plugins.image_gen_controller import get_imagegen_controller
 
-            info_html = get_imagegen_controller(
-                self.main_window
-            ).get_task_queue_status_info_html()
+            controller = get_imagegen_controller(self.main_window)
+            if not force and not controller.task_status_display_needs_refresh():
+                return
+            info_html = controller.get_task_queue_status_info_html()
         except ImportError:
             return
         if not info_html:
             return
         _apply_task_info_html_to_browser(browser, info_html)
+
+    def _refresh_live_task_info_on_signal(self) -> None:
+        self._refresh_live_task_info(force=True)
+
+    def _refresh_live_task_info_on_timer(self) -> None:
+        self._refresh_live_task_info(force=False)
 
     def _start_live_task_info_updates(
         self, info_browser: QTextBrowser, menu: QMenu
@@ -677,13 +693,15 @@ class ClickableImageGenIndicatorLabel(QLabel):
             from imagegen_plugins.image_gen_controller import get_imagegen_controller
 
             controller = get_imagegen_controller(self.main_window)
-            controller.task_status_info_changed.connect(self._refresh_live_task_info)
+            controller.task_status_info_changed.connect(
+                self._refresh_live_task_info_on_signal
+            )
             self._live_task_info_signal_connected = True
         except ImportError:
             pass
         timer = QTimer(self)
         timer.setInterval(500)
-        timer.timeout.connect(self._refresh_live_task_info)
+        timer.timeout.connect(self._refresh_live_task_info_on_timer)
         timer.start()
         self._live_task_info_timer = timer
         menu.aboutToHide.connect(self._stop_live_task_info_updates)
@@ -713,7 +731,7 @@ class ClickableImageGenIndicatorLabel(QLabel):
 
                     controller = get_imagegen_controller(self.main_window)
                     controller.task_status_info_changed.disconnect(
-                        self._refresh_live_task_info
+                        self._refresh_live_task_info_on_signal
                     )
             except (ImportError, TypeError, RuntimeError, SystemError):
                 pass

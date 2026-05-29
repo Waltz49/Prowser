@@ -51,8 +51,23 @@ def run_osascript(script: str, *, timeout: int = 10) -> Completed:
     )
 
 
-def run_terminal_script(shell_command: str) -> subprocess.Popen:
+def run_terminal_script(shell_command: str, *, activate: bool = False) -> subprocess.Popen:
     """Open Terminal.app and run ``shell_command`` via AppleScript tell block."""
     escaped = shell_command.replace("\\", "\\\\").replace('"', '\\"')
-    script = f'tell application "Terminal" to do script "{escaped}"'
-    return subprocess.Popen(["osascript", "-e", script])
+    args = ["osascript"]
+    if activate:
+        args.extend(
+            [
+                "-e",
+                'tell application "Terminal"',
+                "-e",
+                "activate",
+                "-e",
+                f'do script "{escaped}"',
+                "-e",
+                "end tell",
+            ]
+        )
+    else:
+        args.extend(["-e", f'tell application "Terminal" to do script "{escaped}"'])
+    return subprocess.Popen(args)

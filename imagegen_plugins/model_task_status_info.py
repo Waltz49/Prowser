@@ -63,7 +63,8 @@ def _exif_style_link(label: str, href: str = "reflevel://") -> str:
 
 
 _EXPAND_ELAPSED_ROW_RE = re.compile(
-    r"<tr><td><b>Elapsed:</b></td><td>[^<]*</td></tr>"
+    r"(<tr><td><b>Elapsed:</b></td><td>)(.*?)(</td></tr>)",
+    re.DOTALL,
 )
 _EXPAND_REFERENCES_ROW_RE = re.compile(
     r"<tr><td><b>References:</b></td><td>.*?</td></tr>"
@@ -412,6 +413,121 @@ def update_status_html_steps_progress(
         html_text,
         count=1,
     )
+    return updated if count else html_text
+
+
+def _set_elapsed_row(html_text: str, elapsed_cell: str) -> str:
+    """Replace or insert the Elapsed: table row."""
+    if not html_text:
+        return html_text
+    row_html = f"<tr><td><b>Elapsed:</b></td><td>{elapsed_cell}</td></tr>"
+    updated, count = _EXPAND_ELAPSED_ROW_RE.subn(
+        lambda m: f"{m.group(1)}{elapsed_cell}{m.group(3)}",
+        html_text,
+        count=1,
+    )
+    if count:
+        return updated
+    if "</table>" in html_text:
+        return html_text.replace("</table>", row_html + "</table>", 1)
+    return html_text
+
+
+def remove_elapsed_row(html_text: str) -> str:
+    """Remove the Elapsed: table row if present."""
+    if not html_text:
+        return html_text
+    return _EXPAND_ELAPSED_ROW_RE.sub("", html_text, count=1)
+
+
+def freeze_status_html_generation_elapsed(
+    html_text: str,
+    elapsed_seconds: float,
+    *,
+    step: int | None = None,
+    step_total: int | None = None,
+) -> str:
+    """Lock elapsed on its own row and leave Steps showing step count only."""
+    if not html_text:
+        return html_text
+    if step is not None and step_total is not None and step_total > 0:
+        step_i = max(0, min(int(step), int(step_total)))
+        step_value = f"{step_i} of {int(step_total)}"
+        updated, count = _STEPS_ROW_RE.subn(
+            lambda m: m.group(1) + _escape(step_value) + m.group(2),
+            html_text,
+            count=1,
+        )
+        if count:
+            html_text = updated
+    elapsed_str = _format_duration(elapsed_seconds)
+    return _set_elapsed_row(html_text, _escape(elapsed_str))
+
+
+_ELAPSED_ROW_RE = _EXPAND_ELAPSED_ROW_RE
+_COOLDOWN_SUFFIX_RE = re.compile(r"\s+\(Cooldown\)\s+\d+")
+_SKIP_COOLDOWN_LINK_RE = re.compile(
+    r'\s*<a href="skipcooldown://".*?</a>',
+    re.DOTALL,
+)
+_CACHED_SKIP_COOLDOWN_ICON_HTML: str | None = None
+
+
+def cooldown_skip_icon_html() -> str:
+    """Inline skip-cooldown icon (16×16 PNG) for task-info HTML."""
+    global _CACHED_SKIP_COOLDOWN_ICON_HTML
+    cached = _CACHED_SKIP_COOLDOWN_ICON_HTML
+    if cached is not None:
+        return cached
+    from theme_base import asset_file_url
+
+    url = asset_file_url("skip_cooldown_icon.png")
+    cached = (
+        f'<a href="skipcooldown://" title="Skip cooldown">'
+        f'<img src="{url}" width="16" height="16" '
+        f'style="margin:0 0 0 4px;padding:0;vertical-align:middle;border:none;">'
+        f"</a>"
+    )
+    _CACHED_SKIP_COOLDOWN_ICON_HTML = cached
+    return cached
+
+
+def apply_cooldown_to_status_html(
+    html_text: str,
+    remaining_seconds: int,
+    *,
+    skip_icon_html: str = "",
+) -> str:
+    """Append cooldown countdown (and optional skip icon) to the Elapsed row."""
+    if not html_text:
+        return html_text
+    remaining = max(0, int(remaining_seconds))
+    suffix = f"   (Cooldown) {remaining}"
+    if skip_icon_html:
+        suffix += f" {skip_icon_html}"
+
+    def _replace_row(match: re.Match[str]) -> str:
+        prefix, content, closing = match.group(1), match.group(2), match.group(3)
+        clean = _SKIP_COOLDOWN_LINK_RE.sub("", content)
+        clean = _COOLDOWN_SUFFIX_RE.sub("", clean).rstrip()
+        return prefix + clean + suffix + closing
+
+    updated, count = _ELAPSED_ROW_RE.subn(_replace_row, html_text, count=1)
+    return updated if count else html_text
+
+
+def strip_cooldown_from_status_html(html_text: str) -> str:
+    """Remove cooldown countdown and skip icon from the Elapsed row."""
+    if not html_text:
+        return html_text
+
+    def _replace_row(match: re.Match[str]) -> str:
+        prefix, content, closing = match.group(1), match.group(2), match.group(3)
+        clean = _SKIP_COOLDOWN_LINK_RE.sub("", content)
+        clean = _COOLDOWN_SUFFIX_RE.sub("", clean).rstrip()
+        return prefix + clean + closing
+
+    updated, count = _ELAPSED_ROW_RE.subn(_replace_row, html_text, count=1)
     return updated if count else html_text
 
 

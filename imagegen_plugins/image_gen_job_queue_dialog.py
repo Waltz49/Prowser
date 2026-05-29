@@ -268,11 +268,13 @@ class ImageGenJobQueueDialog(QDialog):
         if self._signal_connected:
             return
         self._controller.queue_changed.connect(self.refresh_table)
-        self._controller.task_status_info_changed.connect(self._refresh_active_row_info)
+        self._controller.task_status_info_changed.connect(
+            lambda: self._refresh_active_row_info(force=True)
+        )
         self._signal_connected = True
         timer = QTimer(self)
         timer.setInterval(500)
-        timer.timeout.connect(self._refresh_active_row_info)
+        timer.timeout.connect(lambda: self._refresh_active_row_info(force=False))
         timer.start()
         self._refresh_timer = timer
 
@@ -319,8 +321,10 @@ class ImageGenJobQueueDialog(QDialog):
             self._refresh_timer.start()
         self.refresh_table()
 
-    def _refresh_active_row_info(self) -> None:
+    def _refresh_active_row_info(self, *, force: bool = False) -> None:
         if not self.isVisible():
+            return
+        if not force and not self._controller.task_status_display_needs_refresh():
             return
         rows = self._controller.queue_snapshot()
         if not rows or not rows[0].is_active:

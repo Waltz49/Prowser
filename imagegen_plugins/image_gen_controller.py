@@ -41,11 +41,16 @@ from imagegen_plugins.model_task_status_info import (
     _append_table_rows,
     _series_after_this_one_value,
     _table_row,
+    apply_cooldown_to_status_html,
+    cooldown_skip_icon_html,
     format_caption_status_html,
     format_image_generation_queue_status_html,
     format_image_generation_status_html,
     format_series_line_value,
+    freeze_status_html_generation_elapsed,
     refresh_expand_task_status_html_for_display,
+    remove_elapsed_row,
+    strip_cooldown_from_status_html,
     update_status_html_steps_progress,
 )
 from model_tasks_controller import get_model_tasks_controller
@@ -102,6 +107,9 @@ class ImageGenController(QObject):
         self._copy_batch_active = False
         self._copy_batch_cancelled = False
         self._cooldown_timer: Optional[QTimer] = None
+        self._cooldown_deadline: Optional[float] = None
+        self._frozen_elapsed_seconds: Optional[float] = None
+        self._last_cooldown_ui_second: Optional[int] = None
         self._live_step = 0
         self._live_step_total = 0
         self._live_elapsed_seconds: Optional[float] = None
@@ -306,9 +314,10 @@ class ImageGenController(QObject):
 
     def get_task_status_info_html(self) -> str:
         html = self._task_status_info_html
+        in_cooldown = self._is_in_copy_cooldown()
         if self._expand_source_path or self._expand_base_path:
-            elapsed = None
-            if self._step_progress_start_time is not None:
+            elapsed = self._frozen_elapsed_seconds if in_cooldown else None
+            if elapsed is None and self._step_progress_start_time is not None:
                 elapsed = time.perf_counter() - self._step_progress_start_time
             html, self._task_reference_paths = refresh_expand_task_status_html_for_display(
                 html,
@@ -318,7 +327,46 @@ class ImageGenController(QObject):
             )
         else:
             self._task_reference_paths = []
+        if in_cooldown:
+            html = apply_cooldown_to_status_html(
+                html,
+                self._cooldown_seconds_remaining(),
+                skip_icon_html=cooldown_skip_icon_html(),
+            )
         return html
+
+    def _is_in_copy_cooldown(self) -> bool:
+        timer = self._cooldown_timer
+        return timer is not None and timer.isActive()
+
+    def _cooldown_seconds_remaining(self) -> int:
+        deadline = self._cooldown_deadline
+        if deadline is None:
+            return 0
+        return max(0, int(round(deadline - time.perf_counter())))
+
+    def task_status_display_needs_refresh(self) -> bool:
+        """False when only the cooldown countdown second is unchanged (timer polls)."""
+        if not self._is_in_copy_cooldown():
+            self._last_cooldown_ui_second = None
+            return True
+        remaining = self._cooldown_seconds_remaining()
+        if remaining == self._last_cooldown_ui_second:
+            return False
+        self._last_cooldown_ui_second = remaining
+        return True
+
+    def skip_copy_cooldown(self) -> None:
+        """End the inter-copy cooldown early and start the next generation."""
+        if not self._is_in_copy_cooldown():
+            return
+        QTimer.singleShot(0, self._skip_copy_cooldown_deferred)
+
+    def _skip_copy_cooldown_deferred(self) -> None:
+        if not self._is_in_copy_cooldown():
+            return
+        self._stop_copy_cooldown_timer()
+        self._on_copy_cooldown_elapsed()
 
     def _series_images_after_for_queue_display(self) -> int | None:
         """Images still to render after the current one in a multi-copy batch."""
@@ -478,6 +526,14 @@ class ImageGenController(QObject):
 
     def _on_job_processing_started(self, kind: str) -> None:
         if kind == "generate":
+            if self._task_status_info_html:
+                self._task_status_info_html = strip_cooldown_from_status_html(
+                    self._task_status_info_html
+                )
+                if not (self._expand_source_path or self._expand_base_path):
+                    self._task_status_info_html = remove_elapsed_row(
+                        self._task_status_info_html
+                    )
             self._step_progress_start_time = time.perf_counter()
             self._live_step = 0
             try:
@@ -486,6 +542,7 @@ class ImageGenController(QObject):
                 self._live_step_total = 0
             self._live_elapsed_seconds = None
             self._live_estimate_seconds = None
+            self._frozen_elapsed_seconds = None
         self._update_status_bar_indicator(kind)
 
     def _on_task_finished(self, kind: str, _success: bool, _err: str) -> None:
@@ -593,10 +650,7 @@ class ImageGenController(QObject):
                         self._active_thumbnail_paths = thumbnail_paths_for_values(
                             plugin, self._pending_values
                         )
-                self._reset_live_queue_progress()
-                self.queue_changed.emit()
-                self.task_status_info_changed.emit()
-                self._schedule_copy_cooldown()
+                self._enter_copy_cooldown_after_success()
                 return
             self._finish_copy_batch()
             return
@@ -686,17 +740,40 @@ class ImageGenController(QObject):
             except OSError:
                 pass
 
+    def _enter_copy_cooldown_after_success(self) -> None:
+        final_elapsed = self._live_elapsed_seconds
+        if final_elapsed is None and self._step_progress_start_time is not None:
+            final_elapsed = time.perf_counter() - self._step_progress_start_time
+        final_step = self._live_step
+        final_step_total = self._live_step_total
+        self._frozen_elapsed_seconds = final_elapsed
+        self._step_progress_start_time = None
+        self._reset_live_queue_progress()
+        if self._task_status_info_html and final_elapsed is not None:
+            self._task_status_info_html = freeze_status_html_generation_elapsed(
+                self._task_status_info_html,
+                final_elapsed,
+                step=final_step if final_step > 0 else None,
+                step_total=final_step_total if final_step_total > 0 else None,
+            )
+        self.queue_changed.emit()
+        self.task_status_info_changed.emit()
+        self._schedule_copy_cooldown()
+
     def _stop_copy_cooldown_timer(self) -> None:
         timer = self._cooldown_timer
         if timer is not None:
             timer.stop()
             timer.deleteLater()
         self._cooldown_timer = None
+        self._cooldown_deadline = None
+        self._last_cooldown_ui_second = None
 
     def _schedule_copy_cooldown(self) -> None:
         self._stop_copy_cooldown_timer()
         self._sync_cancel_menu()
         self._update_status_bar_indicator("cooldown")
+        self._cooldown_deadline = time.perf_counter() + (_COPY_COOLDOWN_MS / 1000.0)
         timer = QTimer(self)
         timer.setSingleShot(True)
         timer.timeout.connect(self._on_copy_cooldown_elapsed)
@@ -705,8 +782,17 @@ class ImageGenController(QObject):
 
     def _on_copy_cooldown_elapsed(self) -> None:
         self._cooldown_timer = None
+        self._cooldown_deadline = None
+        self._last_cooldown_ui_second = None
         if self._copy_batch_cancelled:
             self._finish_copy_batch(cancelled=True)
+            return
+        QTimer.singleShot(0, self._launch_next_copy_after_cooldown)
+
+    def _launch_next_copy_after_cooldown(self) -> None:
+        if not self._copy_batch_active or self._copy_batch_cancelled:
+            return
+        if self._tasks.is_running():
             return
         if not self._launch_generation_job():
             self._finish_copy_batch()
@@ -762,6 +848,9 @@ class ImageGenController(QObject):
         self._live_step_total = 0
         self._live_elapsed_seconds = None
         self._live_estimate_seconds = None
+        self._frozen_elapsed_seconds = None
+        self._cooldown_deadline = None
+        self._last_cooldown_ui_second = None
 
     def _sync_cancel_menu(self) -> None:
         action = getattr(self.main_window, "imagegen_cancel_action", None)

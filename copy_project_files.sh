@@ -383,6 +383,7 @@ copy_and_count "assets/noimage.svg"
 copy_and_count "assets/padlock.png"
 copy_and_count "assets/qmark.png"
 copy_and_count "assets/trash_icon.png"
+copy_and_count "assets/skip_cooldown_icon.png"
 
 # Resource Files
 print_info "Copying resource files..."

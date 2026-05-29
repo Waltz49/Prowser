@@ -511,3 +511,16 @@ def manual_download_help(lora_id: str) -> str:
         f"  Save to: {dest}\n"
         f"Or: hf download {entry.repo_id} {entry.filename} --local-dir {dest.parent}"
     )
+
+
+def sample_flux_lora_download_entries() -> Tuple[FluxLoraEntry, ...]:
+    """MFLUX-verified HF LoRAs used as the default sample download set."""
+    return tuple(
+        e
+        for e in catalog_entries_sorted()
+        if e.mflux_compatible is True and e.repo_id and e.filename
+    )
+
+
+def _lora_download_local_dir(entry: FluxLoraEntry) -> Path:
+    return DEFAULT_CACHE / entry.repo_id.replace("/", "__")

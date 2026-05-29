@@ -1124,6 +1124,14 @@ class MenuManager:
         check_loras_action = QAction("Check LoRAs", self.main_window)
         check_loras_action.triggered.connect(self._debug_check_loras)
         debug_menu.addAction(check_loras_action)
+
+        download_sample_loras_action = QAction("Download sample FLUX LoRAs", self.main_window)
+        download_sample_loras_action.triggered.connect(self._debug_download_sample_flux_loras)
+        debug_menu.addAction(download_sample_loras_action)
+
+        download_flux_models_action = QAction("Download FLUX models", self.main_window)
+        download_flux_models_action.triggered.connect(self._debug_download_flux_models)
+        debug_menu.addAction(download_flux_models_action)
         
         # Connect aboutToShow signal to update menu action states
         tools_menu.aboutToShow.connect(self.update_tools_menu_states)
@@ -1164,6 +1172,22 @@ class MenuManager:
         from imagegen_plugins.lora_check_dialog import run_check_loras_dialog
 
         run_check_loras_dialog(self.main_window)
+
+    def _debug_download_sample_flux_loras(self):
+        """Tools > Debug > Download sample FLUX LoRAs — bash script with hf download commands."""
+        from imagegen_plugins.debug_download_script_dialog import (
+            run_flux_lora_download_script_dialog,
+        )
+
+        run_flux_lora_download_script_dialog(self.main_window)
+
+    def _debug_download_flux_models(self):
+        """Tools > Debug > Download FLUX models — bash script with commented hf download commands."""
+        from imagegen_plugins.debug_download_script_dialog import (
+            run_flux_models_download_script_dialog,
+        )
+
+        run_flux_models_download_script_dialog(self.main_window)
 
     def _debug_extract_faces(self):
         """Search > Extract faces — same as context menu: current image + Faces tab examine."""
