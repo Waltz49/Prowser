@@ -21,6 +21,10 @@ from PySide6.QtWidgets import (
 )
 
 from imagegen_plugins.image_gen_controller import get_imagegen_controller
+from imagegen_plugins.job_prompt_tooltip import (
+    install_delayed_prompt_tooltip,
+    notify_job_prompt_tooltip_content_updating,
+)
 from imagegen_plugins.image_gen_persistence import (
     load_job_queue_geometry_hex,
     save_job_queue_geometry_hex,
@@ -285,6 +289,7 @@ class ImageGenJobQueueDialog(QDialog):
         if isinstance(browser, QTextBrowser):
             info_html = self._controller.get_task_queue_status_info_html()
             if info_html:
+                notify_job_prompt_tooltip_content_updating(browser)
                 content_width = _info_content_width(self._table)
                 browser_h = _apply_info_browser_html(
                     browser, info_html, content_width=content_width
@@ -333,6 +338,7 @@ class ImageGenJobQueueDialog(QDialog):
             browser_h = _apply_info_browser_html(
                 info_browser, info_html or "", content_width=content_width
             )
+            install_delayed_prompt_tooltip(info_browser, row.full_prompt)
             self._table.setCellWidget(row_idx, 1, info_browser)
 
             preview_wrap = QWidget()

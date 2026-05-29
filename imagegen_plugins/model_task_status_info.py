@@ -18,11 +18,24 @@ def _escape(text: str) -> str:
     return html.escape(text or "", quote=True)
 
 
-def _truncate(text: str, limit: int = 100) -> str:
+PROMPT_DISPLAY_MAX_LEN = 100
+
+
+def _truncate(text: str, limit: int = PROMPT_DISPLAY_MAX_LEN) -> str:
     text = (text or "").strip()
     if len(text) <= limit:
         return text
     return text[:limit] + "…"
+
+
+def full_prompt_tooltip_text(full_prompt: str) -> str:
+    """Return full prompt for a hover tooltip when status display truncates it."""
+    full = (full_prompt or "").strip()
+    if not full:
+        return ""
+    if _truncate(full) == full:
+        return ""
+    return full
 
 
 def _table_row(label: str, value: str) -> str:

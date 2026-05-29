@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
     QSizePolicy,
     QSlider,
     QSpinBox,
+    QSplitter,
     QVBoxLayout,
     QWidget,
 )
@@ -641,9 +642,113 @@ class ImageGenDimensionAspectMixin:
             self._aspect_ratio = height / width
 
 
+def apply_image_gen_preview_splitter_theme(splitter: QSplitter) -> None:
+    """Visible draggable handle for preview | controls splitters."""
+    t = get_active_theme()
+    w = max(8, int(getattr(t, "view_border_width_px", 4) or 4) + 4)
+    splitter.setHandleWidth(w)
+    splitter.setStyleSheet(
+        f"""
+        QSplitter::handle {{
+            background-color: {t.splitter_handle_hex};
+        }}
+        QSplitter::handle:hover {{
+            background-color: {t.splitter_handle_hover_hex};
+        }}
+        QSplitter::handle:pressed {{
+            background-color: {t.splitter_handle_pressed_hex};
+        }}
+        QSplitter::handle:horizontal {{
+            width: {w}px;
+            margin: 4px 0;
+        }}
+        """
+    )
+
+
+class ImageGenPreviewSplitter(QSplitter):
+    """Horizontal splitter: preview left (capped), controls right; live resize on drag."""
+
+    def __init__(
+        self,
+        parent=None,
+        *,
+        max_left_ratio: float = 0.7,
+        initial_left_ratio: float = 0.5,
+    ):
+        super().__init__(Qt.Orientation.Horizontal, parent)
+        self._max_left_ratio = max_left_ratio
+        self._initial_left_ratio = initial_left_ratio
+        self._initial_sizes_applied = False
+        self.setChildrenCollapsible(False)
+        self.setOpaqueResize(True)
+        apply_image_gen_preview_splitter_theme(self)
+        self.splitterMoved.connect(self._clamp_left_size)
+
+    def add_preview_pane(self, widget: QWidget) -> None:
+        widget.setSizePolicy(
+            QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding
+        )
+        self.addWidget(widget)
+
+    def add_controls_pane(self, widget: QWidget, *, min_width: int = 300) -> None:
+        widget.setMinimumWidth(min_width)
+        widget.setSizePolicy(
+            QSizePolicy.Policy.MinimumExpanding, QSizePolicy.Policy.Expanding
+        )
+        self.addWidget(widget)
+        if self.count() >= 2:
+            self.setStretchFactor(0, 0)
+            self.setStretchFactor(1, 1)
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        if not self._initial_sizes_applied:
+            self._initial_sizes_applied = True
+            QTimer.singleShot(0, self._apply_initial_sizes)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._clamp_left_size()
+
+    def _apply_initial_sizes(self) -> None:
+        total = self.width()
+        if total <= 0:
+            return
+        left = min(
+            int(total * self._initial_left_ratio),
+            int(total * self._max_left_ratio),
+        )
+        self.setSizes([left, max(1, total - left)])
+        self._clamp_left_size()
+
+    def _clamp_left_size(self, *_args) -> None:
+        sizes = self.sizes()
+        if len(sizes) < 2:
+            return
+        total = sum(sizes)
+        if total <= 0:
+            total = self.width()
+        if total <= 0:
+            return
+        max_left = max(1, int(total * self._max_left_ratio))
+        left = sizes[0]
+        if left <= max_left:
+            return
+        self.blockSignals(True)
+        self.setSizes([max_left, max(1, total - max_left)])
+        self.blockSignals(False)
+
+
 def configure_image_gen_form_layout(form: QFormLayout) -> None:
-    """Shared vertical spacing between dynamic field rows."""
+    """Shared vertical spacing and left-aligned labels between dynamic field rows."""
     form.setVerticalSpacing(IMAGE_GEN_FORM_ROW_SPACING)
+    form.setFormAlignment(
+        Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop
+    )
+    form.setLabelAlignment(
+        Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop
+    )
 
 
 def field_specs_share_seed_row(spec_keys: set) -> bool:

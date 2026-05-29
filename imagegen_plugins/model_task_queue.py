@@ -23,6 +23,7 @@ class QueuedGenerateJob:
     status_html: str
     thumbnail_paths: list[str]
     copies_total: int
+    full_prompt: str = ""
 
 
 @dataclass
@@ -31,6 +32,7 @@ class QueueRowSnapshot:
     is_active: bool
     status_html: str
     thumbnail_paths: list[str]
+    full_prompt: str = ""
 
 
 def thumbnail_paths_for_values(
@@ -66,4 +68,5 @@ def make_queued_generate_job(
         status_html=status_html,
         thumbnail_paths=thumbnail_paths_for_values(plugin, values),
         copies_total=copies_total,
+        full_prompt=str(values.get("prompt") or "").strip(),
     )

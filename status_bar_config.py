@@ -69,6 +69,14 @@ def _apply_task_info_html_to_browser(
     info_browser: QTextBrowser, body_html: str
 ) -> None:
     """Set task-info HTML on the menu browser and resize to fit content."""
+    try:
+        from imagegen_plugins.job_prompt_tooltip import (
+            notify_job_prompt_tooltip_content_updating,
+        )
+
+        notify_job_prompt_tooltip_content_updating(info_browser)
+    except ImportError:
+        pass
     info_browser.setHtml(_wrap_task_info_html(body_html))
     info_browser.document().setDocumentMargin(0)
     text_width = max(200, info_browser.width() - 36)
@@ -690,6 +698,17 @@ class ClickableImageGenIndicatorLabel(QLabel):
             info_browser.setStyleSheet(_status_bar_task_info_label_stylesheet())
             info_browser.setFixedWidth(440)
             _apply_task_info_html_to_browser(info_browser, info_html)
+            try:
+                from imagegen_plugins.job_prompt_tooltip import (
+                    install_delayed_prompt_tooltip,
+                )
+
+                install_delayed_prompt_tooltip(
+                    info_browser,
+                    get_imagegen_controller(self.main_window).active_job_full_prompt(),
+                )
+            except ImportError:
+                pass
             info_browser.anchorClicked.connect(self._on_task_info_link_clicked)
             info_layout.addWidget(info_browser)
             progressive_row = _progressive_images_row_widget(self.main_window, info_panel)

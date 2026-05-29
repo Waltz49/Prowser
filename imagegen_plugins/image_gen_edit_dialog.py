@@ -6,7 +6,7 @@ from __future__ import annotations
 import os
 from typing import Any, Dict, List, Optional
 
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import QSize, Qt, QTimer
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -23,7 +23,6 @@ from PySide6.QtWidgets import (
     QSizePolicy,
     QSlider,
     QSpinBox,
-    QSplitter,
     QVBoxLayout,
     QWidget,
 )
@@ -34,6 +33,7 @@ from exif_utils import (
     truncate_usercomment_before_prompt,
 )
 from imagegen_plugins.image_gen_dialog import (
+    ImageGenPreviewSplitter,
     apply_image_gen_dialog_shell,
     apply_import_extras_from_image_path,
     build_seed_and_random_seed_row,
@@ -84,17 +84,25 @@ active_image_path_for_edit = active_image_path_for_expand
 class _SourceImagePreview(QLabel):
     """Read-only preview of the image being edited."""
 
+    _HINT_SIZE = QSize(320, 280)
+    _MIN_HINT_SIZE = QSize(160, 120)
+
     def __init__(self, source_path: str, parent=None):
         super().__init__(parent)
         self._source_path = os.path.abspath(source_path)
         self._pixmap = QPixmap(self._source_path)
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.setMinimumHeight(280)
         self.setSizePolicy(
-            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
+            QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored
         )
         self.setFrameShape(QFrame.Shape.StyledPanel)
         self._refresh_scaled_pixmap()
+
+    def sizeHint(self) -> QSize:
+        return self._HINT_SIZE
+
+    def minimumSizeHint(self) -> QSize:
+        return self._MIN_HINT_SIZE
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -109,8 +117,12 @@ class _SourceImagePreview(QLabel):
         if self._pixmap.isNull():
             self.setText("Could not load image")
             return
+        w, h = self.width(), self.height()
+        if w < 2 or h < 2:
+            return
         scaled = self._pixmap.scaled(
-            self.size(),
+            w,
+            h,
             Qt.AspectRatioMode.KeepAspectRatio,
             Qt.TransformationMode.SmoothTransformation,
         )
@@ -154,7 +166,7 @@ class ImageGenEditDialog(QDialog):
         self._load_plugin_state()
 
         apply_image_gen_dialog_shell(
-            self, window_title=window_title, min_width=640, min_height=720
+            self, window_title=window_title, min_width=880, min_height=520
         )
         self._build_ui()
         if initial_prompt:
@@ -214,13 +226,10 @@ class ImageGenEditDialog(QDialog):
 
     def _build_ui(self) -> None:
         layout = QVBoxLayout(self)
-        splitter = QSplitter(Qt.Orientation.Vertical)
+        splitter = ImageGenPreviewSplitter(self)
 
         preview_host = QFrame()
         preview_host.setFrameShape(QFrame.Shape.NoFrame)
-        preview_host.setSizePolicy(
-            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
-        )
         preview_layout = QVBoxLayout(preview_host)
         preview_layout.setContentsMargins(0, 0, 0, 0)
         self._source_preview = _SourceImagePreview(self.source_path, preview_host)
@@ -232,7 +241,7 @@ class ImageGenEditDialog(QDialog):
         )
         self._source_nav.set_center_widget(self._source_preview)
         preview_layout.addWidget(self._source_nav)
-        splitter.addWidget(preview_host)
+        splitter.add_preview_pane(preview_host)
 
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
@@ -260,10 +269,8 @@ class ImageGenEditDialog(QDialog):
 
         self._populate_field_rows()
         scroll.setWidget(fields_inner)
-        splitter.addWidget(scroll)
-        splitter.setStretchFactor(0, 3)
-        splitter.setStretchFactor(1, 2)
-        layout.addWidget(splitter)
+        splitter.add_controls_pane(scroll)
+        layout.addWidget(splitter, 1)
 
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel

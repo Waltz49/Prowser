@@ -13,11 +13,11 @@ from PySide6.QtWidgets import (
     QDialogButtonBox,
     QFrame,
     QGraphicsOpacityEffect,
-    QHBoxLayout,
     QLabel,
     QPushButton,
     QSizePolicy,
     QVBoxLayout,
+    QWidget,
 )
 
 from imagegen_plugins.image_gen_active_model import (
@@ -26,6 +26,7 @@ from imagegen_plugins.image_gen_active_model import (
 )
 from imagegen_plugins.image_gen_dialog import (
     ImageGenDialog,
+    ImageGenPreviewSplitter,
     apply_image_gen_dialog_shell,
     validate_copies_require_random_seed,
 )
@@ -227,12 +228,10 @@ class ImageGenInfillPaintDialog(QDialog):
 
     def _build_ui(self) -> None:
         layout = QVBoxLayout(self)
+        splitter = ImageGenPreviewSplitter(self)
 
         canvas_host = QFrame()
         canvas_host.setFrameShape(QFrame.Shape.NoFrame)
-        canvas_host.setSizePolicy(
-            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
-        )
         canvas_host_layout = QVBoxLayout(canvas_host)
         canvas_host_layout.setContentsMargins(0, 0, 0, 0)
 
@@ -246,10 +245,13 @@ class ImageGenInfillPaintDialog(QDialog):
         )
         self._source_nav.set_center_widget(self._canvas)
         canvas_host_layout.addWidget(self._source_nav)
-        layout.addWidget(canvas_host, 1)
+        splitter.add_preview_pane(canvas_host)
 
-        btn_row = QHBoxLayout()
-        btn_row.addStretch(1)
+        controls_host = QWidget()
+        controls_layout = QVBoxLayout(controls_host)
+        controls_layout.setContentsMargins(8, 0, 0, 0)
+        controls_layout.addStretch(1)
+
         settings_btn = QPushButton("Settings")
         clear_btn = QPushButton("Clear")
         close_btn = QPushButton("Close")
@@ -274,8 +276,9 @@ class ImageGenInfillPaintDialog(QDialog):
         self._submit_notice.hide()
 
         for btn in (settings_btn, clear_btn, close_btn, self._infill_btn):
-            btn_row.addWidget(btn)
-        layout.addLayout(btn_row)
+            controls_layout.addWidget(btn)
+        splitter.add_controls_pane(controls_host, min_width=120)
+        layout.addWidget(splitter, 1)
 
     def _on_source_image_changed(self, path: str) -> None:
         self.source_path = os.path.abspath(path)

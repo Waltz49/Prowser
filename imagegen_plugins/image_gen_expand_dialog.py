@@ -23,7 +23,6 @@ from PySide6.QtWidgets import (
     QSizePolicy,
     QSlider,
     QSpinBox,
-    QSplitter,
     QVBoxLayout,
     QWidget,
 )
@@ -32,6 +31,7 @@ from imagegen_plugins.expand_placement_canvas import ExpandPlacementCanvas
 from imagegen_plugins.image_gen_dialog import (
     EXPAND_IMAGE_DIALOG_TITLE,
     ImageGenDimensionAspectMixin,
+    ImageGenPreviewSplitter,
     apply_image_gen_dialog_shell,
     apply_import_extras_from_image_path,
     build_seed_and_random_seed_row,
@@ -129,7 +129,7 @@ class ImageGenExpandDialog(ImageGenDimensionAspectMixin, QDialog):
         self._load_plugin_state()
 
         apply_image_gen_dialog_shell(
-            self, window_title=window_title, min_width=640, min_height=720
+            self, window_title=window_title, min_width=880, min_height=520
         )
         self._build_ui()
         if initial_prompt:
@@ -201,15 +201,12 @@ class ImageGenExpandDialog(ImageGenDimensionAspectMixin, QDialog):
 
     def _build_ui(self) -> None:
         layout = QVBoxLayout(self)
-        splitter = QSplitter(Qt.Orientation.Vertical)
+        splitter = ImageGenPreviewSplitter(self)
 
         canvas_w = int(self._values.get("width", 1024))
         canvas_h = int(self._values.get("height", 1024))
         canvas_host = QFrame()
         canvas_host.setFrameShape(QFrame.Shape.NoFrame)
-        canvas_host.setSizePolicy(
-            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
-        )
         canvas_host_layout = QVBoxLayout(canvas_host)
         canvas_host_layout.setContentsMargins(0, 0, 0, 0)
         self._canvas = ExpandPlacementCanvas(
@@ -224,7 +221,7 @@ class ImageGenExpandDialog(ImageGenDimensionAspectMixin, QDialog):
         )
         self._source_nav.set_center_widget(self._canvas)
         canvas_host_layout.addWidget(self._source_nav)
-        splitter.addWidget(canvas_host)
+        splitter.add_preview_pane(canvas_host)
 
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
@@ -252,10 +249,8 @@ class ImageGenExpandDialog(ImageGenDimensionAspectMixin, QDialog):
 
         self._populate_field_rows()
         scroll.setWidget(fields_inner)
-        splitter.addWidget(scroll)
-        splitter.setStretchFactor(0, 3)
-        splitter.setStretchFactor(1, 2)
-        layout.addWidget(splitter)
+        splitter.add_controls_pane(scroll)
+        layout.addWidget(splitter, 1)
 
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel

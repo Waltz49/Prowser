@@ -121,6 +121,9 @@ class ImageGenController(QObject):
     def active_queue_job_id(self) -> str:
         return self._active_queue_job_id
 
+    def active_job_full_prompt(self) -> str:
+        return str(self._pending_values.get("prompt") or "").strip()
+
     def queue_snapshot(self) -> list[QueueRowSnapshot]:
         rows: list[QueueRowSnapshot] = []
         if self._active_queue_job_id:
@@ -130,6 +133,7 @@ class ImageGenController(QObject):
                     is_active=True,
                     status_html=self._task_status_info_html,
                     thumbnail_paths=list(self._active_thumbnail_paths),
+                    full_prompt=self.active_job_full_prompt(),
                 )
             )
         for job in self._queue:
@@ -139,6 +143,7 @@ class ImageGenController(QObject):
                     is_active=False,
                     status_html=job.status_html,
                     thumbnail_paths=list(job.thumbnail_paths),
+                    full_prompt=job.full_prompt,
                 )
             )
         return rows
