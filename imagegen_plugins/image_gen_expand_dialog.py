@@ -64,6 +64,8 @@ from imagegen_plugins.imagegen_control_tooltips import (
 )
 from imagegen_plugins.image_gen_source_nav import (
     ImageGenSourceNavRow,
+    install_source_nav_keyboard_shortcuts,
+    refresh_source_nav_keyboard_shortcuts,
     resolve_image_gen_main_window,
 )
 from utils import (
@@ -251,6 +253,7 @@ class ImageGenExpandDialog(ImageGenDimensionAspectMixin, QDialog):
         scroll.setWidget(fields_inner)
         splitter.add_controls_pane(scroll)
         layout.addWidget(splitter, 1)
+        install_source_nav_keyboard_shortcuts(self, self._source_nav)
 
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
@@ -352,6 +355,7 @@ class ImageGenExpandDialog(ImageGenDimensionAspectMixin, QDialog):
 
         self._connect_canvas_dimension_fields()
         self._connect_dim_aspect_lock()
+        refresh_source_nav_keyboard_shortcuts(self)
 
     def _on_model_combo_changed(self, _index: int = 0) -> None:
         plugin_id = self._model_combo.currentData()

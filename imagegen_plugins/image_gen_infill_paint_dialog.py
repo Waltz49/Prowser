@@ -43,6 +43,7 @@ from imagegen_plugins.image_gen_registry import ImageGenModelPlugin
 from imagegen_plugins.infill_paint_canvas import InfillPaintCanvas
 from imagegen_plugins.image_gen_source_nav import (
     ImageGenSourceNavRow,
+    install_source_nav_keyboard_shortcuts,
     resolve_image_gen_main_window,
 )
 from imagegen_plugins.pixelmator_export import persist_paint_infill_exports
@@ -245,6 +246,7 @@ class ImageGenInfillPaintDialog(QDialog):
         )
         self._source_nav.set_center_widget(self._canvas)
         canvas_host_layout.addWidget(self._source_nav)
+        install_source_nav_keyboard_shortcuts(self, self._source_nav)
         splitter.add_preview_pane(canvas_host)
 
         controls_host = QWidget()

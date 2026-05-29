@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from typing import Callable, Optional
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QEvent, QObject, Qt
 from PySide6.QtWidgets import QHBoxLayout, QPushButton, QSizePolicy, QWidget
 
 from theme_service import get_active_theme
@@ -220,8 +220,68 @@ class ImageGenSourceNavRow(QWidget):
             self._on_source_changed(path)
         self.refresh_arrows()
 
-    def _on_prev_clicked(self) -> None:
+    def navigate_prev(self) -> None:
+        """Same as clicking the < source-image control."""
         self._navigate(-1)
 
-    def _on_next_clicked(self) -> None:
+    def navigate_next(self) -> None:
+        """Same as clicking the > source-image control."""
         self._navigate(1)
+
+    def _on_prev_clicked(self) -> None:
+        self.navigate_prev()
+
+    def _on_next_clicked(self) -> None:
+        self.navigate_next()
+
+
+class _SourceNavKeyFilter(QObject):
+    """Option+Left/Right (Alt+arrows in Qt on macOS) — same as < > nav buttons."""
+
+    def __init__(self, source_nav: ImageGenSourceNavRow, parent: QObject | None = None):
+        super().__init__(parent)
+        self._source_nav = source_nav
+
+    def eventFilter(self, watched: QObject, event: QEvent) -> bool:
+        if event.type() != QEvent.Type.KeyPress:
+            return False
+        key = event.key()
+        if key not in (Qt.Key.Key_Left, Qt.Key.Key_Right):
+            return False
+        if not (event.modifiers() & Qt.KeyboardModifier.AltModifier):
+            return False
+        if key == Qt.Key.Key_Left:
+            self._source_nav.navigate_prev()
+        else:
+            self._source_nav.navigate_next()
+        return True
+
+
+def _attach_source_nav_key_filter(host: QWidget) -> None:
+    filt = getattr(host, "_image_gen_source_nav_key_filter", None)
+    if filt is None:
+        return
+    tracked: set[int] = getattr(host, "_image_gen_source_nav_key_filter_widgets", None) or set()
+    for widget in (host, *host.findChildren(QWidget)):
+        wid = id(widget)
+        if wid in tracked:
+            continue
+        widget.installEventFilter(filt)
+        tracked.add(wid)
+    setattr(host, "_image_gen_source_nav_key_filter_widgets", tracked)
+
+
+def install_source_nav_keyboard_shortcuts(
+    host: QWidget, source_nav: ImageGenSourceNavRow
+) -> None:
+    """Option+Left / Option+Right — prev/next source image (all dialog focus targets)."""
+    filt = getattr(host, "_image_gen_source_nav_key_filter", None)
+    if filt is None:
+        filt = _SourceNavKeyFilter(source_nav, parent=host)
+        setattr(host, "_image_gen_source_nav_key_filter", filt)
+    _attach_source_nav_key_filter(host)
+
+
+def refresh_source_nav_keyboard_shortcuts(host: QWidget) -> None:
+    """Attach key filter to widgets added after install (e.g. dynamic field rows)."""
+    _attach_source_nav_key_filter(host)

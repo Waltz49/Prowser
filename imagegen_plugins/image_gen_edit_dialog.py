@@ -45,6 +45,8 @@ from imagegen_plugins.image_gen_dialog import (
 from imagegen_plugins.image_gen_expand_dialog import active_image_path_for_expand
 from imagegen_plugins.image_gen_source_nav import (
     ImageGenSourceNavRow,
+    install_source_nav_keyboard_shortcuts,
+    refresh_source_nav_keyboard_shortcuts,
     resolve_image_gen_main_window,
 )
 from imagegen_plugins.image_gen_active_model import save_active_plugin_id_for_function
@@ -271,6 +273,7 @@ class ImageGenEditDialog(QDialog):
         scroll.setWidget(fields_inner)
         splitter.add_controls_pane(scroll)
         layout.addWidget(splitter, 1)
+        install_source_nav_keyboard_shortcuts(self, self._source_nav)
 
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
@@ -372,6 +375,8 @@ class ImageGenEditDialog(QDialog):
                 self._fields_form.addRow(spec.label, row_w)
             else:
                 self._fields_form.addRow(spec.label, widget)
+
+        refresh_source_nav_keyboard_shortcuts(self)
 
     def _on_model_combo_changed(self, _index: int = 0) -> None:
         plugin_id = self._model_combo.currentData()
