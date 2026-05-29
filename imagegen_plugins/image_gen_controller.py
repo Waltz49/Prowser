@@ -44,6 +44,7 @@ from imagegen_plugins.model_task_status_info import (
     format_caption_status_html,
     format_image_generation_queue_status_html,
     format_image_generation_status_html,
+    format_series_line_value,
     refresh_expand_task_status_html_for_display,
     update_status_html_steps_progress,
 )
@@ -339,7 +340,15 @@ class ImageGenController(QObject):
         if series_after and html:
             html = _append_table_rows(
                 html,
-                [_table_row("Series:", _series_after_this_one_value(series_after))],
+                [
+                    _table_row(
+                        "Series:",
+                        format_series_line_value(
+                            _series_after_this_one_value(series_after),
+                            self._pending_values,
+                        ),
+                    )
+                ],
             )
         if html:
             return html
@@ -657,6 +666,8 @@ class ImageGenController(QObject):
             except Exception:
                 pass
         mw = self.main_window
+        if hasattr(mw, "set_date_sort"):
+            mw.set_date_sort(reverse=False, notify=False)
         if not hasattr(mw, "refresh_from_configuration"):
             return
         fullscreen = force_fullscreen or not self._progressive_browse_opened

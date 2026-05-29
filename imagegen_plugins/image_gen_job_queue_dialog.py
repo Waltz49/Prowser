@@ -101,6 +101,8 @@ def _open_image_in_browse(main_window, file_path: str) -> None:
         )
         return
     try:
+        if hasattr(main_window, "set_date_sort"):
+            main_window.set_date_sort(reverse=False, notify=False)
         loader = getattr(main_window, "load_file_with_directory_thumbnails", None)
         if loader is None:
             show_styled_warning(

@@ -89,6 +89,21 @@ def _series_queued_value(count: int) -> str:
     return f"{count} {noun}."
 
 
+def _series_refinement_suffix(values: Dict[str, Any]) -> str:
+    """Suffix when the job dialog exposed 'use last generated image'."""
+    if "use_last_generated_image" not in values:
+        return ""
+    if values.get("use_last_generated_image"):
+        return "\u00A0\u00A0\u00A0\u00A0(Refinement)"
+   
+    return "\u00A0\u00A0\u00A0\u00A0(No Refinement)"
+
+
+def format_series_line_value(base: str, values: Dict[str, Any]) -> str:
+    """Series cell text with optional refinement label."""
+    return base + _series_refinement_suffix(values)
+
+
 def _task_menu_title_for_pipeline(pipeline_id: str) -> str:
     if pipeline_id == "mflux_fill_expand":
         return "Image Expansion"
@@ -329,9 +344,23 @@ def format_image_generation_queue_status_html(
         rows.append(_table_row("References:", ", ".join(ref_parts)))
 
     if series_images_after is not None and series_images_after > 0:
-        rows.append(_table_row("Series:", _series_after_this_one_value(series_images_after)))
+        rows.append(
+            _table_row(
+                "Series:",
+                format_series_line_value(
+                    _series_after_this_one_value(series_images_after), values
+                ),
+            )
+        )
     elif series_copies_total is not None and series_copies_total > 1:
-        rows.append(_table_row("Series:", _series_queued_value(series_copies_total)))
+        rows.append(
+            _table_row(
+                "Series:",
+                format_series_line_value(
+                    _series_queued_value(series_copies_total), values
+                ),
+            )
+        )
 
     return _table_html(
         rows,

@@ -966,7 +966,7 @@ class ImageBrowserWindow(QMainWindow):
                 
                 if valid_files:
                     if from_api:
-                        self.set_date_sort(reverse=False)
+                        self.set_date_sort(reverse=False, notify=False)
                         self.load_specific_files(valid_files, external_load=True, force_specific_files_grid=force_specific_files_grid)
                     else:
                         self.load_specific_files(valid_files, external_load=True, force_specific_files_grid=force_specific_files_grid)
@@ -4779,9 +4779,9 @@ class ImageBrowserWindow(QMainWindow):
         """Set name sort mode with specified direction"""
         return self.sorting_manager.set_name_sort(reverse)
 
-    def set_date_sort(self, reverse: bool = False):
+    def set_date_sort(self, reverse: bool = False, *, notify: bool = True):
         """Set date sort mode with specified direction"""
-        return self.sorting_manager.set_date_sort(reverse)
+        return self.sorting_manager.set_date_sort(reverse, notify=notify)
 
     def set_exif_date_sort(self, reverse: bool = False):
         """Set EXIF date sort mode with specified direction"""

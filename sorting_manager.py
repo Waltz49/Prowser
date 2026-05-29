@@ -993,7 +993,7 @@ class SortingManager:
         direction = "Z to A" if reverse else "A to Z"
         self.main_window.status_notification.show_message(f"Sort mode set to Name ({direction})")
     
-    def set_date_sort(self, reverse: bool = False):
+    def set_date_sort(self, reverse: bool = False, *, notify: bool = True):
         """Set date sort mode with specified direction"""
         current_mode = getattr(self.main_window, 'current_view_mode', '')
         # If in list view, exit to thumbnail view first
@@ -1014,30 +1014,31 @@ class SortingManager:
             self.main_window.slideshow3_manager.stop_slideshow3()
 
         displayed = self.main_window.get_displayed_images()
-        if not displayed:
-            return
-        
-        # Reset random sorting if active
-        if self.main_window.current_sort_mode == SortMode.RANDOM:
+        mode_changed = (
+            self.main_window.current_sort_mode != SortMode.DATE
+            or self.main_window.is_reversed != reverse
+        )
+
+        # Reset random sorting if active (needs a displayed list)
+        if self.main_window.current_sort_mode == SortMode.RANDOM and displayed:
             self.main_window.reset_to_original_order()
-        
-        # Set sort mode with specified direction
+
+        # Persist sort mode even when the file list is empty (e.g. API refresh).
         self.main_window.current_sort_mode = SortMode.DATE
         self.main_window.is_reversed = reverse
-        
-        # Save settings
         self.save_sorting_settings()
-        
-        # Apply the sort to current images
-        self.apply_current_sort()
-        
-        # Update UI
+
+        if displayed:
+            self.apply_current_sort()
+
         self.main_window.update_status_bar_sections()
         self.main_window.update_sort_menu_checkmarks()
-        
-        # Show status message
-        direction = "Oldest first" if reverse else "Newest first"
-        self.main_window.status_notification.show_message(f"Sort mode set to Date ({direction})")
+
+        if notify and mode_changed:
+            direction = "Oldest first" if reverse else "Newest first"
+            self.main_window.status_notification.show_message(
+                f"Sort mode set to Date ({direction})"
+            )
 
     def set_exif_date_sort(self, reverse: bool = False):
         """Set EXIF date sort mode with specified direction"""
