@@ -31,7 +31,7 @@ from imagegen_plugins.image_gen_persistence import (
 )
 from status_bar_config import (
     _apply_task_info_html_to_browser,
-    _status_bar_task_info_label_stylesheet,
+    configure_task_info_text_browser,
 )
 from theme_base import asset_path
 from theme_service import get_active_theme
@@ -47,6 +47,48 @@ from utils import (
 
 _THUMB_SIZE = 72
 _ROW_PAD = 12
+
+
+def _job_queue_app_background_hex() -> str:
+    return get_active_theme().default_background_color_hex
+
+
+def _job_queue_cell_background_stylesheet() -> str:
+    bg = _job_queue_app_background_hex()
+    return f"background-color: {bg};"
+
+
+def _job_queue_table_stylesheet() -> str:
+    t = get_active_theme()
+    bg = t.default_background_color_hex
+    return f"""
+            QTableWidget {{
+                background-color: {bg};
+                color: {t.dialog_text_color_hex};
+                border: 1px solid {t.border_default_hex};
+                gridline-color: {t.border_default_hex};
+                alternate-background-color: {bg};
+            }}
+            QTableWidget::item {{
+                background-color: {bg};
+                padding: 4px;
+            }}
+            QTableCornerButton::section {{
+                background-color: {bg};
+                border: 1px solid {t.border_default_hex};
+            }}
+            QHeaderView::section {{
+                background-color: {bg};
+                color: {t.dialog_text_color_hex};
+                border: 1px solid {t.border_default_hex};
+                padding: 4px;
+            }}
+            """
+
+
+def _apply_job_queue_cell_background(widget: QWidget) -> None:
+    widget.setStyleSheet(_job_queue_cell_background_stylesheet())
+    widget.setAutoFillBackground(True)
 
 
 def _open_image_in_browse(main_window, file_path: str) -> None:
@@ -95,10 +137,11 @@ def _info_content_width(table: QTableWidget) -> int:
 def _apply_info_browser_html(
     info_browser: QTextBrowser, body_html: str, *, content_width: int
 ) -> int:
-    info_browser.setFixedWidth(content_width)
-    if body_html:
-        _apply_task_info_html_to_browser(info_browser, body_html)
-    return info_browser.height()
+    if not body_html:
+        return info_browser.height()
+    return _apply_task_info_html_to_browser(
+        info_browser, body_html, content_width=content_width
+    )
 
 
 def _trash_button_stylesheet() -> str:
@@ -157,15 +200,7 @@ class ImageGenJobQueueDialog(QDialog):
                 background-color: {t.dialog_background_hex};
                 color: {t.dialog_text_color_hex};
             }}
-            QTableWidget {{
-                background-color: {t.dialog_background_hex};
-                color: {t.dialog_text_color_hex};
-                border: 1px solid {t.border_default_hex};
-                gridline-color: {t.border_default_hex};
-            }}
-            QTableWidget::item {{
-                padding: 4px;
-            }}
+            {_job_queue_table_stylesheet()}
             """
         )
 
@@ -208,7 +243,10 @@ class ImageGenJobQueueDialog(QDialog):
         self._table.verticalHeader().setVisible(False)
         self._table.setSelectionMode(QTableWidget.SelectionMode.NoSelection)
         self._table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self._table.setAlternatingRowColors(False)
         self._table.setShowGrid(True)
+        self._table.viewport().setAutoFillBackground(True)
+        self._table.viewport().setStyleSheet(_job_queue_cell_background_stylesheet())
         layout.addWidget(self._table, 1)
 
         dismiss_shortcut = QShortcut(QKeySequence("Ctrl+J"), self)
@@ -317,19 +355,16 @@ class ImageGenJobQueueDialog(QDialog):
                 lambda _checked=False, r=row_idx: self._on_cancel_row(r)
             )
             cancel_wrap = QWidget()
+            _apply_job_queue_cell_background(cancel_wrap)
             cancel_layout = QHBoxLayout(cancel_wrap)
             cancel_layout.setContentsMargins(4, 0, 4, 0)
             cancel_layout.addWidget(cancel_btn, alignment=Qt.AlignmentFlag.AlignCenter)
             self._table.setCellWidget(row_idx, 0, cancel_wrap)
 
             info_browser = QTextBrowser()
-            info_browser.setReadOnly(True)
-            info_browser.setOpenExternalLinks(False)
-            info_browser.setOpenLinks(False)
-            info_browser.setFrameShape(QTextBrowser.Shape.NoFrame)
-            info_browser.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-            info_browser.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-            info_browser.setStyleSheet(_status_bar_task_info_label_stylesheet())
+            configure_task_info_text_browser(
+                info_browser, self.main_window, job_queue_cell=True
+            )
             info_html = (
                 self._controller.get_task_queue_status_info_html()
                 if row.is_active
@@ -342,6 +377,7 @@ class ImageGenJobQueueDialog(QDialog):
             self._table.setCellWidget(row_idx, 1, info_browser)
 
             preview_wrap = QWidget()
+            _apply_job_queue_cell_background(preview_wrap)
             preview_layout = QHBoxLayout(preview_wrap)
             preview_layout.setContentsMargins(4, 4, 4, 4)
             preview_layout.setSpacing(6)
@@ -358,6 +394,7 @@ class ImageGenJobQueueDialog(QDialog):
                 placeholder = QLabel("—")
                 placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
                 placeholder.setFixedSize(_THUMB_SIZE, _THUMB_SIZE)
+                _apply_job_queue_cell_background(placeholder)
                 preview_layout.addWidget(placeholder)
             preview_layout.addStretch()
             self._table.setCellWidget(row_idx, 2, preview_wrap)

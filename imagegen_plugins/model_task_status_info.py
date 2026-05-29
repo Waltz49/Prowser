@@ -99,6 +99,57 @@ def _task_menu_title_for_pipeline(pipeline_id: str) -> str:
     return "Image Generation"
 
 
+def _append_table_rows(html_text: str, rows: list[str]) -> str:
+    if not rows or "</table>" not in html_text:
+        return html_text
+    return html_text.replace("</table>", "".join(rows) + "</table>", 1)
+
+
+def _generation_status_table_rows(
+    fields: dict[str, str],
+    *,
+    steps_value: str | None = None,
+) -> list[str]:
+    """Model / size / steps / … / prompt rows — same order as the status-bar menu."""
+    rows: list[str] = []
+    if fields.get("model"):
+        rows.append(_table_row("Model:", fields["model"]))
+    if fields.get("lora"):
+        rows.append(_table_row("LoRA:", fields["lora"]))
+    if fields.get("size"):
+        rows.append(_table_row("Size:", fields["size"]))
+    steps_display = steps_value if steps_value is not None else fields.get("steps", "")
+    if steps_display:
+        rows.append(_table_row("Steps:", steps_display))
+    if fields.get("quant"):
+        rows.append(_table_row("Quant:", fields["quant"]))
+    if fields.get("prompt"):
+        rows.append(_table_row(fields["prompt_label"], fields["prompt"]))
+    if fields.get("neg"):
+        rows.append(_table_row("Neg:", fields["neg"]))
+    return rows
+
+
+def _steps_display_with_progress(
+    fields_steps: str,
+    *,
+    step: int | None = None,
+    step_total: int | None = None,
+    elapsed_seconds: float | None = None,
+    estimate_seconds: float | None = None,
+) -> str:
+    """Steps cell text — matches :func:`update_status_html_steps_progress` inline timing."""
+    steps_value = fields_steps or ""
+    if step is not None and step_total is not None and step_total > 0:
+        step_i = max(0, min(int(step), int(step_total)))
+        steps_value = f"{step_i} of {int(step_total)}"
+        if step_i > 0 and elapsed_seconds is not None:
+            steps_value += f"   {_format_duration(elapsed_seconds)}"
+            if estimate_seconds is not None and estimate_seconds > 0:
+                steps_value += f"   (Est: {_format_duration(estimate_seconds)})"
+    return steps_value
+
+
 def refresh_expand_task_status_html_for_display(
     html_text: str,
     *,
@@ -238,21 +289,7 @@ def format_image_generation_status_html(
     """Rich-text block for the status-bar task menu (image generation)."""
     pipeline_id = plugin.pipeline_id
     fields = _collect_generation_status_fields(plugin, values, payload)
-    rows: list[str] = []
-    if fields.get("model"):
-        rows.append(_table_row("Model:", fields["model"]))
-    if fields.get("lora"):
-        rows.append(_table_row("LoRA:", fields["lora"]))
-    if fields.get("size"):
-        rows.append(_table_row("Size:", fields["size"]))
-    if fields.get("steps"):
-        rows.append(_table_row("Steps:", fields["steps"]))
-    if fields.get("quant"):
-        rows.append(_table_row("Quant:", fields["quant"]))
-    if fields.get("prompt"):
-        rows.append(_table_row(fields["prompt_label"], fields["prompt"]))
-    if fields.get("neg"):
-        rows.append(_table_row("Neg:", fields["neg"]))
+    rows = _generation_status_table_rows(fields)
     return _table_html(rows, title=_task_menu_title_for_pipeline(pipeline_id))
 
 
@@ -271,31 +308,17 @@ def format_image_generation_queue_status_html(
     series_images_after: int | None = None,
     series_copies_total: int | None = None,
 ) -> str:
-    """Rich-text block for the job queue dialog (prompt first, timing last)."""
+    """Rich-text block for the job queue — same field order as the status-bar menu."""
     pipeline_id = plugin.pipeline_id
     fields = _collect_generation_status_fields(plugin, values, payload)
-    rows: list[str] = []
-
-    if fields.get("prompt"):
-        rows.append(_table_row(fields["prompt_label"], fields["prompt"]))
-    if fields.get("neg"):
-        rows.append(_table_row("Neg:", fields["neg"]))
-    if fields.get("model"):
-        rows.append(_table_row("Model:", fields["model"]))
-    if fields.get("lora"):
-        rows.append(_table_row("LoRA:", fields["lora"]))
-
-    steps_value = fields.get("steps", "")
-    if step is not None and step_total is not None and step_total > 0:
-        step_i = max(0, min(int(step), int(step_total)))
-        steps_value = f"{step_i} of {int(step_total)}"
-    if steps_value:
-        rows.append(_table_row("Steps:", steps_value))
-
-    if fields.get("size"):
-        rows.append(_table_row("Size:", fields["size"]))
-    if fields.get("quant"):
-        rows.append(_table_row("Quant:", fields["quant"]))
+    steps_value = _steps_display_with_progress(
+        fields.get("steps", ""),
+        step=step,
+        step_total=step_total,
+        elapsed_seconds=elapsed_seconds,
+        estimate_seconds=estimate_seconds,
+    )
+    rows = _generation_status_table_rows(fields, steps_value=steps_value)
 
     ref_parts: list[str] = []
     if source_path and os.path.isfile(source_path):
@@ -304,19 +327,6 @@ def format_image_generation_queue_status_html(
         ref_parts.append("base")
     if ref_parts:
         rows.append(_table_row("References:", ", ".join(ref_parts)))
-
-    time_parts: list[str] = []
-    if elapsed_seconds is not None and elapsed_seconds >= 0:
-        time_parts.append(f"Elapsed: {_format_duration(elapsed_seconds)}")
-    if (
-        estimate_seconds is not None
-        and estimate_seconds > 0
-        and step is not None
-        and step > 0
-    ):
-        time_parts.append(f"Remaining: {_format_duration(estimate_seconds)}")
-    if time_parts:
-        rows.append(_table_row("Time:", "   ".join(time_parts)))
 
     if series_images_after is not None and series_images_after > 0:
         rows.append(_table_row("Series:", _series_after_this_one_value(series_images_after)))

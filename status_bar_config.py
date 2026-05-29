@@ -40,19 +40,63 @@ def _status_bar_popup_menu_stylesheet() -> str:
     return get_active_theme().status_bar_context_menu_stylesheet()
 
 
-def _status_bar_task_info_label_stylesheet() -> str:
-    from theme_service import get_active_theme
-
+def _task_info_browser_stylesheet(*, job_queue_cell: bool = False) -> str:
     t = get_active_theme()
+    bg = t.default_background_color_hex if job_queue_cell else "transparent"
     return f"""
         QTextBrowser {{
             color: {t.text_color_hex};
-            background-color: transparent;
+            background-color: {bg};
             padding: 6px 18px 8px 18px;
             font-size: 12px;
             border: none;
         }}
     """
+
+
+def _status_bar_task_info_label_stylesheet() -> str:
+    return _task_info_browser_stylesheet(job_queue_cell=False)
+
+
+def configure_task_info_text_browser(
+    browser: QTextBrowser,
+    main_window,
+    *,
+    job_queue_cell: bool = False,
+    max_width: int | None = None,
+    fixed_width: int | None = None,
+) -> None:
+    """Shared setup for status-bar menu and job-queue info cells (incl. reflevel:// links)."""
+    browser.setReadOnly(True)
+    browser.setOpenExternalLinks(False)
+    browser.setOpenLinks(False)
+    browser.setFrameShape(QTextBrowser.Shape.NoFrame)
+    browser.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+    browser.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+    browser.setStyleSheet(_task_info_browser_stylesheet(job_queue_cell=job_queue_cell))
+    if max_width is not None:
+        browser.setMaximumWidth(max_width)
+    if fixed_width is not None:
+        browser.setFixedWidth(fixed_width)
+    browser.anchorClicked.connect(
+        lambda url: handle_task_info_reference_link_clicked(main_window, url)
+    )
+
+
+def handle_task_info_reference_link_clicked(main_window, url: QUrl) -> None:
+    if url.toString() != "reflevel://":
+        return
+    if not main_window:
+        return
+    try:
+        from imagegen_plugins.image_gen_controller import get_imagegen_controller
+
+        controller = get_imagegen_controller(main_window)
+        paths = controller.get_task_reference_paths()
+        if paths:
+            controller.open_task_reference_paths(paths)
+    except ImportError:
+        pass
 
 
 def _wrap_task_info_html(body_html: str) -> str:
@@ -66,9 +110,14 @@ def _wrap_task_info_html(body_html: str) -> str:
 
 
 def _apply_task_info_html_to_browser(
-    info_browser: QTextBrowser, body_html: str
-) -> None:
-    """Set task-info HTML on the menu browser and resize to fit content."""
+    info_browser: QTextBrowser,
+    body_html: str,
+    *,
+    content_width: int | None = None,
+) -> int:
+    """Set task-info HTML on the browser and resize to fit content; returns height."""
+    if content_width is not None:
+        info_browser.setFixedWidth(content_width)
     try:
         from imagegen_plugins.job_prompt_tooltip import (
             notify_job_prompt_tooltip_content_updating,
@@ -91,6 +140,7 @@ def _apply_task_info_html_to_browser(
     fixed_h = int(min(max(content_h, 48) + 16, 420))
     info_browser.setFixedHeight(fixed_h)
     info_browser.setMinimumHeight(fixed_h)
+    return fixed_h
 
 
 def _progressive_images_row_widget(main_window, parent: QWidget) -> Optional[QWidget]:
@@ -611,7 +661,7 @@ class ClickableImageGenIndicatorLabel(QLabel):
 
             info_html = get_imagegen_controller(
                 self.main_window
-            ).get_task_status_info_html()
+            ).get_task_queue_status_info_html()
         except ImportError:
             return
         if not info_html:
@@ -679,7 +729,9 @@ class ClickableImageGenIndicatorLabel(QLabel):
         try:
             from imagegen_plugins.image_gen_controller import get_imagegen_controller
 
-            info_html = get_imagegen_controller(self.main_window).get_task_status_info_html()
+            info_html = get_imagegen_controller(
+                self.main_window
+            ).get_task_queue_status_info_html()
         except ImportError:
             pass
         if info_html:
@@ -688,15 +740,12 @@ class ClickableImageGenIndicatorLabel(QLabel):
             info_layout.setContentsMargins(0, 0, 0, 0)
             info_layout.setSpacing(0)
             info_browser = QTextBrowser(info_panel)
-            info_browser.setReadOnly(True)
-            info_browser.setOpenExternalLinks(False)
-            info_browser.setOpenLinks(False)
-            info_browser.setFrameShape(QTextBrowser.Shape.NoFrame)
-            info_browser.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-            info_browser.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-            info_browser.setMaximumWidth(440)
-            info_browser.setStyleSheet(_status_bar_task_info_label_stylesheet())
-            info_browser.setFixedWidth(440)
+            configure_task_info_text_browser(
+                info_browser,
+                self.main_window,
+                max_width=440,
+                fixed_width=440,
+            )
             _apply_task_info_html_to_browser(info_browser, info_html)
             try:
                 from imagegen_plugins.job_prompt_tooltip import (
@@ -709,7 +758,6 @@ class ClickableImageGenIndicatorLabel(QLabel):
                 )
             except ImportError:
                 pass
-            info_browser.anchorClicked.connect(self._on_task_info_link_clicked)
             info_layout.addWidget(info_browser)
             progressive_row = _progressive_images_row_widget(self.main_window, info_panel)
             if progressive_row is not None:
@@ -732,21 +780,6 @@ class ClickableImageGenIndicatorLabel(QLabel):
 
             if isValid(self):
                 self._stop_live_task_info_updates()
-
-    def _on_task_info_link_clicked(self, url: QUrl) -> None:
-        if url.toString() != "reflevel://":
-            return
-        if not self.main_window:
-            return
-        try:
-            from imagegen_plugins.image_gen_controller import get_imagegen_controller
-
-            controller = get_imagegen_controller(self.main_window)
-            paths = controller.get_task_reference_paths()
-            if paths:
-                controller.open_task_reference_paths(paths)
-        except ImportError:
-            pass
 
     def _cancel_generation(self):
         if not self.main_window:

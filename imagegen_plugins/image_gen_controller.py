@@ -38,6 +38,9 @@ from imagegen_plugins.model_task_queue import (
     thumbnail_paths_for_values,
 )
 from imagegen_plugins.model_task_status_info import (
+    _append_table_rows,
+    _series_after_this_one_value,
+    _table_row,
     format_caption_status_html,
     format_image_generation_queue_status_html,
     format_image_generation_status_html,
@@ -330,37 +333,25 @@ class ImageGenController(QObject):
         self._live_estimate_seconds = None
 
     def get_task_queue_status_info_html(self) -> str:
-        """Job queue dialog layout: prompt first, timing last."""
+        """Active-job info table (job queue top row and status-bar dot menu)."""
+        html = self.get_task_status_info_html()
+        series_after = self._series_images_after_for_queue_display()
+        if series_after and html:
+            html = _append_table_rows(
+                html,
+                [_table_row("Series:", _series_after_this_one_value(series_after))],
+            )
+        if html:
+            return html
         plugin = self._active_plugin
         if plugin is None:
             return ""
-        values = self._pending_values
-        step = self._live_step if self._live_step > 0 else None
-        step_total = self._live_step_total if self._live_step_total > 0 else None
-        if step_total is None:
-            try:
-                raw_total = int(values.get("steps") or 0)
-                step_total = raw_total if raw_total > 0 else None
-            except (TypeError, ValueError):
-                step_total = None
-        elapsed = self._live_elapsed_seconds
-        if (
-            elapsed is None
-            and self._step_progress_start_time is not None
-            and self._live_step > 0
-        ):
-            elapsed = time.perf_counter() - self._step_progress_start_time
         return format_image_generation_queue_status_html(
             plugin,
-            values,
-            step=step,
-            step_total=step_total,
-            elapsed_seconds=elapsed,
-            estimate_seconds=self._live_estimate_seconds,
+            self._pending_values,
             source_path=self._expand_source_path,
             base_path=self._expand_base_path,
-            running=True,
-            series_images_after=self._series_images_after_for_queue_display(),
+            series_images_after=series_after,
         )
 
     def get_show_progressive_images_menu_state(self) -> Optional[tuple[bool, bool]]:
