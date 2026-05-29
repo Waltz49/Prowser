@@ -3,7 +3,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import os
 import re
 import json
@@ -306,18 +305,10 @@ def format_image_exif_prompt(
     return f"Prompt:\n{prompt_text}"
 
 
-def file_md5_hex(path: str) -> str:
-    h = hashlib.md5()
-    with open(path, "rb") as f:
-        for chunk in iter(lambda: f.read(1024 * 1024), b""):
-            h.update(chunk)
-    return h.hexdigest()
-
-
 def reference_entry_for_source(
     source_path: str, output_path: str
 ) -> Optional[Tuple[str, str]]:
-    """(exif_line, path_for_md5) for References block; matches testchat expand style."""
+    """(exif_line, source_path) for References block; matches testchat expand style."""
     if not source_path or not os.path.isfile(source_path):
         return None
     ap = os.path.normpath(os.path.abspath(source_path))
@@ -334,7 +325,7 @@ def inject_references_exif_section(
     *,
     allow_cross_directory: bool = False,
 ) -> str:
-    """Insert References block (path label + md5 per file) after Image Model / before Prompt."""
+    """Insert References block (path label + file mtime per file) after Image Model / before Prompt."""
     out_dir = os.path.normpath(os.path.dirname(os.path.abspath(new_file_path)))
     pairs: List[Tuple[str, str]] = []
     seen_abs: set = set()
@@ -361,21 +352,21 @@ def inject_references_exif_section(
             if ap in seen_abs:
                 continue
             seen_abs.add(ap)
-            try:
-                digest = file_md5_hex(ap)
-            except OSError:
-                continue
             line = exif_line.strip()
             if allow_cross_directory and os.path.dirname(ap) != out_dir:
                 line = ap
-            pairs.append((line, digest))
+            try:
+                mtime_stamp = f"{os.path.getmtime(ap):.6f}"
+            except OSError:
+                continue
+            pairs.append((line, mtime_stamp))
 
     if not pairs:
         return base_comment
     ref_lines = ["References:"]
-    for label, digest in pairs:
-        ref_lines.append(label)
-        ref_lines.append(digest)
+    for line, mtime_stamp in pairs:
+        ref_lines.append(line)
+        ref_lines.append(mtime_stamp)
     ref_block = "\n".join(ref_lines)
     marker = "\n\nPrompt:\n"
     if marker in base_comment:

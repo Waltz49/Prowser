@@ -3,7 +3,6 @@
 Information Sidebar Widget - Displays image EXIF data and file information
 """
 
-import hashlib
 import os
 import re
 from datetime import datetime
@@ -190,60 +189,165 @@ class InformationSidebar(QWidget):
         "reflevel://": "Open this image and its EXIF references together",
     }
 
-    _REF_MD5_LINE = re.compile(r"^[0-9a-fA-F]{32}$")
+    _LEGACY_REF_MD5_LINE = re.compile(r"^[0-9a-fA-F]{32}$")
+    _REF_FILEDATE_LINE = re.compile(r"^\d+(?:\.\d+)?$")
+    _REF_SECTION_STOP = re.compile(
+        r"^(?:prompt|image model|title|description):$", re.IGNORECASE
+    )
+    _REF_FILEDATE_TOLERANCE_S = 1.0
 
     @staticmethod
-    def _file_md5_hex(path: str, cache: Dict[str, str]) -> Optional[str]:
-        if path in cache:
-            return cache[path]
-        try:
-            h = hashlib.md5()
-            with open(path, "rb") as f:
-                for chunk in iter(lambda: f.read(65536), b""):
-                    h.update(chunk)
-            digest = h.hexdigest()
-            cache[path] = digest
-            return digest
-        except (OSError, IOError):
-            return None
+    def _parse_reference_entries_from_lines(lines: List[str], start: int) -> List[Tuple[str, Optional[float]]]:
+        """Parse (label, optional_mtime) from References body lines; skip legacy MD5 lines."""
+        entries: List[Tuple[str, Optional[float]]] = []
+        i = start
+        while i < len(lines):
+            label = lines[i].strip()
+            if not label:
+                i += 1
+                continue
+            if InformationSidebar._REF_SECTION_STOP.match(label):
+                break
+            if InformationSidebar._LEGACY_REF_MD5_LINE.fullmatch(label):
+                i += 1
+                continue
+            expected_mtime: Optional[float] = None
+            if i + 1 < len(lines):
+                nxt = lines[i + 1].strip()
+                if InformationSidebar._LEGACY_REF_MD5_LINE.fullmatch(nxt):
+                    entries.append((label, None))
+                    i += 2
+                    continue
+                if InformationSidebar._REF_FILEDATE_LINE.fullmatch(nxt):
+                    try:
+                        expected_mtime = float(nxt)
+                    except ValueError:
+                        expected_mtime = None
+                    entries.append((label, expected_mtime))
+                    i += 2
+                    continue
+            entries.append((label, None))
+            i += 1
+        return entries
+
+    @staticmethod
+    def _parse_reference_entries_from_text(text: str) -> List[Tuple[str, Optional[float]]]:
+        """Parse References block in EXIF user comment."""
+        if not text:
+            return []
+        lines = text.splitlines()
+        for i, line in enumerate(lines):
+            if line.strip().lower() == "references:":
+                return InformationSidebar._parse_reference_entries_from_lines(lines, i + 1)
+        return []
+
+    def _get_reference_entries_for_path(self, image_path: str) -> List[Tuple[str, Optional[float]]]:
+        """Read reference entries from EXIF description on *image_path*."""
+        if not image_path or not os.path.isfile(image_path):
+            return []
+        exif = self.extract_exif_data(image_path)
+        desc = exif.get("Description")
+        if not desc:
+            return []
+        return self._parse_reference_entries_from_text(str(desc))
+
+    @staticmethod
+    def _resolve_reference_path(
+        image_dir: str, fname: str, expected_mtime: Optional[float] = None
+    ) -> Optional[str]:
+        candidates: List[str] = []
+        if fname.startswith("~") or os.path.isabs(fname) or "/" in fname:
+            try:
+                candidates.append(os.path.normpath(os.path.abspath(os.path.expanduser(fname))))
+            except (OSError, ValueError):
+                pass
+        rel = fname[2:] if fname.startswith("./") else fname
+        candidates.append(os.path.normpath(os.path.join(image_dir, rel)))
+        for cand in candidates:
+            if not os.path.isfile(cand):
+                continue
+            if expected_mtime is not None:
+                try:
+                    if abs(os.path.getmtime(cand) - expected_mtime) > InformationSidebar._REF_FILEDATE_TOLERANCE_S:
+                        continue
+                except OSError:
+                    continue
+            return cand
+        return None
+
+    def _resolve_reference_entries_map(
+        self,
+        image_dir: str,
+        current_path: str,
+        entries: List[Tuple[str, Optional[float]]],
+    ) -> Dict[str, str]:
+        """Map reference label (lower) -> resolved file path (filedate match when stored)."""
+        resolved: Dict[str, str] = {}
+        if not current_path or not os.path.isfile(current_path):
+            return resolved
+        for fname, expected_mtime in entries:
+            key = fname.strip().lower()
+            if key in resolved:
+                continue
+            path = self._resolve_reference_path(image_dir, fname, expected_mtime)
+            if path:
+                resolved[key] = path
+        return resolved
+
+    def _collect_reference_chain_paths(
+        self, image_dir: str, root_path: str, entries: List[Tuple[str, Optional[float]]]
+    ) -> List[str]:
+        """Preorder traversal of EXIF References; skip paths and labels already seen."""
+        if not root_path or not os.path.isfile(root_path):
+            return []
+        seen_paths: set = set()
+        seen_names: set = set()
+        out: List[str] = []
+
+        def visit(path: str, direct_entries: List[Tuple[str, Optional[float]]]) -> None:
+            pn = os.path.normpath(path)
+            if pn in seen_paths:
+                return
+            seen_paths.add(pn)
+            out.append(path)
+            local_dir = os.path.dirname(path) or image_dir
+            resolved = self._resolve_reference_entries_map(
+                local_dir, path, direct_entries
+            )
+            for fname, _expected_mtime in direct_entries:
+                name_key = fname.strip().lower()
+                if name_key in seen_names:
+                    continue
+                ref_path = resolved.get(name_key)
+                if not ref_path:
+                    continue
+                rpn = os.path.normpath(ref_path)
+                if rpn in seen_paths:
+                    seen_names.add(name_key)
+                    continue
+                seen_names.add(name_key)
+                child_entries = self._get_reference_entries_for_path(ref_path)
+                visit(ref_path, child_entries)
+
+        visit(root_path, entries)
+        return out
 
     def _resolve_exif_reference_paths(
-        self, image_dir: str, current_path: str, pairs: List[Tuple[str, str]]
+        self, image_dir: str, current_path: str, entries: List[Tuple[str, Optional[float]]]
     ) -> Tuple[List[str], Dict[str, str]]:
-        """Resolve reference MD5s from EXIF labels (basename, or ~ / absolute path).
-
-        Hashes at most once per distinct existing candidate path (cache). No directory-wide
-        scan: listing and MD5ing every file caused UI freezes on large folders.
-        """
+        """Resolve direct reference filenames (basename, or ~ / absolute path)."""
         empty_map: Dict[str, str] = {}
         if not current_path or not os.path.isfile(current_path):
             return [], empty_map
-        md5_cache: Dict[str, str] = {}
-        resolved: Dict[str, str] = {}
-        for fname, md in pairs:
-            mdl = md.lower()
-            if mdl in resolved:
-                continue
-            candidates: List[str] = []
-            if fname.startswith("~") or os.path.isabs(fname) or "/" in fname:
-                try:
-                    candidates.append(os.path.normpath(os.path.abspath(os.path.expanduser(fname))))
-                except (OSError, ValueError):
-                    pass
-            candidates.append(os.path.join(image_dir, fname))
-            for cand in candidates:
-                if not os.path.isfile(cand):
-                    continue
-                hx = self._file_md5_hex(cand, md5_cache)
-                if hx and hx.lower() == mdl:
-                    resolved[mdl] = cand
-                    break
+        resolved = self._resolve_reference_entries_map(
+            image_dir, current_path, entries
+        )
         out: List[str] = []
         seen_paths: set = set()
         out.append(current_path)
         seen_paths.add(os.path.normpath(current_path))
-        for _fn, md in pairs:
-            p = resolved.get(md.lower())
+        for fn, _expected_mtime in entries:
+            p = resolved.get(fn.strip().lower())
             if not p:
                 continue
             pn = os.path.normpath(p)
@@ -266,26 +370,40 @@ class InformationSidebar(QWidget):
         end = len(disp) if next_h4 < 0 else next_h4
         middle = disp[body_start:end]
         segments = middle.split("<br>")
-        pairs: List[Tuple[str, str]] = []
+        entries: List[Tuple[str, Optional[float]]] = []
         i = 0
         while i < len(segments):
             fn_seg = segments[i].strip()
             if not fn_seg:
                 i += 1
                 continue
-            if i + 1 >= len(segments):
-                break
-            md_seg = segments[i + 1].strip()
-            if self._REF_MD5_LINE.fullmatch(md_seg):
-                fname_raw = unescape(fn_seg)
-                pairs.append((fname_raw, md_seg.lower()))
-                i += 2
-            else:
+            if self._LEGACY_REF_MD5_LINE.fullmatch(fn_seg):
                 i += 1
-        if not pairs:
+                continue
+            fname_raw = unescape(fn_seg)
+            if i + 1 < len(segments):
+                nxt = segments[i + 1].strip()
+                if self._LEGACY_REF_MD5_LINE.fullmatch(nxt):
+                    entries.append((fname_raw, None))
+                    i += 2
+                    continue
+                if self._REF_FILEDATE_LINE.fullmatch(nxt):
+                    try:
+                        expected_mtime = float(nxt)
+                    except ValueError:
+                        expected_mtime = None
+                    entries.append((fname_raw, expected_mtime))
+                    i += 2
+                    continue
+            entries.append((fname_raw, None))
+            i += 1
+        if not entries:
             return disp, None
-        level_paths, resolved_map = self._resolve_exif_reference_paths(image_dir, current_path, pairs)
+        level_paths, _resolved_map = self._resolve_exif_reference_paths(
+            image_dir, current_path, entries
+        )
         self._reference_level_paths = level_paths if len(level_paths) > 1 else None
+        accent = get_active_theme().accent_color_hex
         new_segments: List[str] = []
         j = 0
         while j < len(segments):
@@ -294,22 +412,30 @@ class InformationSidebar(QWidget):
                 new_segments.append(segments[j])
                 j += 1
                 continue
+            if self._LEGACY_REF_MD5_LINE.fullmatch(fn_seg):
+                j += 1
+                continue
             if j + 1 < len(segments):
-                md_seg = segments[j + 1].strip()
-                if self._REF_MD5_LINE.fullmatch(md_seg):
-                    mdl = md_seg.lower()
-                    accent = get_active_theme().accent_color_hex
-                    if resolved_map.get(mdl) and len(level_paths) > 1:
+                nxt = segments[j + 1].strip()
+                if self._LEGACY_REF_MD5_LINE.fullmatch(nxt) or self._REF_FILEDATE_LINE.fullmatch(nxt):
+                    fname_raw = unescape(fn_seg)
+                    if self._resolve_reference_path(image_dir, fname_raw, None) and len(level_paths) > 1:
                         label = segments[j].strip()
                         new_segments.append(
                             f'<a href="reflevel://" style="color:{accent};text-decoration:underline;">{label}</a>'
                         )
                     else:
                         new_segments.append(segments[j])
-                    # Do not display the MD5 line; it is only used for resolution above.
                     j += 2
                     continue
-            new_segments.append(segments[j])
+            fname_raw = unescape(fn_seg)
+            if self._resolve_reference_path(image_dir, fname_raw, None) and len(level_paths) > 1:
+                label = segments[j].strip()
+                new_segments.append(
+                    f'<a href="reflevel://" style="color:{accent};text-decoration:underline;">{label}</a>'
+                )
+            else:
+                new_segments.append(segments[j])
             j += 1
         new_middle = "<br>".join(new_segments)
         new_disp = disp[:body_start] + new_middle + disp[end:]
@@ -377,10 +503,15 @@ class InformationSidebar(QWidget):
         """Handle click on speak/copy/delete links in the information description area."""
         from exif_utils import truncate_usercomment_before_prompt
         if url.toString() == "reflevel://":
-            paths = getattr(self, "_reference_level_paths", None) or []
+            mw = self.main_window
+            current = getattr(mw, "current_image_path", None)
+            if not current or not os.path.isfile(current):
+                return
+            image_dir = os.path.dirname(current) or ""
+            entries = self._get_reference_entries_for_path(current)
+            paths = self._collect_reference_chain_paths(image_dir, current, entries)
             if len(paths) < 2:
                 return
-            mw = self.main_window
             if hasattr(mw, "directory_stack_history_handler"):
                 h = mw.directory_stack_history_handler
                 st = h.capture_current_state()
