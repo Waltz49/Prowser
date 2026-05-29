@@ -488,4 +488,5 @@ def build_worker_payload(
         merged.pop("height", None)
     merged.pop("aspect_ratio_lock", None)
     merged.pop("_pixelmator_batch_dir", None)
+    merged.pop("use_last_generated_image", None)
     return merged

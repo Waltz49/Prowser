@@ -8,7 +8,7 @@ from typing import Dict, List, Optional, Tuple
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QComboBox, QHBoxLayout, QLabel, QSizePolicy, QWidget
 
-from imagegen_plugins.image_gen_persistence import load_model_settings
+from imagegen_plugins.image_gen_persistence import load_dialog_settings
 from imagegen_plugins.image_gen_pipeline_modes import menu_label_with_quant
 from imagegen_plugins.image_gen_registry import ImageGenModelPlugin
 
@@ -24,7 +24,9 @@ def model_label_for_plugin(
 ) -> str:
     """Display name for a plugin in the model dropdown (quant substitution only)."""
     if saved is None:
-        saved = load_model_settings(plugin.plugin_id)
+        saved = load_dialog_settings(
+            plugin.function, fallback_plugin_id=plugin.plugin_id
+        )
     return menu_label_with_quant(plugin.display_name, saved)
 
 

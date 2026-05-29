@@ -24,7 +24,7 @@ from imagegen_plugins.image_gen_naming import (
     resolve_generation_elapsed_seconds,
     write_exif_user_comment,
 )
-from imagegen_plugins.image_gen_persistence import load_model_settings, save_model_settings
+from imagegen_plugins.image_gen_persistence import load_dialog_settings, save_dialog_settings
 from imagegen_plugins.image_gen_pipeline_modes import get_pipeline
 from imagegen_plugins.image_gen_registry import ImageGenModelPlugin
 from imagegen_plugins.image_gen_seed_persistence import (
@@ -367,11 +367,15 @@ class ImageGenController(QObject):
             return None
         values = dict(self._pending_values)
         if "show_progressive_images" not in values:
-            values.update(load_model_settings(plugin.plugin_id))
+            values.update(
+                load_dialog_settings(
+                    plugin.function, fallback_plugin_id=plugin.plugin_id
+                )
+            )
         return True, bool(values.get("show_progressive_images", False))
 
     def set_show_progressive_images(self, enabled: bool) -> None:
-        """Persist show_progressive_images for the active model plugin."""
+        """Persist show_progressive_images for the active function dialog."""
         plugin = self._active_plugin
         if plugin is None:
             return
@@ -379,9 +383,11 @@ class ImageGenController(QObject):
             return
         enabled = bool(enabled)
         self._pending_values["show_progressive_images"] = enabled
-        saved = load_model_settings(plugin.plugin_id)
+        saved = load_dialog_settings(
+            plugin.function, fallback_plugin_id=plugin.plugin_id
+        )
         saved["show_progressive_images"] = enabled
-        save_model_settings(plugin.plugin_id, saved)
+        save_dialog_settings(plugin.function, saved)
         if enabled and self._tasks.is_running() and self._output_path:
             self._refresh_progressive_image(self._output_path)
 
@@ -575,6 +581,13 @@ class ImageGenController(QObject):
                 and self._copy_batch_active
                 and not self._copy_batch_cancelled
             ):
+                if values.get("use_last_generated_image"):
+                    if output_path and os.path.isfile(output_path):
+                        self._pending_values["source_image_path"] = output_path
+                        self._expand_source_path = output_path
+                        self._active_thumbnail_paths = thumbnail_paths_for_values(
+                            plugin, self._pending_values
+                        )
                 self._reset_live_queue_progress()
                 self.queue_changed.emit()
                 self.task_status_info_changed.emit()

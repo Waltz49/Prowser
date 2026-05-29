@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Per-model imagegen settings in ~/.prowser/data/settings.json."""
+"""Image-gen settings in ~/.prowser/data/settings.json (per dialog/function)."""
 
 from __future__ import annotations
 
@@ -37,11 +37,104 @@ def _normalize_plugin_id(plugin_id: str) -> str:
     return plugin_id
 
 
+_DIALOGS_KEY = "dialogs"
+_LEGACY_MODELS_KEY = "models"
+
+# Not shared across models in a function dialog (come from plugin model_defaults).
+_PLUGIN_SPECIFIC_DIALOG_KEYS = frozenset(
+    {
+        "mflux_model_name",
+        "hf_model_id",
+        "source_image_path",
+    }
+)
+
+
+def _sanitize_dialog_values(values: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        k: v
+        for k, v in dict(values).items()
+        if k not in _PLUGIN_SPECIFIC_DIALOG_KEYS
+    }
+
+
+def _legacy_settings_for_function(function: str) -> Dict[str, Any]:
+    """Merge legacy per-plugin settings into one function-level dict (shared prompt)."""
+    from imagegen_plugins import plugins_for_function
+
+    merged: Dict[str, Any] = {}
+    for plugin in plugins_for_function(function):
+        legacy = _sanitize_dialog_values(load_model_settings(plugin.plugin_id))
+        if not legacy:
+            continue
+        prompt = (legacy.get("prompt") or "").strip()
+        if prompt:
+            merged["prompt"] = legacy["prompt"]
+        for key, value in legacy.items():
+            if key == "prompt":
+                continue
+            merged.setdefault(key, value)
+    return merged
+
+
+def _merge_shared_prompt_from_legacy(
+    saved: Dict[str, Any],
+    function: str,
+    *,
+    fallback_plugin_id: Optional[str],
+) -> Dict[str, Any]:
+    if (saved.get("prompt") or "").strip():
+        return saved
+    legacy = _legacy_settings_for_function(function)
+    prompt = (legacy.get("prompt") or "").strip()
+    if not prompt and fallback_plugin_id:
+        single = _sanitize_dialog_values(load_model_settings(fallback_plugin_id))
+        prompt = (single.get("prompt") or "").strip()
+    if prompt:
+        return {**saved, "prompt": prompt}
+    return saved
+
+
+def load_dialog_settings(
+    function: str,
+    *,
+    fallback_plugin_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Saved field values for a function dialog (create, edit, expand, …)."""
+    settings = get_config().load_settings()
+    imagegen = settings.get("imagegen") or {}
+    dialogs = imagegen.get(_DIALOGS_KEY) or {}
+    saved = dict(dialogs.get(function) or {})
+    if not saved:
+        saved = _legacy_settings_for_function(function)
+        if not saved and fallback_plugin_id:
+            saved = _sanitize_dialog_values(load_model_settings(fallback_plugin_id))
+    else:
+        saved = _merge_shared_prompt_from_legacy(
+            saved, function, fallback_plugin_id=fallback_plugin_id
+        )
+    return _sanitize_dialog_values(saved)
+
+
+def save_dialog_settings(function: str, values: Dict[str, Any]) -> None:
+    values = _sanitize_dialog_values(values)
+
+    def mutate(imagegen: dict) -> None:
+        dialogs = imagegen.get(_DIALOGS_KEY)
+        if not isinstance(dialogs, dict):
+            dialogs = {}
+            imagegen[_DIALOGS_KEY] = dialogs
+        dialogs[function] = values
+
+    _mutate_imagegen_settings(mutate)
+
+
 def load_model_settings(plugin_id: str) -> Dict[str, Any]:
+    """Legacy per-plugin settings (used only when migrating to per-dialog storage)."""
     plugin_id = _normalize_plugin_id(plugin_id)
     settings = get_config().load_settings()
     imagegen = settings.get("imagegen") or {}
-    models = imagegen.get("models") or {}
+    models = imagegen.get(_LEGACY_MODELS_KEY) or {}
     saved = dict(models.get(plugin_id) or {})
     if not saved and plugin_id == "flux_fill_infill":
         saved = dict(models.get("flux_fill_infil") or {})
@@ -49,14 +142,15 @@ def load_model_settings(plugin_id: str) -> Dict[str, Any]:
 
 
 def save_model_settings(plugin_id: str, values: Dict[str, Any]) -> None:
+    """Legacy per-plugin save — prefer :func:`save_dialog_settings`."""
     plugin_id = _normalize_plugin_id(plugin_id)
     values = dict(values)
 
     def mutate(imagegen: dict) -> None:
-        models = imagegen.get("models")
+        models = imagegen.get(_LEGACY_MODELS_KEY)
         if not isinstance(models, dict):
             models = {}
-            imagegen["models"] = models
+            imagegen[_LEGACY_MODELS_KEY] = models
         models[plugin_id] = values
 
     _mutate_imagegen_settings(mutate)

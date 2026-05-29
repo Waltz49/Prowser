@@ -33,9 +33,9 @@ from imagegen_plugins.image_gen_model_availability import confirm_model_download
 from imagegen_plugins.image_gen_model_selector import resolve_initial_plugin
 from imagegen_plugins.image_gen_persistence import (
     load_infill_paint_dialog_geometry_hex,
-    load_model_settings,
+    load_dialog_settings,
+    save_dialog_settings,
     save_infill_paint_dialog_geometry_hex,
-    save_model_settings,
 )
 from imagegen_plugins.image_gen_pipeline_modes import finalize_run_values
 from imagegen_plugins.image_gen_registry import ImageGenModelPlugin
@@ -163,7 +163,7 @@ class InfillPaintSettingsDialog(ImageGenDialog):
         )
         if not validate_copies_require_random_seed(self, values):
             return
-        save_model_settings(self.plugin.plugin_id, values)
+        save_dialog_settings(FUNCTION_INFILL, values)
         save_active_plugin_id_for_function(FUNCTION_INFILL, self.plugin.plugin_id)
         self._result_values = values
         self.accept()
@@ -218,7 +218,9 @@ class ImageGenInfillPaintDialog(QDialog):
         self.finished.connect(self._save_geometry)
 
     def _reload_settings(self, *, initial_prompt: Optional[str] = None) -> None:
-        saved = load_model_settings(self.plugin.plugin_id)
+        saved = load_dialog_settings(
+            FUNCTION_INFILL, fallback_plugin_id=self.plugin.plugin_id
+        )
         self._values = self.plugin.merged_values(saved)
         if initial_prompt:
             self._values["prompt"] = initial_prompt
@@ -331,7 +333,7 @@ class ImageGenInfillPaintDialog(QDialog):
             return
 
         values.update(export_meta)
-        save_model_settings(self.plugin.plugin_id, values)
+        save_dialog_settings(FUNCTION_INFILL, values)
 
         if not confirm_model_download_if_needed(self.plugin, self._main_window):
             return

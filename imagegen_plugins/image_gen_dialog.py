@@ -41,10 +41,10 @@ from imagegen_plugins.image_gen_model_selector import (
     sync_model_comment_label,
 )
 from imagegen_plugins.image_gen_persistence import (
+    load_dialog_settings,
     load_imagegen_dialog_geometry_hex,
-    load_model_settings,
+    save_dialog_settings,
     save_imagegen_dialog_geometry_hex,
-    save_model_settings,
 )
 from imagegen_plugins.image_gen_pipeline_modes import (
     align_dims_for_pipeline,
@@ -646,6 +646,32 @@ def configure_image_gen_form_layout(form: QFormLayout) -> None:
     form.setVerticalSpacing(IMAGE_GEN_FORM_ROW_SPACING)
 
 
+def field_specs_share_seed_row(spec_keys: set) -> bool:
+    """True when both seed and random_seed specs exist (one combined form row)."""
+    return "seed" in spec_keys and "random_seed" in spec_keys
+
+
+def build_seed_and_random_seed_row(seed_widget: QWidget, random_widget: QWidget) -> QWidget:
+    """Horizontal row: seed spinbox, gap, then Randomize label + checkbox."""
+    row_w = QWidget()
+    row = QHBoxLayout(row_w)
+    row.setContentsMargins(0, 0, 0, 0)
+    row.setSpacing(0)
+    row.addWidget(seed_widget, 0)
+    row.addSpacing(28)
+
+    random_group = QWidget()
+    random_row = QHBoxLayout(random_group)
+    random_row.setContentsMargins(12, 0, 0, 0)
+    random_row.setSpacing(8)
+    random_label = QLabel("Randomize")
+    random_row.addWidget(random_label, 0)
+    random_row.addWidget(random_widget, 0)
+    row.addWidget(random_group, 0)
+    row.addStretch(1)
+    return row_w
+
+
 def apply_image_gen_dialog_shell(
     dlg: QDialog,
     *,
@@ -711,8 +737,12 @@ class ImageGenDialog(ImageGenDimensionAspectMixin, QDialog):
         self._geometry_was_restored = False
         self.finished.connect(self._save_geometry)
 
-    def _load_plugin_state(self) -> None:
-        saved = load_model_settings(self.plugin.plugin_id)
+    def _load_plugin_state(self, *, saved_override: Optional[Dict[str, Any]] = None) -> None:
+        saved = saved_override
+        if saved is None:
+            saved = load_dialog_settings(
+                self._function, fallback_plugin_id=self.plugin.plugin_id
+            )
         self._values = self.plugin.merged_values(saved)
         self._specs = self.plugin.field_specs(saved)
 
@@ -802,9 +832,12 @@ class ImageGenDialog(ImageGenDimensionAspectMixin, QDialog):
         combine_guidance_lora = (
             "guidance_scale" in spec_keys and "mflux_lora" in spec_keys
         )
+        combine_seed_random = field_specs_share_seed_row(spec_keys)
 
         for spec in self._specs:
             if combine_guidance_lora and spec.key == "mflux_lora":
+                continue
+            if combine_seed_random and spec.key == "random_seed":
                 continue
 
             widget, extra = self._widget_for_spec(spec)
@@ -849,6 +882,18 @@ class ImageGenDialog(ImageGenDimensionAspectMixin, QDialog):
                     self._fields_form.addRow(spec.label, row_w)
                 else:
                     self._fields_form.addRow(spec.label, widget)
+            elif combine_seed_random and spec.key == "seed":
+                random_spec = next(s for s in self._specs if s.key == "random_seed")
+                random_widget, random_extra = self._widget_for_spec(random_spec)
+                self._widgets[random_spec.key] = (
+                    random_widget,
+                    random_extra,
+                    random_spec,
+                )
+                self._fields_form.addRow(
+                    spec.label,
+                    build_seed_and_random_seed_row(widget, random_widget),
+                )
             elif spec.kind == "seed":
                 row = QHBoxLayout()
                 row.addWidget(widget)
@@ -868,12 +913,13 @@ class ImageGenDialog(ImageGenDimensionAspectMixin, QDialog):
             or not new_plugin.is_available()
         ):
             return
+        current = self.collect_values()
         try:
-            save_model_settings(self.plugin.plugin_id, self.collect_values())
+            save_dialog_settings(self._function, current)
         except Exception:
             pass
         self.plugin = new_plugin
-        self._load_plugin_state()
+        self._load_plugin_state(saved_override=current)
         sync_model_comment_label(self._model_comment_label, new_plugin)
         self._populate_field_rows()
         save_active_plugin_id_for_function(self._function, new_plugin.plugin_id)
@@ -1146,7 +1192,7 @@ class ImageGenDialog(ImageGenDimensionAspectMixin, QDialog):
                 return
         if not validate_copies_require_random_seed(self, values):
             return
-        save_model_settings(self.plugin.plugin_id, values)
+        save_dialog_settings(self._function, values)
         save_active_plugin_id_for_function(self._function, self.plugin.plugin_id)
         self._result_values = values
         self.accept()

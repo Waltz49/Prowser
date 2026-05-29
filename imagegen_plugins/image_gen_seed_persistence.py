@@ -4,7 +4,7 @@ Persist the seed actually used after a run so the user can reproduce (uncheck ra
 
 When ``random_seed`` is enabled, workers should return the resolved seed in their final
 JSON result (or the controller may set it before spawn). After a successful run, we store
-that value in per-model settings so the next dialog open shows it in the seed field.
+that value in per-dialog settings so the next dialog open shows it in the seed field.
 
 Future pipelines may return the seed under different keys, only in stderr, or resolve it
 in the parent; extend ``extract_used_seed_from_worker_result`` per ``pipeline_id`` rather
@@ -16,7 +16,7 @@ from __future__ import annotations
 import json
 from typing import Any, Dict, Optional
 
-from imagegen_plugins.image_gen_persistence import load_model_settings, save_model_settings
+from imagegen_plugins.image_gen_persistence import load_dialog_settings, save_dialog_settings
 
 
 def parse_worker_stdout(stdout: str) -> Optional[Dict[str, Any]]:
@@ -79,10 +79,12 @@ def extract_used_seed_from_worker_result(
 
 
 def persist_used_seed_if_random(
-    plugin_id: str,
+    function: str,
     pipeline_id: str,
     run_values: Dict[str, Any],
     worker_result: Optional[Dict[str, Any]],
+    *,
+    fallback_plugin_id: Optional[str] = None,
 ) -> None:
     """
     If the run used random seed and we know the seed used, save it for reproduction.
@@ -94,6 +96,6 @@ def persist_used_seed_if_random(
     used = extract_used_seed_from_worker_result(pipeline_id, worker_result)
     if used is None:
         return
-    saved = load_model_settings(plugin_id)
+    saved = load_dialog_settings(function, fallback_plugin_id=fallback_plugin_id)
     saved["seed"] = used
-    save_model_settings(plugin_id, saved)
+    save_dialog_settings(function, saved)

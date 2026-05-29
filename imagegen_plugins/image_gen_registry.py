@@ -88,5 +88,9 @@ class ImageGenModelPlugin:
         from imagegen_plugins.image_gen_seed_persistence import persist_used_seed_if_random
 
         persist_used_seed_if_random(
-            self.plugin_id, self.pipeline_id, run_values, worker_result
+            self.function,
+            self.pipeline_id,
+            run_values,
+            worker_result,
+            fallback_plugin_id=self.plugin_id,
         )

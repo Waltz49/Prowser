@@ -36,8 +36,10 @@ from exif_utils import (
 from imagegen_plugins.image_gen_dialog import (
     apply_image_gen_dialog_shell,
     apply_import_extras_from_image_path,
+    build_seed_and_random_seed_row,
     configure_image_gen_form_layout,
     connect_import_button_with_option_modifier,
+    field_specs_share_seed_row,
     validate_copies_require_random_seed,
 )
 from imagegen_plugins.image_gen_expand_dialog import active_image_path_for_expand
@@ -52,10 +54,10 @@ from imagegen_plugins.image_gen_model_selector import (
     sync_model_comment_label,
 )
 from imagegen_plugins.image_gen_persistence import (
+    load_dialog_settings,
     load_imagegen_dialog_geometry_hex,
-    load_model_settings,
+    save_dialog_settings,
     save_imagegen_dialog_geometry_hex,
-    save_model_settings,
 )
 from imagegen_plugins.image_gen_pipeline_modes import finalize_run_values
 from imagegen_plugins.image_gen_fields import FieldSpec
@@ -139,6 +141,7 @@ class ImageGenEditDialog(QDialog):
         self._fields_form: Optional[QFormLayout] = None
         self._source_preview: Optional[_SourceImagePreview] = None
         self._source_nav: Optional[ImageGenSourceNavRow] = None
+        self._use_last_generated_cb: Optional[QCheckBox] = None
 
         initial = resolve_initial_plugin(
             self._plugins,
@@ -161,8 +164,12 @@ class ImageGenEditDialog(QDialog):
         self._geometry_was_restored = False
         self.finished.connect(self._save_geometry)
 
-    def _load_plugin_state(self) -> None:
-        saved = load_model_settings(self.plugin.plugin_id)
+    def _load_plugin_state(self, *, saved_override: Optional[Dict[str, Any]] = None) -> None:
+        saved = saved_override
+        if saved is None:
+            saved = load_dialog_settings(
+                self._function, fallback_plugin_id=self.plugin.plugin_id
+            )
         self._values = self.plugin.merged_values(saved)
         self._specs = self.plugin.field_specs(saved)
 
@@ -193,6 +200,10 @@ class ImageGenEditDialog(QDialog):
         self.activateWindow()
 
     def closeEvent(self, event):
+        try:
+            save_dialog_settings(self._function, self.collect_values())
+        except Exception:
+            pass
         self._save_geometry()
         super().closeEvent(event)
 
@@ -269,6 +280,7 @@ class ImageGenEditDialog(QDialog):
         while self._fields_form.rowCount() > 1:
             self._fields_form.removeRow(1)
         self._widgets.clear()
+        self._use_last_generated_cb = None
 
     def _populate_field_rows(self) -> None:
         if self._fields_form is None:
@@ -279,9 +291,12 @@ class ImageGenEditDialog(QDialog):
         combine_guidance_lora = (
             "guidance_scale" in spec_keys and "mflux_lora" in spec_keys
         )
+        combine_seed_random = field_specs_share_seed_row(spec_keys)
 
         for spec in self._specs:
             if combine_guidance_lora and spec.key == "mflux_lora":
+                continue
+            if combine_seed_random and spec.key == "random_seed":
                 continue
 
             widget, extra = self._widget_for_spec(spec)
@@ -312,10 +327,42 @@ class ImageGenEditDialog(QDialog):
                 apply_edit_import_button_tooltip(import_btn)
                 row.addWidget(import_btn, 0, Qt.AlignmentFlag.AlignTop)
                 self._fields_form.addRow(spec.label, row_w)
+            elif combine_seed_random and spec.key == "seed":
+                random_spec = next(s for s in self._specs if s.key == "random_seed")
+                random_widget, random_extra = self._widget_for_spec(random_spec)
+                self._widgets[random_spec.key] = (
+                    random_widget,
+                    random_extra,
+                    random_spec,
+                )
+                self._fields_form.addRow(
+                    spec.label,
+                    build_seed_and_random_seed_row(widget, random_widget),
+                )
             elif spec.kind == "seed":
                 row = QHBoxLayout()
                 row.addWidget(widget)
                 self._fields_form.addRow(spec.label, self._wrap(row))
+            elif spec.key == "copies":
+                row_w = QWidget()
+                col = QVBoxLayout(row_w)
+                col.setContentsMargins(0, 0, 0, 0)
+                col.setSpacing(4)
+                col.addWidget(widget)
+                check_row = QHBoxLayout()
+                check_row.setContentsMargins(0, 0, 0, 0)
+                check_row.addStretch(1)
+                self._use_last_generated_cb = QCheckBox("Use last generated image")
+                self._use_last_generated_cb.setChecked(
+                    bool(self._values.get("use_last_generated_image", False))
+                )
+                self._use_last_generated_cb.setToolTip(
+                    "When generating multiple copies, use each finished image "
+                    "as the input for the next copy."
+                )
+                check_row.addWidget(self._use_last_generated_cb, 0)
+                col.addLayout(check_row)
+                self._fields_form.addRow(spec.label, row_w)
             else:
                 self._fields_form.addRow(spec.label, widget)
 
@@ -328,12 +375,18 @@ class ImageGenEditDialog(QDialog):
             or not new_plugin.is_available()
         ):
             return
+        current = self.collect_values()
+        prompt_entry = self._widgets.get("prompt")
+        if prompt_entry is not None:
+            widget, _, spec = prompt_entry
+            if spec.kind == "text":
+                current["prompt"] = widget.toPlainText()
         try:
-            save_model_settings(self.plugin.plugin_id, self.collect_values())
+            save_dialog_settings(self._function, current)
         except Exception:
             pass
         self.plugin = new_plugin
-        self._load_plugin_state()
+        self._load_plugin_state(saved_override=current)
         sync_model_comment_label(self._model_comment_label, new_plugin)
         self._populate_field_rows()
         save_active_plugin_id_for_function(self._function, new_plugin.plugin_id)
@@ -490,6 +543,8 @@ class ImageGenEditDialog(QDialog):
             else:
                 out[key] = getattr(widget, "text", lambda: "")()
         out["source_image_path"] = self.source_path
+        if self._use_last_generated_cb is not None:
+            out["use_last_generated_image"] = self._use_last_generated_cb.isChecked()
         return out
 
     def _on_generate(self) -> None:
@@ -509,7 +564,7 @@ class ImageGenEditDialog(QDialog):
                 return
         if not validate_copies_require_random_seed(self, values):
             return
-        save_model_settings(self.plugin.plugin_id, values)
+        save_dialog_settings(self._function, values)
         save_active_plugin_id_for_function(self._function, self.plugin.plugin_id)
         self._result_values = values
         self.accept()
