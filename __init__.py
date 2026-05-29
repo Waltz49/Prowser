@@ -7,6 +7,6 @@ slideshow capabilities, and extensive keyboard navigation.
 Based on PySide6/Qt for native macOS performance.
 """
 
-__version__ = "0.9.0"
+__version__ = "0.9.1"
 __author__ = "Doug Nadel"
 __description__ = "Personal image browser" 
