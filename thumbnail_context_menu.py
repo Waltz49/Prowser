@@ -203,6 +203,26 @@ class ThumbnailContextMenuHandler:
         if any_has_gps:
             gps_action.triggered.connect(mw.open_map_for_current_image)
 
+        if single_only:
+            path = paths_to_act[0]
+            from reference_graph import (
+                has_resolvable_exif_references,
+                open_reference_graph_for_path,
+            )
+            if has_resolvable_exif_references(path):
+                show_ref_graph_action = menu.addAction("Show Reference Graph")
+                show_ref_graph_action.triggered.connect(
+                    lambda checked=False, p=path: open_reference_graph_for_path(mw, p)
+                )
+
+        find_refs_action = menu.addAction("Find References to This Image...")
+        find_refs_action.setEnabled(single_only)
+        if single_only:
+            path = paths_to_act[0]
+            find_refs_action.triggered.connect(
+                lambda checked=False, p=path: self._find_references_in_other_images(p)
+            )
+
         menu.addSeparator()
 
         # Open in Finder - single only
@@ -248,6 +268,12 @@ class ThumbnailContextMenuHandler:
         """Convert selected/current images to a different format."""
         from convert_format import convert_selected_images
         convert_selected_images(self.main_window, paths)
+
+    def _find_references_in_other_images(self, path: str):
+        """Scan folder EXIF comments for references to *path* and show results."""
+        from find_references_dialog import find_and_show_references_dialog
+
+        find_and_show_references_dialog(self.main_window, path)
 
     def _extract_faces(self, path: str):
         """Make image current, open settings on Faces tab, and trigger Examine current image."""

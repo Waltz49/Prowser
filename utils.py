@@ -654,19 +654,25 @@ def styled_message_box(parent, icon, title, text, buttons=None, default_button=N
     return dialog
 
 
+def _dialog_thumbnail_border_color() -> str:
+    """Border color for dialog thumbnails (valid for Qt stylesheets)."""
+    from thumbnail_constants import BORDER_DEFAULT_HEX, MULTISELECT_BORDER_COLOR_HEX
+
+    color = (MULTISELECT_BORDER_COLOR_HEX or BORDER_DEFAULT_HEX or "#808080").strip()
+    return color if color else "#808080"
+
+
 def create_dialog_thumbnail_label(file_path: str, size: int, ignore_exif: bool = False):
-    """Create a QLabel for a dialog thumbnail with square frame (1px solid, border-radius 5px,
-    multiselect border color). Use for all dialog image previews.
+    """Create a QLabel for a dialog thumbnail with square frame (1px solid border).
+
+    Avoid border-radius on pixmap QLabels — Qt on macOS often logs stylesheet parse errors.
     """
     from PySide6.QtWidgets import QLabel
-    from thumbnail_constants import MULTISELECT_BORDER_COLOR_HEX
 
     thumb = QLabel()
     thumb.setFixedSize(size, size)
     thumb.setAlignment(Qt.AlignmentFlag.AlignCenter)
-    thumb.setStyleSheet(
-        f"border: 1px solid {MULTISELECT_BORDER_COLOR_HEX}; border-radius: 5px;"
-    )
+    thumb.setStyleSheet(f"border: 1px solid {_dialog_thumbnail_border_color()};")
     px = load_dialog_thumbnail(file_path, size, ignore_exif)
     if px and not px.isNull():
         thumb.setPixmap(px)

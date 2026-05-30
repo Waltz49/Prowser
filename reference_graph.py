@@ -166,6 +166,75 @@ def collect_reference_chain_paths(
     return out
 
 
+def path_is_referenced_in_exif(candidate_path: str, target_path: str) -> bool:
+    """True if *target_path* is listed in *candidate_path*'s EXIF References block."""
+    if not candidate_path or not target_path or not os.path.isfile(candidate_path):
+        return False
+    if not os.path.isfile(target_path):
+        return False
+    if _norm_path(candidate_path) == _norm_path(target_path):
+        return False
+    image_dir = os.path.dirname(candidate_path) or ""
+    entries = get_reference_entries_for_path(candidate_path)
+    if not entries:
+        return False
+    resolved = resolve_reference_entries_map(image_dir, candidate_path, entries)
+    target_norm = _norm_path(target_path)
+    for fname, _expected_mtime in entries:
+        ref_path = resolved.get(fname.strip().lower())
+        if ref_path and _norm_path(ref_path) == target_norm:
+            return True
+    return False
+
+
+def has_resolvable_exif_references(image_path: str) -> bool:
+    """True if EXIF References exist and at least one entry resolves to a file."""
+    if not image_path or not os.path.isfile(image_path):
+        return False
+    entries = get_reference_entries_for_path(image_path)
+    if not entries:
+        return False
+    image_dir = os.path.dirname(image_path) or ""
+    resolved = resolve_reference_entries_map(image_dir, image_path, entries)
+    return any(resolved.get(fname.strip().lower()) for fname, _ in entries)
+
+
+def open_reference_graph_for_path(main_window, image_path: str) -> None:
+    """Show reference-graph presentation for *image_path* (reflevel:// behavior)."""
+    if not image_path or not os.path.isfile(image_path):
+        return
+    image_dir = os.path.dirname(image_path) or ""
+    entries = get_reference_entries_for_path(image_path)
+    paths = collect_reference_chain_paths(image_dir, image_path, entries)
+    if len(paths) < 2:
+        try:
+            from imagegen_plugins.image_gen_job_queue_dialog import _open_image_in_browse
+
+            _open_image_in_browse(main_window, image_path)
+        except ImportError:
+            pass
+        return
+    if hasattr(main_window, "directory_stack_history_handler"):
+        h = main_window.directory_stack_history_handler
+        st = h.capture_current_state()
+        if st and not h.is_duplicate_state(st):
+            h.backward_stack.append(st)
+            h.forward_stack.clear()
+    if hasattr(main_window, "refresh_from_configuration"):
+        main_window.refresh_from_configuration(
+            {
+                "files": paths,
+                "sort_mode": "custom",
+                "presentation": "reference_graph",
+                "focus_path": image_path,
+            }
+        )
+    if hasattr(main_window, "update_sort_menu_checkmarks"):
+        main_window.update_sort_menu_checkmarks()
+    if hasattr(main_window, "save_sorting_settings"):
+        main_window.save_sorting_settings()
+
+
 def resolve_exif_reference_paths(
     image_dir: str, current_path: str, entries: List[Tuple[str, Optional[float]]]
 ) -> Tuple[List[str], Dict[str, str]]:
