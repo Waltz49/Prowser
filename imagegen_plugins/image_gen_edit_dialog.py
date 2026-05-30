@@ -7,7 +7,7 @@ import os
 from typing import Any, Dict, List, Optional
 
 from PySide6.QtCore import QSize, Qt, QTimer
-from PySide6.QtGui import QPixmap
+from PySide6.QtGui import QMouseEvent, QPixmap
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -42,7 +42,6 @@ from imagegen_plugins.image_gen_dialog import (
     field_specs_share_seed_row,
     validate_copies_require_random_seed,
 )
-from imagegen_plugins.image_gen_expand_dialog import active_image_path_for_expand
 from imagegen_plugins.image_gen_source_nav import (
     ImageGenSourceNavRow,
     install_source_nav_keyboard_shortcuts,
@@ -78,9 +77,39 @@ from utils import (
 )
 
 EDIT_IMAGE_DIALOG_TITLE = "Edit Image"
+MAX_EDIT_SOURCE_IMAGES = 3
 
-# Re-use expand's active-image resolution (browse or single thumbnail).
-active_image_path_for_edit = active_image_path_for_expand
+
+def active_image_paths_for_edit(main_window) -> list[str]:
+    """1–3 source paths for Klein edit (browse: current; thumbnail: selection)."""
+    if main_window is None:
+        return []
+    paths: list[str] = []
+    if main_window.current_view_mode == "browse":
+        if hasattr(main_window, "get_current_image_path"):
+            image_path = main_window.get_current_image_path()
+            if image_path and os.path.isfile(image_path):
+                paths.append(os.path.abspath(image_path))
+    elif main_window.current_view_mode == "thumbnail":
+        if hasattr(main_window, "selection_manager") and main_window.selection_manager:
+            selected = main_window.selection_manager.get_selected_files()
+            multi = bool(getattr(main_window, "selected_files", None))
+            if multi and len(selected) > 1:
+                for image_path in selected:
+                    if image_path and os.path.isfile(image_path):
+                        paths.append(os.path.abspath(image_path))
+                    if len(paths) >= MAX_EDIT_SOURCE_IMAGES:
+                        break
+            elif selected:
+                image_path = selected[0]
+                if image_path and os.path.isfile(image_path):
+                    paths.append(os.path.abspath(image_path))
+    return paths
+
+
+def active_image_path_for_edit(main_window) -> Optional[str]:
+    paths = active_image_paths_for_edit(main_window)
+    return paths[0] if paths else None
 
 
 class _SourceImagePreview(QLabel):
@@ -131,6 +160,72 @@ class _SourceImagePreview(QLabel):
         self.setPixmap(scaled)
 
 
+class _ClickableSourceThumb(_SourceImagePreview):
+    """Thumbnail that activates the image in the main browser on click."""
+
+    def __init__(
+        self,
+        source_path: str,
+        on_activate,
+        parent=None,
+    ):
+        super().__init__(source_path, parent)
+        self._on_activate = on_activate
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+
+    def mousePressEvent(self, event: QMouseEvent) -> None:
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._on_activate(self._source_path)
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
+
+class _MultiSourceImagePreview(QWidget):
+    """Flowing row of source thumbnails (no prev/next navigation)."""
+
+    _HINT_SIZE = QSize(320, 280)
+    _MIN_HINT_SIZE = QSize(160, 120)
+
+    def __init__(
+        self,
+        source_paths: list[str],
+        on_activate,
+        parent=None,
+    ):
+        super().__init__(parent)
+        self._source_paths = list(source_paths)
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(6)
+        for path in self._source_paths:
+            thumb = _ClickableSourceThumb(path, on_activate, self)
+            thumb.setSizePolicy(
+                QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
+            )
+            layout.addWidget(thumb, 1)
+
+    def sizeHint(self) -> QSize:
+        return self._HINT_SIZE
+
+    def minimumSizeHint(self) -> QSize:
+        return self._MIN_HINT_SIZE
+
+
+def _activate_source_in_main_window(main_window, path: str) -> None:
+    if main_window is None or not path:
+        return
+    main_window.set_current_image_by_path(path)
+    displayed = main_window.get_displayed_images() or []
+    if path not in displayed:
+        return
+    idx = displayed.index(path)
+    if main_window.current_view_mode == "thumbnail":
+        main_window.view_mode_manager.open_browse_view(idx)
+    elif main_window.current_view_mode == "browse":
+        main_window.highlight_image()
+
+
 class ImageGenEditDialog(QDialog):
     """Source preview + dynamically built edit configuration fields."""
 
@@ -141,6 +236,7 @@ class ImageGenEditDialog(QDialog):
         source_path: str,
         parent=None,
         *,
+        source_paths: Optional[List[str]] = None,
         initial_plugin_id: Optional[str] = None,
         initial_prompt: Optional[str] = None,
         window_title: str = EDIT_IMAGE_DIALOG_TITLE,
@@ -149,7 +245,18 @@ class ImageGenEditDialog(QDialog):
         self._plugins = list(plugins)
         self._function = function
         self._plugins_by_id: Dict[str, ImageGenModelPlugin] = {}
-        self.source_path = os.path.abspath(source_path)
+        if source_paths:
+            self._source_paths = [
+                os.path.abspath(p) for p in source_paths if p and os.path.isfile(p)
+            ]
+        else:
+            self._source_paths = (
+                [os.path.abspath(source_path)] if source_path else []
+            )
+        if not self._source_paths:
+            raise ValueError("At least one source image path is required")
+        self.source_path = self._source_paths[0]
+        self._multi_source = len(self._source_paths) > 1
         self._widgets: Dict[str, Any] = {}
         self._specs: List[FieldSpec] = []
         self._fields_form: Optional[QFormLayout] = None
@@ -234,15 +341,28 @@ class ImageGenEditDialog(QDialog):
         preview_host.setFrameShape(QFrame.Shape.NoFrame)
         preview_layout = QVBoxLayout(preview_host)
         preview_layout.setContentsMargins(0, 0, 0, 0)
-        self._source_preview = _SourceImagePreview(self.source_path, preview_host)
-        self._source_nav = ImageGenSourceNavRow(
-            resolve_image_gen_main_window(self),
-            self._on_source_image_changed,
-            preview_host,
-            initial_source_path=self.source_path,
-        )
-        self._source_nav.set_center_widget(self._source_preview)
-        preview_layout.addWidget(self._source_nav)
+        main_window = resolve_image_gen_main_window(self)
+        if self._multi_source:
+
+            def _on_thumb_activate(path: str) -> None:
+                _activate_source_in_main_window(main_window, path)
+
+            preview_widget = _MultiSourceImagePreview(
+                self._source_paths,
+                _on_thumb_activate,
+                preview_host,
+            )
+            preview_layout.addWidget(preview_widget, 1)
+        else:
+            self._source_preview = _SourceImagePreview(self.source_path, preview_host)
+            self._source_nav = ImageGenSourceNavRow(
+                main_window,
+                self._on_source_image_changed,
+                preview_host,
+                initial_source_path=self.source_path,
+            )
+            self._source_nav.set_center_widget(self._source_preview)
+            preview_layout.addWidget(self._source_nav)
         splitter.add_preview_pane(preview_host)
 
         scroll = QScrollArea()
@@ -273,7 +393,8 @@ class ImageGenEditDialog(QDialog):
         scroll.setWidget(fields_inner)
         splitter.add_controls_pane(scroll)
         layout.addWidget(splitter, 1)
-        install_source_nav_keyboard_shortcuts(self, self._source_nav)
+        if self._source_nav is not None:
+            install_source_nav_keyboard_shortcuts(self, self._source_nav)
 
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
@@ -376,7 +497,8 @@ class ImageGenEditDialog(QDialog):
             else:
                 self._fields_form.addRow(spec.label, widget)
 
-        refresh_source_nav_keyboard_shortcuts(self)
+        if self._source_nav is not None:
+            refresh_source_nav_keyboard_shortcuts(self)
 
     def _on_model_combo_changed(self, _index: int = 0) -> None:
         plugin_id = self._model_combo.currentData()
@@ -555,6 +677,7 @@ class ImageGenEditDialog(QDialog):
             else:
                 out[key] = getattr(widget, "text", lambda: "")()
         out["source_image_path"] = self.source_path
+        out["source_image_paths"] = list(self._source_paths)
         if self._use_last_generated_cb is not None:
             out["use_last_generated_image"] = self._use_last_generated_cb.isChecked()
         return out

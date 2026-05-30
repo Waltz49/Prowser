@@ -20,7 +20,8 @@ from imagegen_plugins.image_gen_naming import (
     lora_name_for_exif,
     make_readable_user_comment_before_browse,
     next_imagegen_path,
-    reference_entry_for_source,
+    reference_entries_for_source_paths,
+    resolve_source_image_paths,
     resolve_generation_elapsed_seconds,
     write_exif_user_comment,
 )
@@ -279,8 +280,11 @@ class ImageGenController(QObject):
                 self._expand_source_path = str(values.get("source_image_path") or "")
                 self._expand_base_path = base_path
             elif get_pipeline(plugin.pipeline_id).requires_source_image:
+                from imagegen_plugins.image_gen_naming import resolve_source_image_paths
+
                 self._expand_source_path = str(values.get("source_image_path") or "")
                 self._expand_base_path = ""
+                self._task_reference_paths = resolve_source_image_paths(values)
             else:
                 self._expand_source_path = ""
                 self._expand_base_path = ""
@@ -315,18 +319,24 @@ class ImageGenController(QObject):
     def get_task_status_info_html(self) -> str:
         html = self._task_status_info_html
         in_cooldown = self._is_in_copy_cooldown()
-        if self._expand_source_path or self._expand_base_path:
-            elapsed = self._frozen_elapsed_seconds if in_cooldown else None
-            if elapsed is None and self._step_progress_start_time is not None:
-                elapsed = time.perf_counter() - self._step_progress_start_time
+        if (
+            self._task_reference_paths
+            or self._expand_source_path
+            or self._expand_base_path
+        ):
+            show_elapsed = bool(self._expand_source_path or self._expand_base_path)
+            elapsed = None
+            if show_elapsed:
+                elapsed = self._frozen_elapsed_seconds if in_cooldown else None
+                if elapsed is None and self._step_progress_start_time is not None:
+                    elapsed = time.perf_counter() - self._step_progress_start_time
             html, self._task_reference_paths = refresh_expand_task_status_html_for_display(
                 html,
                 elapsed_seconds=elapsed,
                 source_path=self._expand_source_path,
                 base_path=self._expand_base_path,
+                reference_paths=self._task_reference_paths,
             )
-        else:
-            self._task_reference_paths = []
         if in_cooldown:
             html = apply_cooldown_to_status_html(
                 html,
@@ -611,14 +621,13 @@ class ImageGenController(QObject):
                         ref_entries = [resolved]
                         allow_cross_dir = True
                 elif get_pipeline(plugin.pipeline_id).requires_source_image:
-                    source_path = values.get("source_image_path")
-                    if source_path and os.path.isfile(source_path):
-                        entry = reference_entry_for_source(
-                            str(source_path), output_path
-                        )
-                        if entry is not None:
-                            ref_entries = [entry]
-                            allow_cross_dir = True
+                    source_paths = resolve_source_image_paths(values)
+                    ref_entries = reference_entries_for_source_paths(
+                        source_paths, output_path
+                    )
+                    if ref_entries:
+                        allow_cross_dir = True
+                        self._task_reference_paths = list(source_paths)
                 write_exif_user_comment(
                     output_path,
                     comment,
@@ -645,11 +654,13 @@ class ImageGenController(QObject):
             ):
                 if values.get("use_last_generated_image"):
                     if output_path and os.path.isfile(output_path):
-                        self._pending_values["source_image_path"] = output_path
-                        self._expand_source_path = output_path
-                        self._active_thumbnail_paths = thumbnail_paths_for_values(
-                            plugin, self._pending_values
-                        )
+                        out = os.path.normpath(output_path)
+                        self._pending_values["source_image_path"] = out
+                        self._pending_values.pop("source_image_paths", None)
+                        self._expand_source_path = out
+                        self._task_reference_paths = [out]
+                        self._active_thumbnail_paths = [out]
+                        self.task_status_info_changed.emit()
                 self._enter_copy_cooldown_after_success()
                 return
             self._finish_copy_batch()

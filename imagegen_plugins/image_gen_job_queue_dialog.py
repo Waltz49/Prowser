@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QMessageBox,
     QPushButton,
+    QSizePolicy,
     QTableWidget,
     QTextBrowser,
     QVBoxLayout,
@@ -47,6 +48,8 @@ from utils import (
 
 _THUMB_SIZE = 72
 _ROW_PAD = 12
+_THUMB_CELL_MARGIN = 8
+_THUMB_CELL_GAP = 6
 
 
 def _job_queue_app_background_hex() -> str:
@@ -116,6 +119,38 @@ def _open_image_in_browse(main_window, file_path: str) -> None:
         show_styled_critical(main_window, "Cannot open image", str(e))
 
 
+def _build_preview_cell(main_window, paths: list[str]) -> tuple[QWidget, int]:
+    """Preview column cell: one full thumbnail per path; returns (widget, width)."""
+    preview_wrap = QWidget()
+    _apply_job_queue_cell_background(preview_wrap)
+    preview_layout = QHBoxLayout(preview_wrap)
+    preview_layout.setContentsMargins(4, 4, 4, 4)
+    preview_layout.setSpacing(_THUMB_CELL_GAP)
+    valid = _valid_preview_paths(paths)
+    row_preview_w = _preview_column_width(len(valid) or 1)
+    preview_wrap.setMinimumWidth(row_preview_w)
+    preview_wrap.setMaximumWidth(row_preview_w)
+    if valid:
+        for path in valid:
+            thumb = _make_clickable_thumbnail(main_window, path, _THUMB_SIZE)
+            thumb.setSizePolicy(
+                QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed
+            )
+            preview_layout.addWidget(
+                thumb,
+                0,
+                Qt.AlignmentFlag.AlignVCenter,
+            )
+    else:
+        placeholder = QLabel("—")
+        placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        placeholder.setFixedSize(_THUMB_SIZE, _THUMB_SIZE)
+        _apply_job_queue_cell_background(placeholder)
+        preview_layout.addWidget(placeholder)
+    preview_layout.addStretch(1)
+    return preview_wrap, row_preview_w
+
+
 def _make_clickable_thumbnail(main_window, file_path: str, size: int) -> QLabel:
     thumb = create_dialog_thumbnail_label(file_path, size)
     thumb.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -129,11 +164,35 @@ def _make_clickable_thumbnail(main_window, file_path: str, size: int) -> QLabel:
     return thumb
 
 
-def _info_content_width(table: QTableWidget) -> int:
+def _valid_preview_paths(paths: list[str]) -> list[str]:
+    out: list[str] = []
+    for raw in paths:
+        p = str(raw or "").strip()
+        if p and os.path.isfile(p):
+            out.append(p)
+    return out
+
+
+def _preview_column_width(num_thumbs: int) -> int:
+    """Preview column width for *num_thumbs* full-size (_THUMB_SIZE) thumbnails."""
+    n = max(1, int(num_thumbs))
+    return (
+        _THUMB_CELL_MARGIN
+        + n * _THUMB_SIZE
+        + max(0, n - 1) * _THUMB_CELL_GAP
+    )
+
+
+def _max_preview_column_width(rows) -> int:
+    widths = [_preview_column_width(len(_valid_preview_paths(r.thumbnail_paths))) for r in rows]
+    return max(_preview_column_width(1), *widths) if widths else _preview_column_width(1)
+
+
+def _info_content_width(table: QTableWidget, *, preview_col_width: int) -> int:
     viewport_w = table.viewport().width()
     if viewport_w < 80:
         viewport_w = max(520, table.width()) - 48
-    return max(240, viewport_w - _THUMB_SIZE - 36 - 48)
+    return max(240, viewport_w - preview_col_width - 36 - 48)
 
 
 def _apply_info_browser_html(
@@ -230,7 +289,7 @@ class ImageGenJobQueueDialog(QDialog):
         layout.addWidget(self._empty_label)
 
         self._table = QTableWidget(0, 3, self)
-        self._table.setHorizontalHeaderLabels(["", "Job", "Preview"])
+        self._table.setHorizontalHeaderLabels(["", "Job", "References"])
         self._table.horizontalHeader().setSectionResizeMode(
             0, QHeaderView.ResizeMode.Fixed
         )
@@ -241,7 +300,7 @@ class ImageGenJobQueueDialog(QDialog):
             2, QHeaderView.ResizeMode.Fixed
         )
         self._table.setColumnWidth(0, 36)
-        self._table.setColumnWidth(2, _THUMB_SIZE + 24)
+        self._table.setColumnWidth(2, _preview_column_width(1))
         self._table.verticalHeader().setVisible(False)
         self._table.setSelectionMode(QTableWidget.SelectionMode.NoSelection)
         self._table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
@@ -334,12 +393,30 @@ class ImageGenJobQueueDialog(QDialog):
             info_html = self._controller.get_task_queue_status_info_html()
             if info_html:
                 notify_job_prompt_tooltip_content_updating(browser)
-                content_width = _info_content_width(self._table)
+                preview_w = self._table.columnWidth(2)
+                content_width = _info_content_width(
+                    self._table, preview_col_width=preview_w
+                )
                 browser_h = _apply_info_browser_html(
                     browser, info_html, content_width=content_width
                 )
                 row_h = max(_THUMB_SIZE + _ROW_PAD, browser_h + _ROW_PAD)
                 self._table.setRowHeight(0, row_h)
+        if force:
+            self._refresh_active_row_preview(row_idx=0)
+
+    def _refresh_active_row_preview(self, row_idx: int = 0) -> None:
+        if not self.isVisible():
+            return
+        rows = self._controller.queue_snapshot()
+        if row_idx < 0 or row_idx >= len(rows):
+            return
+        preview_col_w = _max_preview_column_width(rows)
+        self._table.setColumnWidth(2, preview_col_w)
+        preview_wrap, _row_w = _build_preview_cell(
+            self.main_window, rows[row_idx].thumbnail_paths
+        )
+        self._table.setCellWidget(row_idx, 2, preview_wrap)
 
     def refresh_table(self) -> None:
         rows = self._controller.queue_snapshot()
@@ -351,7 +428,11 @@ class ImageGenJobQueueDialog(QDialog):
             layout.setStretchFactor(self._empty_label, 1 if not has_rows else 0)
             layout.setStretchFactor(self._table, 1 if has_rows else 0)
         self._table.setRowCount(len(rows))
-        content_width = _info_content_width(self._table)
+        preview_col_w = _max_preview_column_width(rows)
+        self._table.setColumnWidth(2, preview_col_w)
+        content_width = _info_content_width(
+            self._table, preview_col_width=preview_col_w
+        )
 
         for row_idx, row in enumerate(rows):
             cancel_btn = QPushButton()
@@ -382,27 +463,9 @@ class ImageGenJobQueueDialog(QDialog):
             install_delayed_prompt_tooltip(info_browser, row.full_prompt)
             self._table.setCellWidget(row_idx, 1, info_browser)
 
-            preview_wrap = QWidget()
-            _apply_job_queue_cell_background(preview_wrap)
-            preview_layout = QHBoxLayout(preview_wrap)
-            preview_layout.setContentsMargins(4, 4, 4, 4)
-            preview_layout.setSpacing(6)
-            paths = row.thumbnail_paths[:2]
-            if paths:
-                for path in paths:
-                    preview_layout.addWidget(
-                        _make_clickable_thumbnail(
-                            self.main_window, path, _THUMB_SIZE
-                        ),
-                        alignment=Qt.AlignmentFlag.AlignCenter,
-                    )
-            else:
-                placeholder = QLabel("—")
-                placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
-                placeholder.setFixedSize(_THUMB_SIZE, _THUMB_SIZE)
-                _apply_job_queue_cell_background(placeholder)
-                preview_layout.addWidget(placeholder)
-            preview_layout.addStretch()
+            preview_wrap, _row_preview_w = _build_preview_cell(
+                self.main_window, row.thumbnail_paths
+            )
             self._table.setCellWidget(row_idx, 2, preview_wrap)
 
             row_h = max(_THUMB_SIZE + _ROW_PAD, browser_h + _ROW_PAD)

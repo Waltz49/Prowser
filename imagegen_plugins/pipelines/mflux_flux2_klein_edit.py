@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-MFLUX FLUX.2 Klein edit worker (4B or 9B; image + edit prompt).
+MFLUX FLUX.2 Klein edit worker (4B or 9B; one or more images + edit prompt).
 Reads JSON from stdin; writes PNG to output_path from payload.
 """
 
@@ -43,9 +43,15 @@ def mflux_is_installed() -> bool:
     return _installed()
 
 
+def _source_paths_from_payload(payload: Dict[str, Any]) -> list[str]:
+    from imagegen_plugins.image_gen_naming import resolve_source_image_paths
+
+    return resolve_source_image_paths(payload)
+
+
 def _build_klein_edit_cli_args(
     *,
-    image_path: str,
+    image_paths: list[str],
     output_path: str,
     prompt: str,
     model: str,
@@ -69,7 +75,7 @@ def _build_klein_edit_cli_args(
         "--guidance",
         str(_KLEIN_GUIDANCE),
         "--image-paths",
-        image_path,
+        *[str(p) for p in image_paths],
         "--output",
         output_path,
         "--prompt",
@@ -92,7 +98,7 @@ def _build_klein_edit_cli_args(
 
 def _run_mflux_klein_edit_cli(
     *,
-    image_path: str,
+    image_paths: list[str],
     output_path: str,
     prompt: str,
     model: str,
@@ -108,7 +114,7 @@ def _run_mflux_klein_edit_cli(
     progressive_output_path: str | None = None,
 ) -> None:
     cli_args = _build_klein_edit_cli_args(
-        image_path=image_path,
+        image_paths=image_paths,
         output_path=output_path,
         prompt=prompt,
         model=model,
@@ -165,9 +171,12 @@ def _run_mflux_klein_edit_cli(
 
 
 def run_from_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
-    source_path = str(payload.get("source_image_path") or "")
-    if not source_path or not os.path.isfile(source_path):
-        raise ValueError("source_image_path is required and must exist")
+    source_paths = _source_paths_from_payload(payload)
+    if not source_paths:
+        raise ValueError(
+            "source_image_path (or source_image_paths) is required and must exist"
+        )
+    source_path = source_paths[0]
 
     prompt = (payload.get("prompt") or "").strip()
     if not prompt:
@@ -220,7 +229,7 @@ def run_from_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     t0 = time.perf_counter()
     try:
         _run_mflux_klein_edit_cli(
-            image_path=source_path,
+            image_paths=source_paths,
             output_path=mflux_output_path,
             prompt=prompt,
             model=model,

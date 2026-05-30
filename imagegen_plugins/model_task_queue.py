@@ -41,8 +41,9 @@ def thumbnail_paths_for_values(
     paths: list[str] = []
     pipeline = get_pipeline(plugin.pipeline_id)
     if pipeline.requires_source_image:
-        src = str(values.get("source_image_path") or "")
-        if src and os.path.isfile(src):
+        from imagegen_plugins.image_gen_naming import resolve_source_image_paths
+
+        for src in resolve_source_image_paths(values):
             paths.append(os.path.normpath(src))
     if plugin.pipeline_id == "mflux_fill_infill":
         px_path = values.get("pixelmator_doc_path")

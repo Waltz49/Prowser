@@ -29,8 +29,9 @@ from imagegen_plugins.image_gen_controller import get_imagegen_controller
 from imagegen_plugins.image_gen_job_queue_dialog import show_imagegen_job_queue_dialog
 from imagegen_plugins.image_gen_dialog import ImageGenDialog
 from imagegen_plugins.image_gen_edit_dialog import (
+    MAX_EDIT_SOURCE_IMAGES,
     ImageGenEditDialog,
-    active_image_path_for_edit,
+    active_image_paths_for_edit,
 )
 from imagegen_plugins.image_gen_expand_dialog import (
     ImageGenExpandDialog,
@@ -232,20 +233,35 @@ def _open_dialog_for_function(
                 initial_prompt=initial_prompt,
             )
         elif function == FUNCTION_EDIT:
-            source_path = active_image_path_for_edit(main_window)
-            if not source_path:
+            if (
+                main_window.current_view_mode == "thumbnail"
+                and hasattr(main_window, "selection_manager")
+                and main_window.selection_manager
+                and getattr(main_window, "selected_files", None)
+                and len(main_window.selection_manager.get_selected_files())
+                > MAX_EDIT_SOURCE_IMAGES
+            ):
                 show_styled_warning(
                     main_window,
                     "Edit",
-                    "Select an image in browse view, or select a single thumbnail, "
-                    "before using edit.",
+                    f"Select at most {MAX_EDIT_SOURCE_IMAGES} images before using edit.",
+                )
+                return
+            source_paths = active_image_paths_for_edit(main_window)
+            if not source_paths:
+                show_styled_warning(
+                    main_window,
+                    "Edit",
+                    "Select an image in browse view, or select up to "
+                    f"{MAX_EDIT_SOURCE_IMAGES} thumbnails, before using edit.",
                 )
                 return
             dlg = ImageGenEditDialog(
                 plugins,
                 function,
-                source_path,
+                source_paths[0],
                 main_window,
+                source_paths=source_paths,
                 initial_prompt=initial_prompt,
             )
         else:

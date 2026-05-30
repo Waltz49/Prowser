@@ -305,6 +305,25 @@ def format_image_exif_prompt(
     return f"Prompt:\n{prompt_text}"
 
 
+def resolve_source_image_paths(values: Dict[str, Any]) -> List[str]:
+    """Ordered unique source paths from dialog/worker values (1–N images)."""
+    paths: List[str] = []
+    seen: set[str] = set()
+    multi = values.get("source_image_paths")
+    if isinstance(multi, list):
+        for raw in multi:
+            ap = os.path.normpath(os.path.abspath(str(raw or "")))
+            if ap and os.path.isfile(ap) and ap not in seen:
+                seen.add(ap)
+                paths.append(ap)
+    primary = str(values.get("source_image_path") or "").strip()
+    if primary:
+        ap = os.path.normpath(os.path.abspath(primary))
+        if ap and os.path.isfile(ap) and ap not in seen:
+            paths.insert(0, ap)
+    return paths
+
+
 def reference_entry_for_source(
     source_path: str, output_path: str
 ) -> Optional[Tuple[str, str]]:
@@ -316,6 +335,25 @@ def reference_entry_for_source(
     if os.path.dirname(ap) == out_dir:
         return (f"./{os.path.basename(ap)}", ap)
     return (ap, ap)
+
+
+def reference_entries_for_source_paths(
+    source_paths: List[str], output_path: str
+) -> List[Tuple[str, str]]:
+    """One EXIF reference entry per source path (same-dir uses ./basename lines)."""
+    entries: List[Tuple[str, str]] = []
+    seen_abs: set[str] = set()
+    for source_path in source_paths:
+        entry = reference_entry_for_source(source_path, output_path)
+        if entry is None:
+            continue
+        _line, abs_path = entry
+        ap = os.path.normpath(os.path.abspath(abs_path))
+        if ap in seen_abs:
+            continue
+        seen_abs.add(ap)
+        entries.append(entry)
+    return entries
 
 
 def inject_references_exif_section(

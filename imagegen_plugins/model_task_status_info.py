@@ -62,6 +62,28 @@ def _exif_style_link(label: str, href: str = "reflevel://") -> str:
     )
 
 
+def _normalize_reference_paths(*path_groups: list[str] | str | None) -> list[str]:
+    """Unique existing paths in order (for status-bar / queue reference rows)."""
+    out: list[str] = []
+    seen: set[str] = set()
+    for group in path_groups:
+        if isinstance(group, str):
+            group = [group] if group else []
+        elif not group:
+            continue
+        for raw in group:
+            p = os.path.normpath(str(raw or ""))
+            if not p or not os.path.isfile(p) or p in seen:
+                continue
+            seen.add(p)
+            out.append(p)
+    return out
+
+
+def _reference_labels_for_paths(paths: list[str]) -> list[str]:
+    return [os.path.basename(p) for p in paths if p and os.path.isfile(p)]
+
+
 _EXPAND_ELAPSED_ROW_RE = re.compile(
     r"(<tr><td><b>Elapsed:</b></td><td>)(.*?)(</td></tr>)",
     re.DOTALL,
@@ -170,10 +192,11 @@ def refresh_expand_task_status_html_for_display(
     html_text: str,
     *,
     elapsed_seconds: float | None,
-    source_path: str,
-    base_path: str,
+    source_path: str = "",
+    base_path: str = "",
+    reference_paths: list[str] | None = None,
 ) -> tuple[str, list[str]]:
-    """Insert elapsed + reference links when the expand status menu is shown."""
+    """Insert elapsed + reference links when the task status menu is shown."""
     if not html_text:
         return html_text, []
 
@@ -186,17 +209,23 @@ def refresh_expand_task_status_html_for_display(
             _table_row("Elapsed:", _format_duration(elapsed_seconds))
         )
 
-    ref_paths: list[str] = []
-    ref_links: list[str] = []
-    if source_path and os.path.isfile(source_path):
-        ref_paths.append(os.path.normpath(source_path))
-        ref_links.append(_exif_style_link(os.path.basename(source_path)))
-    if base_path and os.path.isfile(base_path):
-        ref_paths.append(os.path.normpath(base_path))
+    ref_paths = _normalize_reference_paths(reference_paths, source_path)
+    base_norm = (
+        os.path.normpath(base_path)
+        if base_path and os.path.isfile(base_path)
+        else ""
+    )
+    source_paths = [p for p in ref_paths if p != base_norm]
+    ref_links = [_exif_style_link(os.path.basename(p)) for p in source_paths]
+    if base_norm:
+        ref_paths.append(base_norm)
         ref_links.append(_exif_style_link("base"))
     if ref_links:
         insert_rows.append(
-            _table_row_html_value("References:", "<br>".join(ref_links))
+            _table_row_html_value(
+                "References:",
+                f'<span style="white-space:normal;">{", ".join(ref_links)}</span>',
+            )
         )
 
     if insert_rows and "</table>" in html_text:
@@ -297,6 +326,37 @@ def _collect_generation_status_fields(
     return fields
 
 
+def _references_row_for_values(
+    plugin: ImageGenModelPlugin,
+    values: Dict[str, Any],
+    *,
+    source_path: str = "",
+    base_path: str = "",
+) -> Optional[str]:
+    """References table row (one comma-separated line) when the job has sources."""
+    pipeline_id = plugin.pipeline_id
+    ref_paths: list[str] = []
+    if get_pipeline(pipeline_id).requires_source_image:
+        from imagegen_plugins.image_gen_naming import resolve_source_image_paths
+
+        ref_paths = resolve_source_image_paths(values)
+        if not ref_paths and source_path:
+            ref_paths = _normalize_reference_paths(source_path)
+    elif source_path:
+        ref_paths = _normalize_reference_paths(source_path)
+    base_norm = (
+        os.path.normpath(base_path)
+        if base_path and os.path.isfile(base_path)
+        else ""
+    )
+    labels = _reference_labels_for_paths([p for p in ref_paths if p != base_norm])
+    if base_norm:
+        labels.append("base")
+    if not labels:
+        return None
+    return _table_row("References:", ", ".join(labels))
+
+
 def format_image_generation_status_html(
     plugin: ImageGenModelPlugin,
     values: Dict[str, Any],
@@ -306,6 +366,9 @@ def format_image_generation_status_html(
     pipeline_id = plugin.pipeline_id
     fields = _collect_generation_status_fields(plugin, values, payload)
     rows = _generation_status_table_rows(fields)
+    ref_row = _references_row_for_values(plugin, values)
+    if ref_row:
+        rows.append(ref_row)
     return _table_html(rows, title=_task_menu_title_for_pipeline(pipeline_id))
 
 
@@ -336,13 +399,11 @@ def format_image_generation_queue_status_html(
     )
     rows = _generation_status_table_rows(fields, steps_value=steps_value)
 
-    ref_parts: list[str] = []
-    if source_path and os.path.isfile(source_path):
-        ref_parts.append(os.path.basename(source_path))
-    if base_path and os.path.isfile(base_path):
-        ref_parts.append("base")
-    if ref_parts:
-        rows.append(_table_row("References:", ", ".join(ref_parts)))
+    ref_row = _references_row_for_values(
+        plugin, values, source_path=source_path, base_path=base_path
+    )
+    if ref_row:
+        rows.append(ref_row)
 
     if series_images_after is not None and series_images_after > 0:
         rows.append(

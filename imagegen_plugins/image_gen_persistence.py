@@ -46,6 +46,7 @@ _PLUGIN_SPECIFIC_DIALOG_KEYS = frozenset(
         "mflux_model_name",
         "hf_model_id",
         "source_image_path",
+        "source_image_paths",
     }
 )
 

@@ -484,6 +484,12 @@ def build_worker_payload(
             for_fill=(pipeline_id in ("mflux_fill_expand", "mflux_fill_infill")),
         )
     if pipeline_id == "mflux_flux2_klein_edit":
+        from imagegen_plugins.image_gen_naming import resolve_source_image_paths
+
+        source_paths = resolve_source_image_paths(merged)
+        if source_paths:
+            merged["source_image_paths"] = source_paths
+            merged["source_image_path"] = source_paths[0]
         merged.pop("width", None)
         merged.pop("height", None)
     merged.pop("aspect_ratio_lock", None)
