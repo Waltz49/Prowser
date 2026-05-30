@@ -518,7 +518,11 @@ class InformationSidebar(QWidget):
                 if st and not h.is_duplicate_state(st):
                     h.backward_stack.append(st)
                     h.forward_stack.clear()
-            mw.refresh_from_configuration({"files": paths})
+            mw.refresh_from_configuration({"files": paths, "sort_mode": "custom"})
+            if hasattr(mw, "update_sort_menu_checkmarks"):
+                mw.update_sort_menu_checkmarks()
+            if hasattr(mw, "save_sorting_settings"):
+                mw.save_sorting_settings()
             return
         if url.toString() == "speak://":
             text = truncate_usercomment_before_prompt(self._speakable_description or "")

@@ -517,7 +517,9 @@ class ImageGenController(QObject):
         existing = [p for p in paths if p and os.path.isfile(p)]
         if not existing or not hasattr(self.main_window, "refresh_from_configuration"):
             return
-        self.main_window.refresh_from_configuration({"files": existing})
+        self.main_window.refresh_from_configuration(
+            {"files": existing, "sort_mode": "custom"}
+        )
 
     def start_caption(
         self, file_path: str, user_prompt_override: str | None = None
