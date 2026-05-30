@@ -115,6 +115,8 @@ class ImageGenController(QObject):
         self._live_step_total = 0
         self._live_elapsed_seconds: Optional[float] = None
         self._live_estimate_seconds: Optional[float] = None
+        # Seconds per step, frozen when a diffusion step completes (for live ETA).
+        self._step_seconds_per_step: Optional[float] = None
 
     def is_running(self) -> bool:
         if self._copy_batch_active and not self._copy_batch_cancelled:
@@ -343,7 +345,56 @@ class ImageGenController(QObject):
                 self._cooldown_seconds_remaining(),
                 skip_icon_html=cooldown_skip_icon_html(),
             )
+        if self._live_step > 0 and self._step_progress_start_time is not None:
+            html = self._apply_live_steps_progress(html)
         return html
+
+    def _live_generation_elapsed_seconds(self) -> Optional[float]:
+        start = self._step_progress_start_time
+        if start is None:
+            return None
+        return time.perf_counter() - start
+
+    @staticmethod
+    def _estimate_remaining_seconds(
+        *,
+        elapsed: float,
+        completed_steps: int,
+        total_steps: int,
+        seconds_per_step: Optional[float],
+    ) -> Optional[float]:
+        """(N-n)*a - (E-n*a) with frozen a; i.e. total_steps*a - elapsed."""
+        if (
+            completed_steps <= 0
+            or total_steps <= 0
+            or completed_steps >= total_steps
+            or seconds_per_step is None
+            or seconds_per_step <= 0
+        ):
+            return None
+        return max(0.0, (total_steps * seconds_per_step) - elapsed)
+
+    def _apply_live_steps_progress(self, html: str) -> str:
+        if not html or self._live_step_total <= 0 or self._live_step <= 0:
+            return html
+        elapsed = self._live_generation_elapsed_seconds()
+        if elapsed is None:
+            return html
+        estimate = self._estimate_remaining_seconds(
+            elapsed=elapsed,
+            completed_steps=self._live_step,
+            total_steps=self._live_step_total,
+            seconds_per_step=self._step_seconds_per_step,
+        )
+        self._live_elapsed_seconds = elapsed
+        self._live_estimate_seconds = estimate
+        return update_status_html_steps_progress(
+            html,
+            self._live_step,
+            self._live_step_total,
+            elapsed_seconds=elapsed,
+            estimate_seconds=estimate,
+        )
 
     def _is_in_copy_cooldown(self) -> bool:
         timer = self._cooldown_timer
@@ -390,6 +441,7 @@ class ImageGenController(QObject):
         self._live_step_total = 0
         self._live_elapsed_seconds = None
         self._live_estimate_seconds = None
+        self._step_seconds_per_step = None
 
     def get_task_queue_status_info_html(self) -> str:
         """Active-job info table (job queue top row and status-bar dot menu)."""
@@ -552,6 +604,7 @@ class ImageGenController(QObject):
                 self._live_step_total = 0
             self._live_elapsed_seconds = None
             self._live_estimate_seconds = None
+            self._step_seconds_per_step = None
             self._frozen_elapsed_seconds = None
         self._update_status_bar_indicator(kind)
 
@@ -692,23 +745,14 @@ class ImageGenController(QObject):
         if step is not None and step_total is not None:
             step_i = int(step)
             total_i = int(step_total)
-            elapsed_seconds = None
-            estimate_seconds = None
             if step_i > 0 and self._step_progress_start_time is not None:
-                elapsed_seconds = time.perf_counter() - self._step_progress_start_time
-                remaining = max(0, total_i - step_i)
-                if remaining > 0:
-                    estimate_seconds = (elapsed_seconds / step_i) * remaining
+                elapsed_seconds = self._live_generation_elapsed_seconds()
+                if elapsed_seconds is not None:
+                    self._step_seconds_per_step = elapsed_seconds / step_i
             self._live_step = step_i
             self._live_step_total = total_i
-            self._live_elapsed_seconds = elapsed_seconds
-            self._live_estimate_seconds = estimate_seconds
-            self._task_status_info_html = update_status_html_steps_progress(
-                self._task_status_info_html,
-                step_i,
-                total_i,
-                elapsed_seconds=elapsed_seconds,
-                estimate_seconds=estimate_seconds,
+            self._task_status_info_html = self._apply_live_steps_progress(
+                self._task_status_info_html
             )
             self.task_status_info_changed.emit()
         path = msg.get("path")
@@ -859,6 +903,7 @@ class ImageGenController(QObject):
         self._live_step_total = 0
         self._live_elapsed_seconds = None
         self._live_estimate_seconds = None
+        self._step_seconds_per_step = None
         self._frozen_elapsed_seconds = None
         self._cooldown_deadline = None
         self._last_cooldown_ui_second = None
