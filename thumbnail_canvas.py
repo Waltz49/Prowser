@@ -1235,7 +1235,7 @@ class ThumbnailCanvas(QWidget):
         corner_radius = 10.0
         arrow_len = 14.0
         arrow_half = 9.0
-        tail_half = 5.0  # 10px wide
+        tail_half = arrow_half - 1.0  # full width 2px less than arrowhead (16 vs 18)
         tail_tip_len = 8.0
 
         for route in routes:

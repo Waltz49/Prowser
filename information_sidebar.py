@@ -191,7 +191,7 @@ class InformationSidebar(QWidget):
         "speak://": "Read aloud (click again to stop)",
         "copy://": f"Copy to clipboard.\n{ALT_SYMBOL}+click to escape newlines.",
         "edit://": "Edit user comment",
-        "create://": "Create image from prompt (⌥/)",
+        "create://": "Create an image from text...",
         "editai://": "Edit with AI",
         "delete://": "Delete user comment",
         "reflevel://": "Open this image and its EXIF references together",
@@ -411,7 +411,7 @@ class InformationSidebar(QWidget):
         cells = ""
         if imagegen_plugins_available():
             cells += spacer_box() + icon_box(
-                "create://", "◇", "Create image from prompt (⌥/)"
+                "create://", "◇", "Create an image from text..."
             )
         if imagegen_edit_plugins_available():
             cells += spacer_box() + icon_box("editai://", "✦", "Edit with AI")
@@ -510,13 +510,13 @@ class InformationSidebar(QWidget):
             self._on_delete_user_comment()
 
     def _on_create_image_prompt(self):
-        """Open image generation dialog, primed from the current user comment."""
+        """Open Create > Create an image from text..., primed from the user comment."""
         try:
-            from imagegen_plugins.image_gen_menu import open_imagegen_prompt_dialog
+            from imagegen_plugins.image_gen_menu import open_imagegen_create_from_text_dialog
         except ImportError:
             return
         data = getattr(self, "_last_overlay_data", None) or {}
-        open_imagegen_prompt_dialog(
+        open_imagegen_create_from_text_dialog(
             self.main_window,
             user_comment=data.get("speakable_plain_text"),
         )

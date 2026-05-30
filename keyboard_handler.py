@@ -245,6 +245,18 @@ class BaseKeyboardHandler(QObject):
             import traceback
             logger.error(traceback.format_exc())
 
+    def _handle_j_imagegen_activity_menu(
+        self, event: QKeyEvent, context_data: Dict[str, Any]
+    ) -> bool:
+        """J — imagegen status-bar dot menu while a model background task is active."""
+        mgr = getattr(self.main_window, "status_bar_manager", None)
+        if mgr is None:
+            return False
+        if mgr.show_imagegen_task_menu_from_keyboard():
+            event.accept()
+            return True
+        return False
+
 
 class ThumbnailKeyboardHandler(BaseKeyboardHandler):
     """Keyboard handler for thumbnail view mode."""
@@ -1740,6 +1752,13 @@ class BrowseViewKeyboardHandler(BaseKeyboardHandler):
         self.add_key_binding("t_key", KeyBinding(Qt.Key_T, description="Double-tap: switch to thumbnails and show tree"), self._handle_t_key)
         self.add_key_binding("p_key", KeyBinding(Qt.Key_P, description="Double-tap: switch to thumbnails and show preview"), self._handle_p_key)
 
+        # Imagegen status-bar dot menu while a model task is running (no-op otherwise)
+        self.add_key_binding(
+            "j_key",
+            KeyBinding(Qt.Key_J, description="Model task status menu"),
+            self._handle_j_imagegen_activity_menu,
+        )
+
         # External editors
 
     def _handle_question(self, event: QKeyEvent, context_data: Dict[str, Any]) -> bool:
@@ -3108,6 +3127,20 @@ class KeyboardHandlerManager:
         # Don't intercept undo shortcut
         if event.key() == Qt.Key_Z and (event.modifiers() & Qt.ControlModifier):
             return False  # Let menu action handle it
+
+        # Cmd+J (Ctrl+J in QAction) — job queue; do not treat as plain J
+        if event.key() == Qt.Key_J:
+            event_mods = event.modifiers() & ~Qt.KeypadModifier
+            cmd_pressed = bool(
+                event_mods & (Qt.ControlModifier | Qt.MetaModifier)
+            )
+            other_mods = event_mods & ~(
+                Qt.ControlModifier | Qt.MetaModifier | Qt.ShiftModifier | Qt.AltModifier
+            )
+            if cmd_pressed and (
+                other_mods == Qt.NoModifier or other_mods == 0
+            ):
+                return False
 
         # Determine which handler to use
         if mode is None:

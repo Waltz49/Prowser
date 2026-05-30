@@ -125,6 +125,21 @@ def open_imagegen_prompt_dialog(
     )
 
 
+def open_imagegen_create_from_text_dialog(
+    main_window, *, user_comment: Optional[str] = None
+) -> None:
+    """Open Create > Create an image from text..., optionally primed."""
+    if not function_has_plugins(FUNCTION_CREATE):
+        return
+    controller = get_imagegen_controller(main_window)
+    _schedule_open_dialog_for_function(
+        FUNCTION_CREATE,
+        main_window,
+        controller,
+        initial_prompt=initial_prompt_from_usercomment(user_comment),
+    )
+
+
 def open_imagegen_edit_dialog(
     main_window, *, user_comment: Optional[str] = None
 ) -> None:
@@ -392,7 +407,10 @@ def setup_create_menu(menubar, main_window) -> None:
     main_window.imagegen_cancel_action = cancel_action
 
     def _sync_cancel_action_enabled() -> None:
-        cancel_action.setEnabled(controller.has_pending_work())
+        try:
+            cancel_action.setEnabled(controller.has_pending_work())
+        except Exception:
+            pass
 
     controller.generation_started.connect(_sync_cancel_action_enabled)
     controller.generation_finished.connect(

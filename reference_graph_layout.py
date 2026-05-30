@@ -24,22 +24,23 @@ def _norm_path(path: str) -> str:
 
 
 # Reference-graph edge strokes: ~15 hues per canvas background (3px lines).
+# path_order % N: adjacent slots are hue-separated; no yellow/green cluster.
 _EDGE_COLORS_ON_DARK_BG: Tuple[str, ...] = (
     "#4FC3F7",
-    "#FFB74D",
-    "#81C784",
-    "#CE93D8",
-    "#FF8A80",
-    "#FFF176",
-    "#4DD0E1",
-    "#FFAB91",
-    "#AED581",
-    "#F48FB1",
-    "#90CAF9",
-    "#FFCC80",
-    "#80DEEA",
-    "#B39DDB",
-    "#EF9A9A",
+    "#E040FB",
+    "#FF7043",
+    "#26C6DA",
+    "#FF5252",
+    "#B388FF",
+    "#FFA726",
+    "#EC407A",
+    "#5C6BC0",
+    "#00ACC1",
+    "#AB47BC",
+    "#FF6E40",
+    "#448AFF",
+    "#F06292",
+    "#7E57C2",
 )
 _EDGE_COLORS_ON_LIGHT_BG: Tuple[str, ...] = (
     "#1565C0",
@@ -84,42 +85,28 @@ def _assign_edge_colors(
     canonical: List[Tuple[str, str]],
     outgoing_lanes: Dict[str, List[Tuple[str, str]]],
     color_theme: str,
+    path_order: Optional[Dict[str, int]] = None,
 ) -> Dict[Tuple[str, str], str]:
-    """Round-robin palette; avoid duplicate colors on edges from the same source when possible."""
-    from collections import defaultdict
-
+    """One palette color per source image (sequential by path_order); all outgoing edges match."""
     palette = _edge_color_palette(color_theme)
     n = len(palette)
     if n == 0:
         return {}
 
-    # Stable global order: by source, then target position.
-    ordered: List[Tuple[str, str]] = []
-    for sp in sorted(outgoing_lanes.keys()):
-        ordered.extend(outgoing_lanes[sp])
-
-    used_indices: Dict[str, Set[int]] = defaultdict(set)
     color_map: Dict[Tuple[str, str], str] = {}
-    global_next = 0
-
-    for key in ordered:
-        if key not in canonical:
-            continue
-        sp, _tp = key
-        used = used_indices[sp]
-        chosen: Optional[int] = None
-        for attempt in range(n):
-            ci = (global_next + attempt) % n
-            if ci not in used:
-                chosen = ci
-                global_next = ci + 1
-                break
-        if chosen is None:
-            chosen = global_next % n
-            global_next += 1
-        used.add(chosen)
-        color_map[key] = palette[chosen]
-
+    if path_order is not None:
+        for sp, edges in outgoing_lanes.items():
+            idx = path_order.get(_norm_path(sp), path_order.get(sp, 0))
+            color = palette[idx % n]
+            for key in edges:
+                if key in canonical:
+                    color_map[key] = color
+    else:
+        for i, sp in enumerate(sorted(outgoing_lanes.keys())):
+            color = palette[i % n]
+            for key in outgoing_lanes[sp]:
+                if key in canonical:
+                    color_map[key] = color
     return color_map
 
 # Channel separation between parallel routes (3px pen).
@@ -1172,6 +1159,7 @@ def _route_edges(
     color_theme: str = "dark",
     content_left: float = 0.0,
     content_width: float = 800.0,
+    path_order: Optional[Dict[str, int]] = None,
 ) -> List[GraphEdgeRoute]:
     """Route each dependency; assign global X/Y channels, then deconflict overlaps."""
     from collections import defaultdict
@@ -1211,7 +1199,9 @@ def _route_edges(
         content_right,
     )
 
-    color_map = _assign_edge_colors(canonical, outgoing_lanes, color_theme)
+    color_map = _assign_edge_colors(
+        canonical, outgoing_lanes, color_theme, path_order=path_order
+    )
     default_color = _edge_color_palette(color_theme)[0]
 
     routes: List[GraphEdgeRoute] = []
@@ -1419,6 +1409,7 @@ def compute_reference_graph_layout(
         color_theme=edge_color_theme,
         content_left=content_left,
         content_width=layout_content_width,
+        path_order=graph.path_order,
     )
 
     return ReferenceGraphLayoutResult(

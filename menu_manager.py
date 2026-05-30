@@ -1132,6 +1132,10 @@ class MenuManager:
         download_flux_models_action = QAction("Download FLUX models", self.main_window)
         download_flux_models_action.triggered.connect(self._debug_download_flux_models)
         debug_menu.addAction(download_flux_models_action)
+
+        self.main_window.debug_save_canvas_action = QAction("Save Canvas", self.main_window)
+        self.main_window.debug_save_canvas_action.triggered.connect(self._debug_save_canvas)
+        debug_menu.addAction(self.main_window.debug_save_canvas_action)
         
         # Connect aboutToShow signal to update menu action states
         tools_menu.aboutToShow.connect(self.update_tools_menu_states)
@@ -1188,6 +1192,70 @@ class MenuManager:
         )
 
         run_flux_models_download_script_dialog(self.main_window)
+
+    def _debug_save_canvas_available(self, main_window) -> bool:
+        """Whether Save Canvas can run (no grab — safe for menu aboutToShow)."""
+        mode = getattr(main_window, "current_view_mode", None)
+        if mode == "browse":
+            image_label = getattr(main_window, "image_label", None)
+            if image_label:
+                pixmap = image_label.pixmap()
+                return pixmap is not None and not pixmap.isNull()
+        elif mode == "thumbnail":
+            thumb_mgr = getattr(main_window, "thumbnail_container", None)
+            canvas = getattr(thumb_mgr, "canvas", None) if thumb_mgr else None
+            return (
+                canvas is not None
+                and canvas.isVisible()
+                and canvas.width() > 0
+                and canvas.height() > 0
+            )
+        return False
+
+    def _debug_save_canvas_pixmap(self, main_window):
+        """Pixmap for Tools > Debug > Save Canvas (browse label or thumbnail canvas)."""
+        if not self._debug_save_canvas_available(main_window):
+            return None
+        mode = getattr(main_window, "current_view_mode", None)
+        if mode == "browse":
+            return main_window.image_label.pixmap()
+        thumb_mgr = main_window.thumbnail_container
+        return thumb_mgr.canvas.grab()
+
+    def _debug_save_canvas(self):
+        """Tools > Debug > Save Canvas — PNG of browse or thumbnail canvas (imagegen-NNNN.png)."""
+        mw = self.main_window
+        pixmap = self._debug_save_canvas_pixmap(mw)
+        if pixmap is None:
+            mode = getattr(mw, "current_view_mode", None)
+            if mode not in ("browse", "thumbnail"):
+                show_styled_warning(
+                    mw,
+                    "Save Canvas",
+                    "Switch to browse or thumbnail view first.",
+                )
+            else:
+                show_styled_warning(
+                    mw,
+                    "Save Canvas",
+                    "Nothing to save — the canvas has no display content.",
+                )
+            return
+        from imagegen_plugins.image_gen_naming import next_imagegen_path
+
+        out_path = next_imagegen_path(ext=".png")
+        if not pixmap.save(out_path, "PNG"):
+            show_styled_critical(
+                mw,
+                "Save Canvas",
+                f"Could not write PNG:\n{out_path}",
+            )
+            return
+        if hasattr(mw, "status_notification") and mw.status_notification:
+            mw.status_notification.show_message(
+                f"Canvas saved:\n{out_path}",
+                duration=4000,
+            )
 
     def _debug_extract_faces(self):
         """Search > Extract faces — same as context menu: current image + Faces tab examine."""
@@ -2124,6 +2192,9 @@ class MenuManager:
                 multiselect = len(selected) > 1 if selected else False
             has_current = bool(mw.get_current_image_path() if hasattr(mw, 'get_current_image_path') else False)
             mw.examine_image_action.setEnabled(face_ok and not multiselect and has_current)
+
+        if hasattr(mw, "debug_save_canvas_action"):
+            mw.debug_save_canvas_action.setEnabled(self._debug_save_canvas_available(mw))
 
         # Scan for faces: enable only when face_engine is available
         if hasattr(mw, 'scan_faces_action'):

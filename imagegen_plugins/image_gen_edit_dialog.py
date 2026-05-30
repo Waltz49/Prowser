@@ -12,6 +12,7 @@ from PySide6.QtGui import (
     QDragEnterEvent,
     QDragMoveEvent,
     QDropEvent,
+    QKeyEvent,
     QMouseEvent,
     QPainter,
     QPen,
@@ -87,7 +88,7 @@ from utils import (
 )
 
 EDIT_IMAGE_DIALOG_TITLE = "Edit Image"
-MAX_EDIT_SOURCE_IMAGES = 3
+MAX_EDIT_SOURCE_IMAGES = 4
 _EDIT_SOURCE_MIME = "application/x-imagegen-edit-source-path"
 
 
@@ -568,6 +569,21 @@ class ImageGenEditDialog(QDialog):
         if not self._geometry_was_restored:
             QTimer.singleShot(0, lambda: _center_styled_dialog_on_screen(self, self.parent()))
         QTimer.singleShot(0, self._raise_and_activate)
+
+    def keyPressEvent(self, event: QKeyEvent) -> None:
+        if event.key() == Qt.Key.Key_J:
+            event_mods = event.modifiers() & ~Qt.KeyboardModifier.KeypadModifier
+            if event_mods == Qt.KeyboardModifier.NoModifier or event_mods == 0:
+                main_window = resolve_image_gen_main_window(self)
+                mgr = (
+                    getattr(main_window, "status_bar_manager", None)
+                    if main_window
+                    else None
+                )
+                if mgr is not None and mgr.show_imagegen_task_menu_from_keyboard():
+                    event.accept()
+                    return
+        super().keyPressEvent(event)
 
     def _raise_and_activate(self) -> None:
         self.raise_()
