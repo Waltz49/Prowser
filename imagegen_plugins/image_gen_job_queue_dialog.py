@@ -417,6 +417,11 @@ class ImageGenJobQueueDialog(QDialog):
             self.main_window, rows[row_idx].thumbnail_paths
         )
         self._table.setCellWidget(row_idx, 2, preview_wrap)
+        browser = self._table.cellWidget(row_idx, 1)
+        browser_h = browser.height() if isinstance(browser, QTextBrowser) else 0
+        self._table.setRowHeight(
+            row_idx, max(_THUMB_SIZE + _ROW_PAD, browser_h + _ROW_PAD)
+        )
 
     def refresh_table(self) -> None:
         rows = self._controller.queue_snapshot()

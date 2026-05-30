@@ -305,6 +305,19 @@ def format_image_exif_prompt(
     return f"Prompt:\n{prompt_text}"
 
 
+def apply_refinement_source_for_next_copy(
+    values: Dict[str, Any], output_path: str
+) -> Dict[str, Any]:
+    """Refinement series: next copy uses only the last generated image."""
+    out = dict(values)
+    if not output_path or not os.path.isfile(output_path):
+        return out
+    ap = os.path.normpath(os.path.abspath(output_path))
+    out["source_image_path"] = ap
+    out.pop("source_image_paths", None)
+    return out
+
+
 def resolve_source_image_paths(values: Dict[str, Any]) -> List[str]:
     """Ordered unique source paths from dialog/worker values (1–N images)."""
     paths: List[str] = []

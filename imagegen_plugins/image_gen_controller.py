@@ -20,6 +20,7 @@ from imagegen_plugins.image_gen_naming import (
     lora_name_for_exif,
     make_readable_user_comment_before_browse,
     next_imagegen_path,
+    apply_refinement_source_for_next_copy,
     reference_entries_for_source_paths,
     resolve_source_image_paths,
     resolve_generation_elapsed_seconds,
@@ -678,9 +679,16 @@ class ImageGenController(QObject):
                     ref_entries = reference_entries_for_source_paths(
                         source_paths, output_path
                     )
+                    will_refine_next = (
+                        self._copy_batch_active
+                        and not self._copy_batch_cancelled
+                        and bool(values.get("use_last_generated_image"))
+                        and (self._copies_done + 1 < self._copies_total)
+                    )
                     if ref_entries:
                         allow_cross_dir = True
-                        self._task_reference_paths = list(source_paths)
+                        if not will_refine_next:
+                            self._task_reference_paths = list(source_paths)
                 write_exif_user_comment(
                     output_path,
                     comment,
@@ -707,13 +715,15 @@ class ImageGenController(QObject):
             ):
                 if values.get("use_last_generated_image"):
                     if output_path and os.path.isfile(output_path):
-                        out = os.path.normpath(output_path)
-                        self._pending_values["source_image_path"] = out
-                        self._pending_values.pop("source_image_paths", None)
-                        self._expand_source_path = out
-                        self._task_reference_paths = [out]
-                        self._active_thumbnail_paths = [out]
+                        self._pending_values = apply_refinement_source_for_next_copy(
+                            self._pending_values, output_path
+                        )
+                        paths = resolve_source_image_paths(self._pending_values)
+                        self._expand_source_path = paths[0] if paths else ""
+                        self._task_reference_paths = list(paths)
+                        self._active_thumbnail_paths = list(paths)
                         self.task_status_info_changed.emit()
+                        self.queue_changed.emit()
                 self._enter_copy_cooldown_after_success()
                 return
             self._finish_copy_batch()
