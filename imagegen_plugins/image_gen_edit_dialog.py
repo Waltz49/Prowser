@@ -6,9 +6,19 @@ from __future__ import annotations
 import os
 from typing import Any, Dict, List, Optional
 
-from PySide6.QtCore import QSize, Qt, QTimer
-from PySide6.QtGui import QMouseEvent, QPixmap
+from PySide6.QtCore import QMimeData, QPoint, QSize, Qt, QTimer
+from PySide6.QtGui import (
+    QDrag,
+    QDragEnterEvent,
+    QDragMoveEvent,
+    QDropEvent,
+    QMouseEvent,
+    QPainter,
+    QPen,
+    QPixmap,
+)
 from PySide6.QtWidgets import (
+    QApplication,
     QCheckBox,
     QComboBox,
     QDialog,
@@ -78,6 +88,7 @@ from utils import (
 
 EDIT_IMAGE_DIALOG_TITLE = "Edit Image"
 MAX_EDIT_SOURCE_IMAGES = 3
+_EDIT_SOURCE_MIME = "application/x-imagegen-edit-source-path"
 
 
 def active_image_paths_for_edit(main_window) -> list[str]:
@@ -168,17 +179,131 @@ class _ClickableSourceThumb(_SourceImagePreview):
         source_path: str,
         on_activate,
         parent=None,
+        *,
+        draggable: bool = False,
     ):
         super().__init__(source_path, parent)
         self._on_activate = on_activate
-        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._draggable = draggable
+        self._drag_start_pos: Optional[QPoint] = None
+        self._drag_started = False
+        cursor = (
+            Qt.CursorShape.OpenHandCursor
+            if draggable
+            else Qt.CursorShape.PointingHandCursor
+        )
+        self.setCursor(cursor)
+        if draggable:
+            self.setAcceptDrops(True)
+            self.setToolTip("Click to view in browser. Drag to reorder.")
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
         if event.button() == Qt.MouseButton.LeftButton:
-            self._on_activate(self._source_path)
+            self._drag_start_pos = event.pos()
+            self._drag_started = False
             event.accept()
             return
         super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event: QMouseEvent) -> None:
+        if (
+            self._draggable
+            and self._drag_start_pos is not None
+            and event.buttons() & Qt.MouseButton.LeftButton
+            and not self._drag_started
+        ):
+            distance = (event.pos() - self._drag_start_pos).manhattanLength()
+            threshold = max(QApplication.startDragDistance() * 2, 16)
+            if distance >= threshold:
+                self._drag_started = True
+                self._start_drag()
+                return
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event: QMouseEvent) -> None:
+        if (
+            event.button() == Qt.MouseButton.LeftButton
+            and self._drag_start_pos is not None
+            and not self._drag_started
+        ):
+            self._on_activate(self._source_path)
+            event.accept()
+        self._drag_start_pos = None
+        self._drag_started = False
+        super().mouseReleaseEvent(event)
+
+    def _start_drag(self) -> None:
+        if not self._draggable:
+            return
+        preview = self._multi_preview()
+        drag = QDrag(self)
+        mime = QMimeData()
+        mime.setData(
+            _EDIT_SOURCE_MIME,
+            self._source_path.encode("utf-8"),
+        )
+        drag.setMimeData(mime)
+        pixmap = self.pixmap()
+        if pixmap is not None and not pixmap.isNull():
+            drag.setPixmap(
+                pixmap.scaled(
+                    96,
+                    96,
+                    Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation,
+                )
+            )
+        if preview is not None:
+            preview._drag_source_path = self._source_path
+        try:
+            self.setCursor(Qt.CursorShape.ClosedHandCursor)
+            drag.exec(Qt.DropAction.MoveAction)
+        finally:
+            if preview is not None:
+                preview._drag_source_path = None
+            try:
+                self.setCursor(Qt.CursorShape.OpenHandCursor)
+            except RuntimeError:
+                pass
+            self._drag_start_pos = None
+            self._drag_started = False
+
+    def _multi_preview(self) -> Optional["_MultiSourceImagePreview"]:
+        parent = self.parent()
+        if isinstance(parent, _MultiSourceImagePreview):
+            return parent
+        return None
+
+    def dragEnterEvent(self, event: QDragEnterEvent) -> None:
+        preview = self._multi_preview()
+        if preview is not None and self._draggable:
+            preview._accept_drag(event)
+            return
+        super().dragEnterEvent(event)
+
+    def dragMoveEvent(self, event: QDragMoveEvent) -> None:
+        preview = self._multi_preview()
+        if preview is not None and self._draggable:
+            pos = preview.mapFromGlobal(self.mapToGlobal(event.pos()))
+            preview._update_drop_index(pos, event)
+            return
+        super().dragMoveEvent(event)
+
+    def dragLeaveEvent(self, event) -> None:
+        preview = self._multi_preview()
+        if preview is not None and self._draggable:
+            preview._clear_drop_index()
+            super().dragLeaveEvent(event)
+            return
+        super().dragLeaveEvent(event)
+
+    def dropEvent(self, event: QDropEvent) -> None:
+        preview = self._multi_preview()
+        if preview is not None and self._draggable:
+            pos = preview.mapFromGlobal(self.mapToGlobal(event.pos()))
+            preview._perform_drop(pos, event)
+            return
+        super().dropEvent(event)
 
 
 class _MultiSourceImagePreview(QWidget):
@@ -191,25 +316,156 @@ class _MultiSourceImagePreview(QWidget):
         self,
         source_paths: list[str],
         on_activate,
+        on_reorder=None,
         parent=None,
     ):
         super().__init__(parent)
+        self._on_activate = on_activate
+        self._on_reorder = on_reorder
         self._source_paths = list(source_paths)
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(6)
-        for path in self._source_paths:
-            thumb = _ClickableSourceThumb(path, on_activate, self)
-            thumb.setSizePolicy(
-                QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
-            )
-            layout.addWidget(thumb, 1)
+        self._thumbs: list[_ClickableSourceThumb] = []
+        self._drop_insert_index: Optional[int] = None
+        self._drag_source_path: Optional[str] = None
+        self._layout = QHBoxLayout(self)
+        self._layout.setContentsMargins(0, 0, 0, 0)
+        self._layout.setSpacing(6)
+        self.setAcceptDrops(True)
+        self._rebuild_thumbs()
 
     def sizeHint(self) -> QSize:
         return self._HINT_SIZE
 
     def minimumSizeHint(self) -> QSize:
         return self._MIN_HINT_SIZE
+
+    def source_paths(self) -> list[str]:
+        return list(self._source_paths)
+
+    def _rebuild_thumbs(self) -> None:
+        while self._layout.count():
+            item = self._layout.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
+        self._thumbs.clear()
+        for path in self._source_paths:
+            thumb = _ClickableSourceThumb(
+                path,
+                self._on_activate,
+                self,
+                draggable=True,
+            )
+            thumb.setSizePolicy(
+                QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
+            )
+            self._layout.addWidget(thumb, 1)
+            self._thumbs.append(thumb)
+
+    def _apply_thumb_order(self) -> None:
+        path_to_thumb = {thumb._source_path: thumb for thumb in self._thumbs}
+        self._thumbs = [
+            path_to_thumb[path]
+            for path in self._source_paths
+            if path in path_to_thumb
+        ]
+        while self._layout.count():
+            self._layout.takeAt(0)
+        for thumb in self._thumbs:
+            self._layout.addWidget(thumb, 1)
+
+    def _insert_index_at(self, pos: QPoint) -> int:
+        for index, thumb in enumerate(self._thumbs):
+            rect = thumb.geometry()
+            if pos.x() < rect.center().x():
+                return index
+        return len(self._thumbs)
+
+    def _indicator_x_for_index(self, insert_index: int) -> Optional[int]:
+        if not self._thumbs:
+            return None
+        if insert_index <= 0:
+            return self._thumbs[0].geometry().left()
+        if insert_index >= len(self._thumbs):
+            return self._thumbs[-1].geometry().right()
+        left = self._thumbs[insert_index - 1].geometry().right()
+        right = self._thumbs[insert_index].geometry().left()
+        return (left + right) // 2
+
+    def _set_drop_insert_index(self, insert_index: Optional[int]) -> None:
+        if self._drop_insert_index == insert_index:
+            return
+        self._drop_insert_index = insert_index
+        self.update()
+
+    def _reorder_path(self, source_path: str, insert_index: int) -> None:
+        paths = list(self._source_paths)
+        try:
+            from_index = paths.index(source_path)
+        except ValueError:
+            return
+        if from_index < insert_index:
+            insert_index -= 1
+        if insert_index == from_index or not (0 <= insert_index <= len(paths)):
+            return
+        path = paths.pop(from_index)
+        paths.insert(insert_index, path)
+        self._source_paths = paths
+        self._apply_thumb_order()
+        if self._on_reorder is not None:
+            self._on_reorder(paths)
+
+    def paintEvent(self, event) -> None:
+        super().paintEvent(event)
+        if self._drop_insert_index is None:
+            return
+        x = self._indicator_x_for_index(self._drop_insert_index)
+        if x is None:
+            return
+        painter = QPainter(self)
+        pen = QPen(self.palette().color(self.foregroundRole()), 2)
+        painter.setPen(pen)
+        painter.drawLine(x, 4, x, self.height() - 4)
+
+    def dragEnterEvent(self, event: QDragEnterEvent) -> None:
+        self._accept_drag(event)
+
+    def _accept_drag(self, event: QDragEnterEvent) -> None:
+        if event.mimeData().hasFormat(_EDIT_SOURCE_MIME):
+            event.acceptProposedAction()
+            return
+        event.ignore()
+
+    def dragMoveEvent(self, event: QDragMoveEvent) -> None:
+        self._update_drop_index(event.pos(), event)
+
+    def _update_drop_index(self, pos: QPoint, event: QDragMoveEvent) -> None:
+        if not event.mimeData().hasFormat(_EDIT_SOURCE_MIME):
+            event.ignore()
+            return
+        self._set_drop_insert_index(self._insert_index_at(pos))
+        event.acceptProposedAction()
+
+    def dragLeaveEvent(self, event) -> None:
+        self._clear_drop_index()
+        super().dragLeaveEvent(event)
+
+    def _clear_drop_index(self) -> None:
+        self._set_drop_insert_index(None)
+
+    def dropEvent(self, event: QDropEvent) -> None:
+        self._perform_drop(event.pos(), event)
+
+    def _perform_drop(self, pos: QPoint, event: QDropEvent) -> None:
+        if not event.mimeData().hasFormat(_EDIT_SOURCE_MIME):
+            event.ignore()
+            return
+        source_path = bytes(
+            event.mimeData().data(_EDIT_SOURCE_MIME)
+        ).decode("utf-8")
+        insert_index = self._insert_index_at(pos)
+        self._clear_drop_index()
+        self._reorder_path(source_path, insert_index)
+        event.acceptProposedAction()
 
 
 def _activate_source_in_main_window(main_window, path: str) -> None:
@@ -220,10 +476,7 @@ def _activate_source_in_main_window(main_window, path: str) -> None:
     if path not in displayed:
         return
     idx = displayed.index(path)
-    if main_window.current_view_mode == "thumbnail":
-        main_window.view_mode_manager.open_browse_view(idx)
-    elif main_window.current_view_mode == "browse":
-        main_window.highlight_image()
+    main_window.view_mode_manager.open_browse_view(idx)
 
 
 class ImageGenEditDialog(QDialog):
@@ -333,6 +586,11 @@ class ImageGenEditDialog(QDialog):
         if self._source_preview is not None:
             self._source_preview.set_source_path(self.source_path)
 
+    def _on_source_paths_reordered(self, paths: list[str]) -> None:
+        self._source_paths = list(paths)
+        if self._source_paths:
+            self.source_path = self._source_paths[0]
+
     def _build_ui(self) -> None:
         layout = QVBoxLayout(self)
         splitter = ImageGenPreviewSplitter(self)
@@ -350,6 +608,7 @@ class ImageGenEditDialog(QDialog):
             preview_widget = _MultiSourceImagePreview(
                 self._source_paths,
                 _on_thumb_activate,
+                self._on_source_paths_reordered,
                 preview_host,
             )
             preview_layout.addWidget(preview_widget, 1)

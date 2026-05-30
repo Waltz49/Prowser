@@ -238,6 +238,24 @@ def merge_defaults(
     return base
 
 
+def seed_field_specs(values: Dict[str, Any]) -> List[FieldSpec]:
+    """Seed + random seed row; placed after dimension sliders in dialogs."""
+    return [
+        FieldSpec(
+            key="seed",
+            label="Seed",
+            kind="seed",
+            default=int(values.get("seed", 0)),
+        ),
+        FieldSpec(
+            key="random_seed",
+            label="Random seed",
+            kind="bool",
+            default=bool(values.get("random_seed", True)),
+        ),
+    ]
+
+
 def field_specs_for_pipeline(
     pipeline_id: str,
     values: Dict[str, Any],
@@ -288,6 +306,7 @@ def field_specs_for_pipeline(
             ]
         )
     specs.extend(dim_specs)
+    specs.extend(seed_field_specs(values))
     steps_min = mode.steps_min
     steps_default = int(values.get("steps", mode.steps_default))
     if pipeline_id == "flux_schnell_mflux_play":
@@ -384,22 +403,6 @@ def field_specs_for_pipeline(
                 ),
             ]
         )
-    specs.extend(
-        [
-            FieldSpec(
-                key="seed",
-                label="Seed",
-                kind="seed",
-                default=int(values.get("seed", 0)),
-            ),
-            FieldSpec(
-                key="random_seed",
-                label="Random seed",
-                kind="bool",
-                default=bool(values.get("random_seed", True)),
-            ),
-        ]
-    )
     if pipeline_id in _COPIES_PIPELINES:
         specs.append(
             FieldSpec(
