@@ -1575,7 +1575,7 @@ class ThumbnailKeyboardHandler(BaseKeyboardHandler):
             self.main_window.manual_thumbnail_size = True
             self.main_window.set_thumbnail_size(new_size)
             # Show status notification
-            self.main_window.status_notification.show_message(f"- Thumbnail size: {new_size}px")
+            # self.main_window.status_notification.show_message(f"- Thumbnail size: {new_size}px")
             self.main_window.highlight_image() #DGN Wrong thing to refresh thumbnails
             # Force a resize event to ensure proper layout update after thumbnail size change
             QTimer.singleShot(100, self.main_window.force_resize_event)
