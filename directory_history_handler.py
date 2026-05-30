@@ -233,6 +233,11 @@ class DirectoryHistoryHandler:
                 'specific_files': specific_files,
                 'view_mode': view_mode,
                 'sort_state': sort_state,
+                'presentation': (
+                    'reference_graph'
+                    if getattr(self.main_window, 'reference_graph_active', False)
+                    else 'grid'
+                ),
             }
             return state
             
@@ -253,6 +258,11 @@ class DirectoryHistoryHandler:
             specific_files = state.get('specific_files', [])
             
             if specific_files:  # If we have specific files, we're in specific files mode
+                presentation = state.get('presentation', 'grid')
+                if presentation == 'reference_graph':
+                    self.main_window.set_reference_graph_presentation(True, specific_files)
+                else:
+                    self.main_window.clear_reference_graph_presentation()
                 # Load specific files instead of directory
                 self.main_window.load_specific_files(specific_files, external_load=True)
                 # Set limit and filter if they exist

@@ -23,8 +23,8 @@ from PySide6.QtCore import (
 )
 from PySide6.QtGui import (
     QBrush, QColor, QContextMenuEvent, QDrag, QDragEnterEvent, QDragLeaveEvent, QDragMoveEvent,
-    QDropEvent, QFont, QFontMetrics, QKeyEvent, QMouseEvent, QPaintEvent, QPainter, QPen,
-    QPixmap, QTransform, QWheelEvent
+    QDropEvent, QFont, QFontMetrics, QKeyEvent, QMouseEvent, QPaintEvent, QPainter, QPainterPath,
+    QPen, QPixmap, QTransform, QWheelEvent
 )
 from PySide6.QtWidgets import QWidget, QApplication, QStyle, QLineEdit
 # Import constants from centralized file
@@ -273,6 +273,8 @@ class ThumbnailCanvas(QWidget):
         self._indicator_x = 0
         
         # Auto-scroll during drag
+        self._reference_graph_edge_routes: List = []
+        self._reference_graph_layout_result = None
         self._auto_scroll_timer = QTimer()
         self._auto_scroll_timer.timeout.connect(self._handle_auto_scroll)
         self._auto_scroll_direction = 0  # -1 for up, 1 for down, 0 for none
@@ -530,22 +532,25 @@ class ThumbnailCanvas(QWidget):
             
             # Create section separators if in EXIF_DATE mode or DUPLICATES mode
             self.section_separators.clear()
-            # CRITICAL: Check sort mode FIRST - only create sections if actually in EXIF_DATE/DUPLICATES mode
-            # This prevents sections from being created when sections still have old data
-            # Check for EXIF_DATE mode
-            is_exif_mode = (hasattr(self.main_window, 'current_sort_mode') and
-                hasattr(self.main_window.current_sort_mode, 'value') and
-                self.main_window.current_sort_mode.value in ('exif_date', 'exif_year') and
-                hasattr(self.main_window, 'exif_date_sections') and
-                self.main_window.exif_date_sections and
-                len(self.main_window.exif_date_sections) > 0)
-            # Check for DUPLICATES mode
-            is_duplicate_mode = (hasattr(self.main_window, 'current_sort_mode') and
-                hasattr(self.main_window.current_sort_mode, 'value') and
-                self.main_window.current_sort_mode.value == 'duplicates' and
-                hasattr(self.main_window, 'duplicate_sections') and
-                self.main_window.duplicate_sections and
-                len(self.main_window.duplicate_sections) > 0)
+            is_exif_mode = False
+            is_duplicate_mode = False
+            if not self._is_reference_graph_mode():
+                # CRITICAL: Check sort mode FIRST - only create sections if actually in EXIF_DATE/DUPLICATES mode
+                # This prevents sections from being created when sections still have old data
+                # Check for EXIF_DATE mode
+                is_exif_mode = (hasattr(self.main_window, 'current_sort_mode') and
+                    hasattr(self.main_window.current_sort_mode, 'value') and
+                    self.main_window.current_sort_mode.value in ('exif_date', 'exif_year') and
+                    hasattr(self.main_window, 'exif_date_sections') and
+                    self.main_window.exif_date_sections and
+                    len(self.main_window.exif_date_sections) > 0)
+                # Check for DUPLICATES mode
+                is_duplicate_mode = (hasattr(self.main_window, 'current_sort_mode') and
+                    hasattr(self.main_window.current_sort_mode, 'value') and
+                    self.main_window.current_sort_mode.value == 'duplicates' and
+                    hasattr(self.main_window, 'duplicate_sections') and
+                    self.main_window.duplicate_sections and
+                    len(self.main_window.duplicate_sections) > 0)
 
             
             if is_exif_mode:
@@ -651,6 +656,8 @@ class ThumbnailCanvas(QWidget):
             # Update canvas size after creating/updating segmented displays
             if is_exif_mode or is_duplicate_mode:
                 self._update_canvas_size()
+            elif self._is_reference_graph_mode():
+                pass  # graph layout sets canvas size in _calculate_reference_graph_layout
             
             self.needs_repaint = True
             self.update()
@@ -1013,6 +1020,286 @@ class ThumbnailCanvas(QWidget):
         
         return overlay_spacing + (num_lines * line_height) + padding
     
+    def _is_reference_graph_mode(self) -> bool:
+        return bool(
+            getattr(self.main_window, 'reference_graph_active', False)
+            and getattr(self.main_window, 'reference_graph_data', None)
+            and self.thumbnails
+        )
+
+    def _reference_graph_thumbnail_size(self) -> int:
+        """Resolve thumb size: user setting when manual, else viewport-fit for the DAG."""
+        mw = self.main_window
+        if getattr(mw, 'manual_thumbnail_size', False):
+            return getattr(mw, 'current_thumbnail_size', self.thumbnail_size)
+
+        from reference_graph_layout import compute_reference_graph_dynamic_thumbnail_size
+
+        graph = getattr(mw, 'reference_graph_data', None)
+        if not graph:
+            return self.thumbnail_size
+        size = compute_reference_graph_dynamic_thumbnail_size(
+            graph,
+            self.get_viewport_width(),
+            self.get_viewport_height(),
+            self._get_overlay_height(),
+        )
+        if size != mw.current_thumbnail_size:
+            mw.current_thumbnail_size = size
+        return size
+
+    def _calculate_reference_graph_layout(self) -> None:
+        """Layout thumbnails as a dependency DAG (reference graph presentation)."""
+        graph = getattr(self.main_window, 'reference_graph_data', None)
+        if not graph or not self.thumbnails:
+            return
+        from reference_graph_layout import (
+            compute_reference_graph_layout,
+            reference_graph_edge_color_theme,
+        )
+
+        thumb_size = self._reference_graph_thumbnail_size()
+        self.thumbnail_size = thumb_size
+
+        overlay_h = self._get_overlay_height()
+        fit_width = not getattr(self.main_window, 'manual_thumbnail_size', False)
+        edge_color_theme = reference_graph_edge_color_theme(self.main_window)
+        result = compute_reference_graph_layout(
+            graph,
+            self.get_viewport_width(),
+            thumb_size,
+            overlay_h,
+            fit_to_viewport_width=fit_width,
+            edge_color_theme=edge_color_theme,
+        )
+        self._reference_graph_layout_result = result
+        self._reference_graph_edge_routes = result.edge_routes
+        self.section_separators.clear()
+
+        norm_rects = {}
+        for path, rect in result.node_rects.items():
+            norm_rects[os.path.normpath(path)] = rect
+
+        for thumb in self.thumbnails:
+            rect = result.node_rects.get(thumb.image_path)
+            if rect is None:
+                rect = norm_rects.get(os.path.normpath(thumb.image_path))
+            if rect is not None:
+                thumb.rect = rect
+
+        self._final_y_offset = result.canvas_height
+        self.columns = 1
+        self.rows = max(1, len(graph.nodes))
+        self.setFixedSize(result.canvas_width, result.canvas_height)
+        self.updateGeometry()
+
+    @staticmethod
+    def _rounded_edge_path(
+        points: List[QPointF], corner_radius: float, terminal: QPointF
+    ) -> QPainterPath:
+        """Orthogonal polyline with border-radius-style fillets at each bend."""
+        import math
+
+        path = QPainterPath()
+        n = len(points)
+        if n < 2:
+            return path
+        path.moveTo(points[0])
+        if n == 2:
+            path.lineTo(terminal)
+            return path
+
+        for i in range(1, n - 1):
+            p_before = points[i - 1]
+            corner = points[i]
+            p_after = points[i + 1] if i + 1 < n else terminal
+
+            v_in_x = corner.x() - p_before.x()
+            v_in_y = corner.y() - p_before.y()
+            v_out_x = p_after.x() - corner.x()
+            v_out_y = p_after.y() - corner.y()
+            len_in = math.hypot(v_in_x, v_in_y)
+            len_out = math.hypot(v_out_x, v_out_y)
+            if len_in < 0.5 or len_out < 0.5:
+                path.lineTo(corner)
+                continue
+
+            r = min(corner_radius, len_in / 2.0, len_out / 2.0)
+            if r < 1.0:
+                path.lineTo(corner)
+                continue
+
+            entry = QPointF(
+                corner.x() - v_in_x / len_in * r,
+                corner.y() - v_in_y / len_in * r,
+            )
+            exit_pt = QPointF(
+                corner.x() + v_out_x / len_out * r,
+                corner.y() + v_out_y / len_out * r,
+            )
+            path.lineTo(entry)
+            path.quadTo(corner, exit_pt)
+
+        path.lineTo(terminal)
+        return path
+
+    @staticmethod
+    def _arrow_incoming_at_target(
+        pts: List[QPointF], min_seg_len: float = 6.0
+    ) -> Optional[Tuple[QPointF, QPointF, float, float, float]]:
+        """Last long segment into target attach (skips short border stubs for spine routes)."""
+        import math
+
+        if len(pts) < 2:
+            return None
+        tip = pts[-1]
+        for i in range(len(pts) - 2, -1, -1):
+            prev = pts[i]
+            dx = tip.x() - prev.x()
+            dy = tip.y() - prev.y()
+            seg_len = math.hypot(dx, dy)
+            if seg_len >= min_seg_len:
+                return prev, tip, seg_len, dx, dy
+        prev = pts[-2]
+        dx = tip.x() - prev.x()
+        dy = tip.y() - prev.y()
+        seg_len = math.hypot(dx, dy)
+        if seg_len < 0.5:
+            return None
+        return prev, tip, seg_len, dx, dy
+
+    @staticmethod
+    def _arrow_outgoing_from_source(
+        pts: List[QPointF], min_seg_len: float = 6.0
+    ) -> Optional[Tuple[QPointF, QPointF, float, float, float]]:
+        """First long segment leaving source attach (skips short border stubs)."""
+        import math
+
+        if len(pts) < 2:
+            return None
+        origin = pts[0]
+        for i in range(1, len(pts)):
+            nxt = pts[i]
+            dx = nxt.x() - origin.x()
+            dy = nxt.y() - origin.y()
+            seg_len = math.hypot(dx, dy)
+            if seg_len >= min_seg_len:
+                return origin, nxt, seg_len, dx, dy
+        nxt = pts[1]
+        dx = nxt.x() - origin.x()
+        dy = nxt.y() - origin.y()
+        seg_len = math.hypot(dx, dy)
+        if seg_len < 0.5:
+            return None
+        return origin, nxt, seg_len, dx, dy
+
+    @staticmethod
+    def _draw_outward_tail_triangle(
+        painter: QPainter,
+        color: QColor,
+        attach: QPointF,
+        ux: float,
+        uy: float,
+        *,
+        half_width: float = 5.0,
+        tip_len: float = 8.0,
+    ) -> None:
+        """Flat base on *attach*; tip points outward along (ux, uy)."""
+        from PySide6.QtGui import QPolygonF
+
+        tip = QPointF(attach.x() + ux * tip_len, attach.y() + uy * tip_len)
+        left = QPointF(attach.x() - uy * half_width, attach.y() + ux * half_width)
+        right = QPointF(attach.x() + uy * half_width, attach.y() - ux * half_width)
+        painter.save()
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(color)
+        painter.drawPolygon(QPolygonF([tip, left, right]))
+        painter.restore()
+
+    def _paint_reference_graph_edges(
+        self,
+        painter: QPainter,
+        *,
+        paths_only: bool = False,
+        arrowheads_only: bool = False,
+    ) -> None:
+        """Draw graph edges: paths under thumbnails; arrowheads on top at the cell border."""
+        import math
+
+        from PySide6.QtGui import QPolygonF
+
+        routes = getattr(self, '_reference_graph_edge_routes', None) or []
+        if not routes:
+            return
+
+        corner_radius = 10.0
+        arrow_len = 14.0
+        arrow_half = 9.0
+        tail_half = 5.0  # 10px wide
+        tail_tip_len = 8.0
+
+        for route in routes:
+            pts = route.points
+            if len(pts) < 2:
+                continue
+            edge_color = QColor(getattr(route, "color", None) or "#0088FF")
+            xs = [p.x() for p in pts]
+            ys = [p.y() for p in pts]
+            bbox = QRect(
+                int(min(xs)) - 6,
+                int(min(ys)) - 6,
+                int(max(xs) - min(xs)) + 12,
+                int(max(ys) - min(ys)) + 12,
+            )
+            if not self._visible_rect.intersects(bbox):
+                continue
+
+            incoming = self._arrow_incoming_at_target(pts)
+            outgoing = self._arrow_outgoing_from_source(pts)
+
+            line_end = pts[-1]
+            if incoming is not None:
+                _prev, tip, seg_len, dx, dy = incoming
+                ux, uy = dx / seg_len, dy / seg_len
+                shorten = min(arrow_len, max(2.0, seg_len * 0.4))
+                line_end = QPointF(tip.x() - ux * shorten, tip.y() - uy * shorten)
+
+            if not arrowheads_only:
+                pen = QPen(edge_color, 3.0)
+                pen.setCapStyle(Qt.RoundCap)
+                pen.setJoinStyle(Qt.RoundJoin)
+                path = self._rounded_edge_path(pts, corner_radius, line_end)
+                painter.setPen(pen)
+                painter.setBrush(Qt.NoBrush)
+                painter.drawPath(path)
+
+            if not paths_only:
+                if incoming is not None:
+                    _prev, tip, seg_len, dx, dy = incoming
+                    ux, uy = dx / seg_len, dy / seg_len
+                    base_x = line_end.x()
+                    base_y = line_end.y()
+                    left = QPointF(base_x - uy * arrow_half, base_y + ux * arrow_half)
+                    right = QPointF(base_x + uy * arrow_half, base_y - ux * arrow_half)
+                    painter.save()
+                    painter.setPen(Qt.NoPen)
+                    painter.setBrush(edge_color)
+                    painter.drawPolygon(QPolygonF([tip, left, right]))
+                    painter.restore()
+
+                if outgoing is not None:
+                    origin, _nxt, o_len, odx, ody = outgoing
+                    oux, ouy = odx / o_len, ody / o_len
+                    self._draw_outward_tail_triangle(
+                        painter,
+                        edge_color,
+                        origin,
+                        oux,
+                        ouy,
+                        half_width=tail_half,
+                        tip_len=tail_tip_len,
+                    )
+
     def calculate_grid_layout(self):
         """Calculate grid layout based on current thumbnail size and available space - optimized for square thumbnails"""
         if not self.thumbnails:
@@ -1026,6 +1313,10 @@ class ThumbnailCanvas(QWidget):
                 viewport_width = max(self.width(), 800)
                 viewport_height = max(self.height(), 600)
             self.setFixedSize(max(viewport_width, 800), max(viewport_height, 600))
+            return
+
+        if self._is_reference_graph_mode():
+            self._calculate_reference_graph_layout()
             return
         
         # Get viewport width from the scroll area for proper centering
@@ -1105,6 +1396,9 @@ class ThumbnailCanvas(QWidget):
         """Update the rectangles for all thumbnails based on current grid layout with row-by-row height calculation.
         Properly handles collapsed sections by skipping their thumbnails entirely."""
         if not self.thumbnails:
+            return
+        if self._is_reference_graph_mode():
+            self._calculate_reference_graph_layout()
             return
         
         # First, clear all thumbnail rects and separator rects
@@ -1983,6 +2277,12 @@ class ThumbnailCanvas(QWidget):
             self.update()
             return
 
+        if self._is_reference_graph_mode():
+            self._calculate_reference_graph_layout()
+            self.needs_repaint = True
+            self.update()
+            return
+
         # Only recalculate if dimensions actually changed
         old_columns = self.columns
         self.calculate_grid_layout()
@@ -2045,12 +2345,18 @@ class ThumbnailCanvas(QWidget):
                         self._draw_empty_message(painter, message)
                     # No thumbnails and no directory - just paint black canvas
                     return
-                
+
+                if self._is_reference_graph_mode():
+                    self._paint_reference_graph_edges(painter, paths_only=True)
+
                 painted_count = 0
                 for thumbnail in self.thumbnails:
                     if thumbnail.rect and self._visible_rect.intersects(thumbnail.rect):
                         self._paint_thumbnail(painter, thumbnail)
                         painted_count += 1
+
+                if self._is_reference_graph_mode():
+                    self._paint_reference_graph_edges(painter, arrowheads_only=True)
             
             # Paint section separators for EXIF date mode
             if getattr(self, 'section_separators', None):
@@ -3387,12 +3693,16 @@ class ThumbnailCanvas(QWidget):
                 self.update()  # Repaint to show hover effect
         
         if self._drag_start_pos is not None:
-            # Check if we've moved enough to start dragging
-            distance = (event.pos() - self._drag_start_pos).manhattanLength()
-            if distance > 5:  # Drag threshold
-                self._dragging = True
-                self._start_internal_drag()
-                return
+            if self._is_reference_graph_mode():
+                self._drag_start_pos = None
+                self._dragging = False
+            else:
+                # Check if we've moved enough to start dragging
+                distance = (event.pos() - self._drag_start_pos).manhattanLength()
+                if distance > 5:  # Drag threshold
+                    self._dragging = True
+                    self._start_internal_drag()
+                    return
         
         # Handle hover
         thumbnail_index = self._get_thumbnail_at_position(event.pos())
@@ -3539,6 +3849,9 @@ class ThumbnailCanvas(QWidget):
 
     def dropEvent(self, event: QDropEvent):
         """Handle drop events"""
+        if self._is_reference_graph_mode():
+            event.ignore()
+            return
         self._show_drop_indicator = False
         self._stop_auto_scroll()
         self.update()
@@ -3842,6 +4155,8 @@ class ThumbnailCanvas(QWidget):
         
         After successful move, selections are cleared.
         """
+        if self._is_reference_graph_mode():
+            return
         logger = get_drag_drop_logger()
         logger.info("_start_internal_drag called")
 

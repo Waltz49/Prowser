@@ -597,6 +597,32 @@ def get_usercomment_from_path(file_path: str) -> Optional[bytes]:
         return None
 
 
+def get_user_description_from_exif_dict(exif_dict: Dict[str, Any]) -> Optional[str]:
+    """Plain-text user comment/description from a named EXIF dict (matches info sidebar)."""
+    if not exif_dict:
+        return None
+    for field in ('ImageDescription', 'UserComment', 'XPComment', 'XPSubject'):
+        if field not in exif_dict:
+            continue
+        desc_value = exif_dict[field]
+        if isinstance(desc_value, bytes):
+            try:
+                if field == 'UserComment':
+                    desc = decode_usercomment(desc_value).strip()
+                else:
+                    desc = desc_value.decode('utf-8', errors='ignore').strip()
+                desc = desc.replace('\x00', '')
+            except Exception:
+                continue
+        else:
+            desc = str(desc_value).strip().replace('\x00', '')
+            if desc.startswith("b'") or desc.startswith('b"'):
+                continue
+        if desc:
+            return desc
+    return None
+
+
 def truncate_usercomment_before_prompt(text: str) -> str:
     """If text contains a line that exactly matches USERCOMMENT_SKIP_HEADINGS (case-insensitive),
     return only the content after that line. Otherwise return text unchanged.

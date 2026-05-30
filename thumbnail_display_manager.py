@@ -58,7 +58,26 @@ class ThumbnailDisplayManager:
         
         # Only recalculate grid size if not manually set
         if not self.main_window.manual_thumbnail_size:
-            self.main_window.current_thumbnail_size, _, _ = self.main_window.thumbnail_operations_manager.calculate_grid_for_images(num_images_to_process)
+            if (
+                getattr(self.main_window, 'reference_graph_active', False)
+                and getattr(self.main_window, 'reference_graph_data', None)
+            ):
+                from reference_graph_layout import compute_reference_graph_dynamic_thumbnail_size
+
+                display_size = self.main_window.get_effective_display_size()
+                overlay = self.main_window.thumbnail_operations_manager._get_overlay_height_for_calculation()
+                self.main_window.current_thumbnail_size = compute_reference_graph_dynamic_thumbnail_size(
+                    self.main_window.reference_graph_data,
+                    display_size.width(),
+                    display_size.height(),
+                    overlay,
+                )
+            else:
+                self.main_window.current_thumbnail_size, _, _ = (
+                    self.main_window.thumbnail_operations_manager.calculate_grid_for_images(
+                        num_images_to_process
+                    )
+                )
         else:
             # Use current size and calculate grid dimensions
             pass
@@ -142,6 +161,8 @@ class ThumbnailDisplayManager:
                 elif v in ("exif_date", "exif_year") and getattr(
                     self.main_window, "exif_date_sections", None
                 ):
+                    canvas.reorder_thumbnails(images_to_process, force_recalculate_grid=True)
+                elif getattr(self.main_window, "reference_graph_active", False):
                     canvas.reorder_thumbnails(images_to_process, force_recalculate_grid=True)
 
         # Set initial highlight - preserve existing highlight_index if it's valid

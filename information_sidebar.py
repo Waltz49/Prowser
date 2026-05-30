@@ -18,6 +18,14 @@ from combined_sidebar_widget import HeaderWidget
 from theme_service import get_active_theme
 from utils import format_file_size, get_file_extension, styled_message_box
 from speech_utils import speak_or_stop
+from reference_graph import (
+    collect_reference_chain_paths,
+    get_reference_entries_for_path,
+    parse_reference_entries_from_text,
+    resolve_exif_reference_paths,
+    resolve_reference_entries_map,
+    resolve_reference_path,
+)
 
 # Path to trash icon for delete action (inline image in information HTML)
 _TRASH_ICON_PATH = os.path.join(os.path.dirname(__file__), "assets", "trash_icon.png")
@@ -243,13 +251,7 @@ class InformationSidebar(QWidget):
 
     def _get_reference_entries_for_path(self, image_path: str) -> List[Tuple[str, Optional[float]]]:
         """Read reference entries from EXIF description on *image_path*."""
-        if not image_path or not os.path.isfile(image_path):
-            return []
-        exif = self.extract_exif_data(image_path)
-        desc = exif.get("Description")
-        if not desc:
-            return []
-        return self._parse_reference_entries_from_text(str(desc))
+        return get_reference_entries_for_path(image_path)
 
     @staticmethod
     def _resolve_reference_path(
@@ -298,63 +300,13 @@ class InformationSidebar(QWidget):
         self, image_dir: str, root_path: str, entries: List[Tuple[str, Optional[float]]]
     ) -> List[str]:
         """Preorder traversal of EXIF References; skip paths and labels already seen."""
-        if not root_path or not os.path.isfile(root_path):
-            return []
-        seen_paths: set = set()
-        seen_names: set = set()
-        out: List[str] = []
-
-        def visit(path: str, direct_entries: List[Tuple[str, Optional[float]]]) -> None:
-            pn = os.path.normpath(path)
-            if pn in seen_paths:
-                return
-            seen_paths.add(pn)
-            out.append(path)
-            local_dir = os.path.dirname(path) or image_dir
-            resolved = self._resolve_reference_entries_map(
-                local_dir, path, direct_entries
-            )
-            for fname, _expected_mtime in direct_entries:
-                name_key = fname.strip().lower()
-                if name_key in seen_names:
-                    continue
-                ref_path = resolved.get(name_key)
-                if not ref_path:
-                    continue
-                rpn = os.path.normpath(ref_path)
-                if rpn in seen_paths:
-                    seen_names.add(name_key)
-                    continue
-                seen_names.add(name_key)
-                child_entries = self._get_reference_entries_for_path(ref_path)
-                visit(ref_path, child_entries)
-
-        visit(root_path, entries)
-        return out
+        return collect_reference_chain_paths(image_dir, root_path, entries)
 
     def _resolve_exif_reference_paths(
         self, image_dir: str, current_path: str, entries: List[Tuple[str, Optional[float]]]
     ) -> Tuple[List[str], Dict[str, str]]:
         """Resolve direct reference filenames (basename, or ~ / absolute path)."""
-        empty_map: Dict[str, str] = {}
-        if not current_path or not os.path.isfile(current_path):
-            return [], empty_map
-        resolved = self._resolve_reference_entries_map(
-            image_dir, current_path, entries
-        )
-        out: List[str] = []
-        seen_paths: set = set()
-        out.append(current_path)
-        seen_paths.add(os.path.normpath(current_path))
-        for fn, _expected_mtime in entries:
-            p = resolved.get(fn.strip().lower())
-            if not p:
-                continue
-            pn = os.path.normpath(p)
-            if pn not in seen_paths:
-                out.append(p)
-                seen_paths.add(pn)
-        return out, resolved
+        return resolve_exif_reference_paths(image_dir, current_path, entries)
 
     def _apply_references_markup(
         self, disp: str, image_dir: str, current_path: str
@@ -518,7 +470,14 @@ class InformationSidebar(QWidget):
                 if st and not h.is_duplicate_state(st):
                     h.backward_stack.append(st)
                     h.forward_stack.clear()
-            mw.refresh_from_configuration({"files": paths, "sort_mode": "custom"})
+            mw.refresh_from_configuration(
+                {
+                    "files": paths,
+                    "sort_mode": "custom",
+                    "presentation": "reference_graph",
+                    "focus_path": current,
+                }
+            )
             if hasattr(mw, "update_sort_menu_checkmarks"):
                 mw.update_sort_menu_checkmarks()
             if hasattr(mw, "save_sorting_settings"):

@@ -210,6 +210,20 @@ class ThumbnailOperationsManager:
 
     def calculate_optimal_thumbnail_size(self) -> int:
         """Calculate optimal thumbnail size"""
+        if (
+            getattr(self.main_window, 'reference_graph_active', False)
+            and getattr(self.main_window, 'reference_graph_data', None)
+        ):
+            from reference_graph_layout import compute_reference_graph_dynamic_thumbnail_size
+
+            display_size = self.main_window.get_effective_display_size()
+            overlay_height = self._get_overlay_height_for_calculation()
+            return compute_reference_graph_dynamic_thumbnail_size(
+                self.main_window.reference_graph_data,
+                display_size.width(),
+                display_size.height(),
+                overlay_height,
+            )
         size, _, _ = self.calculate_optimal_thumbnail_size_and_grid()
         return size
 
@@ -227,6 +241,14 @@ class ThumbnailOperationsManager:
         
         # Use smart update methods to avoid unnecessary rebuilding
         self.main_window.current_thumbnail_size = size
-        
+        canvas = getattr(
+            getattr(self.main_window, 'thumbnail_container', None), 'canvas', None
+        )
+        if canvas and getattr(self.main_window, 'reference_graph_active', False):
+            canvas.thumbnail_size = size
+            if canvas.thumbnails:
+                canvas.calculate_grid_layout()
+                canvas.update()
+
         self.main_window.status_notification.show_message(f"Thumbnail size: {size}px")
  

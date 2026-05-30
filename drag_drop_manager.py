@@ -43,6 +43,9 @@ class DragDropManager:
         displayed images list and adjust modification times so the browser's
         normal date sort keeps the new order.  Returns True on success."""
 
+        if getattr(self.window, 'reference_graph_active', False):
+            return False
+
         # Prevent reordering within Photos Libraries
         if is_inside_photos_library(image_path):
             show_styled_warning(
@@ -430,6 +433,9 @@ class DragDropManager:
         """Re-order multiple *image_paths* to *insertion_index* inside the window's
         displayed images list and adjust modification times so the browser's
         normal date sort keeps the new order.  Returns True on success."""
+
+        if getattr(self.window, 'reference_graph_active', False):
+            return False
 
         # Prevent reordering within Photos Libraries
         photos_library_paths = [path for path in image_paths if is_inside_photos_library(path)]

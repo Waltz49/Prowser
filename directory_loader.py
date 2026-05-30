@@ -167,6 +167,7 @@ class DirectoryLoader:
 
         # Directory browsing deactivates specific-files mode and window mode
         self.main_window.specific_files_active = False
+        self.main_window.clear_reference_graph_presentation()
         self.main_window.window_size = None
         self.main_window.window_target_file = None
         
@@ -395,8 +396,13 @@ class DirectoryLoader:
         if len(file_paths) == 1 and not force_specific_files_grid:
             # Use the windowing logic for single file loads
             target_file = file_paths[0]
+            self.main_window.clear_reference_graph_presentation()
             self.load_file_with_directory_thumbnails(target_file, limit=self.main_window.limit, external_load=external_load)
             return
+        
+        # Non-reference specific-files loads clear graph presentation unless already set
+        if not getattr(self.main_window, 'reference_graph_active', False):
+            self.main_window.clear_reference_graph_presentation()
         
         # Activate specific-files mode when multiple explicit files are provided (or single-file forced grid)
         # Clear window mode when loading specific files (not window mode)
@@ -457,6 +463,11 @@ class DirectoryLoader:
         # This ensures current_directory matches displayed_images[0] after filtering/sorting
         if self.main_window.displayed_images:
             self.main_window.current_directory = os.path.dirname(self.main_window.displayed_images[0])
+
+        if getattr(self.main_window, 'reference_graph_active', False):
+            self.main_window.set_reference_graph_presentation(
+                True, self.main_window.displayed_images
+            )
         
         self.main_window.populate_indices_arrays()
         

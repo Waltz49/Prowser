@@ -329,6 +329,9 @@ class ImageBrowserWindow(QMainWindow):
         # externally (e.g., via API). Used to avoid replacing the set with a full
         # directory scan when exiting fullscreen.
         self.specific_files_active: bool = False
+        self.reference_graph_active: bool = False
+        self.reference_graph_data = None
+        self.reference_graph_focus_path: Optional[str] = None
         
         # Flag to track if settings changed while in browse mode
         self._settings_changed_in_browse: bool = False
@@ -718,6 +721,38 @@ class ImageBrowserWindow(QMainWindow):
     def save_sorting_settings(self):
         """Save current sorting scheme settings to config"""
         self.sorting_manager.save_sorting_settings()
+
+    def set_reference_graph_presentation(
+        self, active: bool, paths=None, focus_path: Optional[str] = None
+    ) -> None:
+        """Enable reference dependency graph canvas for the current specific-files level."""
+        if active and paths and len(paths) > 1:
+            from reference_graph import build_reference_graph
+
+            self.reference_graph_active = True
+            path_set = {os.path.normpath(os.path.abspath(p)) for p in paths}
+            focus = focus_path or getattr(self, "current_image_path", None) or paths[0]
+            fn = os.path.normpath(os.path.abspath(focus)) if focus else ""
+            if fn not in path_set:
+                focus = paths[0]
+            self.reference_graph_focus_path = focus
+            self.reference_graph_data = build_reference_graph(
+                list(paths), focus_path=focus
+            )
+        else:
+            self.clear_reference_graph_presentation()
+
+    def clear_reference_graph_presentation(self) -> None:
+        """Return thumbnail canvas to normal grid/section layout."""
+        self.reference_graph_active = False
+        self.reference_graph_data = None
+        self.reference_graph_focus_path = None
+        if getattr(self, 'thumbnail_container', None) and hasattr(
+            self.thumbnail_container, 'canvas'
+        ):
+            canvas = self.thumbnail_container.canvas
+            canvas._reference_graph_edge_routes = []
+            canvas._reference_graph_layout_result = None
     
     def set_sort_mode(self, mode: SortMode, toggle_reverse: bool = False):
         """Unified method to set sorting mode."""
@@ -872,6 +907,15 @@ class ImageBrowserWindow(QMainWindow):
                         resolved_list.append(abs_path)
                 files = resolved_list
                 configuration['files'] = files
+            presentation = configuration.get('presentation')
+            if presentation == 'reference_graph' and files and len(files) > 1:
+                self.set_reference_graph_presentation(
+                    True,
+                    files,
+                    focus_path=configuration.get("focus_path"),
+                )
+            elif not files or presentation != 'reference_graph':
+                self.clear_reference_graph_presentation()
             # If not currently in fullscreen, add current image to directory stack history
             # BUT: Skip saving state when loading specific files - the caller should save state
             # before calling refresh_from_configuration, and save correct state after load_specific_files
@@ -3023,8 +3067,11 @@ class ImageBrowserWindow(QMainWindow):
                 self.combined_sidebar.refresh_theme_styles()
 
         if getattr(self, "thumbnail_container", None) and hasattr(self.thumbnail_container, "canvas"):
-            if self.thumbnail_container.canvas:
-                self.thumbnail_container.canvas.update()
+            canvas = self.thumbnail_container.canvas
+            if canvas:
+                if canvas._is_reference_graph_mode():
+                    canvas._calculate_reference_graph_layout()
+                canvas.update()
         if getattr(self, "canvas_manager", None) and hasattr(self.canvas_manager, "refresh_theme_styles"):
             self.canvas_manager.refresh_theme_styles()
         if getattr(self, "preview_widget", None) and hasattr(self.preview_widget, "refresh_theme_styles"):
