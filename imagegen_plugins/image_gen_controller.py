@@ -684,36 +684,19 @@ class ImageGenController(QObject):
                     lora=lora_name_for_exif(values.get("mflux_lora")),
                     guidance=values.get("guidance_scale"),
                 )
-                ref_entries = None
-                allow_cross_dir = False
-                if plugin.pipeline_id == "mflux_fill_infill":
-                    from imagegen_plugins.pixelmator_export import (
-                        resolve_infill_reference,
-                    )
-
-                    resolved = resolve_infill_reference(
-                        output_path,
-                        values.get("pixelmator_doc_name"),
-                        pixelmator_file_path=values.get("pixelmator_doc_path"),
-                    )
-                    if resolved is not None:
-                        ref_entries = [resolved]
-                        allow_cross_dir = True
-                elif get_pipeline(plugin.pipeline_id).requires_source_image:
+                ref_entries, allow_cross_dir = self._exif_reference_entries_for_output(
+                    plugin, values, output_path
+                )
+                if get_pipeline(plugin.pipeline_id).requires_source_image:
                     source_paths = resolve_source_image_paths(values)
-                    ref_entries = reference_entries_for_source_paths(
-                        source_paths, output_path
-                    )
                     will_refine_next = (
                         self._copy_batch_active
                         and not self._copy_batch_cancelled
                         and bool(values.get("use_last_generated_image"))
                         and (self._copies_done + 1 < self._copies_total)
                     )
-                    if ref_entries:
-                        allow_cross_dir = True
-                        if not will_refine_next:
-                            self._task_reference_paths = list(source_paths)
+                    if ref_entries and not will_refine_next:
+                        self._task_reference_paths = list(source_paths)
                 write_exif_user_comment(
                     output_path,
                     comment,
@@ -775,6 +758,34 @@ class ImageGenController(QObject):
     def _open_in_browse(self, output_path: str) -> None:
         self._refresh_progressive_image(output_path, force_fullscreen=True)
 
+    def _exif_reference_entries_for_output(
+        self,
+        plugin: ImageGenModelPlugin,
+        values: Dict[str, Any],
+        output_path: str,
+    ) -> tuple[Optional[list], bool]:
+        ref_entries = None
+        allow_cross_dir = False
+        if plugin.pipeline_id == "mflux_fill_infill":
+            from imagegen_plugins.pixelmator_export import resolve_infill_reference
+
+            resolved = resolve_infill_reference(
+                output_path,
+                values.get("pixelmator_doc_name"),
+                pixelmator_file_path=values.get("pixelmator_doc_path"),
+            )
+            if resolved is not None:
+                ref_entries = [resolved]
+                allow_cross_dir = True
+        elif get_pipeline(plugin.pipeline_id).requires_source_image:
+            source_paths = resolve_source_image_paths(values)
+            ref_entries = reference_entries_for_source_paths(
+                source_paths, output_path
+            )
+            if ref_entries:
+                allow_cross_dir = True
+        return ref_entries, allow_cross_dir
+
     def _on_generate_progress(self, msg: Dict[str, Any]) -> None:
         step = msg.get("step")
         step_total = msg.get("step_total")
@@ -800,16 +811,37 @@ class ImageGenController(QObject):
     ) -> None:
         if not output_path or not os.path.isfile(output_path):
             return
-        # Pretty-print mflux JSON blobs during stepwise previews only; final EXIF
-        # is already written in _on_generation_finished (Image Model / Prompt / …).
+        # Stepwise previews: match final Image Model / Prompt EXIF (skip last step).
         if not force_fullscreen:
-            try:
-                make_readable_user_comment_before_browse(
-                    output_path,
-                    fallback_prompt=str(self._pending_values.get("prompt") or ""),
-                )
-            except Exception:
-                pass
+            step = self._live_step
+            total = self._live_step_total
+            plugin = self._active_plugin
+            values = self._pending_values
+            if (
+                step > 0
+                and total > 0
+                and step < total
+                and plugin is not None
+                and values
+            ):
+                try:
+                    ref_entries, allow_cross_dir = (
+                        self._exif_reference_entries_for_output(
+                            plugin, values, output_path
+                        )
+                    )
+                    make_readable_user_comment_before_browse(
+                        output_path,
+                        model_name=plugin.menu_label(values),
+                        values=values,
+                        elapsed_seconds=self._live_generation_elapsed_seconds(),
+                        intermediate_step=step,
+                        intermediate_total=total,
+                        reference_entries=ref_entries,
+                        allow_cross_directory_references=allow_cross_dir,
+                    )
+                except Exception:
+                    pass
         mw = self.main_window
         if hasattr(mw, "set_date_sort"):
             mw.set_date_sort(reverse=False, notify=False)

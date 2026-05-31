@@ -254,6 +254,8 @@ def format_image_exif_prompt(
     quantization: Optional[int] = None,
     lora: Optional[str] = None,
     guidance: Optional[float] = None,
+    intermediate_step: Optional[int] = None,
+    intermediate_total: Optional[int] = None,
 ) -> str:
     """EXIF UserComment body: Image Model block then Prompt."""
     prompt_text = (prompt_text or "").strip()
@@ -281,6 +283,17 @@ def format_image_exif_prompt(
         except (TypeError, ValueError):
             pass
 
+    intermediate_line: Optional[str] = None
+    if (
+        intermediate_step is not None
+        and intermediate_total is not None
+        and int(intermediate_step) != int(intermediate_total)
+    ):
+        intermediate_line = (
+            f"Intermediate: Generated at Step {int(intermediate_step)} "
+            f"of {int(intermediate_total)}"
+        )
+
     if model_name:
         iter_suffix = f" [{iterations}]" if iterations is not None else ""
         model_block = f"Image Model:\n{model_name}{iter_suffix}"
@@ -295,6 +308,10 @@ def format_image_exif_prompt(
                     f" ({format_elapsed_hms(elapsed_seconds / step_count)}/iter)"
                 )
             model_block += f"\n{elapsed_line}"
+            if intermediate_line:
+                model_block += f"\n\n{intermediate_line}"
+        elif intermediate_line:
+            model_block += f"\n\n{intermediate_line}"
         return f"{model_block}\n\nPrompt:\n{prompt_text}"
 
     if param_lines:
@@ -427,41 +444,86 @@ def inject_references_exif_section(
     return base_comment + "\n\n" + ref_block
 
 
-def make_readable_user_comment_before_browse(
-    image_path: str,
-    *,
-    fallback_prompt: str = "",
-) -> None:
-    """Replace compact mflux JSON in EXIF UserComment before opening in browse.
-
-    On valid JSON, writes ``json.dumps(..., indent=2)``. On parse failure, uses
-    *fallback_prompt* as plain text. Skips when the comment is not JSON-shaped
-    (e.g. already formatted after generation completes).
-    """
-    if not image_path or not os.path.isfile(image_path):
-        return
+def _mflux_json_from_user_comment(image_path: str) -> Optional[Dict[str, Any]]:
+    """Parse mflux generation JSON from EXIF UserComment when present."""
     try:
         from exif_utils import decode_usercomment, get_usercomment_from_path
 
         raw = get_usercomment_from_path(image_path)
         if not raw:
-            return
+            return None
         text = decode_usercomment(raw).strip()
-        if not text:
-            return
-        stripped = text.lstrip()
-        if not stripped or stripped[0] not in ("{", "["):
-            return
-        try:
-            data = json.loads(text)
-            comment = json.dumps(data, indent=2, ensure_ascii=False)
-        except Exception:
-            comment = (fallback_prompt or "").strip()
-            if not comment:
+        if not text or text.lstrip()[0] not in ("{", "["):
+            return None
+        data = json.loads(text)
+        return data if isinstance(data, dict) else None
+    except Exception:
+        return None
+
+
+def make_readable_user_comment_before_browse(
+    image_path: str,
+    *,
+    model_name: str,
+    values: Dict[str, Any],
+    elapsed_seconds: Optional[float] = None,
+    intermediate_step: int,
+    intermediate_total: int,
+    seed: Optional[int] = None,
+    reference_entries: Optional[List[Tuple[str, Optional[str]]]] = None,
+    allow_cross_directory_references: bool = False,
+) -> None:
+    """Write final-style Image Model / Prompt EXIF for in-progress step previews."""
+    if not image_path or not os.path.isfile(image_path):
+        return
+    if intermediate_step >= intermediate_total:
+        return
+    try:
+        from exif_utils import decode_usercomment, get_usercomment_from_path
+
+        raw = get_usercomment_from_path(image_path)
+        if raw:
+            text = decode_usercomment(raw).strip()
+            if text.startswith("Image Model:"):
                 return
-        _write_exif_user_comment_pil(image_path, comment)
     except Exception:
         pass
+
+    meta = _mflux_json_from_user_comment(image_path)
+    if seed is None and not values.get("random_seed"):
+        try:
+            seed = int(values.get("seed"))
+        except (TypeError, ValueError):
+            seed = None
+    if seed is None and meta is not None:
+        try:
+            seed = int(meta.get("seed"))
+        except (TypeError, ValueError):
+            seed = None
+
+    prompt_text = str(values.get("prompt") or "").strip()
+    if not prompt_text and meta is not None:
+        prompt_text = str(meta.get("prompt") or "").strip()
+
+    comment = format_image_exif_prompt(
+        model_name,
+        prompt_text,
+        iterations=values.get("steps"),
+        elapsed_seconds=elapsed_seconds,
+        seed=seed,
+        steps=values.get("steps"),
+        quantization=values.get("mflux_quantize"),
+        lora=lora_name_for_exif(values.get("mflux_lora")),
+        guidance=values.get("guidance_scale"),
+        intermediate_step=intermediate_step,
+        intermediate_total=intermediate_total,
+    )
+    write_exif_user_comment(
+        image_path,
+        comment,
+        reference_entries=reference_entries,
+        allow_cross_directory_references=allow_cross_directory_references,
+    )
 
 
 def _write_exif_user_comment_pil(image_path: str, user_comment: str) -> None:
