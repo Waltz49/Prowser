@@ -290,7 +290,8 @@ def format_image_exif_prompt(
         and int(intermediate_step) != int(intermediate_total)
     ):
         intermediate_line = (
-            f"Intermediate: Generated at Step {int(intermediate_step)} "
+            "Intermediate:\n"
+            f"Generated at Step {int(intermediate_step)} "
             f"of {int(intermediate_total)}"
         )
 

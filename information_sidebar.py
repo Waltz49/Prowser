@@ -1169,6 +1169,7 @@ class InformationSidebar(QWidget):
                             disp = escape(desc)
                             disp = disp.replace('\n', '<br>')
                             disp = disp.replace('Image Model:<br>', '<h4>Image model</h4>')
+                            disp = disp.replace('Intermediate:<br>', '<h4>Intermediate</h4>')
                             disp = disp.replace('Prompt:<br>', '<h4>Prompt</h4>')
                             disp = disp.replace('Title:<br>', '<h4>Title</h4>')
                             disp = disp.replace('Description:<br>', '<h4>Description</h4>')
