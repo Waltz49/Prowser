@@ -333,6 +333,7 @@ class ImageBrowserConfig:
             'slideshow_direction': 'right',
             'slideshow_max_rotation': 0,
             'slideshow_overlap_delay': -200,
+            'slideshow_back_and_forth': False,
             'space_key_mode': 'exit',
             'slideshow2_enlargement': 2.0,  # Default to 2.0x for visible panning effect
             'slideshow2_speed': 8,  # pixels per second (slow for landscape viewing)

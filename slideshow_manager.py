@@ -38,6 +38,7 @@ class SlideshowManager:
         self.slideshow_direction = settings.get('slideshow_direction', 'right')
         self.slideshow_max_rotation = settings.get('slideshow_max_rotation', 0)
         self.slideshow_overlap_delay = settings.get('slideshow_overlap_delay', -200)
+        self.slideshow_back_and_forth = settings.get('slideshow_back_and_forth', False)
         
         # Initialize slideshow state attributes
         # Note: slideshow state is now tracked via window.current_view_mode == 'slideshow'
@@ -56,6 +57,8 @@ class SlideshowManager:
         # Otherwise, contains all displayed images
         self._slideshow_images = []
         self._slideshow_current_index = 0
+        self._slideshow_step_direction = 1
+        self._slideshow_at_endpoint_repeat = False
         
         # Debounced save mechanism for slideshow settings
         self._save_timer = QTimer()
@@ -71,6 +74,7 @@ class SlideshowManager:
         self.config.update_setting('slideshow_direction', self.slideshow_direction)
         self.config.update_setting('slideshow_max_rotation', self.slideshow_max_rotation)
         self.config.update_setting('slideshow_overlap_delay', self.slideshow_overlap_delay)
+        self.config.update_setting('slideshow_back_and_forth', self.slideshow_back_and_forth)
 
     def debounced_save_setting(self, key: str, value):
         """Save a setting with debouncing to avoid excessive disk writes"""
@@ -112,6 +116,14 @@ class SlideshowManager:
         if 'slideshow_overlap_delay' in new_settings:
             self.slideshow_overlap_delay = new_settings['slideshow_overlap_delay']
 
+        if 'slideshow_back_and_forth' in new_settings:
+            was_enabled = self.slideshow_back_and_forth
+            self.slideshow_back_and_forth = new_settings['slideshow_back_and_forth']
+            if self.slideshow_back_and_forth and (
+                not was_enabled or self.window.current_view_mode == 'slideshow'
+            ):
+                self._reset_slideshow_ping_pong_state()
+
     def cleanup(self):
         """Clean up resources and save any pending settings"""
         # Force save any pending settings
@@ -142,7 +154,9 @@ class SlideshowManager:
             super().__setattr__(name, value)
         elif name in ['slideshow_timer', 'slideshow_rate', 
                      'slideshow_transition_speed', 'slideshow_direction', 'slideshow_max_rotation',
-                     'slideshow_overlap_delay', '_current_slideshow_anim', '_next_slideshow_anim',
+                     'slideshow_overlap_delay', 'slideshow_back_and_forth',
+                     '_slideshow_step_direction', '_slideshow_at_endpoint_repeat',
+                     '_current_slideshow_anim', '_next_slideshow_anim',
                      '_current_rotation_anim', '_next_rotation_anim', '_current_opacity_anim']:
             # These slideshow attributes are managed locally in the manager
             super().__setattr__(name, value)
@@ -210,6 +224,8 @@ class SlideshowManager:
             self._slideshow_current_index = self._slideshow_images.index(current_image_path)
         else:
             self._slideshow_current_index = 0
+
+        self._reset_slideshow_ping_pong_state()
         
         # Stop other slideshows if running
         if hasattr(self.window, 'slideshow2_manager') and self.window.current_view_mode == 'slideshow2':
@@ -413,6 +429,53 @@ class SlideshowManager:
         # Clean up slideshow images list
         self._slideshow_images = []
         self._slideshow_current_index = 0
+        self._slideshow_step_direction = 1
+        self._slideshow_at_endpoint_repeat = False
+
+    def _reset_slideshow_ping_pong_state(self):
+        """Initialize ping-pong direction from current index (forward unless at last image)."""
+        n = len(self._slideshow_images)
+        idx = self._slideshow_current_index
+        self._slideshow_at_endpoint_repeat = False
+        if n <= 1:
+            self._slideshow_step_direction = 1
+            return
+        if idx >= n - 1:
+            self._slideshow_step_direction = -1
+        else:
+            self._slideshow_step_direction = 1
+
+    def _advance_slideshow_index(self):
+        """Move to the next slideshow index (loop or back-and-forth)."""
+        n = len(self._slideshow_images)
+        if n <= 1:
+            return
+
+        if not self.slideshow_back_and_forth:
+            self._slideshow_current_index = (self._slideshow_current_index + 1) % n
+            return
+
+        idx = self._slideshow_current_index
+        direction = self._slideshow_step_direction
+
+        if direction == 1:
+            if idx < n - 1:
+                self._slideshow_current_index = idx + 1
+            elif not self._slideshow_at_endpoint_repeat:
+                self._slideshow_at_endpoint_repeat = True
+            else:
+                self._slideshow_at_endpoint_repeat = False
+                self._slideshow_step_direction = -1
+                self._slideshow_current_index = idx - 1
+        else:
+            if idx > 0:
+                self._slideshow_current_index = idx - 1
+            elif not self._slideshow_at_endpoint_repeat:
+                self._slideshow_at_endpoint_repeat = True
+            else:
+                self._slideshow_at_endpoint_repeat = False
+                self._slideshow_step_direction = 1
+                self._slideshow_current_index = idx + 1
 
     def _sync_slideshow_images_from_displayed(self):
         """Sync slideshow image list from displayed_images when sort mode changes during slideshow.
@@ -426,6 +489,8 @@ class SlideshowManager:
             self._slideshow_current_index = self._slideshow_images.index(current_path)
         else:
             self._slideshow_current_index = 0
+        if self.slideshow_back_and_forth:
+            self._reset_slideshow_ping_pong_state()
 
     def advance_slideshow(self):
         """Advance to next slide in slideshow"""
@@ -441,8 +506,7 @@ class SlideshowManager:
             self._current_opacity_anim.state() == QPropertyAnimation.Running):
             return
             
-        # Move to next image in the slideshow list
-        self._slideshow_current_index = (self._slideshow_current_index + 1) % len(self._slideshow_images)
+        self._advance_slideshow_index()
         
         # Note: Don't call highlight_image() here during slideshow to avoid interference
         # It will be called after animation finishes in slideshow_animation_finished()

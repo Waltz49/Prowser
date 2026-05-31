@@ -527,6 +527,7 @@ class SettingsDialog(QDialog):
     DEFAULT_OVERLAP_DELAY = -200
     DEFAULT_OVERLAP_PERCENT = 115
     DEFAULT_SLIDESHOW_DIRECTION = 'right'
+    DEFAULT_SLIDESHOW_BACK_AND_FORTH = False
     DEFAULT_SIMILARITY_THRESHOLD = 45
     DEFAULT_HASH_SIZE = 16
     DEFAULT_SHIFT_CMD_DEPTH = 4
@@ -935,6 +936,7 @@ class SettingsDialog(QDialog):
                 'slideshow_overlap_percent': self.overlap_percent_spinbox.value(),
                 'slideshow_direction': self.direction_combo.currentText(),
                 'slideshow_overlap_delay': self._calculate_overlap_delay(),
+                'slideshow_back_and_forth': self.slideshow_back_and_forth_checkbox.isChecked(),
             }
         elif tab_widget == self.move_destinations_tab:
             return {
@@ -1086,6 +1088,8 @@ class SettingsDialog(QDialog):
                 self.overlap_percent_spinbox.setValue(settings['slideshow_overlap_percent'])
             if 'slideshow_direction' in settings:
                 self.direction_combo.setCurrentText(settings['slideshow_direction'])
+            if 'slideshow_back_and_forth' in settings:
+                self.slideshow_back_and_forth_checkbox.setChecked(settings['slideshow_back_and_forth'])
         elif tab_widget == self.move_destinations_tab:
             if 'move_destinations' in settings and hasattr(self, 'move_destination_input_fields'):
                 destinations = settings['move_destinations']
@@ -2934,8 +2938,14 @@ class SettingsDialog(QDialog):
 
         slideshow_layout.addWidget(QLabel("Default Direction:"), 2, 0, Qt.AlignRight | Qt.AlignVCenter)
         slideshow_layout.addWidget(self.direction_combo, 2, 1, Qt.AlignLeft | Qt.AlignVCenter)
-        # End of direction_container removal
 
+        self.slideshow_back_and_forth_checkbox = QCheckBox("Back and forth")
+        self.slideshow_back_and_forth_checkbox.setToolTip(
+            "Play through images forward and backward repeatedly."
+        )
+        slideshow_layout.addWidget(
+            self.slideshow_back_and_forth_checkbox, 2, 2, 1, 2, Qt.AlignLeft | Qt.AlignVCenter
+        )
         
         # Add performance warning note at the bottom
         warning_label = QLabel(
@@ -5529,6 +5539,9 @@ class SettingsDialog(QDialog):
         self.overlap_percent_spinbox.setValue(overlap_percent)
         
         self.direction_combo.setCurrentText(settings.get('slideshow_direction', self.DEFAULT_SLIDESHOW_DIRECTION))
+        self.slideshow_back_and_forth_checkbox.setChecked(
+            settings.get('slideshow_back_and_forth', self.DEFAULT_SLIDESHOW_BACK_AND_FORTH)
+        )
         
         # Update original settings
         self.original_settings['slideshow_rate'] = settings.get('slideshow_rate', self.DEFAULT_SLIDESHOW_RATE)
@@ -5536,6 +5549,9 @@ class SettingsDialog(QDialog):
         self.original_settings['slideshow_max_rotation'] = settings.get('slideshow_max_rotation', 0)
         self.original_settings['slideshow_overlap_percent'] = overlap_percent
         self.original_settings['slideshow_direction'] = settings.get('slideshow_direction', self.DEFAULT_SLIDESHOW_DIRECTION)
+        self.original_settings['slideshow_back_and_forth'] = settings.get(
+            'slideshow_back_and_forth', self.DEFAULT_SLIDESHOW_BACK_AND_FORTH
+        )
 
     def _load_move_destinations(self, settings):
         """Load move destinations from config"""
@@ -6265,6 +6281,7 @@ class SettingsDialog(QDialog):
             'slideshow_max_rotation': self.rotation_angle_spinbox.value(),
             'slideshow_overlap_percent': self.overlap_percent_spinbox.value(),
             'slideshow_overlap_delay': self._calculate_overlap_delay(),
+            'slideshow_back_and_forth': self.slideshow_back_and_forth_checkbox.isChecked(),
             'wrap_around': self.wrap_around_checkbox.isChecked(),
             'ignore_exif_rotation': not self.ignore_exif_rotation_checkbox.isChecked(),  # Reversed: checked = use EXIF (ignore_exif=False)
             'drag_drop_auto_date_change': self.drag_drop_auto_date_change_checkbox.isChecked(),
