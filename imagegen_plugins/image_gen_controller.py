@@ -11,6 +11,7 @@ from typing import Any, Dict, List, Optional
 from PySide6.QtCore import QObject, QTimer, Signal
 from PySide6.QtWidgets import QMessageBox
 
+from imagegen_plugins.edit_aspect_pad import remove_edit_aspect_pad_temps
 from imagegen_plugins.expand_base_image import (
     prepare_and_save_expand_base,
     remove_expand_base_temp,
@@ -102,6 +103,7 @@ class ImageGenController(QObject):
         self._step_progress_start_time: Optional[float] = None
         self._expand_source_path: str = ""
         self._expand_base_path: str = ""
+        self._aspect_pad_temp_paths: list[str] = []
         self._task_reference_paths: list[str] = []
         self._suppress_task_failure_ui = False
         self._copies_total = 0
@@ -277,6 +279,9 @@ class ImageGenController(QObject):
         output_path = next_imagegen_path(ext=".png")
         try:
             payload = plugin.build_payload(values, output_path)
+            pad_temps = payload.pop("_aspect_pad_temp_paths", None)
+            if isinstance(pad_temps, list) and pad_temps:
+                self._aspect_pad_temp_paths.extend(str(p) for p in pad_temps)
             if plugin.pipeline_id == "mflux_fill_expand":
                 base_path = prepare_and_save_expand_base(values, output_path)
                 payload["prepared_fill_image_path"] = base_path
@@ -708,6 +713,7 @@ class ImageGenController(QObject):
             if plugin.pipeline_id == "mflux_fill_expand":
                 remove_expand_base_temp(self._expand_base_path)
                 self._expand_base_path = ""
+            self._remove_aspect_pad_temps()
             self._copies_done += 1
             remaining = self._copies_total - self._copies_done
             if (
@@ -864,6 +870,11 @@ class ImageGenController(QObject):
         if not self._launch_generation_job():
             self._finish_copy_batch()
 
+    def _remove_aspect_pad_temps(self) -> None:
+        if self._aspect_pad_temp_paths:
+            remove_edit_aspect_pad_temps(self._aspect_pad_temp_paths)
+            self._aspect_pad_temp_paths = []
+
     def _cleanup_infill_batch_assets(self) -> None:
         plugin = self._active_plugin
         if plugin is None or plugin.pipeline_id != "mflux_fill_infill":
@@ -874,6 +885,7 @@ class ImageGenController(QObject):
 
     def _finish_copy_batch(self, *, cancelled: bool = False) -> None:
         self._stop_copy_cooldown_timer()
+        self._remove_aspect_pad_temps()
         self._cleanup_infill_batch_assets()
         self._copy_batch_active = False
         self._copies_total = 0
@@ -910,6 +922,7 @@ class ImageGenController(QObject):
         self._step_progress_start_time = None
         self._expand_source_path = ""
         self._expand_base_path = ""
+        self._aspect_pad_temp_paths = []
         self._task_reference_paths = []
         self._live_step = 0
         self._live_step_total = 0

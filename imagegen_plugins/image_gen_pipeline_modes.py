@@ -433,6 +433,15 @@ def field_specs_for_pipeline(
                 default=bool(values.get("low_ram", True)),
             )
         )
+    if pipeline_id == "mflux_flux2_klein_edit":
+        specs.append(
+            FieldSpec(
+                key="aspect_ratio_test",
+                label="Aspect ratio correction",
+                kind="bool",
+                default=bool(values.get("aspect_ratio_test", False)),
+            )
+        )
     if pipeline_id == "mflux_fill_expand":
         specs.append(
             FieldSpec(
@@ -493,9 +502,22 @@ def build_worker_payload(
         if source_paths:
             merged["source_image_paths"] = source_paths
             merged["source_image_path"] = source_paths[0]
+            if merged.get("aspect_ratio_test"):
+                from imagegen_plugins.edit_aspect_pad import (
+                    generator_paths_with_aspect_padding,
+                )
+
+                gen_paths, pad_temps = generator_paths_with_aspect_padding(
+                    source_paths
+                )
+                merged["source_image_paths"] = gen_paths
+                merged["source_image_path"] = gen_paths[0]
+                if pad_temps:
+                    merged["_aspect_pad_temp_paths"] = pad_temps
         merged.pop("width", None)
         merged.pop("height", None)
     merged.pop("aspect_ratio_lock", None)
     merged.pop("_pixelmator_batch_dir", None)
     merged.pop("use_last_generated_image", None)
+    merged.pop("aspect_ratio_test", None)
     return merged

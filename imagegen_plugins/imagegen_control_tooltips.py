@@ -22,6 +22,12 @@ _FIELD_TOOLTIPS: dict[str, str] = {
     "low_ram": "Use less memory during generation (may be slower).",
     "overlap_percentage": "Overlap between expand tiles when blending (percent).",
     "show_progressive_images": "Show partial previews while generation is running.",
+    "aspect_ratio_test": (
+        "When using multiple source images, fit each additional image to the "
+        "exact pixel size of the first (scale down if needed, white borders, "
+        "centered) before generation. References and EXIF still point at the "
+        "original files."
+    ),
 }
 
 _DIM_HELPER_TOOLTIPS: dict[str, str] = {
