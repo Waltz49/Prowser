@@ -214,6 +214,27 @@ class ExpandPlacementCanvas(QWidget):
             self._placement_h,
         )
 
+    def set_canvas_placement(
+        self, px: int, py: int, pw: int, ph: int, *, emit_changed: bool = False
+    ) -> None:
+        """Restore absolute placement on the current canvas size."""
+        cw, ch = self._canvas_w, self._canvas_h
+        max_w = max(MIN_PLACEMENT_EDGE, cw)
+        max_h = max(MIN_PLACEMENT_EDGE, ch)
+        pw_i = max(MIN_PLACEMENT_EDGE, min(int(pw), max_w))
+        ph_i = max(MIN_PLACEMENT_EDGE, min(int(ph), max_h))
+        px_i = max(0, min(int(px), cw - pw_i))
+        py_i = max(0, min(int(py), ch - ph_i))
+        self._placement_x = px_i
+        self._placement_y = py_i
+        self._placement_w = pw_i
+        self._placement_h = ph_i
+        self._clamp_placement_position()
+        self._store_relative()
+        self.update()
+        if emit_changed:
+            self.placementChanged.emit()
+
     def _reset_initial_placement(self) -> None:
         self._apply_top_centered_fit(emit_changed=False)
 

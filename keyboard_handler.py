@@ -368,7 +368,12 @@ class ThumbnailKeyboardHandler(BaseKeyboardHandler):
         # F11 is handled by menu system (MacOS Fullscreen)
         # Ctrl+F is handled by menu system (Search by Description)
 
-        # Status bar - handled by View menu action shortcut
+        # Imagegen status-bar dot menu while a model task is running (no-op otherwise)
+        self.add_key_binding(
+            "j_key",
+            KeyBinding(Qt.Key_J, description="Model task status menu"),
+            self._handle_j_imagegen_activity_menu,
+        )
 
         # Preview widget controls
         # A key is handled by menu system in browse view (Actual Size), keep for thumbnail view

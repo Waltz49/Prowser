@@ -3,7 +3,8 @@
 
 from __future__ import annotations
 
-from typing import List, Optional
+import os
+from typing import Any, Dict, List, Optional
 
 from imagegen_plugins.image_gen_dialog import ImageGenDialog, validate_copies_require_random_seed
 from imagegen_plugins.image_gen_pipeline_modes import finalize_run_values
@@ -29,6 +30,7 @@ class ImageGenInfillDialog(ImageGenDialog):
         *,
         initial_plugin_id: Optional[str] = None,
         initial_prompt: Optional[str] = None,
+        initial_values: Optional[Dict[str, Any]] = None,
         window_title: str = INFILL_IMAGE_DIALOG_TITLE,
     ):
         super().__init__(
@@ -37,6 +39,7 @@ class ImageGenInfillDialog(ImageGenDialog):
             parent,
             initial_plugin_id=initial_plugin_id,
             initial_prompt=initial_prompt,
+            initial_values=initial_values,
             window_title=window_title,
         )
 
@@ -45,16 +48,24 @@ class ImageGenInfillDialog(ImageGenDialog):
         if not validate_copies_require_random_seed(self, values):
             return
 
-        ok, meta, err = export_pixelmator_base_and_mask()
-        if not ok:
-            show_styled_warning(
-                self,
-                "Infill",
-                err or "Could not export base and mask from Pixelmator Pro.",
-            )
-            return
+        base_path = str(values.get("pixelmator_base_path") or "")
+        mask_path = str(values.get("pixelmator_mask_path") or "")
+        if not (
+            base_path
+            and mask_path
+            and os.path.isfile(base_path)
+            and os.path.isfile(mask_path)
+        ):
+            ok, meta, err = export_pixelmator_base_and_mask()
+            if not ok:
+                show_styled_warning(
+                    self,
+                    "Infill",
+                    err or "Could not export base and mask from Pixelmator Pro.",
+                )
+                return
 
-        values.update(persist_pixelmator_exports(meta))
+            values.update(persist_pixelmator_exports(meta))
         save_dialog_settings(self._function, values)
         from imagegen_plugins.image_gen_active_model import save_active_plugin_id_for_function
 

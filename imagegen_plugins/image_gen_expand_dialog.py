@@ -106,6 +106,7 @@ class ImageGenExpandDialog(ImageGenDimensionAspectMixin, QDialog):
         *,
         initial_plugin_id: Optional[str] = None,
         initial_prompt: Optional[str] = None,
+        initial_values: Optional[Dict[str, Any]] = None,
         window_title: str = EXPAND_IMAGE_DIALOG_TITLE,
     ):
         super().__init__(parent)
@@ -128,7 +129,9 @@ class ImageGenExpandDialog(ImageGenDimensionAspectMixin, QDialog):
         if initial is None:
             raise ValueError(f"No available plugins for function {function!r}")
         self.plugin = initial
-        self._load_plugin_state()
+        self._load_plugin_state(
+            saved_override=initial_values if initial_values else None
+        )
 
         apply_image_gen_dialog_shell(
             self, window_title=window_title, min_width=880, min_height=520
@@ -136,6 +139,7 @@ class ImageGenExpandDialog(ImageGenDimensionAspectMixin, QDialog):
         self._build_ui()
         if initial_prompt:
             self.set_prompt_text(initial_prompt)
+        self._apply_initial_placement(initial_values)
 
         self._geometry_restore_attempted = False
         self._geometry_was_restored = False
@@ -265,6 +269,23 @@ class ImageGenExpandDialog(ImageGenDimensionAspectMixin, QDialog):
         layout.addWidget(buttons)
 
         self._connect_canvas_dimension_fields()
+
+    def _apply_initial_placement(
+        self, initial_values: Optional[Dict[str, Any]]
+    ) -> None:
+        if self._canvas is None or not initial_values:
+            return
+        keys = ("placement_x", "placement_y", "placement_w", "placement_h")
+        if not all(k in initial_values for k in keys):
+            return
+        try:
+            px = int(initial_values["placement_x"])
+            py = int(initial_values["placement_y"])
+            pw = int(initial_values["placement_w"])
+            ph = int(initial_values["placement_h"])
+        except (TypeError, ValueError):
+            return
+        self._canvas.set_canvas_placement(px, py, pw, ph)
 
     def _clear_field_rows(self) -> None:
         if self._fields_form is None:

@@ -493,6 +493,7 @@ class ImageGenEditDialog(QDialog):
         source_paths: Optional[List[str]] = None,
         initial_plugin_id: Optional[str] = None,
         initial_prompt: Optional[str] = None,
+        initial_values: Optional[Dict[str, Any]] = None,
         window_title: str = EDIT_IMAGE_DIALOG_TITLE,
     ):
         super().__init__(parent)
@@ -526,7 +527,9 @@ class ImageGenEditDialog(QDialog):
         if initial is None:
             raise ValueError(f"No available plugins for function {function!r}")
         self.plugin = initial
-        self._load_plugin_state()
+        self._load_plugin_state(
+            saved_override=initial_values if initial_values else None
+        )
 
         apply_image_gen_dialog_shell(
             self, window_title=window_title, min_width=880, min_height=520

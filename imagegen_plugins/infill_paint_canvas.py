@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import os
 from typing import List, Optional, Tuple
 
 from PySide6.QtCore import QPoint, QPointF, QRect, QSize, Qt
@@ -101,6 +102,28 @@ class InfillPaintCanvas(QWidget):
         self._overlay_cache = None
         self._redo_stack.clear()
         self.update()
+
+    def load_mask_from_path(self, mask_path: str) -> bool:
+        """Load a saved mask PNG (same dimensions as source, or scaled to fit)."""
+        mask_path = (mask_path or "").strip()
+        if not mask_path or not os.path.isfile(mask_path):
+            return False
+        loaded = QImage(mask_path)
+        if loaded.isNull():
+            return False
+        if loaded.size() != self._mask.size():
+            loaded = loaded.scaled(
+                self._mask.size(),
+                Qt.AspectRatioMode.IgnoreAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+        self._undo_stack.clear()
+        self._redo_stack.clear()
+        self._mask = loaded.convertToFormat(QImage.Format.Format_ARGB32)
+        self._sync_has_paint_from_mask()
+        self._overlay_cache = None
+        self.update()
+        return self._has_paint
 
     def has_paint(self) -> bool:
         return self._has_paint

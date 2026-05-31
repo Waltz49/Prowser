@@ -13,9 +13,9 @@ from PySide6.QtWidgets import (
     QDialogButtonBox,
     QFrame,
     QGraphicsOpacityEffect,
+    QHBoxLayout,
     QLabel,
     QPushButton,
-    QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
@@ -31,10 +31,8 @@ from imagegen_plugins.image_gen_dialog import (
     validate_copies_require_random_seed,
 )
 from imagegen_plugins.image_gen_model_availability import confirm_model_download_if_needed
-from imagegen_plugins.image_gen_model_selector import resolve_initial_plugin
 from imagegen_plugins.image_gen_persistence import (
     load_infill_paint_dialog_geometry_hex,
-    load_dialog_settings,
     save_dialog_settings,
     save_infill_paint_dialog_geometry_hex,
 )
@@ -83,7 +81,7 @@ def active_image_path_for_infill(main_window) -> Optional[str]:
 
 
 class InfillPaintSettingsDialog(ImageGenDialog):
-    """Modal infill settings (model, prompt, steps, etc.) without Pixelmator export."""
+    """Infill model/steps settings; embedded in paint dialog or shown standalone."""
 
     def __init__(
         self,
@@ -91,9 +89,12 @@ class InfillPaintSettingsDialog(ImageGenDialog):
         source_path: str,
         parent=None,
         *,
+        embedded: bool = False,
         initial_plugin_id: Optional[str] = None,
         initial_prompt: Optional[str] = None,
+        initial_values: Optional[Dict[str, Any]] = None,
     ):
+        self._embedded = embedded
         self._source_path = os.path.abspath(source_path)
         super().__init__(
             plugins,
@@ -101,14 +102,21 @@ class InfillPaintSettingsDialog(ImageGenDialog):
             parent,
             initial_plugin_id=initial_plugin_id,
             initial_prompt=initial_prompt,
+            initial_values=initial_values,
             window_title="Infill Settings",
         )
         self.finished.disconnect(self._save_geometry)
+        if embedded:
+            self.setWindowFlags(Qt.Widget)
+            self.setMinimumSize(0, 0)
 
     def _save_geometry(self) -> None:
         pass
 
     def showEvent(self, event):
+        if self._embedded:
+            QWidget.showEvent(self, event)
+            return
         QDialog.showEvent(self, event)
         QTimer.singleShot(0, lambda: _center_styled_dialog_on_screen(self, self.parent()))
         QTimer.singleShot(0, self._raise_and_activate)
@@ -120,9 +128,17 @@ class InfillPaintSettingsDialog(ImageGenDialog):
         super()._build_ui()
         buttons = self.findChild(QDialogButtonBox)
         if buttons is not None:
-            ok_btn = buttons.button(QDialogButtonBox.StandardButton.Ok)
-            if ok_btn is not None:
-                ok_btn.setText("Done")
+            if self._embedded:
+                buttons.hide()
+                layout = self.layout()
+                if layout is not None:
+                    layout.removeWidget(buttons)
+                buttons.setParent(None)
+                buttons.deleteLater()
+            else:
+                ok_btn = buttons.button(QDialogButtonBox.StandardButton.Ok)
+                if ok_btn is not None:
+                    ok_btn.setText("Done")
         if not _SHOW_INFILL_PAINT_PROMPT_AND_IMPORT:
             self._hide_prompt_and_import_rows()
 
@@ -182,7 +198,9 @@ class ImageGenInfillPaintDialog(QDialog):
         main_window,
         parent=None,
         *,
+        initial_plugin_id: Optional[str] = None,
         initial_prompt: Optional[str] = None,
+        initial_values: Optional[Dict[str, Any]] = None,
     ):
         super().__init__(parent or main_window)
         self._plugins = list(plugins)
@@ -192,20 +210,21 @@ class ImageGenInfillPaintDialog(QDialog):
         self._canvas: Optional[InfillPaintCanvas] = None
         self._source_nav: Optional[ImageGenSourceNavRow] = None
         self._values: Dict[str, Any] = {}
+        self._initial_mask_path: str = ""
         self._submit_notice: Optional[QLabel] = None
         self._submit_notice_opacity: Optional[QGraphicsOpacityEffect] = None
         self._submit_notice_timer: Optional[QTimer] = None
         self._submit_notice_fade: Optional[QPropertyAnimation] = None
         self._infill_btn: Optional[QPushButton] = None
+        self._settings: Optional[InfillPaintSettingsDialog] = None
+        self._initial_plugin_id = initial_plugin_id
+        self._initial_prompt = initial_prompt
+        self._initial_values = initial_values
 
-        initial = resolve_initial_plugin(
-            self._plugins,
-            function=FUNCTION_INFILL,
-        )
-        if initial is None:
-            raise ValueError("No available plugins for infill paint")
-        self.plugin = initial
-        self._reload_settings(initial_prompt=initial_prompt)
+        if initial_values:
+            mask_path = str(initial_values.get("pixelmator_mask_path") or "")
+            if mask_path and os.path.isfile(mask_path):
+                self._initial_mask_path = mask_path
 
         apply_image_gen_dialog_shell(
             self,
@@ -214,18 +233,17 @@ class ImageGenInfillPaintDialog(QDialog):
             min_height=600,
         )
         self._build_ui()
+        if self._initial_mask_path and self._canvas is not None:
+            if not self._canvas.load_mask_from_path(self._initial_mask_path):
+                show_styled_warning(
+                    self,
+                    "Infill",
+                    "Could not restore the saved mask; paint a new mask if needed.",
+                )
 
         self._geometry_restore_attempted = False
         self._geometry_was_restored = False
         self.finished.connect(self._save_geometry)
-
-    def _reload_settings(self, *, initial_prompt: Optional[str] = None) -> None:
-        saved = load_dialog_settings(
-            FUNCTION_INFILL, fallback_plugin_id=self.plugin.plugin_id
-        )
-        self._values = self.plugin.merged_values(saved)
-        if initial_prompt:
-            self._values["prompt"] = initial_prompt
 
     def _build_ui(self) -> None:
         layout = QVBoxLayout(self)
@@ -249,16 +267,21 @@ class ImageGenInfillPaintDialog(QDialog):
         install_source_nav_keyboard_shortcuts(self, self._source_nav)
         splitter.add_preview_pane(canvas_host)
 
-        controls_host = QWidget()
-        controls_layout = QVBoxLayout(controls_host)
-        controls_layout.setContentsMargins(8, 0, 0, 0)
-        controls_layout.addStretch(1)
+        self._settings = InfillPaintSettingsDialog(
+            self._plugins,
+            self.source_path,
+            self,
+            embedded=True,
+            initial_plugin_id=self._initial_plugin_id,
+            initial_prompt=self._initial_prompt,
+            initial_values=self._initial_values,
+        )
+        splitter.add_controls_pane(self._settings)
+        layout.addWidget(splitter, 1)
 
-        settings_btn = QPushButton("Settings")
         clear_btn = QPushButton("Clear")
         close_btn = QPushButton("Close")
         self._infill_btn = QPushButton("Infill")
-        settings_btn.clicked.connect(self._on_settings)
         clear_btn.clicked.connect(self._on_clear)
         close_btn.clicked.connect(self.reject)
         self._infill_btn.clicked.connect(self._on_infill)
@@ -277,39 +300,30 @@ class ImageGenInfillPaintDialog(QDialog):
         self._style_submit_notice()
         self._submit_notice.hide()
 
-        for btn in (settings_btn, clear_btn, close_btn, self._infill_btn):
-            controls_layout.addWidget(btn)
-        splitter.add_controls_pane(controls_host, min_width=120)
-        layout.addWidget(splitter, 1)
+        button_row = QHBoxLayout()
+        button_row.addStretch(1)
+        button_row.addWidget(clear_btn)
+        button_row.addWidget(close_btn)
+        button_row.addWidget(self._infill_btn)
+        layout.addLayout(button_row)
 
     def _on_source_image_changed(self, path: str) -> None:
         self.source_path = os.path.abspath(path)
         if self._canvas is not None:
             self._canvas.set_source_path(self.source_path)
+        if self._settings is not None:
+            self._settings._source_path = self.source_path
 
     def _on_clear(self) -> None:
         if self._canvas is not None:
             self._canvas.clear_mask()
 
-    def _on_settings(self) -> None:
-        dlg = InfillPaintSettingsDialog(
-            self._plugins,
-            self.source_path,
-            self,
-            initial_plugin_id=self.plugin.plugin_id,
-            initial_prompt=str(self._values.get("prompt") or ""),
-        )
-        if dlg.exec() != QDialog.DialogCode.Accepted:
-            return
-        values = dlg.accepted_values()
-        new_plugin = dlg.accepted_plugin()
-        if values:
-            self._values = dict(values)
-        if new_plugin is not None:
-            self.plugin = new_plugin
-
     def _collect_run_values(self) -> Dict[str, Any]:
-        return finalize_run_values(self.plugin.pipeline_id, dict(self._values))
+        if self._settings is None:
+            return {}
+        return finalize_run_values(
+            self._settings.plugin.pipeline_id, self._settings.collect_values()
+        )
 
     def _on_infill(self) -> None:
         if self._canvas is None or not self._canvas.has_paint():
@@ -340,15 +354,19 @@ class ImageGenInfillPaintDialog(QDialog):
         values.update(export_meta)
         save_dialog_settings(FUNCTION_INFILL, values)
 
-        if not confirm_model_download_if_needed(self.plugin, self._main_window):
+        if self._settings is None:
+            return
+        if not confirm_model_download_if_needed(
+            self._settings.plugin, self._main_window
+        ):
             return
 
         from imagegen_plugins.image_gen_active_model import set_active_plugin_for_function
 
         set_active_plugin_for_function(
-            self._main_window, FUNCTION_INFILL, self.plugin
+            self._main_window, FUNCTION_INFILL, self._settings.plugin
         )
-        if self._controller.start_generation(self.plugin, values):
+        if self._controller.start_generation(self._settings.plugin, values):
             self._show_submit_notice()
 
     def _style_submit_notice(self) -> None:
@@ -464,6 +482,16 @@ class ImageGenInfillPaintDialog(QDialog):
             self._canvas.setFocus(Qt.FocusReason.OtherFocusReason)
 
     def closeEvent(self, event):
+        if self._settings is not None:
+            try:
+                save_dialog_settings(
+                    FUNCTION_INFILL, self._settings.collect_values()
+                )
+                save_active_plugin_id_for_function(
+                    FUNCTION_INFILL, self._settings.plugin.plugin_id
+                )
+            except Exception:
+                pass
         self._save_geometry()
         super().closeEvent(event)
 

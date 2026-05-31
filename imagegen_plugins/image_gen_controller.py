@@ -166,6 +166,24 @@ class ImageGenController(QObject):
             )
         return rows
 
+    def job_record_for_row(
+        self, row: int
+    ) -> tuple[ImageGenModelPlugin, Dict[str, Any]] | None:
+        """Return (plugin, values) for a queue table row (active or pending)."""
+        rows = self.queue_snapshot()
+        if row < 0 or row >= len(rows):
+            return None
+        entry = rows[row]
+        if entry.is_active:
+            plugin = self._active_plugin
+            if plugin is None:
+                return None
+            return plugin, dict(self._pending_values)
+        for job in self._queue:
+            if job.job_id == entry.job_id:
+                return job.plugin, dict(job.values)
+        return None
+
     def start_generation(
         self, plugin: ImageGenModelPlugin, values: Dict[str, Any]
     ) -> bool:

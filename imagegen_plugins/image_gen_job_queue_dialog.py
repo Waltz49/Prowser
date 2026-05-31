@@ -236,6 +236,37 @@ def _trash_button_stylesheet() -> str:
     """
 
 
+def _edit_button_stylesheet() -> str:
+    t = get_active_theme()
+    edit_url = f"url({asset_path('edit_icon.png')})"
+    edit_hover_url = f"url({asset_path('edit_icon_hover.png')})"
+    return f"""
+        QPushButton {{
+            background-color: {t.dialog_background_hex};
+            border: 1px solid {t.border_default_hex};
+            border-radius: 3px;
+            padding: 0px;
+            min-width: 22px;
+            max-width: 22px;
+            min-height: 22px;
+            max-height: 22px;
+            image: {edit_url};
+        }}
+        QPushButton:focus {{
+            border: 1px solid {t.current_image_border_color_hex};
+            outline: none;
+        }}
+        QPushButton:hover {{
+            background-color: {t.tab_button_hover_bg_hex};
+            border: 1px solid {t.tab_button_hover_bg_hex};
+            image: {edit_hover_url};
+        }}
+        QPushButton:pressed {{
+            background-color: {t.sidebar_splitter_handle_hex};
+        }}
+    """
+
+
 class ImageGenJobQueueDialog(QDialog):
     """Scrollable table of active and queued image-generation jobs."""
 
@@ -440,18 +471,26 @@ class ImageGenJobQueueDialog(QDialog):
         )
 
         for row_idx, row in enumerate(rows):
+            edit_btn = QPushButton()
+            edit_btn.setToolTip("Edit job settings…")
+            edit_btn.setStyleSheet(_edit_button_stylesheet())
+            edit_btn.clicked.connect(
+                lambda _checked=False, r=row_idx: self._on_edit_row(r)
+            )
             cancel_btn = QPushButton()
             cancel_btn.setToolTip("Cancel job")
             cancel_btn.setStyleSheet(_trash_button_stylesheet())
             cancel_btn.clicked.connect(
                 lambda _checked=False, r=row_idx: self._on_cancel_row(r)
             )
-            cancel_wrap = QWidget()
-            _apply_job_queue_cell_background(cancel_wrap)
-            cancel_layout = QHBoxLayout(cancel_wrap)
-            cancel_layout.setContentsMargins(4, 0, 4, 0)
-            cancel_layout.addWidget(cancel_btn, alignment=Qt.AlignmentFlag.AlignCenter)
-            self._table.setCellWidget(row_idx, 0, cancel_wrap)
+            action_wrap = QWidget()
+            _apply_job_queue_cell_background(action_wrap)
+            action_layout = QVBoxLayout(action_wrap)
+            action_layout.setContentsMargins(4, 0, 4, 0)
+            action_layout.setSpacing(4)
+            action_layout.addWidget(edit_btn, alignment=Qt.AlignmentFlag.AlignCenter)
+            action_layout.addWidget(cancel_btn, alignment=Qt.AlignmentFlag.AlignCenter)
+            self._table.setCellWidget(row_idx, 0, action_wrap)
 
             info_browser = QTextBrowser()
             configure_task_info_text_browser(
@@ -475,6 +514,15 @@ class ImageGenJobQueueDialog(QDialog):
 
             row_h = max(_THUMB_SIZE + _ROW_PAD, browser_h + _ROW_PAD)
             self._table.setRowHeight(row_idx, row_h)
+
+    def _on_edit_row(self, row: int) -> None:
+        record = self._controller.job_record_for_row(row)
+        if record is None:
+            return
+        plugin, values = record
+        from imagegen_plugins.image_gen_menu import open_imagegen_dialog_from_job
+
+        open_imagegen_dialog_from_job(self.main_window, plugin, values)
 
     def _on_cancel_row(self, row: int) -> None:
         rows = self._controller.queue_snapshot()
