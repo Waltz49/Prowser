@@ -831,13 +831,23 @@ class ImageGenController(QObject):
                             plugin, values, output_path
                         )
                     )
+                    elapsed = self._live_generation_elapsed_seconds()
+                    estimate = None
+                    if elapsed is not None:
+                        estimate = self._estimate_remaining_seconds(
+                            elapsed=elapsed,
+                            completed_steps=step,
+                            total_steps=total,
+                            seconds_per_step=self._step_seconds_per_step,
+                        )
                     make_readable_user_comment_before_browse(
                         output_path,
                         model_name=plugin.menu_label(values),
                         values=values,
-                        elapsed_seconds=self._live_generation_elapsed_seconds(),
+                        elapsed_seconds=elapsed,
                         intermediate_step=step,
                         intermediate_total=total,
+                        estimate_seconds=estimate,
                         reference_entries=ref_entries,
                         allow_cross_directory_references=allow_cross_dir,
                     )

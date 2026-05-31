@@ -173,18 +173,12 @@ def _steps_display_with_progress(
     *,
     step: int | None = None,
     step_total: int | None = None,
-    elapsed_seconds: float | None = None,
-    estimate_seconds: float | None = None,
 ) -> str:
-    """Steps cell text — matches :func:`update_status_html_steps_progress` inline timing."""
+    """Steps cell text — step count only; timing lives on the Elapsed row."""
     steps_value = fields_steps or ""
     if step is not None and step_total is not None and step_total > 0:
         step_i = max(0, min(int(step), int(step_total)))
         steps_value = f"{step_i} of {int(step_total)}"
-        if step_i > 0 and elapsed_seconds is not None:
-            steps_value += f"   {_format_duration(elapsed_seconds)}"
-            if estimate_seconds is not None and estimate_seconds > 0:
-                steps_value += f"   (Est: {_format_duration(estimate_seconds)})"
     return steps_value
 
 
@@ -206,7 +200,7 @@ def refresh_expand_task_status_html_for_display(
     insert_rows: list[str] = []
     if elapsed_seconds is not None:
         insert_rows.append(
-            _table_row("Elapsed:", _format_duration(elapsed_seconds))
+            _table_row("Elapsed:", _format_elapsed_cell_value(elapsed_seconds))
         )
 
     ref_paths = _normalize_reference_paths(reference_paths, source_path)
@@ -394,10 +388,21 @@ def format_image_generation_queue_status_html(
         fields.get("steps", ""),
         step=step,
         step_total=step_total,
-        elapsed_seconds=elapsed_seconds,
-        estimate_seconds=estimate_seconds,
     )
     rows = _generation_status_table_rows(fields, steps_value=steps_value)
+    if (
+        step is not None
+        and step_total is not None
+        and step_total > 0
+        and step > 0
+        and elapsed_seconds is not None
+    ):
+        rows.append(
+            _table_row(
+                "Elapsed:",
+                _format_elapsed_cell_value(elapsed_seconds, estimate_seconds),
+            )
+        )
 
     ref_row = _references_row_for_values(
         plugin, values, source_path=source_path, base_path=base_path
@@ -442,6 +447,20 @@ def _format_duration(seconds: float) -> str:
     return f"{minutes}:{secs:02d}"
 
 
+_ELAPSED_EST_SEPARATOR = "\u00A0" * 5
+
+
+def _format_elapsed_cell_value(
+    elapsed_seconds: float,
+    estimate_seconds: float | None = None,
+) -> str:
+    """Elapsed row cell: duration, optional estimate after five NBSPs."""
+    value = _format_duration(elapsed_seconds)
+    if estimate_seconds is not None and estimate_seconds > 0:
+        value += f"{_ELAPSED_EST_SEPARATOR}Est: {_format_duration(estimate_seconds)}"
+    return value
+
+
 _TIME_RE = r"\d+:\d{2}(?::\d{2})?"
 _STEPS_ROW_RE = re.compile(
     rf"(<tr><td><b>Steps:</b></td><td>)[^<]*(?:   {_TIME_RE})?"
@@ -457,24 +476,25 @@ def update_status_html_steps_progress(
     elapsed_seconds: float | None = None,
     estimate_seconds: float | None = None,
 ) -> str:
-    """Replace the Steps detail line in saved status HTML."""
+    """Replace the Steps line and refresh the Elapsed row with live timing."""
     if not html_text or total <= 0:
         return html_text
     step = max(0, min(int(step), int(total)))
     total = int(total)
 
     step_value = f"{step} of {total}"
-    if step > 0 and elapsed_seconds is not None:
-        step_value += f"   {_format_duration(elapsed_seconds)}"
-        if estimate_seconds is not None and estimate_seconds > 0:
-            step_value += f"   (Est: {_format_duration(estimate_seconds)})"
-
     updated, count = _STEPS_ROW_RE.subn(
         lambda m: m.group(1) + _escape(step_value) + m.group(2),
         html_text,
         count=1,
     )
-    return updated if count else html_text
+    html_text = updated if count else html_text
+    if step > 0 and elapsed_seconds is not None:
+        elapsed_cell = _escape(
+            _format_elapsed_cell_value(elapsed_seconds, estimate_seconds)
+        )
+        html_text = _set_elapsed_row(html_text, elapsed_cell)
+    return html_text
 
 
 def _set_elapsed_row(html_text: str, elapsed_cell: str) -> str:
@@ -521,8 +541,8 @@ def freeze_status_html_generation_elapsed(
         )
         if count:
             html_text = updated
-    elapsed_str = _format_duration(elapsed_seconds)
-    return _set_elapsed_row(html_text, _escape(elapsed_str))
+    elapsed_cell = _escape(_format_elapsed_cell_value(elapsed_seconds))
+    return _set_elapsed_row(html_text, elapsed_cell)
 
 
 _ELAPSED_ROW_RE = _EXPAND_ELAPSED_ROW_RE

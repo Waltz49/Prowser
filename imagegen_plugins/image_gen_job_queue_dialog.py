@@ -472,7 +472,7 @@ class ImageGenJobQueueDialog(QDialog):
 
         for row_idx, row in enumerate(rows):
             edit_btn = QPushButton()
-            edit_btn.setToolTip("Edit job settings…")
+            edit_btn.setToolTip("Replicate job settings…")
             edit_btn.setStyleSheet(_edit_button_stylesheet())
             edit_btn.clicked.connect(
                 lambda _checked=False, r=row_idx: self._on_edit_row(r)

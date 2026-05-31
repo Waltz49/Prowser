@@ -256,6 +256,7 @@ def format_image_exif_prompt(
     guidance: Optional[float] = None,
     intermediate_step: Optional[int] = None,
     intermediate_total: Optional[int] = None,
+    estimate_seconds: Optional[float] = None,
 ) -> str:
     """EXIF UserComment body: Image Model block then Prompt."""
     prompt_text = (prompt_text or "").strip()
@@ -289,11 +290,20 @@ def format_image_exif_prompt(
         and intermediate_total is not None
         and int(intermediate_step) != int(intermediate_total)
     ):
-        intermediate_line = (
-            "Intermediate:\n"
-            f"Generated at Step {int(intermediate_step)} "
-            f"of {int(intermediate_total)}"
-        )
+        intermediate_parts = [
+            "Intermediate:",
+            (
+                f"Generated at Step {int(intermediate_step)} "
+                f"of {int(intermediate_total)}"
+            ),
+        ]
+        if estimate_seconds is not None and estimate_seconds > 0:
+            from imagegen_plugins.model_task_status_info import _format_duration
+
+            intermediate_parts.append(
+                f"Estimate: {_format_duration(estimate_seconds)} remaining"
+            )
+        intermediate_line = "\n".join(intermediate_parts)
 
     if model_name:
         iter_suffix = f" [{iterations}]" if iterations is not None else ""
@@ -494,6 +504,7 @@ def format_exif_comment_from_mflux_metadata(
     elapsed_seconds: Optional[float] = None,
     intermediate_step: Optional[int] = None,
     intermediate_total: Optional[int] = None,
+    estimate_seconds: Optional[float] = None,
     seed: Optional[int] = None,
 ) -> str:
     """Build Image Model / Prompt EXIF body from mflux JSON metadata."""
@@ -539,6 +550,7 @@ def format_exif_comment_from_mflux_metadata(
         guidance=guidance,
         intermediate_step=intermediate_step,
         intermediate_total=intermediate_total,
+        estimate_seconds=estimate_seconds,
     )
 
 
@@ -581,6 +593,7 @@ def make_readable_user_comment_before_browse(
     elapsed_seconds: Optional[float] = None,
     intermediate_step: int,
     intermediate_total: int,
+    estimate_seconds: Optional[float] = None,
     seed: Optional[int] = None,
     reference_entries: Optional[List[Tuple[str, Optional[str]]]] = None,
     allow_cross_directory_references: bool = False,
@@ -610,6 +623,7 @@ def make_readable_user_comment_before_browse(
             elapsed_seconds=elapsed_seconds,
             intermediate_step=intermediate_step,
             intermediate_total=intermediate_total,
+            estimate_seconds=estimate_seconds,
             seed=seed,
         )
     else:
@@ -630,6 +644,7 @@ def make_readable_user_comment_before_browse(
             guidance=values.get("guidance_scale"),
             intermediate_step=intermediate_step,
             intermediate_total=intermediate_total,
+            estimate_seconds=estimate_seconds,
         )
     if not write_exif_user_comment(
         image_path,
