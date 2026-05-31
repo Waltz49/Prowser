@@ -194,7 +194,10 @@ class InformationSidebar(QWidget):
         "create://": "Create an image from text...",
         "editai://": "Edit with AI",
         "delete://": "Delete user comment",
-        "reflevel://": "Open this image and its EXIF references together",
+        "reflevel://": (
+            "click: Show the reference graph for complete history.\n"
+            f"{ALT_SYMBOL}+click: Show only this image and its direct references "
+        ),
     }
 
     _LEGACY_REF_MD5_LINE = re.compile(r"^[0-9a-fA-F]{32}$")
@@ -455,29 +458,43 @@ class InformationSidebar(QWidget):
         """Handle click on speak/copy/delete links in the information description area."""
         from exif_utils import truncate_usercomment_before_prompt
         if url.toString() == "reflevel://":
+            from PySide6.QtWidgets import QApplication
+
             mw = self.main_window
             current = getattr(mw, "current_image_path", None)
             if not current or not os.path.isfile(current):
                 return
             image_dir = os.path.dirname(current) or ""
             entries = self._get_reference_entries_for_path(current)
-            paths = self._collect_reference_chain_paths(image_dir, current, entries)
-            if len(paths) < 2:
-                return
+            option_held = bool(
+                QApplication.keyboardModifiers() & Qt.KeyboardModifier.AltModifier
+            )
+            if option_held:
+                paths, _resolved = self._resolve_exif_reference_paths(
+                    image_dir, current, entries
+                )
+                if not paths:
+                    return
+                config = {"files": paths, "sort_mode": "custom"}
+            else:
+                paths = self._collect_reference_chain_paths(
+                    image_dir, current, entries
+                )
+                if len(paths) < 2:
+                    return
+                config = {
+                    "files": paths,
+                    "sort_mode": "custom",
+                    "presentation": "reference_graph",
+                    "focus_path": current,
+                }
             if hasattr(mw, "directory_stack_history_handler"):
                 h = mw.directory_stack_history_handler
                 st = h.capture_current_state()
                 if st and not h.is_duplicate_state(st):
                     h.backward_stack.append(st)
                     h.forward_stack.clear()
-            mw.refresh_from_configuration(
-                {
-                    "files": paths,
-                    "sort_mode": "custom",
-                    "presentation": "reference_graph",
-                    "focus_path": current,
-                }
-            )
+            mw.refresh_from_configuration(config)
             if hasattr(mw, "update_sort_menu_checkmarks"):
                 mw.update_sort_menu_checkmarks()
             if hasattr(mw, "save_sorting_settings"):
