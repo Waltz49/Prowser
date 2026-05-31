@@ -505,8 +505,13 @@ class SlideshowManager:
         if (getattr(self, '_current_opacity_anim', None) and 
             self._current_opacity_anim.state() == QPropertyAnimation.Running):
             return
-            
+
+        prev_index = self._slideshow_current_index
         self._advance_slideshow_index()
+
+        # Back-and-forth endpoint pause: index unchanged — hold on current slide
+        if self._slideshow_current_index == prev_index:
+            return
         
         # Note: Don't call highlight_image() here during slideshow to avoid interference
         # It will be called after animation finishes in slideshow_animation_finished()
