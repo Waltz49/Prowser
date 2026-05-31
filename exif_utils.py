@@ -580,12 +580,22 @@ def get_usercomment_from_path(file_path: str) -> Optional[bytes]:
     if not os.path.exists(file_path):
         return None
     try:
+        import piexif
         from PIL import Image
+
         with Image.open(file_path) as img:
             exif = _exif_dict_from_pil(img)
-            if not exif:
-                return None
-            val = exif.get(TAG_USERCOMMENT)
+            val = exif.get(TAG_USERCOMMENT) if exif else None
+            if val is None:
+                exif_bytes = get_exif_bytes_for_piexif_from_pil(img)
+                if exif_bytes:
+                    try:
+                        exif_dict = piexif.load(exif_bytes)
+                        val = (exif_dict.get("Exif") or {}).get(
+                            piexif.ExifIFD.UserComment
+                        )
+                    except Exception:
+                        val = None
             if val is None:
                 return None
             if isinstance(val, bytes):
@@ -734,18 +744,41 @@ def restore_usercomment_to_file(file_path: str, usercomment: bytes) -> bool:
             return True
         elif is_png or is_tiff:
             with Image.open(file_path) as img:
-                exif = img.getexif()
-                if exif is None:
-                    exif = {}
-                exif[TAG_USERCOMMENT] = usercomment
+                exif_bytes = get_exif_bytes_for_piexif_from_pil(img)
+                if exif_bytes:
+                    try:
+                        exif_dict = piexif.load(exif_bytes)
+                    except Exception:
+                        exif_dict = {
+                            "0th": {},
+                            "Exif": {},
+                            "GPS": {},
+                            "1st": {},
+                            "thumbnail": None,
+                        }
+                else:
+                    exif_dict = {
+                        "0th": {},
+                        "Exif": {},
+                        "GPS": {},
+                        "1st": {},
+                        "thumbnail": None,
+                    }
+                exif_dict.setdefault("Exif", {})
+                exif_dict["Exif"][piexif.ExifIFD.UserComment] = usercomment
+                new_exif = piexif.dump(exif_dict)
                 temp_path = file_path + ".tmp"
                 if is_png:
-                    img.save(temp_path, 'PNG', exif=exif)
+                    img.save(temp_path, "PNG", exif=new_exif)
                 else:
-                    img.save(temp_path, 'TIFF', exif=exif)
-                os.replace(temp_path, file_path)
-                os.utime(file_path, (file_atime, file_mtime))
-                return True
+                    exif = img.getexif()
+                    if exif is None:
+                        exif = {}
+                    exif[TAG_USERCOMMENT] = usercomment
+                    img.save(temp_path, "TIFF", exif=exif)
+            os.replace(temp_path, file_path)
+            os.utime(file_path, (file_atime, file_mtime))
+            return True
     except Exception as e:
         print(f"DEBUG restore_usercomment_to_file: failed for {file_path}: {e}")
     return False

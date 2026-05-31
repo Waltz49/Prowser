@@ -1155,6 +1155,14 @@ class InformationSidebar(QWidget):
                 if desc and not (desc.startswith("b'") or desc.startswith('b"')):
                     desc = desc.strip()
                     if desc:
+                            try:
+                                from imagegen_plugins.image_gen_naming import (
+                                    format_user_comment_text_for_display,
+                                )
+
+                                desc = format_user_comment_text_for_display(desc)
+                            except Exception:
+                                pass
                             speakable_plain_text = desc
                             # Escape user/EXIF text so embedded HTML is not interpreted by QTextBrowser;
                             # then newlines and known section prefixes become markup.

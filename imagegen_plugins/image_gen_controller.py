@@ -812,6 +812,7 @@ class ImageGenController(QObject):
         if not output_path or not os.path.isfile(output_path):
             return
         # Stepwise previews: match final Image Model / Prompt EXIF (skip last step).
+        mw = self.main_window
         if not force_fullscreen:
             step = self._live_step
             total = self._live_step_total
@@ -840,9 +841,21 @@ class ImageGenController(QObject):
                         reference_entries=ref_entries,
                         allow_cross_directory_references=allow_cross_dir,
                     )
-                except Exception:
-                    pass
-        mw = self.main_window
+                    current = getattr(mw, "current_image_path", None)
+                    sidebar = getattr(mw, "right_sidebar", None)
+                    if (
+                        sidebar is not None
+                        and current
+                        and os.path.normpath(current)
+                        == os.path.normpath(output_path)
+                        and hasattr(sidebar, "show_image_info_overlay")
+                    ):
+                        sidebar.show_image_info_overlay()
+                except Exception as e:
+                    print(
+                        "DEBUG make_readable_user_comment_before_browse: "
+                        f"{e}"
+                    )
         if hasattr(mw, "set_date_sort"):
             mw.set_date_sort(reverse=False, notify=False)
         if not hasattr(mw, "refresh_from_configuration"):
