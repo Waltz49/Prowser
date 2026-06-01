@@ -52,22 +52,28 @@ def thumbnail_paths_for_values(
     return paths
 
 
+def refresh_queued_job_status(job: QueuedGenerateJob) -> None:
+    """Rebuild status HTML after queue-row series edits (copies / refinement)."""
+    payload = job.plugin.build_payload(job.values, _PREVIEW_OUTPUT)
+    job.status_html = format_image_generation_queue_status_html(
+        job.plugin,
+        job.values,
+        payload,
+        series_copies_total=job.copies_total,
+    )
+
+
 def make_queued_generate_job(
     plugin: ImageGenModelPlugin, values: dict[str, Any], *, copies_total: int
 ) -> QueuedGenerateJob:
-    payload = plugin.build_payload(values, _PREVIEW_OUTPUT)
-    status_html = format_image_generation_queue_status_html(
-        plugin,
-        values,
-        payload,
-        series_copies_total=copies_total,
-    )
-    return QueuedGenerateJob(
+    job = QueuedGenerateJob(
         job_id=uuid.uuid4().hex,
         plugin=plugin,
         values=dict(values),
-        status_html=status_html,
+        status_html="",
         thumbnail_paths=thumbnail_paths_for_values(plugin, values),
         copies_total=copies_total,
         full_prompt=str(values.get("prompt") or "").strip(),
     )
+    refresh_queued_job_status(job)
+    return job

@@ -367,6 +367,7 @@ class ImageBrowserConfig:
             'status_bar_visible': True,  # Default to showing status bar
             'thumbnail_filename_visible': False,  # Default to hiding thumbnail filenames
             'preview_visible': False,  # Default to hiding preview panel
+            'jobs_visible': False,  # Default to hiding jobs pane in combined sidebar
             'sidebar_width': 300,  # Default width for combined sidebar (tree + preview)
             'right_sidebar_width': 300,  # Default width for right sidebar (info panel)
             'right_sidebar_visible': False,  # Default to hiding right sidebar (legacy; derived from information/shortcuts)

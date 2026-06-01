@@ -38,6 +38,7 @@ from imagegen_plugins.model_task_queue import (
     QueuedGenerateJob,
     QueueRowSnapshot,
     make_queued_generate_job,
+    refresh_queued_job_status,
     thumbnail_paths_for_values,
 )
 from imagegen_plugins.model_task_status_info import (
@@ -496,6 +497,102 @@ class ImageGenController(QObject):
             return False
         self._pending_values["use_last_generated_image"] = enabled
         self.task_status_info_changed.emit()
+        self.queue_changed.emit()
+        return True
+
+    def _queued_job_by_id(self, job_id: str) -> QueuedGenerateJob | None:
+        for job in self._queue:
+            if job.job_id == job_id:
+                return job
+        return None
+
+    def series_remaining_after_for_row(self, row: int) -> int:
+        """Pending images after the current one (active) or after the first (queued)."""
+        rows = self.queue_snapshot()
+        if row < 0 or row >= len(rows):
+            return 0
+        entry = rows[row]
+        if entry.is_active:
+            return self.active_series_remaining_after()
+        job = self._queued_job_by_id(entry.job_id)
+        if job is None:
+            return 0
+        return max(0, job.copies_total - 1)
+
+    def can_add_series_cycle_for_row(self, row: int) -> bool:
+        rows = self.queue_snapshot()
+        if row < 0 or row >= len(rows):
+            return False
+        if rows[row].is_active:
+            return self.can_add_active_series_cycle()
+        job = self._queued_job_by_id(rows[row].job_id)
+        return job is not None and job.copies_total < _COPIES_MAX
+
+    def add_series_cycle_for_row(self, row: int) -> bool:
+        rows = self.queue_snapshot()
+        if row < 0 or row >= len(rows):
+            return False
+        if rows[row].is_active:
+            return self.add_active_series_cycle()
+        return self._adjust_queued_series_total(row, 1)
+
+    def subtract_series_remaining_for_row(self, row: int) -> bool:
+        rows = self.queue_snapshot()
+        if row < 0 or row >= len(rows):
+            return False
+        if rows[row].is_active:
+            return self.subtract_active_series_remaining()
+        return self._adjust_queued_series_total(row, -1)
+
+    def series_refinement_enabled_for_row(self, row: int) -> bool:
+        record = self.job_record_for_row(row)
+        if record is None:
+            return False
+        _, values = record
+        return bool(values.get("use_last_generated_image", False))
+
+    def set_series_refinement_for_row(self, row: int, enabled: bool) -> bool:
+        rows = self.queue_snapshot()
+        if row < 0 or row >= len(rows):
+            return False
+        if rows[row].is_active:
+            return self.set_active_series_refinement(enabled)
+        if self.series_remaining_after_for_row(row) <= 0:
+            return False
+        job = self._queued_job_by_id(rows[row].job_id)
+        if job is None:
+            return False
+        enabled = bool(enabled)
+        if bool(job.values.get("use_last_generated_image", False)) == enabled:
+            return False
+        job.values["use_last_generated_image"] = enabled
+        refresh_queued_job_status(job)
+        self.queue_changed.emit()
+        return True
+
+    def _adjust_queued_series_total(self, row: int, delta: int) -> bool:
+        if delta == 0:
+            return False
+        rows = self.queue_snapshot()
+        if row < 0 or row >= len(rows) or rows[row].is_active:
+            return False
+        job = self._queued_job_by_id(rows[row].job_id)
+        if job is None:
+            return False
+        remaining = max(0, job.copies_total - 1)
+        if delta > 0:
+            if job.copies_total >= _COPIES_MAX:
+                return False
+            new_total = job.copies_total + 1
+        else:
+            if remaining <= 0:
+                return False
+            new_total = job.copies_total - 1
+        if new_total == job.copies_total:
+            return False
+        job.copies_total = new_total
+        job.values["copies"] = new_total
+        refresh_queued_job_status(job)
         self.queue_changed.emit()
         return True
 

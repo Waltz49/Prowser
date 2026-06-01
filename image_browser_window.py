@@ -1369,6 +1369,7 @@ class ImageBrowserWindow(QMainWindow):
         
         # Load preview visibility setting
         self.preview_visible = saved_settings.get('preview_visible', False)
+        self.jobs_visible = saved_settings.get('jobs_visible', False)
         
         # Single width for the combined sidebar widget
         self.sidebar_width = saved_settings.get('sidebar_width', 300)
@@ -1398,6 +1399,7 @@ class ImageBrowserWindow(QMainWindow):
         # Connect signals from combined sidebar
         self.combined_sidebar.tree_visibility_changed.connect(self._on_tree_visibility_changed)
         self.combined_sidebar.preview_visibility_changed.connect(self._on_preview_visibility_changed)
+        self.combined_sidebar.jobs_visibility_changed.connect(self._on_jobs_visibility_changed)
         self.combined_sidebar.widget_resized.connect(self._on_sidebar_resized)
         
         # Create focusable container for file tree
@@ -1442,10 +1444,16 @@ class ImageBrowserWindow(QMainWindow):
         # Create preview widget
         self.preview_widget = PreviewWidget(self)
         self.preview_widget.setFocusPolicy(Qt.NoFocus)  # Not in tab order
+
+        from sidebar_jobs_widget import SidebarJobsWidget
+
+        self.sidebar_jobs_widget = SidebarJobsWidget(self)
+        self.sidebar_jobs_widget.setFocusPolicy(Qt.NoFocus)
         
         # Set widgets in combined sidebar
         self.combined_sidebar.set_tree_widget(self.tree_container)
         self.combined_sidebar.set_preview_widget(self.preview_widget)
+        self.combined_sidebar.set_jobs_widget(self.sidebar_jobs_widget)
         
         # Create main content area
         self.main_content_widget = QWidget()
@@ -1502,7 +1510,7 @@ class ImageBrowserWindow(QMainWindow):
         # Set splitter sizes IMMEDIATELY after adding widgets to prevent Qt from calculating default sizes
         # Use a large initial width estimate - will be corrected once window is shown
         estimated_width = 1920  # Reasonable default for most screens
-        left_width = self.sidebar_width if (self.file_tree_visible or self.preview_visible) else 0
+        left_width = self.sidebar_width if self._any_left_sidebar_pane_visible() else 0
         right_width = self.right_sidebar_width if self.right_sidebar_visible else 0
         main_width = estimated_width - left_width - right_width
         self._set_splitter_sizes_safe([left_width, main_width, right_width])
@@ -1557,6 +1565,7 @@ class ImageBrowserWindow(QMainWindow):
         # overriding the saved width during initialization
         self.combined_sidebar.tree_visibility_changed.disconnect()
         self.combined_sidebar.preview_visibility_changed.disconnect()
+        self.combined_sidebar.jobs_visibility_changed.disconnect()
         
         # Set initial splitter sizes based on sidebar visibility
         # Use a timer to ensure the splitter has been properly sized
@@ -1571,7 +1580,7 @@ class ImageBrowserWindow(QMainWindow):
             right_width = 0
             
             # Calculate left sidebar width using saved width
-            if self.file_tree_visible or self.preview_visible:
+            if self._any_left_sidebar_pane_visible():
                 left_width = self.sidebar_width
             
             # Calculate right sidebar width
@@ -1601,6 +1610,7 @@ class ImageBrowserWindow(QMainWindow):
             # Set visibility states (handlers are disconnected so they won't override sizes)
             self.combined_sidebar.set_tree_visible(self.file_tree_visible)
             self.combined_sidebar.set_preview_visible(self.preview_visible)
+            self.combined_sidebar.set_jobs_visible(self.jobs_visible)
             
             # Update preview widget's internal visibility flag
             self.preview_widget.preview_visible = self.preview_visible
@@ -1616,12 +1626,13 @@ class ImageBrowserWindow(QMainWindow):
             # Reconnect visibility change handlers
             self.combined_sidebar.tree_visibility_changed.connect(self._on_tree_visibility_changed)
             self.combined_sidebar.preview_visibility_changed.connect(self._on_preview_visibility_changed)
+            self.combined_sidebar.jobs_visibility_changed.connect(self._on_jobs_visibility_changed)
             
             # Enforce saved width after initialization completes
             def enforce_saved_width():
                 if self.main_splitter.width() > 0:
                     total_width = self.main_splitter.width()
-                    left_width = self.sidebar_width if (self.file_tree_visible or self.preview_visible) else 0
+                    left_width = self.sidebar_width if self._any_left_sidebar_pane_visible() else 0
                     right_width = self.right_sidebar_width if self.right_sidebar_visible else 0
                     main_width = total_width - left_width - right_width
                     self._set_splitter_sizes_safe([left_width, main_width, right_width])
@@ -2132,6 +2143,24 @@ class ImageBrowserWindow(QMainWindow):
             if getattr(self, 'list_view_container', None):
                 QTimer.singleShot(100, lambda: self.list_view_container.canvas.setFocus())
 
+    def show_jobs_pane(self) -> bool:
+        """Show the jobs pane in the combined sidebar (idempotent)."""
+        if hasattr(self, "combined_sidebar"):
+            self.combined_sidebar.set_jobs_visible(True)
+            return self.combined_sidebar.is_jobs_visible()
+        return False
+
+    def toggle_jobs(self):
+        """Toggle the jobs pane in the combined sidebar."""
+        if hasattr(self, "sidebar_manager"):
+            return self.sidebar_manager.toggle_jobs()
+        if hasattr(self, "combined_sidebar"):
+            self.combined_sidebar.set_jobs_visible(
+                not self.combined_sidebar.is_jobs_visible()
+            )
+            return self.combined_sidebar.is_jobs_visible()
+        return False
+
     def toggle_preview(self):
         """Toggle the visibility of the preview widget and resize canvas accordingly"""
         if hasattr(self, 'combined_sidebar'):
@@ -2186,7 +2215,7 @@ class ImageBrowserWindow(QMainWindow):
                 self.preview_widget.hide()
                 # Hide sidebar if no components are visible
                 total_width = self.main_splitter.width()
-                if not self.combined_sidebar.is_tree_visible() and not self.combined_sidebar.is_preview_visible():
+                if not self._any_left_sidebar_pane_visible():
                     self._set_splitter_sizes_safe([0, total_width])
                 else:
                     self._set_splitter_sizes_safe([self.sidebar_width, total_width - self.sidebar_width])
@@ -2239,8 +2268,8 @@ class ImageBrowserWindow(QMainWindow):
             left_width = 0
             right_width = 0
             
-            # Show left sidebar if file tree or preview is visible
-            if self.file_tree_visible or self.preview_visible:
+            # Show left sidebar if any combined pane is visible
+            if self._any_left_sidebar_pane_visible():
                 left_width = self.sidebar_width if current_left_width == 0 else current_left_width
                 self.combined_sidebar.show()
             else:
@@ -2392,7 +2421,7 @@ class ImageBrowserWindow(QMainWindow):
                     # Enforce saved width after adding widget to prevent Qt from recalculating
                     if self.main_splitter.width() > 0:
                         total_width = self.main_splitter.width()
-                        left_width = self.sidebar_width if (self.file_tree_visible or self.preview_visible) else 0
+                        left_width = self.sidebar_width if self._any_left_sidebar_pane_visible() else 0
                         right_width = self.right_sidebar_width if self.right_sidebar_visible else 0
                         main_width = total_width - left_width - right_width
                         self._set_splitter_sizes_safe([left_width, main_width, right_width])
@@ -2498,6 +2527,19 @@ class ImageBrowserWindow(QMainWindow):
         fake_event = QResizeEvent(current_size, current_size)
         self.resizeEvent(fake_event)
     
+    def _any_left_sidebar_pane_visible(self) -> bool:
+        if self.file_tree_visible or self.preview_visible:
+            return True
+        if getattr(self, "jobs_visible", False):
+            return True
+        if getattr(self, "combined_sidebar", None):
+            return (
+                self.combined_sidebar.is_tree_visible()
+                or self.combined_sidebar.is_preview_visible()
+                or self.combined_sidebar.is_jobs_visible()
+            )
+        return False
+
     def _on_tree_visibility_changed(self, visible):
         """Handle tree visibility changes from combined sidebar"""
         self.file_tree_visible = visible
@@ -2538,7 +2580,7 @@ class ImageBrowserWindow(QMainWindow):
         current_sizes = self.main_splitter.sizes()
         right_width = current_sizes[2] if len(current_sizes) > 2 else (self.right_sidebar_width if getattr(self, 'right_sidebar_visible', None) else 0)
         
-        if visible or self.combined_sidebar.is_preview_visible():
+        if visible or self.combined_sidebar.is_preview_visible() or self.combined_sidebar.is_jobs_visible():
             left_width = self.sidebar_width
             main_width = total_width - left_width - right_width
             self._set_splitter_sizes_safe([left_width, main_width, right_width])
@@ -2602,7 +2644,11 @@ class ImageBrowserWindow(QMainWindow):
         current_left_width = current_sizes[0] if len(current_sizes) > 0 else 0
         
         # Calculate new left_width
-        if visible or self.combined_sidebar.is_tree_visible():
+        if (
+            visible
+            or self.combined_sidebar.is_tree_visible()
+            or self.combined_sidebar.is_jobs_visible()
+        ):
             new_left_width = self.sidebar_width
             main_width = total_width - new_left_width - right_width
             self._set_splitter_sizes_safe([new_left_width, main_width, right_width])
@@ -2628,6 +2674,56 @@ class ImageBrowserWindow(QMainWindow):
         self._preview_was_visible = visible
         
         # Update canvas layout only if sidebar width changed (to avoid unnecessary thumbnail refresh)
+        if sidebar_width_changed:
+            QTimer.singleShot(50, self.update_max_thumbnail_size)
+
+    def _on_jobs_visibility_changed(self, visible):
+        """Handle jobs pane visibility changes from combined sidebar."""
+        self.jobs_visible = visible
+
+        if hasattr(self, "toggle_jobs_action"):
+            self.toggle_jobs_action.setChecked(visible)
+            self.toggle_jobs_action.setText("Hide Jobs" if visible else "Show Jobs")
+
+        total_width = self.main_splitter.width()
+        if total_width == 0:
+            return
+
+        current_sizes = self.main_splitter.sizes()
+        right_width = (
+            current_sizes[2]
+            if len(current_sizes) > 2
+            else (
+                self.right_sidebar_width
+                if getattr(self, "right_sidebar_visible", None)
+                else 0
+            )
+        )
+        current_left_width = current_sizes[0] if len(current_sizes) > 0 else 0
+
+        if (
+            visible
+            or self.combined_sidebar.is_tree_visible()
+            or self.combined_sidebar.is_preview_visible()
+        ):
+            new_left_width = self.sidebar_width
+            main_width = total_width - new_left_width - right_width
+            self._set_splitter_sizes_safe([new_left_width, main_width, right_width])
+        else:
+            new_left_width = 0
+            main_width = total_width - right_width
+            self._set_splitter_sizes_safe([new_left_width, main_width, right_width])
+
+        sidebar_width_changed = current_left_width != new_left_width
+        if self.current_view_mode == "browse":
+            QTimer.singleShot(100, self._resize_browse_view_image_container)
+
+        self.config.update_setting("jobs_visible", visible)
+        self.config.update_setting("sidebar_width", self.sidebar_width)
+
+        if visible and getattr(self, "sidebar_jobs_widget", None):
+            self.sidebar_jobs_widget.refresh_table()
+
         if sidebar_width_changed:
             QTimer.singleShot(50, self.update_max_thumbnail_size)
     

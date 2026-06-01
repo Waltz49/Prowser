@@ -1,6 +1,9 @@
 #!/bin/bash
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$SCRIPT_DIR"
+
 #######################################
 # Config
 #######################################
@@ -14,12 +17,12 @@ DMG_PATH="$HOME/Desktop/${APP_NAME}-${APP_VERSION}.dmg"
 WORKDIR="/tmp/${APP_NAME}_dmg"
 TEMP_DMG="/tmp/${APP_NAME}_rw.dmg"
 
-# Paths to icons and background
-VOL_ICON_ICNS="$HOME/dev/testchat/image_browser/Prowser.icns"
-BG_IMAGE="$HOME/dev/testchat/image_browser/background.png"
+# Paths to icons and background (same directory as this script / source folder)
+VOL_ICON_ICNS="$SCRIPT_DIR/Prowser.icns"
+BG_IMAGE="$SCRIPT_DIR/background.png"
 
-# Path to pre-blessed source folder (icon applied manually once in Finder)
-SOURCE_FOLDER="$HOME/dev/testchat/source_preblessed"
+# Pre-blessed source folder (custom icon applied once in Finder); override via env if needed
+SOURCE_FOLDER="${SOURCE_FOLDER:-$HOME/dev/testchat/source_preblessed}"
 
 #######################################
 # Clean previous runs
@@ -44,7 +47,7 @@ ln -s /Applications "$WORKDIR/Applications"
 # Copy pre-blessed source folder into staging (icon preserved)
 if [ -d "$SOURCE_FOLDER" ]; then
     cp -R "$SOURCE_FOLDER" "$WORKDIR/source"
-    ./copy_project_files.sh "$WORKDIR/source" -f
+    "$SCRIPT_DIR/copy_project_files.sh" "$WORKDIR/source" -f
 else
     echo "❌ Error: pre-blessed source folder not found at $SOURCE_FOLDER"
     echo "To create a folder with a custom icon, create $SOURCE_FOLDER and use Finder"

@@ -461,6 +461,16 @@ class MenuManager:
         self.main_window.toggle_preview_action.setShortcut(QKeySequence('P'))
         self.main_window.toggle_preview_action.triggered.connect(self.main_window.toggle_preview)
         view_menu.addAction(self.main_window.toggle_preview_action)
+
+        # Jobs pane toggle (combined sidebar)
+        self.main_window.toggle_jobs_action = QAction('Show Jobs', self.main_window)
+        self.main_window.toggle_jobs_action.setCheckable(True)
+        self.main_window.toggle_jobs_action.setChecked(
+            getattr(self.main_window, 'jobs_visible', False)
+        )
+        self.main_window.toggle_jobs_action.setShortcut(QKeySequence('J'))
+        self.main_window.toggle_jobs_action.triggered.connect(self.main_window.toggle_jobs)
+        view_menu.addAction(self.main_window.toggle_jobs_action)
         
         # Toggle Information Sidebar (right sidebar with EXIF info)
         self.main_window.toggle_information_sidebar_action = QAction("Information Sidebar Toggle", self.main_window)
@@ -491,6 +501,9 @@ class MenuManager:
             preview_visible = self.main_window.combined_sidebar.is_preview_visible()
             self.main_window.toggle_preview_action.setText('Hide Preview' if preview_visible else 'Show Preview')
             self.main_window.toggle_preview_action.setChecked(preview_visible)
+            jobs_visible = self.main_window.combined_sidebar.is_jobs_visible()
+            self.main_window.toggle_jobs_action.setText('Hide Jobs' if jobs_visible else 'Show Jobs')
+            self.main_window.toggle_jobs_action.setChecked(jobs_visible)
         
         
         # Toggle List View (shortcut F12)
@@ -2695,6 +2708,7 @@ class MenuManager:
         menu_actions = [
             'toggle_file_tree_action',
             'toggle_preview_action',
+            'toggle_jobs_action',
             'toggle_status_bar_action',
             'browse_view_action',
             'native_fullscreen_action',
@@ -2724,6 +2738,7 @@ class MenuManager:
             'thumbnail': {
                 'toggle_file_tree_action': True,
                 'toggle_preview_action': True,
+                'toggle_jobs_action': True,
                 'toggle_status_bar_action': True,
                 'browse_view_action': True,
                 'native_fullscreen_action': True,
@@ -2750,6 +2765,7 @@ class MenuManager:
             'browse': {
                 'toggle_file_tree_action': False,
                 'toggle_preview_action': False,
+                'toggle_jobs_action': False,
                 'toggle_status_bar_action': True,
                 'browse_view_action': True,
                 'native_fullscreen_action': True,
@@ -2777,6 +2793,7 @@ class MenuManager:
             'slideshow': {
                 'toggle_file_tree_action': False,
                 'toggle_preview_action': False,
+                'toggle_jobs_action': False,
                 'toggle_status_bar_action': False,
                 'browse_view_action': True,
                 'native_fullscreen_action': True,
@@ -2803,6 +2820,7 @@ class MenuManager:
             'slideshow2': {
                 'toggle_file_tree_action': False,
                 'toggle_preview_action': False,
+                'toggle_jobs_action': False,
                 'toggle_status_bar_action': False,
                 'browse_view_action': True,
                 'native_fullscreen_action': True,
@@ -2829,6 +2847,7 @@ class MenuManager:
             'slideshow3': {
                 'toggle_file_tree_action': False,
                 'toggle_preview_action': False,
+                'toggle_jobs_action': False,
                 'toggle_status_bar_action': False,
                 'browse_view_action': True,
                 'native_fullscreen_action': True,
@@ -2855,6 +2874,7 @@ class MenuManager:
             'list': {
                 'toggle_file_tree_action': True,  # Enable T key to toggle tree
                 'toggle_preview_action': True,  # Enable P key to toggle preview
+                'toggle_jobs_action': True,  # Enable J key to toggle jobs pane
                 'toggle_status_bar_action': True,
                 'browse_view_action': True,
                 'native_fullscreen_action': True,
@@ -3311,3 +3331,6 @@ class MenuManager:
         if hasattr(mw, 'toggle_preview_action'):
             mw.toggle_preview_action.setEnabled(show_tree_preview_toggles)
             mw.toggle_preview_action.setVisible(show_tree_preview_toggles)
+        if hasattr(mw, 'toggle_jobs_action'):
+            mw.toggle_jobs_action.setEnabled(show_tree_preview_toggles)
+            mw.toggle_jobs_action.setVisible(show_tree_preview_toggles)

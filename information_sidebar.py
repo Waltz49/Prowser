@@ -15,7 +15,7 @@ from PySide6.QtWidgets import QApplication, QLabel, QPushButton, QTextBrowser, Q
 
 from combined_sidebar_widget import HeaderWidget
 from theme_service import get_active_theme
-from utils import format_file_size, get_file_extension, styled_message_box
+from utils import format_file_size, get_file_extension, normalize_path_for_display, styled_message_box
 from speech_utils import speak_or_stop
 from tooltip_popup_utils import ensure_tooltip_label, position_tooltip_near_cursor
 from reference_graph import (
@@ -1048,12 +1048,13 @@ class InformationSidebar(QWidget):
                 pass  # If we can't get file size, just skip it
             return file_size_bytes
 
-        # Helper function to get directory name (elided if > 40 characters)
+        # Helper function to get directory name (~ for home; elided if > 40 characters)
         def get_directory_name():
             directory_name = None
             try:
                 directory_path = os.path.dirname(current_image_path)
                 if directory_path:
+                    directory_path = normalize_path_for_display(directory_path)
                     if len(directory_path) > 40:
                         # Show last part of path
                         directory_name = "..." + directory_path[-37:]

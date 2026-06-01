@@ -581,7 +581,7 @@ class ClickableFitModeLabel(QLabel):
 class ClickableImageGenIndicatorLabel(QLabel):
     """Clickable status indicator while a model background task runs (image or caption)."""
 
-    _CLICK_HINT = "J or click for menu, double-click for job queue (⌘J)"
+    _CLICK_HINT = "Click for menu, double-click for job queue (⌘J)"
 
     def __init__(self, text="🔴", parent=None):
         super().__init__(text, parent)

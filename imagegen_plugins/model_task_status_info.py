@@ -28,6 +28,27 @@ def _truncate(text: str, limit: int = PROMPT_DISPLAY_MAX_LEN) -> str:
     return text[:limit] + "…"
 
 
+def parse_queue_status_title(html_text: str) -> str:
+    """Centered title from a job queue / status HTML table (may include '(Running)')."""
+    match = _QUEUE_TITLE_ROW_RE.search(html_text or "")
+    if not match:
+        return ""
+    return html.unescape(match.group(1).strip())
+
+
+def parse_queue_status_elapsed(html_text: str) -> str:
+    """Elapsed / estimate cell from queue status HTML, or empty when absent."""
+    match = _QUEUE_ELAPSED_ROW_RE.search(html_text or "")
+    if not match:
+        return ""
+    raw = re.sub(r"<[^>]+>", "", match.group(1))
+    return html.unescape(raw).strip()
+
+
+def elide_prompt_for_sidebar(prompt: str, *, max_len: int = 48) -> str:
+    return _truncate(prompt, max_len)
+
+
 def full_prompt_tooltip_text(full_prompt: str) -> str:
     """Return full prompt for a hover tooltip when status display truncates it."""
     full = (full_prompt or "").strip()
@@ -88,9 +109,24 @@ _EXPAND_ELAPSED_ROW_RE = re.compile(
     r"(<tr><td><b>Elapsed:</b></td><td>)(.*?)(</td></tr>)",
     re.DOTALL,
 )
+_QUEUE_TITLE_ROW_RE = re.compile(
+    r'<tr><td colspan="2"[^>]*>\s*<b><span[^>]*>([^<]*)</span>',
+    re.DOTALL | re.IGNORECASE,
+)
+_QUEUE_ELAPSED_ROW_RE = re.compile(
+    r"<tr><td><b>Elapsed:</b></td><td>(.*?)</td></tr>",
+    re.DOTALL,
+)
 _EXPAND_REFERENCES_ROW_RE = re.compile(
     r"<tr><td><b>References:</b></td><td>.*?</td></tr>"
 )
+
+
+def strip_references_from_status_html(html_text: str) -> str:
+    """Remove the References table row (sidebar jobs pane hides text links)."""
+    if not html_text:
+        return ""
+    return _EXPAND_REFERENCES_ROW_RE.sub("", html_text)
 
 
 def _table_title_row(title: str, *, running: bool = False) -> str:

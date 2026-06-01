@@ -27,6 +27,7 @@ class WhyWasThisWrittenDialog(MarkdownDialog):
 | --- |**Appearance** |  
 | **T** | Toggle the visibility of the folder tree sidebar on and off. |
 | **P** | Toggle the preview pane, letting you quickly see a larger version of the highlighted image. |
+| **J** | Toggle the Jobs pane in thumbnail view (or open the imagegen task menu when a model job is running). In browse view, return to thumbnails and show the Jobs pane. |
 | **I** | Show or hide the Information sidebar, revealing EXIF, filename, and other details about the image. |
 | **B** | Toggle status bar visibility. |
 | --- |**Search Functions** |  

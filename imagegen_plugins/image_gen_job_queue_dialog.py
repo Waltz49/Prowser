@@ -193,8 +193,8 @@ def _max_preview_column_width(rows) -> int:
     return max(_preview_column_width(1), *widths) if widths else _preview_column_width(1)
 
 
-def _action_column_min_height(*, is_active: bool) -> int:
-    series_btn_count = 5 if is_active else 2
+def _action_column_min_height(*, is_active: bool = True) -> int:
+    series_btn_count = 5
     return (
         series_btn_count * _ICON_BTN_SIZE
         + max(0, series_btn_count - 1) * 4
@@ -217,6 +217,126 @@ def _apply_info_browser_html(
     return _apply_task_info_html_to_browser(
         info_browser, body_html, content_width=content_width
     )
+
+
+def info_html_for_queue_row(controller, row_idx: int, row) -> str:
+    if row.is_active:
+        return controller.get_task_queue_status_info_html()
+    return row.status_html or ""
+
+
+def job_queue_edit_row(main_window, controller, row: int) -> None:
+    record = controller.job_record_for_row(row)
+    if record is None:
+        return
+    plugin, values = record
+    from imagegen_plugins.image_gen_menu import open_imagegen_dialog_from_job
+
+    open_imagegen_dialog_from_job(main_window, plugin, values)
+
+
+def job_queue_cancel_row(main_window, controller, row: int, *, parent: QWidget) -> None:
+    rows = controller.queue_snapshot()
+    if row < 0 or row >= len(rows):
+        return
+    entry = rows[row]
+    if entry.is_active:
+        prompt = "Cancel the running job?"
+    else:
+        prompt = "Remove this job from the queue?"
+    answer = show_styled_question(
+        parent,
+        "Cancel job?",
+        prompt,
+        default_no=True,
+    )
+    if answer != QMessageBox.StandardButton.Yes:
+        return
+    controller.cancel_job_at_row(row)
+
+
+def build_job_queue_action_widget(
+    main_window,
+    controller,
+    row_idx: int,
+    *,
+    is_active: bool,
+    parent: QWidget,
+) -> QWidget:
+    """Action column: series controls, edit, cancel (active and queued rows)."""
+    _ = is_active
+    edit_btn = QPushButton()
+    edit_btn.setToolTip("Replicate job settings…")
+    edit_btn.setStyleSheet(_edit_button_stylesheet())
+    edit_btn.clicked.connect(
+        lambda _checked=False, r=row_idx: job_queue_edit_row(main_window, controller, r)
+    )
+    cancel_btn = QPushButton()
+    cancel_btn.setToolTip("Cancel job")
+    cancel_btn.setStyleSheet(_trash_button_stylesheet())
+    cancel_btn.clicked.connect(
+        lambda _checked=False, r=row_idx: job_queue_cancel_row(
+            main_window, controller, r, parent=parent
+        )
+    )
+    action_wrap = QWidget()
+    _apply_job_queue_cell_background(action_wrap)
+    action_layout = QVBoxLayout(action_wrap)
+    action_layout.setContentsMargins(4, 0, 4, 0)
+    action_layout.setSpacing(4)
+
+    plus_btn = QPushButton()
+    plus_btn.setToolTip("Add another image to this series")
+    plus_btn.setStyleSheet(_series_plus_button_stylesheet())
+    plus_btn.setEnabled(controller.can_add_series_cycle_for_row(row_idx))
+    plus_btn.clicked.connect(
+        lambda _checked=False, r=row_idx: controller.add_series_cycle_for_row(r)
+    )
+    minus_btn = QPushButton()
+    minus_btn.setToolTip("Remove one pending image from the series")
+    minus_btn.setStyleSheet(_series_minus_button_stylesheet())
+    minus_btn.setEnabled(controller.series_remaining_after_for_row(row_idx) > 0)
+    minus_btn.clicked.connect(
+        lambda _checked=False, r=row_idx: controller.subtract_series_remaining_for_row(r)
+    )
+    refine_btn = QPushButton()
+    refine_btn.setCheckable(True)
+    refine_btn.setToolTip(
+        "Refinement (toggle): use each finished image as input for later copies"
+    )
+    refine_btn.setStyleSheet(_series_refinement_button_stylesheet())
+    refine_btn.setEnabled(controller.series_remaining_after_for_row(row_idx) > 0)
+    refine_btn.blockSignals(True)
+    refine_btn.setChecked(controller.series_refinement_enabled_for_row(row_idx))
+    refine_btn.blockSignals(False)
+    refine_btn.toggled.connect(
+        lambda checked, r=row_idx: controller.set_series_refinement_for_row(r, checked)
+    )
+    action_layout.addWidget(plus_btn, alignment=Qt.AlignmentFlag.AlignCenter)
+    action_layout.addWidget(minus_btn, alignment=Qt.AlignmentFlag.AlignCenter)
+    action_layout.addWidget(refine_btn, alignment=Qt.AlignmentFlag.AlignCenter)
+    action_layout.addWidget(edit_btn, alignment=Qt.AlignmentFlag.AlignCenter)
+    action_layout.addWidget(cancel_btn, alignment=Qt.AlignmentFlag.AlignCenter)
+    action_wrap.setFixedWidth(_ACTION_COL_WIDTH)
+    return action_wrap
+
+
+def open_reference_thumbnail_paths(main_window, paths: list[str]) -> None:
+    """One image → browse; multiple → new thumbnail level."""
+    valid = _valid_preview_paths(paths)
+    if not valid:
+        return
+    if len(valid) == 1:
+        _open_image_in_browse(main_window, valid[0])
+        return
+    if hasattr(main_window, "directory_stack_history_handler"):
+        main_window.directory_stack_history_handler.save_current_state(
+            "open_reference_thumbnail_paths", delay=0.0
+        )
+    if hasattr(main_window, "refresh_from_configuration"):
+        main_window.refresh_from_configuration(
+            {"files": valid, "sort_mode": "custom"}
+        )
 
 
 def _icon_push_button_stylesheet(icon_name: str, *, hover_icon_name: str | None = None) -> str:
@@ -526,71 +646,20 @@ class ImageGenJobQueueDialog(QDialog):
         )
 
         for row_idx, row in enumerate(rows):
-            edit_btn = QPushButton()
-            edit_btn.setToolTip("Replicate job settings…")
-            edit_btn.setStyleSheet(_edit_button_stylesheet())
-            edit_btn.clicked.connect(
-                lambda _checked=False, r=row_idx: self._on_edit_row(r)
+            action_wrap = build_job_queue_action_widget(
+                self.main_window,
+                self._controller,
+                row_idx,
+                is_active=row.is_active,
+                parent=self,
             )
-            cancel_btn = QPushButton()
-            cancel_btn.setToolTip("Cancel job")
-            cancel_btn.setStyleSheet(_trash_button_stylesheet())
-            cancel_btn.clicked.connect(
-                lambda _checked=False, r=row_idx: self._on_cancel_row(r)
-            )
-            action_wrap = QWidget()
-            _apply_job_queue_cell_background(action_wrap)
-            action_layout = QVBoxLayout(action_wrap)
-            action_layout.setContentsMargins(4, 0, 4, 0)
-            action_layout.setSpacing(4)
-            if row.is_active:
-                plus_btn = QPushButton()
-                plus_btn.setToolTip("Add another image to this series")
-                plus_btn.setStyleSheet(_series_plus_button_stylesheet())
-                plus_btn.setEnabled(self._controller.can_add_active_series_cycle())
-                plus_btn.clicked.connect(self._on_series_plus)
-                minus_btn = QPushButton()
-                minus_btn.setToolTip("Remove one pending image from the series")
-                minus_btn.setStyleSheet(_series_minus_button_stylesheet())
-                minus_btn.setEnabled(self._controller.active_series_remaining_after() > 0)
-                minus_btn.clicked.connect(self._on_series_minus)
-                refine_btn = QPushButton()
-                refine_btn.setCheckable(True)
-                refine_btn.setToolTip(
-                    "Refinement (toggle): use each finished image as input for later copies"
-                )
-                refine_btn.setStyleSheet(_series_refinement_button_stylesheet())
-                refine_btn.setEnabled(
-                    self._controller.active_series_remaining_after() > 0
-                )
-                refine_btn.blockSignals(True)
-                refine_btn.setChecked(
-                    self._controller.active_series_refinement_enabled()
-                )
-                refine_btn.blockSignals(False)
-                refine_btn.toggled.connect(self._on_series_refinement_toggled)
-                action_layout.addWidget(
-                    plus_btn, alignment=Qt.AlignmentFlag.AlignCenter
-                )
-                action_layout.addWidget(
-                    minus_btn, alignment=Qt.AlignmentFlag.AlignCenter
-                )
-                action_layout.addWidget(
-                    refine_btn, alignment=Qt.AlignmentFlag.AlignCenter
-                )
-            action_layout.addWidget(edit_btn, alignment=Qt.AlignmentFlag.AlignCenter)
-            action_layout.addWidget(cancel_btn, alignment=Qt.AlignmentFlag.AlignCenter)
             self._table.setCellWidget(row_idx, 0, action_wrap)
 
             info_browser = QTextBrowser()
             configure_task_info_text_browser(
                 info_browser, self.main_window, job_queue_cell=True
             )
-            info_html = (
-                self._controller.get_task_queue_status_info_html()
-                if row.is_active
-                else row.status_html
-            )
+            info_html = info_html_for_queue_row(self._controller, row_idx, row)
             browser_h = _apply_info_browser_html(
                 info_browser, info_html or "", content_width=content_width
             )
@@ -609,42 +678,16 @@ class ImageGenJobQueueDialog(QDialog):
             )
             self._table.setRowHeight(row_idx, row_h)
 
-    def _on_series_plus(self) -> None:
-        self._controller.add_active_series_cycle()
-
-    def _on_series_minus(self) -> None:
-        self._controller.subtract_active_series_remaining()
-
-    def _on_series_refinement_toggled(self, checked: bool) -> None:
-        self._controller.set_active_series_refinement(checked)
-
-    def _on_edit_row(self, row: int) -> None:
-        record = self._controller.job_record_for_row(row)
-        if record is None:
-            return
-        plugin, values = record
-        from imagegen_plugins.image_gen_menu import open_imagegen_dialog_from_job
-
-        open_imagegen_dialog_from_job(self.main_window, plugin, values)
-
-    def _on_cancel_row(self, row: int) -> None:
-        rows = self._controller.queue_snapshot()
-        if row < 0 or row >= len(rows):
-            return
-        entry = rows[row]
-        if entry.is_active:
-            prompt = "Cancel the running job?"
-        else:
-            prompt = "Remove this job from the queue?"
-        answer = show_styled_question(
-            self,
-            "Cancel job?",
-            prompt,
-            default_no=True,
-        )
-        if answer != QMessageBox.StandardButton.Yes:
-            return
-        self._controller.cancel_job_at_row(row)
+def open_imagegen_job_queue_dialog(main_window) -> None:
+    """Show the full job queue dialog (does not toggle hide)."""
+    dlg = getattr(main_window, "_imagegen_job_queue_dialog", None)
+    if dlg is None:
+        dlg = ImageGenJobQueueDialog(main_window)
+        main_window._imagegen_job_queue_dialog = dlg
+    dlg._schedule_refresh_table()
+    dlg.show()
+    dlg.raise_()
+    dlg.activateWindow()
 
 
 def show_imagegen_job_queue_dialog(main_window) -> None:
@@ -655,7 +698,4 @@ def show_imagegen_job_queue_dialog(main_window) -> None:
     if dlg.isVisible():
         dlg.hide()
         return
-    dlg._schedule_refresh_table()
-    dlg.show()
-    dlg.raise_()
-    dlg.activateWindow()
+    open_imagegen_job_queue_dialog(main_window)

@@ -257,6 +257,14 @@ class BaseKeyboardHandler(QObject):
             return True
         return False
 
+    def _handle_j_key(self, event: QKeyEvent, context_data: Dict[str, Any]) -> bool:
+        """J in thumbnail/list: imagegen task menu when active, else View menu toggle."""
+        if event.isAutoRepeat():
+            return True
+        if self._handle_j_imagegen_activity_menu(event, context_data):
+            return True
+        return False
+
 
 class ThumbnailKeyboardHandler(BaseKeyboardHandler):
     """Keyboard handler for thumbnail view mode."""
@@ -363,17 +371,15 @@ class ThumbnailKeyboardHandler(BaseKeyboardHandler):
         # Ctrl+I (Cmd+I) toggles filename overlay on thumbnails
         self.add_key_binding("i_key", KeyBinding(Qt.Key_I, description="Information sidebar toggle"), self._handle_i_key_metadata)
         self.add_key_binding("o_key", KeyBinding(Qt.Key_O, description="Organize sidebar toggle"), self._handle_o_key_sidebar)
+        self.add_key_binding(
+            "j_key",
+            KeyBinding(Qt.Key_J, description="Jobs pane toggle / imagegen task menu"),
+            self._handle_j_key,
+        )
         self.add_key_binding("ctrl_i", KeyBinding(Qt.Key_I, CMD, description="Cycle filename display"), self._handle_ctrl_i_filename)
         self.add_key_binding("ctrl_shift_i", KeyBinding(Qt.Key_I, Qt.ControlModifier | Qt.ShiftModifier, description="Information overlay toggle"), self._handle_ctrl_shift_i)
         # F11 is handled by menu system (MacOS Fullscreen)
         # Ctrl+F is handled by menu system (Search by Description)
-
-        # Imagegen status-bar dot menu while a model task is running (no-op otherwise)
-        self.add_key_binding(
-            "j_key",
-            KeyBinding(Qt.Key_J, description="Model task status menu"),
-            self._handle_j_imagegen_activity_menu,
-        )
 
         # Preview widget controls
         # A key is handled by menu system in browse view (Actual Size), keep for thumbnail view
@@ -1756,12 +1762,10 @@ class BrowseViewKeyboardHandler(BaseKeyboardHandler):
         # Double-tap T/P: switch to thumbnail and show tree or preview (T and P disabled in browse per UX)
         self.add_key_binding("t_key", KeyBinding(Qt.Key_T, description="Double-tap: switch to thumbnails and show tree"), self._handle_t_key)
         self.add_key_binding("p_key", KeyBinding(Qt.Key_P, description="Double-tap: switch to thumbnails and show preview"), self._handle_p_key)
-
-        # Imagegen status-bar dot menu while a model task is running (no-op otherwise)
         self.add_key_binding(
             "j_key",
-            KeyBinding(Qt.Key_J, description="Model task status menu"),
-            self._handle_j_imagegen_activity_menu,
+            KeyBinding(Qt.Key_J, description="Switch to thumbnails and show jobs pane"),
+            self._handle_j_key_browse,
         )
 
         # External editors
@@ -1811,6 +1815,16 @@ class BrowseViewKeyboardHandler(BaseKeyboardHandler):
         self._double_tap_last_time = now
         # First tap: do not consume — let View > P (toggle preview) QAction run.
         return False
+
+    def _handle_j_key_browse(self, event: QKeyEvent, context_data: Dict[str, Any]) -> bool:
+        """J in browse: return to thumbnails and show jobs pane (always show, not toggle)."""
+        if event.isAutoRepeat():
+            return True
+        self.main_window.close_browse_view()
+
+        QTimer.singleShot(50, self.main_window.show_jobs_pane)
+        event.accept()
+        return True
 
     # Navigation handlers
     def _handle_left_arrow(self, event: QKeyEvent, context_data: Dict[str, Any]) -> bool:

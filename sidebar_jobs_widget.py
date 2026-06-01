@@ -1,0 +1,363 @@
+#!/usr/bin/env python3
+"""Job queue list for the combined left sidebar Jobs pane (matches dialog data)."""
+
+from __future__ import annotations
+
+import os
+
+from PySide6.QtCore import QEvent, Qt, QTimer, QSize
+from PySide6.QtWidgets import (
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QScrollArea,
+    QSizePolicy,
+    QTextBrowser,
+    QVBoxLayout,
+    QWidget,
+    QGridLayout,
+)
+
+from imagegen_plugins.image_gen_controller import get_imagegen_controller
+from imagegen_plugins.image_gen_job_queue_dialog import (
+    _ACTION_COL_WIDTH,
+    _apply_info_browser_html,
+    _apply_job_queue_cell_background,
+    _valid_preview_paths,
+    build_job_queue_action_widget,
+    info_html_for_queue_row,
+    open_reference_thumbnail_paths,
+)
+from imagegen_plugins.job_prompt_tooltip import install_delayed_prompt_tooltip
+from imagegen_plugins.model_task_status_info import strip_references_from_status_html
+from status_bar_config import configure_task_info_text_browser
+from theme_service import get_active_theme
+from utils import create_dialog_thumbnail_label
+
+_THUMB_SIZE = 40
+_THUMB_GAP = 4
+
+
+def _job_card_stylesheet() -> str:
+    t = get_active_theme()
+    bg = t.default_background_color_hex
+    return f"""
+        QFrame#sidebarJobCard {{
+            background-color: {bg};
+            color: {t.dialog_text_color_hex};
+            border: 1px solid {t.border_default_hex};
+            border-radius: 4px;
+        }}
+    """
+
+
+class _FlowReferenceThumbs(QWidget):
+    """Reference thumbnails; reflow on resize."""
+
+    def __init__(self, main_window, paths: list[str], parent=None):
+        super().__init__(parent)
+        self._main_window = main_window
+        self._paths = _valid_preview_paths(paths)
+        self._cells: list[QLabel] = []
+        self._last_cols: int | None = None
+        self._reflow_guard = False
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
+        self._grid = QGridLayout(self)
+        self._grid.setContentsMargins(0, 4, 0, 0)
+        self._grid.setHorizontalSpacing(_THUMB_GAP)
+        self._grid.setVerticalSpacing(_THUMB_GAP)
+        for path in self._paths:
+            thumb = create_dialog_thumbnail_label(path, _THUMB_SIZE)
+            thumb.setCursor(Qt.CursorShape.PointingHandCursor)
+            thumb.setToolTip(os.path.basename(path))
+            self._cells.append(thumb)
+        if not self._paths:
+            placeholder = QLabel("—")
+            placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            placeholder.setFixedHeight(_THUMB_SIZE)
+            self._grid.addWidget(placeholder, 0, 0)
+
+    def _cols_for_width(self, width: int) -> int:
+        w = max(width, _THUMB_SIZE)
+        stride = _THUMB_SIZE + _THUMB_GAP
+        return max(1, (w + _THUMB_GAP) // stride)
+
+    def _content_height(self, cols: int) -> int:
+        n = len(self._cells)
+        if not n:
+            return _THUMB_SIZE + 4
+        rows = (n + cols - 1) // cols
+        return rows * (_THUMB_SIZE + _THUMB_GAP) - _THUMB_GAP + 4
+
+    def reflow_to_width(self, width: int) -> None:
+        if self._reflow_guard or not self._cells or width <= 0:
+            return
+        cols = self._cols_for_width(width)
+        if cols == self._last_cols and self._grid.count() == len(self._cells):
+            return
+        self._reflow_guard = True
+        try:
+            for cell in self._cells:
+                self._grid.removeWidget(cell)
+            self._last_cols = cols
+            for i, cell in enumerate(self._cells):
+                r, c = divmod(i, cols)
+                self._grid.addWidget(
+                    cell,
+                    r,
+                    c,
+                    Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignHCenter,
+                )
+        finally:
+            self._reflow_guard = False
+        self.updateGeometry()
+
+    def sizeHint(self) -> QSize:
+        w = max(self.width(), _THUMB_SIZE)
+        return QSize(w, self._content_height(self._cols_for_width(w)))
+
+    def minimumSizeHint(self) -> QSize:
+        return QSize(0, self._content_height(self._cols_for_width(max(self.width(), 1))))
+
+    def mousePressEvent(self, event) -> None:
+        if event.button() == Qt.MouseButton.LeftButton and self._paths:
+            open_reference_thumbnail_paths(self._main_window, self._paths)
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
+
+class _JobCard(QFrame):
+    """One queue row: action buttons | status HTML + thumbnails."""
+
+    def __init__(
+        self,
+        main_window,
+        controller,
+        row_idx: int,
+        *,
+        is_active: bool,
+        parent=None,
+    ):
+        super().__init__(parent)
+        self.setObjectName("sidebarJobCard")
+        self.setStyleSheet(_job_card_stylesheet())
+        self._main_window = main_window
+        self._controller = controller
+        self._row_idx = row_idx
+        self._full_prompt = ""
+        self._last_info_html = ""
+
+        row_layout = QHBoxLayout(self)
+        row_layout.setContentsMargins(4, 4, 4, 4)
+        row_layout.setSpacing(6)
+
+        self._actions = build_job_queue_action_widget(
+            main_window,
+            controller,
+            row_idx,
+            is_active=is_active,
+            parent=self,
+        )
+        row_layout.addWidget(self._actions, 0, Qt.AlignmentFlag.AlignTop)
+
+        content = QWidget()
+        _apply_job_queue_cell_background(content)
+        content_layout = QVBoxLayout(content)
+        content_layout.setContentsMargins(0, 0, 0, 0)
+        content_layout.setSpacing(0)
+
+        self._info_browser = QTextBrowser()
+        configure_task_info_text_browser(
+            self._info_browser, main_window, job_queue_cell=True
+        )
+
+        self._refs = _FlowReferenceThumbs(main_window, [])
+        content_layout.addWidget(self._info_browser)
+        content_layout.addWidget(self._refs)
+        row_layout.addWidget(content, 1)
+
+    def set_row_content(
+        self,
+        *,
+        info_html: str,
+        full_prompt: str,
+        thumbnail_paths: list[str],
+        content_width: int,
+    ) -> None:
+        self._full_prompt = full_prompt or ""
+        install_delayed_prompt_tooltip(self._info_browser, self._full_prompt)
+        self.update_info_html(info_html, content_width)
+        self._replace_refs(thumbnail_paths)
+
+    def update_info_html(self, info_html: str, content_width: int) -> None:
+        self._last_info_html = info_html or ""
+        display_html = strip_references_from_status_html(self._last_info_html)
+        _apply_info_browser_html(
+            self._info_browser,
+            display_html,
+            content_width=max(80, content_width),
+        )
+
+    def _replace_refs(self, paths: list[str]) -> None:
+        content = self._info_browser.parentWidget()
+        layout = content.layout() if content else None
+        if layout is None:
+            return
+        layout.removeWidget(self._refs)
+        self._refs.deleteLater()
+        self._refs = _FlowReferenceThumbs(self._main_window, paths)
+        layout.addWidget(self._refs)
+
+    def reflow_refs(self, width: int) -> None:
+        self._refs.reflow_to_width(max(_THUMB_SIZE, width - _ACTION_COL_WIDTH - 20))
+
+
+class SidebarJobsWidget(QWidget):
+    """Scrollable job queue for the combined sidebar (dialog-equivalent data)."""
+
+    def __init__(self, main_window, parent=None):
+        super().__init__(parent)
+        self.main_window = main_window
+        self._controller = get_imagegen_controller(main_window)
+        self._job_cards: list[_JobCard] = []
+        self._refresh_table_timer: QTimer | None = None
+        self._live_timer: QTimer | None = None
+        self._signal_connected = False
+        self._setup_ui()
+        self._connect_controller()
+
+    def _setup_ui(self) -> None:
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+
+        self._empty_label = QLabel("No jobs in the queue.")
+        self._empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        t = get_active_theme()
+        self._empty_label.setStyleSheet(
+            f"color: {t.dialog_text_color_hex}; font-size: 12px; padding: 12px;"
+        )
+
+        self._scroll = QScrollArea()
+        self._scroll.setWidgetResizable(True)
+        self._scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        self._scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._scroll.viewport().installEventFilter(self)
+
+        self._list_host = QWidget()
+        self._list_layout = QVBoxLayout(self._list_host)
+        self._list_layout.setContentsMargins(4, 4, 4, 4)
+        self._list_layout.setSpacing(8)
+        self._list_layout.addStretch(1)
+
+        self._scroll.setWidget(self._list_host)
+        layout.addWidget(self._empty_label)
+        layout.addWidget(self._scroll, 1)
+
+    def _connect_controller(self) -> None:
+        if self._signal_connected:
+            return
+        self._controller.queue_changed.connect(self._schedule_refresh_table)
+        self._controller.task_status_info_changed.connect(
+            lambda: self._refresh_active_row(force=True)
+        )
+        self._signal_connected = True
+        timer = QTimer(self)
+        timer.setInterval(500)
+        timer.timeout.connect(lambda: self._refresh_active_row(force=False))
+        timer.start()
+        self._live_timer = timer
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        self._schedule_refresh_table()
+        if self._live_timer is not None:
+            self._live_timer.start()
+
+    def hideEvent(self, event) -> None:
+        if self._live_timer is not None:
+            self._live_timer.stop()
+        super().hideEvent(event)
+
+    def eventFilter(self, obj, event) -> bool:
+        if (
+            hasattr(self, "_scroll")
+            and obj is self._scroll.viewport()
+            and event.type() == QEvent.Type.Resize
+        ):
+            self._reflow_all()
+        return super().eventFilter(obj, event)
+
+    def _schedule_refresh_table(self) -> None:
+        timer = self._refresh_table_timer
+        if timer is None:
+            timer = QTimer(self)
+            timer.setSingleShot(True)
+            timer.timeout.connect(self.refresh_table)
+            self._refresh_table_timer = timer
+        timer.start(0)
+
+    def _viewport_width(self) -> int:
+        w = self._scroll.viewport().width() if hasattr(self, "_scroll") else self.width()
+        return max(120, w - 8)
+
+    def _info_content_width(self) -> int:
+        return max(80, self._viewport_width() - _ACTION_COL_WIDTH - 20)
+
+    def _refresh_active_row(self, *, force: bool = False) -> None:
+        if not self.isVisible() or not self._job_cards:
+            return
+        if not force and not self._controller.task_status_display_needs_refresh():
+            return
+        rows = self._controller.queue_snapshot()
+        if not rows or not rows[0].is_active:
+            return
+        row = rows[0]
+        info_html = info_html_for_queue_row(self._controller, 0, row)
+        self._job_cards[0].update_info_html(info_html, self._info_content_width())
+        self._job_cards[0].reflow_refs(self._viewport_width())
+
+    def _clear_job_cards(self) -> None:
+        while self._list_layout.count() > 1:
+            item = self._list_layout.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
+        self._job_cards.clear()
+
+    def _reflow_all(self) -> None:
+        width = self._viewport_width()
+        info_w = self._info_content_width()
+        for card in self._job_cards:
+            if card._last_info_html:
+                card.update_info_html(card._last_info_html, info_w)
+            card.reflow_refs(width)
+
+    def refresh_table(self) -> None:
+        rows = self._controller.queue_snapshot()
+        has_rows = bool(rows)
+        self._empty_label.setVisible(not has_rows)
+        self._scroll.setVisible(has_rows)
+        self._clear_job_cards()
+
+        info_w = self._info_content_width()
+        for row_idx, row in enumerate(rows):
+            info_html = info_html_for_queue_row(self._controller, row_idx, row)
+            card = _JobCard(
+                self.main_window,
+                self._controller,
+                row_idx,
+                is_active=row.is_active,
+            )
+            card.set_row_content(
+                info_html=info_html,
+                full_prompt=row.full_prompt,
+                thumbnail_paths=row.thumbnail_paths,
+                content_width=info_w,
+            )
+            self._list_layout.insertWidget(self._list_layout.count() - 1, card)
+            self._job_cards.append(card)
+
+        QTimer.singleShot(0, self._reflow_all)
