@@ -1181,7 +1181,22 @@ def main():
             if args.filter is not None:
                 configuration['filter'] = args.filter
 
-        print("Window.show is starting with configuration:",CYAN, configuration, RESET)
+        if window.debug_mode:
+            from debug_log import debug_timestamp
+
+            print(
+                f"{debug_timestamp()} Window.show is starting with configuration:",
+                CYAN,
+                configuration,
+                RESET,
+            )
+        else:
+            print(
+                "Window.show is starting with configuration:",
+                CYAN,
+                configuration,
+                RESET,
+            )
         window.show()
         
         # Activate and raise window to ensure it's ready for fullscreen

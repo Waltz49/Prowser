@@ -6,14 +6,13 @@ Shortcuts Sidebar Widget - Displays Favorites and Move list keyboard shortcuts
 import os
 import re
 
-from PySide6.QtCore import QPoint, Qt, QTimer
-from PySide6.QtGui import QContextMenuEvent, QCursor
+from PySide6.QtCore import Qt, QTimer
+from PySide6.QtGui import QContextMenuEvent
 from PySide6.QtWidgets import (
     QComboBox,
     QHBoxLayout,
     QLabel,
     QSizePolicy,
-    QToolTip,
     QVBoxLayout,
     QWidget,
     QScrollArea,
@@ -21,6 +20,7 @@ from PySide6.QtWidgets import (
 
 from thumbnail_constants import TEXT_COLOR_HEX, HEADING_COLOR_HEX, asset_file_url
 from theme_service import get_active_theme
+from tooltip_popup_utils import ensure_tooltip_label, position_tooltip_near_cursor
 
 
 def _shortcuts_primary_text_hex():
@@ -197,15 +197,28 @@ class ShortcutsSidebar(QWidget):
             return ""
         return ""
 
+    def _organize_path_tooltip_stylesheet(self) -> str:
+        t = get_active_theme()
+        return (
+            f"QLabel {{ background-color: {t.qtooltip_bg_hex}; color: {t.qtooltip_fg_hex}; "
+            f"border: 1px solid {t.qtooltip_border_hex}; border-radius: 4px; padding: 4px 8px; font-size: 11pt; }}"
+        )
+
     def _show_organize_path_tooltip(self, anchor_widget, url: str):
         """Show full path near the cursor; avoid QLabel.setToolTip (positions vs whole label on macOS)."""
         if anchor_widget:
             anchor_widget.setToolTip("")
         tip = self._tooltip_for_organize_url(url) if url else ""
+        lbl = ensure_tooltip_label(self, "_organize_path_tooltip_label")
         if tip:
-            QToolTip.showText(QCursor.pos() + QPoint(-15, -20), tip, anchor_widget)
+            lbl.setStyleSheet(self._organize_path_tooltip_stylesheet())
+            lbl.setText(tip)
+            lbl.adjustSize()
+            position_tooltip_near_cursor(lbl, clamp_widget=self)
+            lbl.show()
+            lbl.raise_()
         else:
-            QToolTip.hideText()
+            lbl.hide()
 
     def refresh_shortcuts(self):
         """Refresh the Favorites and Move shortcuts from config"""
@@ -505,6 +518,8 @@ class ShortcutsSidebar(QWidget):
         QTimer.singleShot(10, self._restore_scroll_position)
 
     def hideEvent(self, event):
-        QToolTip.hideText()
+        lbl = getattr(self, "_organize_path_tooltip_label", None)
+        if lbl is not None:
+            lbl.hide()
         self._save_scroll_position()
         super().hideEvent(event)

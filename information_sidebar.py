@@ -10,14 +10,14 @@ from html import escape, unescape
 from typing import Any, Dict, List, Optional, Tuple
 
 from PIL.ExifTags import GPSTAGS
-from PySide6.QtCore import QEvent, QObject, Qt, QPoint, QTimer
-from PySide6.QtGui import QCursor
+from PySide6.QtCore import QEvent, QObject, Qt, QTimer
 from PySide6.QtWidgets import QApplication, QLabel, QPushButton, QTextBrowser, QVBoxLayout, QWidget
 
 from combined_sidebar_widget import HeaderWidget
 from theme_service import get_active_theme
 from utils import format_file_size, get_file_extension, styled_message_box
 from speech_utils import speak_or_stop
+from tooltip_popup_utils import ensure_tooltip_label, position_tooltip_near_cursor
 from reference_graph import (
     collect_reference_chain_paths,
     get_reference_entries_for_path,
@@ -440,15 +440,12 @@ class InformationSidebar(QWidget):
 
     def _show_link_tooltip(self, text):
         """Show or hide floating tooltip for information links. Uses custom QLabel since QToolTip is unreliable on macOS."""
-        if not hasattr(self, '_link_tooltip_label'):
-            self._link_tooltip_label = QLabel(None, Qt.WindowType.ToolTip | Qt.WindowType.FramelessWindowHint)
-            self._link_tooltip_label.setStyleSheet(get_active_theme().information_link_tooltip_stylesheet())
-        lbl = self._link_tooltip_label
+        lbl = ensure_tooltip_label(self, "_link_tooltip_label")
         if text:
+            lbl.setStyleSheet(get_active_theme().information_link_tooltip_stylesheet())
             lbl.setText(text)
             lbl.adjustSize()
-            pos = QCursor.pos() + QPoint(-12, 12)
-            lbl.move(pos)
+            position_tooltip_near_cursor(lbl, clamp_widget=self)
             lbl.show()
             lbl.raise_()
         else:

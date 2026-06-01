@@ -332,6 +332,12 @@ class ImageGenController(QObject):
             )
             self.task_status_info_changed.emit()
 
+        from config import get_config
+
+        payload["debug_mode"] = bool(
+            get_config().load_settings().get("debug_mode", False)
+        )
+
         if not self._tasks.start_generate_job(payload):
             show_styled_critical(
                 self.main_window,
@@ -369,8 +375,13 @@ class ImageGenController(QObject):
                 self._cooldown_seconds_remaining(),
                 skip_icon_html=cooldown_skip_icon_html(),
             )
-        if self._live_step > 0 and self._step_progress_start_time is not None:
-            html = self._apply_live_steps_progress(html)
+        if self._step_progress_start_time is not None and self._live_step_total > 0:
+            if self._live_step > 0:
+                html = self._apply_live_steps_progress(html)
+            else:
+                html = update_status_html_steps_progress(
+                    html, 0, self._live_step_total
+                )
         return html
 
     def _live_generation_elapsed_seconds(self) -> Optional[float]:
@@ -632,6 +643,13 @@ class ImageGenController(QObject):
             self._live_estimate_seconds = None
             self._step_seconds_per_step = None
             self._frozen_elapsed_seconds = None
+            if self._live_step_total > 0 and self._task_status_info_html:
+                self._task_status_info_html = update_status_html_steps_progress(
+                    self._task_status_info_html,
+                    0,
+                    self._live_step_total,
+                )
+                self.task_status_info_changed.emit()
         self._update_status_bar_indicator(kind)
 
     def _on_task_finished(self, kind: str, _success: bool, _err: str) -> None:
@@ -804,7 +822,30 @@ class ImageGenController(QObject):
             self.task_status_info_changed.emit()
         path = msg.get("path")
         if path and self._show_progressive_images_enabled():
-            self._refresh_progressive_image(str(path))
+            step_i = int(step) if step is not None else -1
+            if step_i != 0:
+                self._refresh_progressive_image(str(path))
+            else:
+                self._note_progressive_step_zero(str(path))
+
+    def _note_progressive_step_zero(self, output_path: str) -> None:
+        """Step 0 preview is empty or redundant; avoid a full browse refresh."""
+        mw = self.main_window
+        current = getattr(mw, "current_image_path", None)
+        if (
+            current
+            and os.path.normpath(current) == os.path.normpath(output_path)
+            and getattr(mw, "current_view_mode", None) == "browse"
+        ):
+            self._progressive_browse_opened = True
+        if getattr(mw, "debug_mode", False):
+            from debug_log import debug_timestamp
+
+            print(
+                f"{debug_timestamp()} [imagegen] skip progressive refresh "
+                f"(step=0 path={output_path})",
+                flush=True,
+            )
 
     def _refresh_progressive_image(
         self, output_path: str, *, force_fullscreen: bool = False

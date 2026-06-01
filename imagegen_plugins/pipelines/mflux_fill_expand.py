@@ -128,7 +128,31 @@ def _run_mflux_fill_cli(
         stepwise_image_output_dir=stepwise_image_output_dir,
     )
 
+    def _run_inprocess() -> None:
+        from imagegen_plugins.mflux_flux1_session import generate_flux1_fill
+
+        image = generate_flux1_fill(
+            quantize=quantize,
+            lora_paths=lora_paths,
+            lora_scales=lora_scales,
+            prompt=prompt,
+            seed=seed,
+            steps=steps,
+            width=width,
+            height=height,
+            guidance=guidance,
+            scheduler="flow_match_euler_discrete",
+            low_ram=low_ram,
+            stepwise_dir=stepwise_image_output_dir,
+            image_path=image_path,
+            masked_image_path=mask_path,
+        )
+        image.save(path=output_path)
+
     def _run_cli() -> None:
+        if mflux_is_installed():
+            _run_inprocess()
+            return
         if getattr(sys, "frozen", False):
             old_argv = list(sys.argv)
             try:
@@ -223,7 +247,10 @@ def _run_fill_generation(
             raise RuntimeError(
                 f"mflux Fill did not write output: {mflux_output_path}"
             )
-        atomic_copy2(mflux_output_path, output_path)
+        from imagegen_plugins.imagegen_perf_log import PerfTimer
+
+        with PerfTimer("save_output", pipeline="mflux_fill"):
+            atomic_copy2(mflux_output_path, output_path)
         finalize_stepwise_progress(output_path, steps)
         return time.perf_counter() - t0
     finally:

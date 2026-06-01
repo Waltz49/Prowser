@@ -5,38 +5,19 @@ from __future__ import annotations
 
 import time
 
-from PySide6.QtCore import QEvent, QObject, QPoint, QRect, QTimer, Qt
-from PySide6.QtGui import QCursor, QGuiApplication
-from PySide6.QtWidgets import QLabel, QMenu, QWidget
+from PySide6.QtCore import QEvent, QObject, QPoint, QTimer, Qt
+from PySide6.QtGui import QCursor
+from PySide6.QtWidgets import QLabel, QWidget
 
 from imagegen_plugins.model_task_status_info import full_prompt_tooltip_text
+from tooltip_popup_utils import (
+    TOOLTIP_MARGIN,
+    clamp_bounds_for_widget,
+    position_tooltip_near_cursor,
+)
 
 _POLL_MS = 100
-_MARGIN = 10
 _DEFAULT_MAX_WIDTH = 520
-
-
-def _clamp_bounds_for_widget(widget: QWidget | None) -> QRect:
-    """Global rect to keep the popup inside (host window, else screen)."""
-    if widget is not None:
-        win = widget.window()
-        if win is not None and win.isVisible() and not isinstance(win, QMenu):
-            return win.frameGeometry()
-    screen = QGuiApplication.screenAt(QCursor.pos())
-    if screen is not None:
-        return screen.availableGeometry()
-    return QRect(0, 0, 1920, 1080)
-
-
-def _clamp_popup_position(
-    global_pos: QPoint, size, bounds: QRect, *, margin: int = _MARGIN
-) -> QPoint:
-    x, y = global_pos.x(), global_pos.y()
-    left = bounds.left() + margin
-    top = bounds.top() + margin
-    right = bounds.right() - margin - size.width()
-    bottom = bounds.bottom() - margin - size.height()
-    return QPoint(max(left, min(x, right)), max(top, min(y, bottom)))
 
 
 class _PromptTooltipPopup(QLabel):
@@ -68,24 +49,12 @@ class _PromptTooltipPopup(QLabel):
         )
 
     def show_near_cursor(self, clamp_widget: QWidget | None = None) -> None:
-        bounds = _clamp_bounds_for_widget(clamp_widget)
-        margin = _MARGIN
+        bounds = clamp_bounds_for_widget(clamp_widget)
+        margin = TOOLTIP_MARGIN
         max_w = max(160, bounds.width() - 2 * margin)
         self.setMaximumWidth(min(_DEFAULT_MAX_WIDTH, max_w))
-
-        cursor = QCursor.pos()
-        # Prefer below-right of cursor; flip when that would clip.
-        x = cursor.x() + 12
-        y = cursor.y() + 20
         self.adjustSize()
-        size = self.size()
-        if x + size.width() > bounds.right() - margin:
-            x = cursor.x() - size.width() - 12
-        if y + size.height() > bounds.bottom() - margin:
-            y = cursor.y() - size.height() - 12
-
-        pos = _clamp_popup_position(QPoint(x, y), size, bounds, margin=margin)
-        self.move(pos)
+        position_tooltip_near_cursor(self, clamp_widget=clamp_widget, margin=margin)
         self.show()
         self.raise_()
 

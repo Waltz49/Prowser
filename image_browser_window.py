@@ -877,7 +877,13 @@ class ImageBrowserWindow(QMainWindow):
         try:
             if self.debug_mode:
                 import json
-                print(f"{RED}refresh_from_configuration configuration:{RESET}\n{json.dumps(configuration, indent=4)}{RESET}")
+
+                from debug_log import debug_timestamp
+
+                print(
+                    f"{debug_timestamp()} {RED}refresh_from_configuration configuration:{RESET}\n"
+                    f"{json.dumps(configuration, indent=4)}{RESET}"
+                )
             
             files = configuration.get('files', [])
             directory = configuration.get('directory')

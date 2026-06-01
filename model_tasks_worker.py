@@ -30,8 +30,14 @@ def _unload_lmstudio_models() -> None:
         _LOADED_KIND = None
 
 
-def _unload_image_model() -> None:
+def _unload_image_model(*, reason: str = "explicit") -> None:
     global _LOADED_KIND
+    try:
+        from imagegen_plugins.mflux_model_session import release_all_mflux_sessions
+
+        release_all_mflux_sessions(reason=reason)
+    except Exception:
+        pass
     try:
         from imagegen_plugins.pipelines.sana_sprint import unload_pipeline
 
@@ -48,7 +54,7 @@ def _ensure_image_mode() -> None:
 
 
 def _ensure_lmstudio_mode() -> None:
-    _unload_image_model()
+    _unload_image_model(reason="caption")
 
 
 def _log_worker_error(context: str, exc: BaseException) -> None:
@@ -61,6 +67,11 @@ def _log_worker_error(context: str, exc: BaseException) -> None:
 
 def _run_generate(payload: Dict[str, Any], job_id: str) -> None:
     global _LOADED_KIND
+    import time
+
+    from imagegen_plugins.imagegen_perf_log import PerfTimer, set_perf_debug
+
+    set_perf_debug(bool(payload.get("debug_mode")))
     _emit({"type": "job_started", "job_id": job_id, "command": "generate"})
     _ensure_image_mode()
     pipeline_id = str(payload.get("pipeline_id") or "flux_schnell_mflux_play")
@@ -123,15 +134,31 @@ def _run_generate(payload: Dict[str, Any], job_id: str) -> None:
     else:
         raise ValueError(f"Unknown imagegen pipeline_id: {pipeline_id!r}")
 
+    from imagegen_plugins.mflux_model_session import (
+        note_image_model_loaded,
+        prepare_image_model_for_payload,
+    )
+
+    prepare_image_model_for_payload(payload)
     _LOADED_KIND = "image"
+    job_t0 = time.perf_counter()
     try:
-        result = run_from_payload(payload)
+        with PerfTimer("worker_job", job_id=job_id, pipeline=pipeline_id):
+            result = run_from_payload(payload)
         _emit({"type": "result", "job_id": job_id, "command": "generate", **result})
     except Exception as e:
         _log_worker_error("generate failed", e)
         raise
     finally:
-        _unload_image_model()
+        note_image_model_loaded(payload)
+        from imagegen_plugins.imagegen_perf_log import perf_log_kv
+
+        perf_log_kv(
+            "worker_job_done",
+            job_id=job_id,
+            pipeline=pipeline_id,
+            elapsed=time.perf_counter() - job_t0,
+        )
 
 
 def _run_caption(
@@ -171,8 +198,12 @@ def _handle_command(cmd: Dict[str, Any]) -> None:
     command = cmd.get("command")
     job_id = str(cmd.get("job_id") or "")
 
+    from imagegen_plugins.mflux_model_session import maybe_unload_idle_image_model
+
+    maybe_unload_idle_image_model()
+
     if command == "shutdown":
-        _unload_image_model()
+        _unload_image_model(reason="shutdown")
         _unload_lmstudio_models()
         raise SystemExit(0)
 
@@ -197,6 +228,13 @@ def _handle_command(cmd: Dict[str, Any]) -> None:
 
 
 def main() -> int:
+    try:
+        from print_log_redirect import setup_stdout_print_log
+
+        setup_stdout_print_log(truncate=False)
+    except Exception:
+        pass
+
     _emit({"type": "ready"})
     for line in sys.stdin:
         line = line.strip()

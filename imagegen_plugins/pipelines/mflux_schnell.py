@@ -95,8 +95,33 @@ def run_mflux_flux_schnell_generate(
     out = ""
     err = ""
 
+    def _run_inprocess() -> None:
+        from imagegen_plugins.mflux_flux1_session import generate_flux1
+
+        base_model = "schnell" if "/" in str(model) else None
+        image = generate_flux1(
+            model_name=str(model),
+            quantize=q,
+            base_model=base_model,
+            lora_paths=lora_paths,
+            lora_scales=lora_scales,
+            prompt=prompt,
+            seed=seed,
+            steps=steps,
+            width=width,
+            height=height,
+            guidance=guidance,
+            scheduler="flow_match_euler_discrete",
+            low_ram=low_ram,
+            stepwise_dir=stepwise_image_output_dir,
+        )
+        image.save(path=mflux_output_path)
+
     def _run_cli() -> None:
         nonlocal out, err
+        if mflux_is_installed():
+            _run_inprocess()
+            return
         if getattr(sys, "frozen", False):
             _run_mflux_cli_inprocess(cli_args)
         else:
@@ -284,7 +309,10 @@ def run_from_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
             lora_scales=lora_scales,
         )
         generation_time_seconds = time.perf_counter() - t0
-        atomic_copy2(mflux_output_path, output_path)
+        from imagegen_plugins.imagegen_perf_log import PerfTimer
+
+        with PerfTimer("save_output", pipeline="flux_schnell"):
+            atomic_copy2(mflux_output_path, output_path)
         finalize_stepwise_progress(output_path, steps)
     finally:
         try:

@@ -11,12 +11,13 @@ from typing import Dict
 
 # Third-party imports
 from PySide6.QtCore import Qt, QEvent, QRect, QPoint, QSize, QObject
-from PySide6.QtGui import QFont, QFontMetrics, QGuiApplication, QPainter, QColor, QPen, QBrush, QPixmap, QCursor
+from PySide6.QtGui import QFont, QFontMetrics, QGuiApplication, QPainter, QColor, QPen, QBrush, QPixmap
 from PySide6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QWidget, QScrollArea, QSizePolicy
 
 # Local imports
 from keyboard_handler import KeyboardHandlerManager
 from config import get_config
+from tooltip_popup_utils import ensure_tooltip_label, position_tooltip_near_cursor
 from thumbnail_constants import (
     DIALOG_BACKGROUND_HEX, DIALOG_TEXT_COLOR_HEX, ERROR_COLOR_HEX,
     DEFAULT_BORDER_COLOR_HEX, DEFAULT_BACKGROUND_COLOR_HEX, HEADING_COLOR_HEX,
@@ -707,12 +708,15 @@ class HelpDialog:
             "Each view has its own set of (mostly) context-sensitive keys.\n\n"
             "This list is dynamically generated and may have omissions or errors."
         )
-        qmark_tooltip_label = QLabel(None, Qt.WindowType.ToolTip | Qt.WindowType.FramelessWindowHint)
-        qmark_tooltip_label.setStyleSheet(f"QLabel {{ background-color: {DEFAULT_BACKGROUND_COLOR_HEX}; color: {BUTTON_TEXT_HOVER_HEX}; border: 1px solid {DEFAULT_BORDER_COLOR_HEX}; border-radius: 4px; padding: 4px 8px; font-size: 11pt; }}")
+        qmark_tooltip_label = ensure_tooltip_label(dialog, "_qmark_tooltip_label")
+        qmark_tooltip_label.setStyleSheet(
+            f"QLabel {{ background-color: {DEFAULT_BACKGROUND_COLOR_HEX}; color: {BUTTON_TEXT_HOVER_HEX}; "
+            f"border: 1px solid {DEFAULT_BORDER_COLOR_HEX}; border-radius: 4px; padding: 4px 8px; font-size: 11pt; }}"
+        )
         def qmark_show_tooltip():
             qmark_tooltip_label.setText(qmark_tooltip_text)
             qmark_tooltip_label.adjustSize()
-            qmark_tooltip_label.move(QCursor.pos() + QPoint(12, 12))
+            position_tooltip_near_cursor(qmark_tooltip_label, clamp_widget=dialog)
             qmark_tooltip_label.show()
             qmark_tooltip_label.raise_()
         def qmark_hide_tooltip():

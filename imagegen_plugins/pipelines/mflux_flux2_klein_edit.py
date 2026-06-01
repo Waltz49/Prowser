@@ -9,7 +9,6 @@ from __future__ import annotations
 import json
 import os
 import random
-import subprocess
 import sys
 import tempfile
 import time
@@ -49,7 +48,7 @@ def _source_paths_from_payload(payload: Dict[str, Any]) -> list[str]:
     return resolve_source_image_paths(payload)
 
 
-def _build_klein_edit_cli_args(
+def _run_mflux_klein_edit(
     *,
     image_paths: list[str],
     output_path: str,
@@ -59,115 +58,37 @@ def _build_klein_edit_cli_args(
     seed: int,
     quantize: int,
     low_ram: bool,
-    width: int | None = None,
-    height: int | None = None,
+    width: int,
+    height: int,
     lora_paths: list[str] | None = None,
     lora_scales: list[float] | None = None,
     stepwise_image_output_dir: str | None = None,
-) -> list[str]:
-    args: list[str] = [
-        "-q",
-        str(int(quantize)),
-        "--steps",
-        str(int(steps)),
-        "--seed",
-        str(int(seed)),
-        "--guidance",
-        str(_KLEIN_GUIDANCE),
-        "--image-paths",
-        *[str(p) for p in image_paths],
-        "--output",
-        output_path,
-        "--prompt",
-        prompt,
-        "--model",
-        str(model),
-    ]
-    if width is not None and height is not None:
-        args.extend(["--width", str(int(width)), "--height", str(int(height))])
-    if low_ram:
-        args.append("--low-ram")
-    if stepwise_image_output_dir:
-        args.extend(["--stepwise-image-output-dir", str(stepwise_image_output_dir)])
-    if lora_paths:
-        args.extend(["--lora-paths", *[str(p) for p in lora_paths]])
-        if lora_scales:
-            args.extend(["--lora-scales", *[str(float(s)) for s in lora_scales]])
-    return args
-
-
-def _run_mflux_klein_edit_cli(
-    *,
-    image_paths: list[str],
-    output_path: str,
-    prompt: str,
-    model: str,
-    steps: int,
-    seed: int,
-    quantize: int,
-    low_ram: bool,
-    width: int | None = None,
-    height: int | None = None,
-    lora_paths: list[str] | None = None,
-    lora_scales: list[float] | None = None,
-    stepwise_image_output_dir: str | None = None,
-    progressive_output_path: str | None = None,
 ) -> None:
-    cli_args = _build_klein_edit_cli_args(
-        image_paths=image_paths,
-        output_path=output_path,
-        prompt=prompt,
-        model=model,
-        steps=steps,
-        seed=seed,
-        quantize=quantize,
-        low_ram=low_ram,
-        width=width,
-        height=height,
-        lora_paths=lora_paths,
-        lora_scales=lora_scales,
-        stepwise_image_output_dir=stepwise_image_output_dir,
-    )
-
-    def _run_cli() -> None:
-        if getattr(sys, "frozen", False):
-            old_argv = list(sys.argv)
-            try:
-                sys.argv = ["flux2_edit_generate", *cli_args]
-                from mflux.models.flux2.cli.flux2_edit_generate import main as klein_edit_main
-
-                klein_edit_main()
-            finally:
-                sys.argv = old_argv
-            return
-
-        cmd = [
-            sys.executable,
-            "-m",
-            "mflux.models.flux2.cli.flux2_edit_generate",
-            *cli_args,
-        ]
-        proc = subprocess.run(
-            cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            env=os.environ.copy(),
+    if not mflux_is_installed():
+        raise RuntimeError(
+            "MFLUX is not installed. Install with: pip install mflux"
         )
-        out = (proc.stdout or "").strip()
-        err = (proc.stderr or "").strip()
-        if proc.returncode != 0:
-            msg = err or out or f"exit {proc.returncode}"
-            raise RuntimeError(
-                f"mflux FLUX.2 Klein edit failed ({proc.returncode}): {msg[:8000]}"
-            )
+    from imagegen_plugins.mflux_flux2_klein_session import generate_flux2_klein_edit
 
-    run_with_stepwise_watcher(
-        seed=seed,
-        stepwise_dir=stepwise_image_output_dir,
-        progressive_output_path=progressive_output_path,
-        run=_run_cli,
-    )
+    def _run() -> None:
+        image = generate_flux2_klein_edit(
+            model_name=model,
+            quantize=quantize,
+            lora_paths=lora_paths,
+            lora_scales=lora_scales,
+            prompt=prompt,
+            seed=seed,
+            steps=steps,
+            width=width,
+            height=height,
+            guidance=_KLEIN_GUIDANCE,
+            image_paths=image_paths,
+            low_ram=low_ram,
+            stepwise_dir=stepwise_image_output_dir,
+        )
+        image.save(path=output_path)
+
+    _run()
 
 
 def run_from_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -228,21 +149,25 @@ def run_from_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
 
     t0 = time.perf_counter()
     try:
-        _run_mflux_klein_edit_cli(
-            image_paths=source_paths,
-            output_path=mflux_output_path,
-            prompt=prompt,
-            model=model,
-            steps=steps,
+        run_with_stepwise_watcher(
             seed=seed,
-            quantize=quantize,
-            low_ram=low_ram,
-            width=width_i,
-            height=height_i,
-            lora_paths=lora_paths,
-            lora_scales=lora_scales,
-            stepwise_image_output_dir=stepwise_dir,
+            stepwise_dir=stepwise_dir,
             progressive_output_path=progressive_output_path,
+            run=lambda: _run_mflux_klein_edit(
+                image_paths=source_paths,
+                output_path=mflux_output_path,
+                prompt=prompt,
+                model=model,
+                steps=steps,
+                seed=seed,
+                quantize=quantize,
+                low_ram=low_ram,
+                width=width_i,
+                height=height_i,
+                lora_paths=lora_paths,
+                lora_scales=lora_scales,
+                stepwise_image_output_dir=stepwise_dir,
+            ),
         )
         if (
             not os.path.isfile(mflux_output_path)
@@ -251,7 +176,10 @@ def run_from_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
             raise RuntimeError(
                 f"mflux Klein edit did not write output: {mflux_output_path}"
             )
-        atomic_copy2(mflux_output_path, output_path)
+        from imagegen_plugins.imagegen_perf_log import PerfTimer
+
+        with PerfTimer("save_output", pipeline="flux2_klein_edit"):
+            atomic_copy2(mflux_output_path, output_path)
         finalize_stepwise_progress(output_path, steps)
         generation_time_seconds = time.perf_counter() - t0
     finally:

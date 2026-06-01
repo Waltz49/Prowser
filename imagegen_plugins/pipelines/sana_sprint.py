@@ -81,11 +81,16 @@ def unload_pipeline() -> None:
 def _ensure_pipeline(hf_model_id: str) -> Any:
     global _pipe, _loaded_hf_model_id
     if _pipe is not None and _loaded_hf_model_id == hf_model_id:
+        from imagegen_plugins.imagegen_perf_log import perf_log_kv
+
+        perf_log_kv("model_load", kind="sana_sprint", cache="warm", model=hf_model_id)
         return _pipe
 
     unload_pipeline()
     from diffusers import SanaSprintPipeline
+    from imagegen_plugins.imagegen_perf_log import perf_log_kv
 
+    load_t0 = time.perf_counter()
     device, torch_dtype = _pick_torch_device()
     tok_kwargs = _hf_hub_token_kwargs()
     kwargs = {"torch_dtype": torch_dtype, "use_safetensors": True, **tok_kwargs}
@@ -102,6 +107,13 @@ def _ensure_pipeline(hf_model_id: str) -> Any:
         except Exception:
             pass
     _loaded_hf_model_id = hf_model_id
+    perf_log_kv(
+        "model_load",
+        kind="sana_sprint",
+        cache="cold",
+        model=hf_model_id,
+        elapsed=time.perf_counter() - load_t0,
+    )
     return _pipe
 
 
@@ -152,10 +164,15 @@ def run_from_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     if steps != 2:
         gen_kwargs["intermediate_timesteps"] = None
 
-    pipe = _ensure_pipeline(hf_model_id)
+    from imagegen_plugins.imagegen_perf_log import PerfTimer
+
     t0 = time.perf_counter()
-    out = pipe(**gen_kwargs)
-    out.images[0].save(output_path)
+    with PerfTimer("sana_pipeline", model=hf_model_id):
+        pipe = _ensure_pipeline(hf_model_id)
+    with PerfTimer("sana_inference", steps=steps, seed=seed):
+        out = pipe(**gen_kwargs)
+    with PerfTimer("save_output", pipeline="sana_sprint"):
+        out.images[0].save(output_path)
     generation_time_seconds = time.perf_counter() - t0
 
     return {
