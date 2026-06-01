@@ -38,6 +38,11 @@ def compute_flux1_fill_model_key(
     return (int(quantize), paths, scales)
 
 
+def _model_unusable_after_low_ram(model: Any) -> bool:
+    """MemorySaver can drop weights after a run; do not reuse a hollow shell."""
+    return model is None or getattr(model, "transformer", None) is None
+
+
 def _register_run_callbacks(
     model: Any,
     *,
@@ -50,10 +55,14 @@ def _register_run_callbacks(
     from mflux.callbacks.callback_registry import CallbackRegistry
 
     model.callbacks = CallbackRegistry()
+    # MemorySaver keeps the transformer only when len(seed) > 1; series jobs need that.
+    seed_arg: list[int] = [int(seed)]
+    if low_ram:
+        seed_arg = [int(seed), int(seed)]
     args = Namespace(
         stepwise_image_output_dir=stepwise_dir,
         low_ram=low_ram,
-        seed=[int(seed)],
+        seed=seed_arg,
         battery_percentage_stop_limit=None,
         output=None,
         mlx_cache_limit_gb=None,
@@ -78,8 +87,14 @@ def get_flux1(
         model_name, quantize, base_model, lora_paths, lora_scales
     )
     if _flux1_model is not None and _flux1_loaded_key == key:
-        perf_log_kv("model_load", kind="flux1", cache="warm", model=model_name)
-        return _flux1_model
+        if _model_unusable_after_low_ram(_flux1_model):
+            perf_log_kv("model_load", kind="flux1", cache="stale", model=model_name)
+            _flux1_model = None
+            _flux1_loaded_key = None
+            gc.collect()
+        else:
+            perf_log_kv("model_load", kind="flux1", cache="warm", model=model_name)
+            return _flux1_model
 
     if _flux1_model is not None:
         _flux1_model = None
@@ -121,8 +136,14 @@ def get_flux1_fill(
     global _flux1_fill_model, _flux1_fill_loaded_key
     key = compute_flux1_fill_model_key(quantize, lora_paths, lora_scales)
     if _flux1_fill_model is not None and _flux1_fill_loaded_key == key:
-        perf_log_kv("model_load", kind="flux1_fill", cache="warm")
-        return _flux1_fill_model
+        if _model_unusable_after_low_ram(_flux1_fill_model):
+            perf_log_kv("model_load", kind="flux1_fill", cache="stale")
+            _flux1_fill_model = None
+            _flux1_fill_loaded_key = None
+            gc.collect()
+        else:
+            perf_log_kv("model_load", kind="flux1_fill", cache="warm")
+            return _flux1_fill_model
 
     if _flux1_fill_model is not None:
         _flux1_fill_model = None

@@ -235,6 +235,31 @@ def open_reference_graph_for_path(main_window, image_path: str) -> None:
         main_window.save_sorting_settings()
 
 
+def valid_exif_reference_paths_for_image(
+    image_path: str, *, max_count: Optional[int] = None
+) -> List[str]:
+    """Ordered unique paths: *image_path* first, then direct EXIF references that resolve."""
+    if not image_path or not os.path.isfile(image_path):
+        return []
+    image_path = os.path.normpath(os.path.abspath(image_path))
+    entries = get_reference_entries_for_path(image_path)
+    if not entries:
+        return [image_path]
+    image_dir = os.path.dirname(image_path) or ""
+    paths, _ = resolve_exif_reference_paths(image_dir, image_path, entries)
+    out: List[str] = []
+    seen: Set[str] = set()
+    for raw in paths:
+        ap = os.path.normpath(os.path.abspath(raw))
+        if not ap or not os.path.isfile(ap) or ap in seen:
+            continue
+        seen.add(ap)
+        out.append(ap)
+        if max_count is not None and len(out) >= max_count:
+            break
+    return out or [image_path]
+
+
 def resolve_exif_reference_paths(
     image_dir: str, current_path: str, entries: List[Tuple[str, Optional[float]]]
 ) -> Tuple[List[str], Dict[str, str]]:

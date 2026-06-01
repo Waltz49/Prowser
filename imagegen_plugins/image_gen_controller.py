@@ -518,6 +518,9 @@ class ImageGenController(QObject):
         self._copy_batch_active = new_total > 1
         self.task_status_info_changed.emit()
         self.queue_changed.emit()
+        if self._is_in_copy_cooldown() and self._pending_batch_copies() <= 0:
+            self._stop_copy_cooldown_timer()
+            self._finish_copy_batch()
 
     def _series_images_after_for_queue_display(self) -> int | None:
         """Images still to render after the current one in a multi-copy batch."""
@@ -1000,9 +1003,19 @@ class ImageGenController(QObject):
         self.task_status_info_changed.emit()
         self._schedule_copy_cooldown()
 
+    def _pending_batch_copies(self) -> int:
+        """Images in the active batch still to generate (including after cooldown)."""
+        if not self._copy_batch_active or not self._active_queue_job_id:
+            return 0
+        return max(0, self._copies_total - self._copies_done)
+
     def _stop_copy_cooldown_timer(self) -> None:
         timer = self._cooldown_timer
         if timer is not None:
+            try:
+                timer.timeout.disconnect(self._on_copy_cooldown_elapsed)
+            except (TypeError, RuntimeError):
+                pass
             timer.stop()
             timer.deleteLater()
         self._cooldown_timer = None
@@ -1027,10 +1040,19 @@ class ImageGenController(QObject):
         if self._copy_batch_cancelled:
             self._finish_copy_batch(cancelled=True)
             return
+        if self._pending_batch_copies() <= 0:
+            self._finish_copy_batch()
+            return
         QTimer.singleShot(0, self._launch_next_copy_after_cooldown)
 
     def _launch_next_copy_after_cooldown(self) -> None:
-        if not self._copy_batch_active or self._copy_batch_cancelled:
+        if self._copy_batch_cancelled:
+            return
+        if self._pending_batch_copies() <= 0:
+            self._finish_copy_batch()
+            return
+        if not self._copy_batch_active:
+            self._finish_copy_batch()
             return
         if self._tasks.is_running():
             return

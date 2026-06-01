@@ -82,6 +82,10 @@ def _klein_session_key(
     return (model_name, int(quantize), paths, scales)
 
 
+def _klein_model_unusable_after_low_ram(model: Any) -> bool:
+    return model is None or getattr(model, "transformer", None) is None
+
+
 def _register_run_callbacks(
     model: Any,
     *,
@@ -94,10 +98,13 @@ def _register_run_callbacks(
     from mflux.models.flux2.latent_creator.flux2_latent_creator import Flux2LatentCreator
 
     model.callbacks = CallbackRegistry()
+    seed_arg: list[int] = [int(seed)]
+    if low_ram:
+        seed_arg = [int(seed), int(seed)]
     args = Namespace(
         stepwise_image_output_dir=stepwise_dir,
         low_ram=low_ram,
-        seed=[int(seed)],
+        seed=seed_arg,
         battery_percentage_stop_limit=None,
         output=None,
         mlx_cache_limit_gb=None,
@@ -119,8 +126,12 @@ def get_flux2_klein_edit(
     global _session_model, _session_key
     key = _klein_session_key(model_name, quantize, lora_paths, lora_scales)
     if _session_model is not None and _session_key == key:
-        perf_log_kv("model_load", kind="flux2_klein_edit", cache="warm", model=model_name)
-        return _session_model
+        if _klein_model_unusable_after_low_ram(_session_model):
+            perf_log_kv("model_load", kind="flux2_klein_edit", cache="stale", model=model_name)
+            release_flux2_klein_session(reason="stale_low_ram")
+        else:
+            perf_log_kv("model_load", kind="flux2_klein_edit", cache="warm", model=model_name)
+            return _session_model
 
     release_flux2_klein_session(reason="reload")
     from mflux.models.common.config import ModelConfig

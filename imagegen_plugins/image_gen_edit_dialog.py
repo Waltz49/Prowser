@@ -74,6 +74,7 @@ from imagegen_plugins.image_gen_persistence import (
 from imagegen_plugins.image_gen_pipeline_modes import finalize_run_values
 from imagegen_plugins.image_gen_fields import FieldSpec
 from imagegen_plugins.image_gen_registry import ImageGenModelPlugin
+from reference_graph import valid_exif_reference_paths_for_image
 from imagegen_plugins.imagegen_control_tooltips import (
     apply_dialog_button_tooltips,
     apply_edit_import_button_tooltip,
@@ -342,6 +343,12 @@ class _MultiSourceImagePreview(QWidget):
     def source_paths(self) -> list[str]:
         return list(self._source_paths)
 
+    def set_source_paths(self, source_paths: list[str]) -> None:
+        self._source_paths = [
+            os.path.abspath(p) for p in source_paths if p and os.path.isfile(p)
+        ]
+        self._rebuild_thumbs()
+
     def _rebuild_thumbs(self) -> None:
         while self._layout.count():
             item = self._layout.takeAt(0)
@@ -517,6 +524,9 @@ class ImageGenEditDialog(QDialog):
         self._fields_form: Optional[QFormLayout] = None
         self._source_preview: Optional[_SourceImagePreview] = None
         self._source_nav: Optional[ImageGenSourceNavRow] = None
+        self._multi_source_preview: Optional[_MultiSourceImagePreview] = None
+        self._preview_host: Optional[QFrame] = None
+        self._preview_layout: Optional[QVBoxLayout] = None
         self._use_last_generated_cb: Optional[QCheckBox] = None
 
         initial = resolve_initial_plugin(
@@ -610,6 +620,66 @@ class ImageGenEditDialog(QDialog):
         if self._source_paths:
             self.source_path = self._source_paths[0]
 
+    def _set_edit_source_paths(self, paths: list[str]) -> None:
+        paths = [
+            os.path.abspath(p)
+            for p in paths
+            if p and os.path.isfile(p)
+        ][:MAX_EDIT_SOURCE_IMAGES]
+        if not paths:
+            return
+        was_multi = self._multi_source
+        self._source_paths = paths
+        self.source_path = paths[0]
+        self._multi_source = len(paths) > 1
+        if self._multi_source == was_multi:
+            if self._multi_source and self._multi_source_preview is not None:
+                self._multi_source_preview.set_source_paths(paths)
+            elif self._source_preview is not None:
+                self._source_preview.set_source_path(self.source_path)
+            return
+        self._rebuild_source_preview()
+
+    def _rebuild_source_preview(self) -> None:
+        if self._preview_layout is None or self._preview_host is None:
+            return
+        layout = self._preview_layout
+        while layout.count():
+            item = layout.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
+        self._source_preview = None
+        self._source_nav = None
+        self._multi_source_preview = None
+
+        main_window = resolve_image_gen_main_window(self)
+        if self._multi_source:
+
+            def _on_thumb_activate(path: str) -> None:
+                _activate_source_in_main_window(main_window, path)
+
+            self._multi_source_preview = _MultiSourceImagePreview(
+                self._source_paths,
+                _on_thumb_activate,
+                self._on_source_paths_reordered,
+                self._preview_host,
+            )
+            layout.addWidget(self._multi_source_preview, 1)
+        else:
+            self._source_preview = _SourceImagePreview(
+                self.source_path, self._preview_host
+            )
+            self._source_nav = ImageGenSourceNavRow(
+                main_window,
+                self._on_source_image_changed,
+                self._preview_host,
+                initial_source_path=self.source_path,
+            )
+            self._source_nav.set_center_widget(self._source_preview)
+            layout.addWidget(self._source_nav)
+            install_source_nav_keyboard_shortcuts(self, self._source_nav)
+
     def _build_ui(self) -> None:
         layout = QVBoxLayout(self)
         splitter = ImageGenPreviewSplitter(self)
@@ -618,19 +688,21 @@ class ImageGenEditDialog(QDialog):
         preview_host.setFrameShape(QFrame.Shape.NoFrame)
         preview_layout = QVBoxLayout(preview_host)
         preview_layout.setContentsMargins(0, 0, 0, 0)
+        self._preview_host = preview_host
+        self._preview_layout = preview_layout
         main_window = resolve_image_gen_main_window(self)
         if self._multi_source:
 
             def _on_thumb_activate(path: str) -> None:
                 _activate_source_in_main_window(main_window, path)
 
-            preview_widget = _MultiSourceImagePreview(
+            self._multi_source_preview = _MultiSourceImagePreview(
                 self._source_paths,
                 _on_thumb_activate,
                 self._on_source_paths_reordered,
                 preview_host,
             )
-            preview_layout.addWidget(preview_widget, 1)
+            preview_layout.addWidget(self._multi_source_preview, 1)
         else:
             self._source_preview = _SourceImagePreview(self.source_path, preview_host)
             self._source_nav = ImageGenSourceNavRow(
@@ -832,6 +904,10 @@ class ImageGenEditDialog(QDialog):
         self.set_prompt_text(prompt_text)
         if option_held:
             apply_import_extras_from_image_path(self, self.source_path)
+            ref_paths = valid_exif_reference_paths_for_image(
+                self.source_path, max_count=MAX_EDIT_SOURCE_IMAGES
+            )
+            self._set_edit_source_paths(ref_paths)
 
     def set_prompt_text(self, text: str) -> None:
         entry = self._widgets.get("prompt")

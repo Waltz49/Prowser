@@ -109,7 +109,8 @@ def apply_dim_helper_tooltips(
 _EDIT_IMPORT_TOOLTIP = (
     "Load prompt text from the EXIF user comment of the selected image. "
     "Hold Option while pressing Import to also load seed, steps, quantization, LoRA, "
-    "and guidance when those values are present in the comment."
+    "and guidance when those values are present in the comment, and to add all "
+    "valid EXIF references as source images (up to four)."
 )
 
 
