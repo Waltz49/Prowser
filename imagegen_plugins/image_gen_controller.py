@@ -464,11 +464,64 @@ class ImageGenController(QObject):
         self._stop_copy_cooldown_timer()
         self._on_copy_cooldown_elapsed()
 
+    def active_series_remaining_after(self) -> int:
+        """Images in the active batch still to run after the current cycle."""
+        if not self._active_queue_job_id:
+            return 0
+        return max(0, self._copies_total - self._copies_done - 1)
+
+    def can_add_active_series_cycle(self) -> bool:
+        if not self._active_queue_job_id:
+            return False
+        max_after = _COPIES_MAX - self._copies_done - 1
+        return self.active_series_remaining_after() < max_after
+
+    def add_active_series_cycle(self) -> bool:
+        """Add one more image to the active batch (same parameters)."""
+        return self._adjust_active_series_remaining_after(1)
+
+    def subtract_active_series_remaining(self) -> bool:
+        """Remove one pending image from the active batch (minimum 0 remaining)."""
+        return self._adjust_active_series_remaining_after(-1)
+
+    def active_series_refinement_enabled(self) -> bool:
+        return bool(self._pending_values.get("use_last_generated_image", False))
+
+    def set_active_series_refinement(self, enabled: bool) -> bool:
+        """Toggle whether remaining copies reuse the last generated image."""
+        if not self._active_queue_job_id or self.active_series_remaining_after() <= 0:
+            return False
+        enabled = bool(enabled)
+        if self.active_series_refinement_enabled() == enabled:
+            return False
+        self._pending_values["use_last_generated_image"] = enabled
+        self.task_status_info_changed.emit()
+        self.queue_changed.emit()
+        return True
+
+    def _adjust_active_series_remaining_after(self, delta: int) -> bool:
+        if not self._active_queue_job_id or delta == 0:
+            return False
+        after = self.active_series_remaining_after()
+        max_after = _COPIES_MAX - self._copies_done - 1
+        new_after = max(0, min(max_after, after + delta))
+        if new_after == after:
+            return False
+        self._set_active_series_remaining_after(new_after)
+        return True
+
+    def _set_active_series_remaining_after(self, after: int) -> None:
+        after = max(0, min(_COPIES_MAX - self._copies_done - 1, int(after)))
+        new_total = self._copies_done + 1 + after
+        self._copies_total = new_total
+        self._pending_values["copies"] = new_total
+        self._copy_batch_active = new_total > 1
+        self.task_status_info_changed.emit()
+        self.queue_changed.emit()
+
     def _series_images_after_for_queue_display(self) -> int | None:
         """Images still to render after the current one in a multi-copy batch."""
-        if self._copies_total <= 1:
-            return None
-        after = self._copies_total - self._copies_done - 1
+        after = self.active_series_remaining_after()
         return after if after > 0 else None
 
     def _reset_live_queue_progress(self) -> None:

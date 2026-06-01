@@ -11,12 +11,12 @@ from typing import Any
 from imagegen_plugins.imagegen_perf_log import PerfTimer, perf_log_kv
 
 _flux1_model: Any = None
-_flux1_key: tuple[Any, ...] | None = None
+_flux1_loaded_key: tuple[Any, ...] | None = None
 _flux1_fill_model: Any = None
-_flux1_fill_key: tuple[Any, ...] | None = None
+_flux1_fill_loaded_key: tuple[Any, ...] | None = None
 
 
-def _flux1_key(
+def compute_flux1_model_key(
     model_name: str,
     quantize: int,
     base_model: str | None,
@@ -28,7 +28,7 @@ def _flux1_key(
     return (model_name, int(quantize), str(base_model or ""), paths, scales)
 
 
-def _flux1_fill_key(
+def compute_flux1_fill_model_key(
     quantize: int,
     lora_paths: list[str] | None,
     lora_scales: list[float] | None,
@@ -73,15 +73,17 @@ def get_flux1(
     lora_paths: list[str] | None,
     lora_scales: list[float] | None,
 ) -> Any:
-    global _flux1_model, _flux1_key
-    key = _flux1_key(model_name, quantize, base_model, lora_paths, lora_scales)
-    if _flux1_model is not None and _flux1_key == key:
+    global _flux1_model, _flux1_loaded_key
+    key = compute_flux1_model_key(
+        model_name, quantize, base_model, lora_paths, lora_scales
+    )
+    if _flux1_model is not None and _flux1_loaded_key == key:
         perf_log_kv("model_load", kind="flux1", cache="warm", model=model_name)
         return _flux1_model
 
     if _flux1_model is not None:
         _flux1_model = None
-        _flux1_key = None
+        _flux1_loaded_key = None
         gc.collect()
 
     from mflux.models.common.config import ModelConfig
@@ -98,7 +100,7 @@ def get_flux1(
         lora_paths=lora_paths,
         lora_scales=lora_scales,
     )
-    _flux1_key = key
+    _flux1_loaded_key = key
     perf_log_kv(
         "model_load",
         kind="flux1",
@@ -116,15 +118,15 @@ def get_flux1_fill(
     lora_paths: list[str] | None,
     lora_scales: list[float] | None,
 ) -> Any:
-    global _flux1_fill_model, _flux1_fill_key
-    key = _flux1_fill_key(quantize, lora_paths, lora_scales)
-    if _flux1_fill_model is not None and _flux1_fill_key == key:
+    global _flux1_fill_model, _flux1_fill_loaded_key
+    key = compute_flux1_fill_model_key(quantize, lora_paths, lora_scales)
+    if _flux1_fill_model is not None and _flux1_fill_loaded_key == key:
         perf_log_kv("model_load", kind="flux1_fill", cache="warm")
         return _flux1_fill_model
 
     if _flux1_fill_model is not None:
         _flux1_fill_model = None
-        _flux1_fill_key = None
+        _flux1_fill_loaded_key = None
         gc.collect()
 
     from mflux.models.flux.variants.fill.flux_fill import Flux1Fill
@@ -135,7 +137,7 @@ def get_flux1_fill(
         lora_paths=lora_paths,
         lora_scales=lora_scales,
     )
-    _flux1_fill_key = key
+    _flux1_fill_loaded_key = key
     perf_log_kv(
         "model_load",
         kind="flux1_fill",
@@ -147,13 +149,13 @@ def get_flux1_fill(
 
 
 def release_flux1_sessions(*, reason: str = "explicit") -> None:
-    global _flux1_model, _flux1_key, _flux1_fill_model, _flux1_fill_key
+    global _flux1_model, _flux1_loaded_key, _flux1_fill_model, _flux1_fill_loaded_key
     if _flux1_model is not None or _flux1_fill_model is not None:
         perf_log_kv("flux1_session_release", reason=reason)
     _flux1_model = None
-    _flux1_key = None
+    _flux1_loaded_key = None
     _flux1_fill_model = None
-    _flux1_fill_key = None
+    _flux1_fill_loaded_key = None
     gc.collect()
 
 

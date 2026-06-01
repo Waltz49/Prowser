@@ -50,6 +50,8 @@ _THUMB_SIZE = 72
 _ROW_PAD = 12
 _THUMB_CELL_MARGIN = 8
 _THUMB_CELL_GAP = 6
+_ACTION_COL_WIDTH = 36
+_ICON_BTN_SIZE = 22
 
 
 def _job_queue_app_background_hex() -> str:
@@ -159,6 +161,9 @@ def _make_clickable_thumbnail(main_window, file_path: str, size: int) -> QLabel:
     def _on_mouse_press(event) -> None:
         if event.button() == Qt.MouseButton.LeftButton:
             _open_image_in_browse(main_window, file_path)
+            event.accept()
+            return
+        QLabel.mousePressEvent(thumb, event)
 
     thumb.mousePressEvent = _on_mouse_press
     return thumb
@@ -188,6 +193,15 @@ def _max_preview_column_width(rows) -> int:
     return max(_preview_column_width(1), *widths) if widths else _preview_column_width(1)
 
 
+def _action_column_min_height(*, is_active: bool) -> int:
+    series_btn_count = 5 if is_active else 2
+    return (
+        series_btn_count * _ICON_BTN_SIZE
+        + max(0, series_btn_count - 1) * 4
+        + 8
+    )
+
+
 def _info_content_width(table: QTableWidget, *, preview_col_width: int) -> int:
     viewport_w = table.viewport().width()
     if viewport_w < 80:
@@ -205,21 +219,23 @@ def _apply_info_browser_html(
     )
 
 
-def _trash_button_stylesheet() -> str:
+def _icon_push_button_stylesheet(icon_name: str, *, hover_icon_name: str | None = None) -> str:
     t = get_active_theme()
-    trash_url = f"url({asset_path('trash_icon.svg')})"
-    trash_hover_url = f"url({asset_path('trash_icon_hover.svg')})"
+    icon_url = f"url({asset_path(icon_name)})"
+    hover_name = hover_icon_name or icon_name.replace(".png", "_hover.png")
+    hover_url = f"url({asset_path(hover_name)})"
+    sz = _ICON_BTN_SIZE
     return f"""
         QPushButton {{
             background-color: {t.dialog_background_hex};
             border: 1px solid {t.border_default_hex};
             border-radius: 3px;
             padding: 0px;
-            min-width: 22px;
-            max-width: 22px;
-            min-height: 22px;
-            max-height: 22px;
-            image: {trash_url};
+            min-width: {sz}px;
+            max-width: {sz}px;
+            min-height: {sz}px;
+            max-height: {sz}px;
+            image: {icon_url};
         }}
         QPushButton:focus {{
             border: 1px solid {t.current_image_border_color_hex};
@@ -228,41 +244,47 @@ def _trash_button_stylesheet() -> str:
         QPushButton:hover {{
             background-color: {t.tab_button_hover_bg_hex};
             border: 1px solid {t.tab_button_hover_bg_hex};
-            image: {trash_hover_url};
+            image: {hover_url};
         }}
         QPushButton:pressed {{
             background-color: {t.sidebar_splitter_handle_hex};
+        }}
+        QPushButton:disabled {{
+            opacity: 0.35;
         }}
     """
 
 
+def _trash_button_stylesheet() -> str:
+    return _icon_push_button_stylesheet(
+        "trash_icon.svg", hover_icon_name="trash_icon_hover.svg"
+    )
+
+
 def _edit_button_stylesheet() -> str:
+    return _icon_push_button_stylesheet("edit_icon.png")
+
+
+def _series_plus_button_stylesheet() -> str:
+    return _icon_push_button_stylesheet("series_plus_icon.png")
+
+
+def _series_minus_button_stylesheet() -> str:
+    return _icon_push_button_stylesheet("series_minus_icon.png")
+
+
+def _series_refinement_button_stylesheet() -> str:
     t = get_active_theme()
-    edit_url = f"url({asset_path('edit_icon.png')})"
-    edit_hover_url = f"url({asset_path('edit_icon_hover.png')})"
-    return f"""
-        QPushButton {{
-            background-color: {t.dialog_background_hex};
-            border: 1px solid {t.border_default_hex};
-            border-radius: 3px;
-            padding: 0px;
-            min-width: 22px;
-            max-width: 22px;
-            min-height: 22px;
-            max-height: 22px;
-            image: {edit_url};
+    active_url = f"url({asset_path('series_refinement_icon_active.png')})"
+    active_hover_url = f"url({asset_path('series_refinement_icon_active_hover.png')})"
+    return _icon_push_button_stylesheet("series_refinement_icon.png") + f"""
+        QPushButton:checked {{
+            image: {active_url};
         }}
-        QPushButton:focus {{
-            border: 1px solid {t.current_image_border_color_hex};
-            outline: none;
-        }}
-        QPushButton:hover {{
+        QPushButton:checked:hover {{
             background-color: {t.tab_button_hover_bg_hex};
             border: 1px solid {t.tab_button_hover_bg_hex};
-            image: {edit_hover_url};
-        }}
-        QPushButton:pressed {{
-            background-color: {t.sidebar_splitter_handle_hex};
+            image: {active_hover_url};
         }}
     """
 
@@ -275,6 +297,7 @@ class ImageGenJobQueueDialog(QDialog):
         self.main_window = main_window
         self._controller = get_imagegen_controller(main_window)
         self._refresh_timer: QTimer | None = None
+        self._refresh_table_timer: QTimer | None = None
         self._signal_connected = False
         self._geometry_restore_attempted = False
         self._geometry_was_restored = False
@@ -330,7 +353,7 @@ class ImageGenJobQueueDialog(QDialog):
         self._table.horizontalHeader().setSectionResizeMode(
             2, QHeaderView.ResizeMode.Fixed
         )
-        self._table.setColumnWidth(0, 36)
+        self._table.setColumnWidth(0, _ACTION_COL_WIDTH)
         self._table.setColumnWidth(2, _preview_column_width(1))
         self._table.verticalHeader().setVisible(False)
         self._table.setSelectionMode(QTableWidget.SelectionMode.NoSelection)
@@ -346,7 +369,25 @@ class ImageGenJobQueueDialog(QDialog):
         dismiss_shortcut.activated.connect(self.hide)
 
         self._connect_controller()
-        self.refresh_table()
+        self._do_refresh_table()
+
+    def _schedule_refresh_table(self) -> None:
+        """Defer table rebuild so queue_changed is safe during button handlers."""
+        timer = self._refresh_table_timer
+        if timer is None:
+            timer = QTimer(self)
+            timer.setSingleShot(True)
+            timer.timeout.connect(self._do_refresh_table)
+            self._refresh_table_timer = timer
+        timer.start(0)
+
+    def _do_refresh_table(self) -> None:
+        try:
+            self.refresh_table()
+        except Exception:
+            import traceback
+
+            traceback.print_exc()
 
     def _save_geometry(self) -> None:
         try:
@@ -357,7 +398,7 @@ class ImageGenJobQueueDialog(QDialog):
     def _connect_controller(self) -> None:
         if self._signal_connected:
             return
-        self._controller.queue_changed.connect(self.refresh_table)
+        self._controller.queue_changed.connect(self._schedule_refresh_table)
         self._controller.task_status_info_changed.connect(
             lambda: self._refresh_active_row_info(force=True)
         )
@@ -382,6 +423,8 @@ class ImageGenJobQueueDialog(QDialog):
         self._save_geometry()
         if self._refresh_timer is not None:
             self._refresh_timer.stop()
+        if self._refresh_table_timer is not None:
+            self._refresh_table_timer.stop()
         event.ignore()
         self.hide()
 
@@ -389,6 +432,8 @@ class ImageGenJobQueueDialog(QDialog):
         self._save_geometry()
         if self._refresh_timer is not None:
             self._refresh_timer.stop()
+        if self._refresh_table_timer is not None:
+            self._refresh_table_timer.stop()
         super().hideEvent(event)
 
     def showEvent(self, event) -> None:
@@ -409,7 +454,7 @@ class ImageGenJobQueueDialog(QDialog):
             )
         if self._refresh_timer is not None:
             self._refresh_timer.start()
-        self.refresh_table()
+        self._schedule_refresh_table()
 
     def _refresh_active_row_info(self, *, force: bool = False) -> None:
         if not self.isVisible():
@@ -431,7 +476,11 @@ class ImageGenJobQueueDialog(QDialog):
                 browser_h = _apply_info_browser_html(
                     browser, info_html, content_width=content_width
                 )
-                row_h = max(_THUMB_SIZE + _ROW_PAD, browser_h + _ROW_PAD)
+                row_h = max(
+                    _THUMB_SIZE + _ROW_PAD,
+                    browser_h + _ROW_PAD,
+                    _action_column_min_height(is_active=True),
+                )
                 self._table.setRowHeight(0, row_h)
         if force:
             self._refresh_active_row_preview(row_idx=0)
@@ -450,8 +499,14 @@ class ImageGenJobQueueDialog(QDialog):
         self._table.setCellWidget(row_idx, 2, preview_wrap)
         browser = self._table.cellWidget(row_idx, 1)
         browser_h = browser.height() if isinstance(browser, QTextBrowser) else 0
+        is_active = row_idx < len(rows) and rows[row_idx].is_active
         self._table.setRowHeight(
-            row_idx, max(_THUMB_SIZE + _ROW_PAD, browser_h + _ROW_PAD)
+            row_idx,
+            max(
+                _THUMB_SIZE + _ROW_PAD,
+                browser_h + _ROW_PAD,
+                _action_column_min_height(is_active=is_active),
+            ),
         )
 
     def refresh_table(self) -> None:
@@ -488,6 +543,41 @@ class ImageGenJobQueueDialog(QDialog):
             action_layout = QVBoxLayout(action_wrap)
             action_layout.setContentsMargins(4, 0, 4, 0)
             action_layout.setSpacing(4)
+            if row.is_active:
+                plus_btn = QPushButton()
+                plus_btn.setToolTip("Add another image to this series")
+                plus_btn.setStyleSheet(_series_plus_button_stylesheet())
+                plus_btn.setEnabled(self._controller.can_add_active_series_cycle())
+                plus_btn.clicked.connect(self._on_series_plus)
+                minus_btn = QPushButton()
+                minus_btn.setToolTip("Remove one pending image from the series")
+                minus_btn.setStyleSheet(_series_minus_button_stylesheet())
+                minus_btn.setEnabled(self._controller.active_series_remaining_after() > 0)
+                minus_btn.clicked.connect(self._on_series_minus)
+                refine_btn = QPushButton()
+                refine_btn.setCheckable(True)
+                refine_btn.setToolTip(
+                    "Refinement (toggle): use each finished image as input for later copies"
+                )
+                refine_btn.setStyleSheet(_series_refinement_button_stylesheet())
+                refine_btn.setEnabled(
+                    self._controller.active_series_remaining_after() > 0
+                )
+                refine_btn.blockSignals(True)
+                refine_btn.setChecked(
+                    self._controller.active_series_refinement_enabled()
+                )
+                refine_btn.blockSignals(False)
+                refine_btn.toggled.connect(self._on_series_refinement_toggled)
+                action_layout.addWidget(
+                    plus_btn, alignment=Qt.AlignmentFlag.AlignCenter
+                )
+                action_layout.addWidget(
+                    minus_btn, alignment=Qt.AlignmentFlag.AlignCenter
+                )
+                action_layout.addWidget(
+                    refine_btn, alignment=Qt.AlignmentFlag.AlignCenter
+                )
             action_layout.addWidget(edit_btn, alignment=Qt.AlignmentFlag.AlignCenter)
             action_layout.addWidget(cancel_btn, alignment=Qt.AlignmentFlag.AlignCenter)
             self._table.setCellWidget(row_idx, 0, action_wrap)
@@ -512,8 +602,21 @@ class ImageGenJobQueueDialog(QDialog):
             )
             self._table.setCellWidget(row_idx, 2, preview_wrap)
 
-            row_h = max(_THUMB_SIZE + _ROW_PAD, browser_h + _ROW_PAD)
+            row_h = max(
+                _THUMB_SIZE + _ROW_PAD,
+                browser_h + _ROW_PAD,
+                _action_column_min_height(is_active=row.is_active),
+            )
             self._table.setRowHeight(row_idx, row_h)
+
+    def _on_series_plus(self) -> None:
+        self._controller.add_active_series_cycle()
+
+    def _on_series_minus(self) -> None:
+        self._controller.subtract_active_series_remaining()
+
+    def _on_series_refinement_toggled(self, checked: bool) -> None:
+        self._controller.set_active_series_refinement(checked)
 
     def _on_edit_row(self, row: int) -> None:
         record = self._controller.job_record_for_row(row)
@@ -552,7 +655,7 @@ def show_imagegen_job_queue_dialog(main_window) -> None:
     if dlg.isVisible():
         dlg.hide()
         return
-    dlg.refresh_table()
+    dlg._schedule_refresh_table()
     dlg.show()
     dlg.raise_()
     dlg.activateWindow()

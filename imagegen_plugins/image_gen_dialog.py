@@ -505,6 +505,14 @@ class ImageGenDimensionAspectMixin:
         try:
             self._aspect_checkbox.setChecked(locked)
             if locked:
+                w = self._values.get("width")
+                h = self._values.get("height")
+                if (
+                    isinstance(w, (int, float))
+                    and isinstance(h, (int, float))
+                    and float(h) > 0
+                ):
+                    self._aspect_ratio = float(w) / float(h)
                 self._refresh_aspect_ratio_from_sliders()
         finally:
             self._aspect_lock_updating = False
@@ -589,7 +597,6 @@ class ImageGenDimensionAspectMixin:
             reverse_btn=reverse_btn,
             aspect_checkbox=self._aspect_checkbox,
         )
-        self._restore_aspect_lock_from_values()
 
     def _connect_dim_aspect_lock(self) -> None:
         if not self._has_dim_fields():
@@ -606,6 +613,7 @@ class ImageGenDimensionAspectMixin:
             spin.valueChanged.connect(
                 lambda value, k=key: self._on_dim_value_changed(k, int(value))
             )
+        self._restore_aspect_lock_from_values()
 
     def _on_screen_size_dims(self) -> None:
         sw, sh = self._screen_pixel_size()
