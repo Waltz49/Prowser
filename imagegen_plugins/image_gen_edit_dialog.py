@@ -6,12 +6,14 @@ from __future__ import annotations
 import os
 from typing import Any, Dict, List, Optional
 
-from PySide6.QtCore import QMimeData, QPoint, QSize, Qt, QTimer
+from PySide6.QtCore import QMimeData, QPoint, QRect, QSize, Qt, QTimer
 from PySide6.QtGui import (
+    QColor,
     QDrag,
     QDragEnterEvent,
     QDragMoveEvent,
     QDropEvent,
+    QEnterEvent,
     QKeyEvent,
     QMouseEvent,
     QPainter,
@@ -49,7 +51,6 @@ from imagegen_plugins.image_gen_dialog import (
     apply_import_extras_from_image_path,
     build_seed_and_random_seed_row,
     configure_image_gen_form_layout,
-    connect_import_button_with_option_modifier,
     field_specs_share_seed_row,
     validate_copies_require_random_seed,
 )
@@ -77,7 +78,8 @@ from imagegen_plugins.image_gen_registry import ImageGenModelPlugin
 from reference_graph import valid_exif_reference_paths_for_image
 from imagegen_plugins.imagegen_control_tooltips import (
     apply_dialog_button_tooltips,
-    apply_edit_import_button_tooltip,
+    apply_edit_import_all_button_tooltip,
+    apply_edit_import_text_button_tooltip,
     apply_field_control_tooltips,
     apply_model_combo_tooltip,
 )
@@ -91,6 +93,9 @@ from utils import (
 EDIT_IMAGE_DIALOG_TITLE = "Edit Image"
 MAX_EDIT_SOURCE_IMAGES = 4
 _EDIT_SOURCE_MIME = "application/x-imagegen-edit-source-path"
+_EDIT_SOURCE_REMOVE_BOX_PX = 32
+_EDIT_SOURCE_REMOVE_BORDER_PX = 2
+_EDIT_SOURCE_REMOVE_INSET_PX = 3
 
 
 def active_image_paths_for_edit(main_window) -> list[str]:
@@ -189,18 +194,97 @@ class _ClickableSourceThumb(_SourceImagePreview):
         self._draggable = draggable
         self._drag_start_pos: Optional[QPoint] = None
         self._drag_started = False
-        cursor = (
+        self._hover_remove = False
+        self._default_thumb_cursor = (
             Qt.CursorShape.OpenHandCursor
             if draggable
             else Qt.CursorShape.PointingHandCursor
         )
-        self.setCursor(cursor)
+        self.setMouseTracking(True)
+        self.setCursor(self._default_thumb_cursor)
         if draggable:
             self.setAcceptDrops(True)
             self.setToolTip("Click to view in browser. Drag to reorder.")
 
+    def enterEvent(self, event: QEnterEvent) -> None:
+        self._hover_remove = True
+        self._update_remove_cursor(event.position().toPoint())
+        self.update()
+        super().enterEvent(event)
+
+    def leaveEvent(self, event) -> None:
+        self._hover_remove = False
+        self.setCursor(self._default_thumb_cursor)
+        self.update()
+        super().leaveEvent(event)
+
+    def _update_remove_cursor(self, pos: QPoint) -> None:
+        remove_rect = self._remove_button_rect()
+        if (
+            self._hover_remove
+            and remove_rect is not None
+            and remove_rect.contains(pos)
+        ):
+            self.setCursor(Qt.CursorShape.PointingHandCursor)
+        else:
+            self.setCursor(self._default_thumb_cursor)
+
+    def paintEvent(self, event) -> None:
+        super().paintEvent(event)
+        if not self._hover_remove:
+            return
+        remove_rect = self._remove_button_rect()
+        if remove_rect is None:
+            return
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        border = _EDIT_SOURCE_REMOVE_BORDER_PX
+        painter.fillRect(remove_rect, QColor(255, 255, 255))
+        inner = remove_rect.adjusted(border, border, -border, -border)
+        painter.fillRect(inner, QColor(0, 0, 0))
+        pad = 3
+        x_rect = inner.adjusted(pad, pad, -pad, -pad)
+        painter.setPen(QPen(QColor(220, 40, 40), 2))
+        painter.drawLine(x_rect.topLeft(), x_rect.bottomRight())
+        painter.drawLine(x_rect.topRight(), x_rect.bottomLeft())
+
+    def _image_display_rect(self) -> QRect:
+        pix = self.pixmap()
+        if pix is None or pix.isNull():
+            return QRect()
+        pw, ph = pix.width(), pix.height()
+        if pw < 1 or ph < 1:
+            return QRect()
+        x = (self.width() - pw) // 2
+        y = (self.height() - ph) // 2
+        return QRect(x, y, pw, ph)
+
+    def _remove_button_rect(self) -> Optional[QRect]:
+        preview = self._multi_preview()
+        if preview is None or len(preview.source_paths()) <= 1:
+            return None
+        img = self._image_display_rect()
+        if img.isEmpty():
+            return None
+        box = _EDIT_SOURCE_REMOVE_BOX_PX
+        inset = _EDIT_SOURCE_REMOVE_INSET_PX
+        x = img.right() - inset - box + 1
+        y = img.top() + inset
+        return QRect(x, y, box, box)
+
     def mousePressEvent(self, event: QMouseEvent) -> None:
         if event.button() == Qt.MouseButton.LeftButton:
+            remove_rect = self._remove_button_rect()
+            if (
+                self._hover_remove
+                and remove_rect is not None
+                and remove_rect.contains(event.pos())
+            ):
+                preview = self._multi_preview()
+                if preview is not None:
+                    preview.request_remove_path(self._source_path)
+                event.accept()
+                return
             self._drag_start_pos = event.pos()
             self._drag_started = False
             event.accept()
@@ -220,6 +304,7 @@ class _ClickableSourceThumb(_SourceImagePreview):
                 self._drag_started = True
                 self._start_drag()
                 return
+        self._update_remove_cursor(event.pos())
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:
@@ -319,11 +404,13 @@ class _MultiSourceImagePreview(QWidget):
         source_paths: list[str],
         on_activate,
         on_reorder=None,
+        on_remove=None,
         parent=None,
     ):
         super().__init__(parent)
         self._on_activate = on_activate
         self._on_reorder = on_reorder
+        self._on_remove = on_remove
         self._source_paths = list(source_paths)
         self._thumbs: list[_ClickableSourceThumb] = []
         self._drop_insert_index: Optional[int] = None
@@ -342,6 +429,15 @@ class _MultiSourceImagePreview(QWidget):
 
     def source_paths(self) -> list[str]:
         return list(self._source_paths)
+
+    def request_remove_path(self, path: str) -> None:
+        if len(self._source_paths) <= 1:
+            return
+        paths = [p for p in self._source_paths if p != path]
+        if len(paths) == len(self._source_paths) or not paths:
+            return
+        if self._on_remove is not None:
+            self._on_remove(paths)
 
     def set_source_paths(self, source_paths: list[str]) -> None:
         self._source_paths = [
@@ -620,6 +716,9 @@ class ImageGenEditDialog(QDialog):
         if self._source_paths:
             self.source_path = self._source_paths[0]
 
+    def _on_source_path_removed(self, paths: list[str]) -> None:
+        self._set_edit_source_paths(paths)
+
     def _set_edit_source_paths(self, paths: list[str]) -> None:
         paths = [
             os.path.abspath(p)
@@ -663,6 +762,7 @@ class ImageGenEditDialog(QDialog):
                 self._source_paths,
                 _on_thumb_activate,
                 self._on_source_paths_reordered,
+                self._on_source_path_removed,
                 self._preview_host,
             )
             layout.addWidget(self._multi_source_preview, 1)
@@ -700,6 +800,7 @@ class ImageGenEditDialog(QDialog):
                 self._source_paths,
                 _on_thumb_activate,
                 self._on_source_paths_reordered,
+                self._on_source_path_removed,
                 preview_host,
             )
             preview_layout.addWidget(self._multi_source_preview, 1)
@@ -801,12 +902,20 @@ class ImageGenEditDialog(QDialog):
                 row = QHBoxLayout(row_w)
                 row.setContentsMargins(0, 0, 0, 0)
                 row.addWidget(widget, 1)
-                import_btn = QPushButton("Import")
-                connect_import_button_with_option_modifier(
-                    import_btn, self._on_import_prompt
-                )
-                apply_edit_import_button_tooltip(import_btn)
-                row.addWidget(import_btn, 0, Qt.AlignmentFlag.AlignTop)
+                btn_col = QVBoxLayout()
+                btn_col.setContentsMargins(0, 0, 0, 0)
+                btn_col.setSpacing(4)
+                import_text_btn = QPushButton("Import Prompt")
+                import_text_btn.clicked.connect(self._on_import_text)
+                apply_edit_import_text_button_tooltip(import_text_btn)
+                btn_col.addWidget(import_text_btn, 0, Qt.AlignmentFlag.AlignTop)
+                import_all_btn = QPushButton("Import Available")
+                import_all_btn.clicked.connect(self._on_import_all)
+                apply_edit_import_all_button_tooltip(import_all_btn)
+                btn_col.addWidget(import_all_btn, 0, Qt.AlignmentFlag.AlignTop)
+                btn_host = QWidget()
+                btn_host.setLayout(btn_col)
+                row.addWidget(btn_host, 0, Qt.AlignmentFlag.AlignTop)
                 self._fields_form.addRow(spec.label, row_w)
             elif combine_seed_random and spec.key == "seed":
                 random_spec = next(s for s in self._specs if s.key == "random_seed")
@@ -880,34 +989,42 @@ class ImageGenEditDialog(QDialog):
         w.setLayout(layout)
         return w
 
-    def _on_import_prompt(self, *, option_held: bool = False) -> None:
+    def _import_prompt_text_from_source(self) -> bool:
+        """Load prompt text from EXIF; return True on success."""
         if not self.source_path:
-            show_styled_warning(self, "Import", "No image selected.")
-            return
+            show_styled_warning(self, "Import Text", "No image selected.")
+            return False
         raw_bytes = get_usercomment_from_path(self.source_path)
         if raw_bytes is None:
             show_styled_warning(
                 self,
-                "Import",
+                "Import Text",
                 "No EXIF user comment was found for this image.",
             )
-            return
+            return False
         full_text = decode_usercomment(raw_bytes)
         prompt_text = truncate_usercomment_before_prompt(full_text).strip()
         if not prompt_text:
             show_styled_warning(
                 self,
-                "Import",
+                "Import Text",
                 "The EXIF user comment is empty.",
             )
-            return
+            return False
         self.set_prompt_text(prompt_text)
-        if option_held:
-            apply_import_extras_from_image_path(self, self.source_path)
-            ref_paths = valid_exif_reference_paths_for_image(
-                self.source_path, max_count=MAX_EDIT_SOURCE_IMAGES
-            )
-            self._set_edit_source_paths(ref_paths)
+        return True
+
+    def _on_import_text(self) -> None:
+        self._import_prompt_text_from_source()
+
+    def _on_import_all(self) -> None:
+        if not self._import_prompt_text_from_source():
+            return
+        apply_import_extras_from_image_path(self, self.source_path)
+        ref_paths = valid_exif_reference_paths_for_image(
+            self.source_path, max_count=MAX_EDIT_SOURCE_IMAGES
+        )
+        self._set_edit_source_paths(ref_paths)
 
     def set_prompt_text(self, text: str) -> None:
         entry = self._widgets.get("prompt")

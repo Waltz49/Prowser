@@ -23,10 +23,9 @@ _FIELD_TOOLTIPS: dict[str, str] = {
     "overlap_percentage": "Overlap between expand tiles when blending (percent).",
     "show_progressive_images": "Show partial previews while generation is running.",
     "aspect_ratio_test": (
-        "When using multiple source images, fit each additional image to the "
-        "exact pixel size of the first (scale down if needed, white borders, "
-        "centered) before generation. References and EXIF still point at the "
-        "original files."
+        "When using multiple source images, all images to\n"
+        "the exact pixel size of the first image.\n"
+        "(Scale down if needed, white borders, centered.)"
     ),
 }
 
@@ -106,11 +105,14 @@ def apply_dim_helper_tooltips(
         import_btn.setToolTip(_DIM_HELPER_TOOLTIPS["import"])
 
 
-_EDIT_IMPORT_TOOLTIP = (
-    "Load prompt text from the EXIF user comment of the selected image. "
-    "Hold Option while pressing Import to also load seed, steps, quantization, LoRA, "
-    "and guidance when those values are present in the comment, and to add all "
-    "valid EXIF references as source images (up to four)."
+_EDIT_IMPORT_TEXT_TOOLTIP = (
+    "Load prompt text from the EXIF user\n"
+    "comment of the selected image."
+)
+
+_EDIT_IMPORT_ALL_TOOLTIP = (
+    "Load prompt text and other available settings\n"
+    "from the EXIF user comment of the selected image."
 )
 
 
@@ -118,8 +120,12 @@ def apply_import_button_tooltip(import_btn: QPushButton) -> None:
     import_btn.setToolTip(_DIM_HELPER_TOOLTIPS["import"])
 
 
-def apply_edit_import_button_tooltip(import_btn: QPushButton) -> None:
-    import_btn.setToolTip(_EDIT_IMPORT_TOOLTIP)
+def apply_edit_import_text_button_tooltip(import_btn: QPushButton) -> None:
+    import_btn.setToolTip(_EDIT_IMPORT_TEXT_TOOLTIP)
+
+
+def apply_edit_import_all_button_tooltip(import_btn: QPushButton) -> None:
+    import_btn.setToolTip(_EDIT_IMPORT_ALL_TOOLTIP)
 
 
 def apply_dialog_button_tooltips(buttons: QDialogButtonBox) -> None:

@@ -7,7 +7,7 @@ import time
 
 from PySide6.QtCore import QEvent, QObject, QPoint, QTimer, Qt
 from PySide6.QtGui import QCursor
-from PySide6.QtWidgets import QLabel, QWidget
+from PySide6.QtWidgets import QApplication, QLabel, QWidget
 
 from imagegen_plugins.model_task_status_info import full_prompt_tooltip_text
 from tooltip_popup_utils import (
@@ -23,8 +23,8 @@ _DEFAULT_MAX_WIDTH = 520
 class _PromptTooltipPopup(QLabel):
     """Floating label — avoids macOS QToolTip auto-dismiss after show."""
 
-    def __init__(self, text: str):
-        super().__init__(None)
+    def __init__(self, text: str, parent: QWidget | None = None):
+        super().__init__(parent)
         self.setText(text)
         self.setWordWrap(True)
         self.setMaximumWidth(_DEFAULT_MAX_WIDTH)
@@ -62,6 +62,42 @@ class _PromptTooltipPopup(QLabel):
         return self.isVisible() and self.geometry().contains(global_pos)
 
 
+class _GlobalPromptTooltipDismissFilter(QObject):
+    """Dismiss the active prompt tooltip on any mouse press outside the host filter."""
+
+    def __init__(self) -> None:
+        super().__init__(QApplication.instance())
+        self._active: _DelayedPromptTooltipFilter | None = None
+
+    def set_active(self, filt: _DelayedPromptTooltipFilter | None) -> None:
+        self._active = filt
+
+    def clear_active_if(self, filt: _DelayedPromptTooltipFilter) -> None:
+        if self._active is filt:
+            self._active = None
+
+    def eventFilter(self, obj: QObject, event: QEvent) -> bool:
+        if (
+            self._active is not None
+            and self._active._is_visible()
+            and event.type() == QEvent.Type.MouseButtonPress
+        ):
+            self._active._dismiss()
+        return False
+
+
+_global_dismiss_filter: _GlobalPromptTooltipDismissFilter | None = None
+
+
+def _global_dismiss_filter_instance() -> _GlobalPromptTooltipDismissFilter:
+    global _global_dismiss_filter
+    if _global_dismiss_filter is None:
+        app = QApplication.instance()
+        _global_dismiss_filter = _GlobalPromptTooltipDismissFilter()
+        app.installEventFilter(_global_dismiss_filter)
+    return _global_dismiss_filter
+
+
 class _DelayedPromptTooltipFilter(QObject):
     """1s delayed show; dismiss only when cursor leaves host and popup (polled)."""
 
@@ -85,6 +121,10 @@ class _DelayedPromptTooltipFilter(QObject):
         self._poll_timer = QTimer(self)
         self._poll_timer.setInterval(_POLL_MS)
         self._poll_timer.timeout.connect(self._poll_hover)
+        host_widget.destroyed.connect(self._on_host_destroyed)
+
+    def _on_host_destroyed(self, _obj: QObject | None = None) -> None:
+        self._dismiss()
 
     def brief_suppress_dismiss(self, ms: int = 200) -> None:
         """Ignore hover-out briefly during HTML/height refresh of the host."""
@@ -106,9 +146,23 @@ class _DelayedPromptTooltipFilter(QObject):
     def _is_visible(self) -> bool:
         return self._popup is not None and self._popup.isVisible()
 
+    def _host_effective_visible(self) -> bool:
+        host = self._host_widget
+        if host is None:
+            return False
+        try:
+            if not host.isVisible():
+                return False
+            win = host.window()
+            if win is None or not win.isVisible():
+                return False
+        except RuntimeError:
+            return False
+        return True
+
     def _host_under_cursor(self, global_pos: QPoint) -> bool:
         host = self._host_widget
-        if host is None or not host.isVisible():
+        if not self._host_effective_visible():
             return False
         return host.rect().contains(host.mapFromGlobal(global_pos))
 
@@ -117,13 +171,17 @@ class _DelayedPromptTooltipFilter(QObject):
         if not self._host_under_cursor(pos):
             return
         if self._popup is None:
-            self._popup = _PromptTooltipPopup(self._text)
+            self._popup = _PromptTooltipPopup(self._text, parent=self._host_widget)
         self._popup.show_near_cursor(self._host_widget)
+        _global_dismiss_filter_instance().set_active(self)
         self._poll_timer.start()
 
     def _poll_hover(self) -> None:
         if not self._is_visible():
             self._poll_timer.stop()
+            return
+        if not self._host_effective_visible():
+            self._dismiss()
             return
         if time.monotonic() < self._suppress_dismiss_until:
             return
@@ -137,6 +195,8 @@ class _DelayedPromptTooltipFilter(QObject):
     def _dismiss(self) -> None:
         self._show_timer.stop()
         self._poll_timer.stop()
+        if _global_dismiss_filter is not None:
+            _global_dismiss_filter.clear_active_if(self)
         if self._popup is not None:
             self._popup.hide()
         self._suppress_dismiss_until = 0.0
