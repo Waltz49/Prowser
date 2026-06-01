@@ -39,8 +39,14 @@ def compute_flux1_fill_model_key(
 
 
 def _model_unusable_after_low_ram(model: Any) -> bool:
-    """MemorySaver can drop weights after a run; do not reuse a hollow shell."""
-    return model is None or getattr(model, "transformer", None) is None
+    """MemorySaver can drop encoders after a run; do not reuse a hollow shell."""
+    if model is None or getattr(model, "transformer", None) is None:
+        return True
+    if getattr(model, "t5_text_encoder", None) is None:
+        return True
+    if getattr(model, "clip_text_encoder", None) is None:
+        return True
+    return False
 
 
 def _register_run_callbacks(

@@ -83,7 +83,12 @@ def _klein_session_key(
 
 
 def _klein_model_unusable_after_low_ram(model: Any) -> bool:
-    return model is None or getattr(model, "transformer", None) is None
+    """MemorySaver drops text_encoder before denoise; transformer may still be warm."""
+    if model is None or getattr(model, "transformer", None) is None:
+        return True
+    if getattr(model, "text_encoder", None) is None:
+        return True
+    return False
 
 
 def _register_run_callbacks(
