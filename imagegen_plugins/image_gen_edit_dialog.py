@@ -953,6 +953,14 @@ class ImageGenEditDialog(QDialog):
                 check_row.addWidget(self._use_last_generated_cb, 0)
                 col.addLayout(check_row)
                 self._fields_form.addRow(spec.label, row_w)
+            elif spec.key == "screen_size_experimental":
+                row_w = QWidget()
+                row = QHBoxLayout(row_w)
+                row.setContentsMargins(0, 0, 0, 0)
+                row.addWidget(widget, 0)
+                row.addWidget(QLabel("(Experimental)"), 0)
+                row.addStretch(1)
+                self._fields_form.addRow(spec.label, row_w)
             else:
                 self._fields_form.addRow(spec.label, widget)
 

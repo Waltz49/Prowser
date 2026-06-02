@@ -64,7 +64,7 @@ class _FlowReferenceThumbs(QWidget):
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
         self._grid = QGridLayout(self)
-        self._grid.setContentsMargins(0, 4, 0, 0)
+        self._grid.setContentsMargins(0, 2, 0, 0)
         self._grid.setHorizontalSpacing(_THUMB_GAP)
         self._grid.setVerticalSpacing(_THUMB_GAP)
         for path in self._paths:
@@ -72,11 +72,22 @@ class _FlowReferenceThumbs(QWidget):
             thumb.setCursor(Qt.CursorShape.PointingHandCursor)
             thumb.setToolTip(os.path.basename(path))
             self._cells.append(thumb)
-        if not self._paths:
-            placeholder = QLabel("—")
-            placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            placeholder.setFixedHeight(_THUMB_SIZE)
-            self._grid.addWidget(placeholder, 0, 0)
+        if self._paths:
+            self.reflow_to_width(max(_THUMB_SIZE * 2, 120))
+        else:
+            self.hide()
+            self.setFixedHeight(0)
+            self.setMaximumHeight(0)
+            self.setMinimumHeight(0)
+            self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored)
+
+    def _effective_reflow_width(self, width: int) -> int:
+        if width > 0:
+            return width
+        parent = self.parentWidget()
+        if parent is not None and parent.width() > 0:
+            return parent.width()
+        return max(_THUMB_SIZE * 2, 120)
 
     def _cols_for_width(self, width: int) -> int:
         w = max(width, _THUMB_SIZE)
@@ -86,15 +97,17 @@ class _FlowReferenceThumbs(QWidget):
     def _content_height(self, cols: int) -> int:
         n = len(self._cells)
         if not n:
-            return _THUMB_SIZE + 4
+            return 0
         rows = (n + cols - 1) // cols
         return rows * (_THUMB_SIZE + _THUMB_GAP) - _THUMB_GAP + 4
 
     def reflow_to_width(self, width: int) -> None:
-        if self._reflow_guard or not self._cells or width <= 0:
+        width = self._effective_reflow_width(width)
+        if self._reflow_guard or not self._cells:
             return
         cols = self._cols_for_width(width)
         if cols == self._last_cols and self._grid.count() == len(self._cells):
+            self._apply_thumb_height(cols)
             return
         self._reflow_guard = True
         try:
@@ -111,13 +124,23 @@ class _FlowReferenceThumbs(QWidget):
                 )
         finally:
             self._reflow_guard = False
+        self._apply_thumb_height(cols)
         self.updateGeometry()
 
+    def _apply_thumb_height(self, cols: int) -> None:
+        h = self._content_height(cols)
+        self.setMinimumHeight(h)
+        self.setMaximumHeight(h)
+
     def sizeHint(self) -> QSize:
+        if not self._cells:
+            return QSize(0, 0)
         w = max(self.width(), _THUMB_SIZE)
         return QSize(w, self._content_height(self._cols_for_width(w)))
 
     def minimumSizeHint(self) -> QSize:
+        if not self._cells:
+            return QSize(0, 0)
         return QSize(0, self._content_height(self._cols_for_width(max(self.width(), 1))))
 
     def mousePressEvent(self, event) -> None:
@@ -150,8 +173,8 @@ class _JobCard(QFrame):
         self._last_info_html = ""
 
         row_layout = QHBoxLayout(self)
-        row_layout.setContentsMargins(4, 4, 4, 4)
-        row_layout.setSpacing(6)
+        row_layout.setContentsMargins(2, 2, 2, 2)
+        row_layout.setSpacing(4)
 
         self._actions = build_job_queue_action_widget(
             main_window,
@@ -174,9 +197,18 @@ class _JobCard(QFrame):
         )
 
         self._refs = _FlowReferenceThumbs(main_window, [])
-        content_layout.addWidget(self._info_browser)
-        content_layout.addWidget(self._refs)
+        content_layout.addWidget(self._info_browser, 0)
+        content_layout.addWidget(self._refs, 0)
         row_layout.addWidget(content, 1)
+
+    def _sync_card_height(self, content_width: int) -> None:
+        if self._refs.isVisible():
+            self._refs.reflow_to_width(max(_THUMB_SIZE, content_width))
+        refs_h = self._refs.height() if self._refs.isVisible() else 0
+        content_h = self._info_browser.height() + refs_h
+        min_h = max(content_h, self._actions.sizeHint().height())
+        self.setMinimumHeight(min_h)
+        self.updateGeometry()
 
     def set_row_content(
         self,
@@ -189,7 +221,8 @@ class _JobCard(QFrame):
         self._full_prompt = full_prompt or ""
         install_delayed_prompt_tooltip(self._info_browser, self._full_prompt)
         self.update_info_html(info_html, content_width)
-        self._replace_refs(thumbnail_paths)
+        self._replace_refs(thumbnail_paths, content_width)
+        self._sync_card_height(content_width)
 
     def update_info_html(self, info_html: str, content_width: int) -> None:
         self._last_info_html = info_html or ""
@@ -200,7 +233,7 @@ class _JobCard(QFrame):
             content_width=max(80, content_width),
         )
 
-    def _replace_refs(self, paths: list[str]) -> None:
+    def _replace_refs(self, paths: list[str], content_width: int) -> None:
         content = self._info_browser.parentWidget()
         layout = content.layout() if content else None
         if layout is None:
@@ -208,10 +241,14 @@ class _JobCard(QFrame):
         layout.removeWidget(self._refs)
         self._refs.deleteLater()
         self._refs = _FlowReferenceThumbs(self._main_window, paths)
-        layout.addWidget(self._refs)
+        layout.addWidget(self._refs, 0)
+        if self._refs.isVisible():
+            self._refs.reflow_to_width(max(_THUMB_SIZE, content_width))
 
     def reflow_refs(self, width: int) -> None:
-        self._refs.reflow_to_width(max(_THUMB_SIZE, width - _ACTION_COL_WIDTH - 20))
+        if self._refs.isVisible():
+            self._refs.reflow_to_width(max(_THUMB_SIZE, width - _ACTION_COL_WIDTH - 20))
+        self._sync_card_height(max(80, width - _ACTION_COL_WIDTH - 20))
 
 
 class SidebarJobsWidget(QWidget):
@@ -316,7 +353,9 @@ class SidebarJobsWidget(QWidget):
             return
         row = rows[0]
         info_html = info_html_for_queue_row(self._controller, 0, row)
-        self._job_cards[0].update_info_html(info_html, self._info_content_width())
+        info_w = self._info_content_width()
+        self._job_cards[0].update_info_html(info_html, info_w)
+        self._job_cards[0]._replace_refs(row.thumbnail_paths, info_w)
         self._job_cards[0].reflow_refs(self._viewport_width())
 
     def _clear_job_cards(self) -> None:

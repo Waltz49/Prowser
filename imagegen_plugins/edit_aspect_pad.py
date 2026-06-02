@@ -9,6 +9,10 @@ from typing import List, Tuple
 
 from PIL import Image
 
+SCREEN_SIZE_EXPERIMENTAL_PROMPT_SUFFIX = (
+    " Fill all white borders with generated image expansion."
+)
+
 
 def _fit_dimensions(w: int, h: int, ref_w: int, ref_h: int) -> tuple[int, int]:
     """Scale down if needed so w×h fits inside ref_w×ref_h; never upscale."""
@@ -25,6 +29,46 @@ def create_edit_aspect_pad_temp_path() -> str:
     os.close(fd)
     os.chmod(path, 0o600)
     return path
+
+
+EXPANSION_TEMPLATE_ASSET = "expansion_template.webp"
+
+
+def create_screen_size_expansion_template_temp_path() -> str:
+    fd, path = tempfile.mkstemp(
+        prefix="imagegen-edit-screen-size-",
+        suffix=".webp",
+        dir="/tmp",
+    )
+    os.close(fd)
+    os.chmod(path, 0o600)
+    return path
+
+
+def save_screen_size_expansion_template_webp() -> str:
+    """Resize bundled expansion template to primary display size."""
+    from screen_size_copy import get_physical_screen_size
+    from theme_base import asset_path
+
+    template_path = asset_path(EXPANSION_TEMPLATE_ASSET)
+    if not os.path.isfile(template_path):
+        raise FileNotFoundError(
+            f"Expansion template not found: {template_path}"
+        )
+    screen_size = get_physical_screen_size()
+    ref_w = max(1, int(screen_size.width()))
+    ref_h = max(1, int(screen_size.height()))
+    image = Image.open(template_path)
+    try:
+        rgb = image.convert("RGB")
+        if rgb.size != (ref_w, ref_h):
+            rgb = rgb.resize((ref_w, ref_h), Image.Resampling.LANCZOS)
+        out_path = create_screen_size_expansion_template_temp_path()
+        rgb.save(out_path, "WEBP", quality=95, method=6)
+        os.chmod(out_path, 0o600)
+        return out_path
+    finally:
+        image.close()
 
 
 def remove_edit_aspect_pad_temp(path: str) -> None:
@@ -61,6 +105,16 @@ def save_fitted_to_reference_size(
         return out_path
     finally:
         image.close()
+
+
+def generator_paths_with_screen_size_expansion(
+    source_paths: List[str],
+) -> Tuple[List[str], List[str]]:
+    """Prepend screen-sized expansion template; return (paths, temp_paths_to_delete)."""
+    if not source_paths:
+        return [], []
+    template_path = save_screen_size_expansion_template_webp()
+    return [template_path, *source_paths], [template_path]
 
 
 def generator_paths_with_aspect_padding(

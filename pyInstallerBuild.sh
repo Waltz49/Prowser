@@ -1323,6 +1323,7 @@ a = Analysis(
         ('assets/combo_arrow.svg', 'assets'),
         ('assets/edit_icon.png', 'assets'),
         ('assets/edit_icon_hover.png', 'assets'),
+        ('assets/expansion_template.webp', 'assets'),
         ('assets/gear.svg', 'assets'),
         ('assets/gear_hover.svg', 'assets'),
         ('assets/noimage.svg', 'assets'),

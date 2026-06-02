@@ -47,7 +47,7 @@ from utils import (
 )
 
 _THUMB_SIZE = 72
-_ROW_PAD = 12
+_ROW_PAD = 6
 _THUMB_CELL_MARGIN = 8
 _THUMB_CELL_GAP = 6
 _ACTION_COL_WIDTH = 36
@@ -76,7 +76,7 @@ def _job_queue_table_stylesheet() -> str:
             }}
             QTableWidget::item {{
                 background-color: {bg};
-                padding: 4px;
+                padding: 2px;
             }}
             QTableCornerButton::section {{
                 background-color: {bg};
@@ -132,6 +132,10 @@ def _build_preview_cell(main_window, paths: list[str]) -> tuple[QWidget, int]:
     row_preview_w = _preview_column_width(len(valid) or 1)
     preview_wrap.setMinimumWidth(row_preview_w)
     preview_wrap.setMaximumWidth(row_preview_w)
+    preview_wrap.setMinimumHeight(_preview_cell_height())
+    preview_wrap.setSizePolicy(
+        QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Expanding
+    )
     if valid:
         for path in valid:
             thumb = _make_clickable_thumbnail(main_window, path, _THUMB_SIZE)
@@ -197,8 +201,20 @@ def _action_column_min_height(*, is_active: bool = True) -> int:
     series_btn_count = 5
     return (
         series_btn_count * _ICON_BTN_SIZE
-        + max(0, series_btn_count - 1) * 4
-        + 8
+        + max(0, series_btn_count - 1) * 2
+        + 4
+    )
+
+
+def _preview_cell_height() -> int:
+    return _THUMB_SIZE + 8
+
+
+def _row_height_for_job_cell(*, browser_h: int, is_active: bool) -> int:
+    return max(
+        _preview_cell_height() + _ROW_PAD,
+        browser_h + _ROW_PAD,
+        _action_column_min_height(is_active=is_active),
     )
 
 
@@ -215,7 +231,7 @@ def _apply_info_browser_html(
     if not body_html:
         return info_browser.height()
     return _apply_task_info_html_to_browser(
-        info_browser, body_html, content_width=content_width
+        info_browser, body_html, content_width=content_width, job_queue_cell=True
     )
 
 
@@ -282,8 +298,8 @@ def build_job_queue_action_widget(
     action_wrap = QWidget()
     _apply_job_queue_cell_background(action_wrap)
     action_layout = QVBoxLayout(action_wrap)
-    action_layout.setContentsMargins(4, 0, 4, 0)
-    action_layout.setSpacing(4)
+    action_layout.setContentsMargins(2, 0, 2, 0)
+    action_layout.setSpacing(2)
 
     plus_btn = QPushButton()
     plus_btn.setToolTip("Add another image to this series")
@@ -596,12 +612,12 @@ class ImageGenJobQueueDialog(QDialog):
                 browser_h = _apply_info_browser_html(
                     browser, info_html, content_width=content_width
                 )
-                row_h = max(
-                    _THUMB_SIZE + _ROW_PAD,
-                    browser_h + _ROW_PAD,
-                    _action_column_min_height(is_active=True),
+                self._table.setRowHeight(
+                    0,
+                    _row_height_for_job_cell(
+                        browser_h=browser_h, is_active=True
+                    ),
                 )
-                self._table.setRowHeight(0, row_h)
         if force:
             self._refresh_active_row_preview(row_idx=0)
 
@@ -622,10 +638,8 @@ class ImageGenJobQueueDialog(QDialog):
         is_active = row_idx < len(rows) and rows[row_idx].is_active
         self._table.setRowHeight(
             row_idx,
-            max(
-                _THUMB_SIZE + _ROW_PAD,
-                browser_h + _ROW_PAD,
-                _action_column_min_height(is_active=is_active),
+            _row_height_for_job_cell(
+                browser_h=browser_h, is_active=is_active
             ),
         )
 
@@ -671,10 +685,8 @@ class ImageGenJobQueueDialog(QDialog):
             )
             self._table.setCellWidget(row_idx, 2, preview_wrap)
 
-            row_h = max(
-                _THUMB_SIZE + _ROW_PAD,
-                browser_h + _ROW_PAD,
-                _action_column_min_height(is_active=row.is_active),
+            row_h = _row_height_for_job_cell(
+                browser_h=browser_h, is_active=row.is_active
             )
             self._table.setRowHeight(row_idx, row_h)
 

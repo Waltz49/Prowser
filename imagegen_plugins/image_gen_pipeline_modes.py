@@ -442,6 +442,14 @@ def field_specs_for_pipeline(
                 default=bool(values.get("aspect_ratio_test", False)),
             )
         )
+        specs.append(
+            FieldSpec(
+                key="screen_size_experimental",
+                label="Screen Size",
+                kind="bool",
+                default=bool(values.get("screen_size_experimental", False)),
+            )
+        )
     if pipeline_id == "mflux_fill_expand":
         specs.append(
             FieldSpec(
@@ -502,22 +510,38 @@ def build_worker_payload(
         if source_paths:
             merged["source_image_paths"] = source_paths
             merged["source_image_path"] = source_paths[0]
+            pad_temps: list[str] = []
+            if merged.get("screen_size_experimental"):
+                from imagegen_plugins.edit_aspect_pad import (
+                    SCREEN_SIZE_EXPERIMENTAL_PROMPT_SUFFIX,
+                    generator_paths_with_screen_size_expansion,
+                )
+
+                source_paths, screen_temps = generator_paths_with_screen_size_expansion(
+                    source_paths
+                )
+                pad_temps.extend(screen_temps)
+                prompt = str(merged.get("prompt") or "")
+                merged["prompt"] = prompt + SCREEN_SIZE_EXPERIMENTAL_PROMPT_SUFFIX
             if merged.get("aspect_ratio_test"):
                 from imagegen_plugins.edit_aspect_pad import (
                     generator_paths_with_aspect_padding,
                 )
 
-                gen_paths, pad_temps = generator_paths_with_aspect_padding(
+                gen_paths, aspect_temps = generator_paths_with_aspect_padding(
                     source_paths
                 )
-                merged["source_image_paths"] = gen_paths
-                merged["source_image_path"] = gen_paths[0]
-                if pad_temps:
-                    merged["_aspect_pad_temp_paths"] = pad_temps
+                source_paths = gen_paths
+                pad_temps.extend(aspect_temps)
+            merged["source_image_paths"] = source_paths
+            merged["source_image_path"] = source_paths[0]
+            if pad_temps:
+                merged["_aspect_pad_temp_paths"] = pad_temps
         merged.pop("width", None)
         merged.pop("height", None)
     merged.pop("aspect_ratio_lock", None)
     merged.pop("_pixelmator_batch_dir", None)
     merged.pop("use_last_generated_image", None)
     merged.pop("aspect_ratio_test", None)
+    merged.pop("screen_size_experimental", None)
     return merged

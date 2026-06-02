@@ -43,11 +43,15 @@ def _status_bar_popup_menu_stylesheet() -> str:
 def _task_info_browser_stylesheet(*, job_queue_cell: bool = False) -> str:
     t = get_active_theme()
     bg = t.default_background_color_hex if job_queue_cell else "transparent"
+    if job_queue_cell:
+        padding = "2px 4px 2px 4px"
+    else:
+        padding = "6px 18px 8px 18px"
     return f"""
         QTextBrowser {{
             color: {t.text_color_hex};
             background-color: {bg};
-            padding: 6px 18px 8px 18px;
+            padding: {padding};
             font-size: 12px;
             border: none;
         }}
@@ -123,6 +127,7 @@ def _apply_task_info_html_to_browser(
     body_html: str,
     *,
     content_width: int | None = None,
+    job_queue_cell: bool = False,
 ) -> int:
     """Set task-info HTML on the browser and resize to fit content; returns height."""
     if content_width is not None:
@@ -137,7 +142,8 @@ def _apply_task_info_html_to_browser(
         pass
     info_browser.setHtml(_wrap_task_info_html(body_html))
     info_browser.document().setDocumentMargin(0)
-    text_width = max(200, info_browser.width() - 36)
+    h_pad = 8 if job_queue_cell else 36
+    text_width = max(200, info_browser.width() - h_pad)
     info_browser.document().setTextWidth(text_width)
     doc_height = info_browser.document().size().height()
     layout_height = info_browser.document().documentLayout().documentSize().height()
@@ -146,7 +152,9 @@ def _apply_task_info_html_to_browser(
         line_h = info_browser.fontMetrics().lineSpacing()
         blocks = max(1, info_browser.document().blockCount())
         content_h = line_h * blocks
-    fixed_h = int(min(max(content_h, 48) + 16, 420))
+    min_h = 28 if job_queue_cell else 48
+    extra = 6 if job_queue_cell else 16
+    fixed_h = int(min(max(content_h, min_h) + extra, 420))
     info_browser.setFixedHeight(fixed_h)
     info_browser.setMinimumHeight(fixed_h)
     return fixed_h

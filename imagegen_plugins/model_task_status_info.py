@@ -73,6 +73,24 @@ def _table_row_html_value(label: str, value_html: str) -> str:
     )
 
 
+_QUEUE_FIELD_SEP = "\u00A0" * 4
+
+
+def _table_row_primary_plus_inline(
+    label: str, value: str, inline_parts: list[tuple[str, str]]
+) -> str:
+    """Primary label/value in cols 1–2, extra label/value pairs inline in col 2."""
+    cell = _escape(value)
+    for extra_label, extra_value in inline_parts:
+        cell += (
+            f"{_QUEUE_FIELD_SEP}<b>{_escape(extra_label)}</b> {_escape(extra_value)}"
+        )
+    return (
+        f"<tr><td><b>{_escape(label)}</b></td>"
+        f"<td>{cell}</td></tr>"
+    )
+
+
 def _exif_style_link(label: str, href: str = "reflevel://") -> str:
     from theme_service import get_active_theme
 
@@ -132,8 +150,8 @@ def strip_references_from_status_html(html_text: str) -> str:
 def _table_title_row(title: str, *, running: bool = False) -> str:
     display = f"{title} (Running)" if running else title
     return (
-        '<tr><td colspan="2" align="center" style="padding-bottom:4px;">'
-        f'<b><span style="font-size:13px;">{_escape(display)}</span></b>'
+        '<tr><td colspan="2" align="center" style="padding-bottom:1px;">'
+        f'<b><span style="font-size:12px;">{_escape(display)}</span></b>'
         "</td></tr>"
     )
 
@@ -164,13 +182,12 @@ def format_series_line_value(base: str, values: Dict[str, Any]) -> str:
 
 
 def _task_menu_title_for_pipeline(pipeline_id: str) -> str:
-    if pipeline_id == "mflux_fill_expand":
-        return "Image Expansion"
-    if pipeline_id == "mflux_fill_infill":
-        return "Image Infill"
-    if pipeline_id == "mflux_flux2_klein_edit":
-        return "Image Edit"
-    return "Image Generation"
+    titles = {
+        "mflux_fill_expand": "Expand Existing Image",
+        "mflux_fill_infill": "Infill image",
+        "mflux_flux2_klein_edit": "Edit an image with AI",
+    }
+    return titles.get(pipeline_id, "Generate an image from text")
 
 
 def _append_table_rows(html_text: str, rows: list[str]) -> str:
@@ -197,6 +214,43 @@ def _generation_status_table_rows(
         rows.append(_table_row("Steps:", steps_display))
     if fields.get("quant"):
         rows.append(_table_row("Quant:", fields["quant"]))
+    if fields.get("prompt"):
+        rows.append(_table_row(fields["prompt_label"], fields["prompt"]))
+    if fields.get("neg"):
+        rows.append(_table_row("Neg:", fields["neg"]))
+    return rows
+
+
+def _generation_status_queue_table_rows(
+    fields: dict[str, str],
+    *,
+    steps_value: str | None = None,
+) -> list[str]:
+    """Compact job-queue rows: combine short fields on one line where possible."""
+    rows: list[str] = []
+    if fields.get("model"):
+        rows.append(_table_row("Model:", fields["model"]))
+
+    lora = fields.get("lora")
+    size = fields.get("size")
+    if lora and size:
+        rows.append(_table_row_primary_plus_inline("LoRA:", lora, [("Size:", size)]))
+    elif lora:
+        rows.append(_table_row("LoRA:", lora))
+    elif size:
+        rows.append(_table_row("Size:", size))
+
+    steps_display = steps_value if steps_value is not None else fields.get("steps", "")
+    quant = fields.get("quant")
+    if steps_display and quant:
+        rows.append(
+            _table_row_primary_plus_inline("Steps:", steps_display, [("Quant:", quant)])
+        )
+    elif steps_display:
+        rows.append(_table_row("Steps:", steps_display))
+    elif quant:
+        rows.append(_table_row("Quant:", quant))
+
     if fields.get("prompt"):
         rows.append(_table_row(fields["prompt_label"], fields["prompt"]))
     if fields.get("neg"):
@@ -274,7 +328,7 @@ def _table_html(
     if title:
         parts.append(_table_title_row(title, running=running))
     parts.extend(rows)
-    return "<table cellspacing=\"2\" cellpadding=\"0\">" + "".join(parts) + "</table>"
+    return "<table cellspacing=\"0\" cellpadding=\"0\">" + "".join(parts) + "</table>"
 
 
 def _resolve_hf_model_name(pipeline_id: str, hf_model_id: str) -> str:
@@ -425,7 +479,7 @@ def format_image_generation_queue_status_html(
         step=step,
         step_total=step_total,
     )
-    rows = _generation_status_table_rows(fields, steps_value=steps_value)
+    rows = _generation_status_queue_table_rows(fields, steps_value=steps_value)
     if (
         step is not None
         and step_total is not None
@@ -497,10 +551,12 @@ def _format_elapsed_cell_value(
     return value
 
 
-_TIME_RE = r"\d+:\d{2}(?::\d{2})?"
+_STEPS_QUANT_SUFFIX_RE = re.compile(
+    rf"((?:\u00A0){{2,}}<b>Quant:</b> [^<]+)$"
+)
 _STEPS_ROW_RE = re.compile(
-    rf"(<tr><td><b>Steps:</b></td><td>)[^<]*(?:   {_TIME_RE})?"
-    rf"(?:   \(Est: {_TIME_RE}\))?(</td></tr>)"
+    r"(<tr><td><b>Steps:</b></td><td>)(.*?)(</td></tr>)",
+    re.DOTALL,
 )
 
 
@@ -519,11 +575,15 @@ def update_status_html_steps_progress(
     total = int(total)
 
     step_value = f"{step} of {total}"
-    updated, count = _STEPS_ROW_RE.subn(
-        lambda m: m.group(1) + _escape(step_value) + m.group(2),
-        html_text,
-        count=1,
-    )
+
+    def _replace_steps_cell(match: re.Match[str]) -> str:
+        quant_suffix = ""
+        quant_match = _STEPS_QUANT_SUFFIX_RE.search(match.group(2))
+        if quant_match:
+            quant_suffix = quant_match.group(1)
+        return match.group(1) + _escape(step_value) + quant_suffix + match.group(3)
+
+    updated, count = _STEPS_ROW_RE.subn(_replace_steps_cell, html_text, count=1)
     html_text = updated if count else html_text
     if step > 0 and elapsed_seconds is not None:
         elapsed_cell = _escape(
@@ -570,11 +630,14 @@ def freeze_status_html_generation_elapsed(
     if step is not None and step_total is not None and step_total > 0:
         step_i = max(0, min(int(step), int(step_total)))
         step_value = f"{step_i} of {int(step_total)}"
-        updated, count = _STEPS_ROW_RE.subn(
-            lambda m: m.group(1) + _escape(step_value) + m.group(2),
-            html_text,
-            count=1,
-        )
+        def _replace_steps_cell(match: re.Match[str]) -> str:
+            quant_suffix = ""
+            quant_match = _STEPS_QUANT_SUFFIX_RE.search(match.group(2))
+            if quant_match:
+                quant_suffix = quant_match.group(1)
+            return match.group(1) + _escape(step_value) + quant_suffix + match.group(3)
+
+        updated, count = _STEPS_ROW_RE.subn(_replace_steps_cell, html_text, count=1)
         if count:
             html_text = updated
     elapsed_cell = _escape(_format_elapsed_cell_value(elapsed_seconds))
@@ -706,3 +769,10 @@ def format_caption_status_html(user_prompt_override: Optional[str] = None) -> st
         rows.append(_table_row("Prompt:", prompt))
 
     return _table_html(rows, title="Text Generation")
+
+
+def format_caption_queue_status_html(
+    user_prompt_override: Optional[str] = None,
+) -> str:
+    """Compact job-queue block for AI caption jobs."""
+    return format_caption_status_html(user_prompt_override)

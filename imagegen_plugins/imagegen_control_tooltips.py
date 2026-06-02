@@ -27,6 +27,10 @@ _FIELD_TOOLTIPS: dict[str, str] = {
         "the exact pixel size of the first image.\n"
         "(Scale down if needed, white borders, centered.)"
     ),
+    "screen_size_experimental": (
+        "Experimental: prepend a screen-sized expansion template as the first "
+        "source image and append an expansion instruction to the prompt."
+    ),
 }
 
 _DIM_HELPER_TOOLTIPS: dict[str, str] = {

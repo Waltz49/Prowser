@@ -42,15 +42,11 @@ from imagegen_plugins.model_task_queue import (
     thumbnail_paths_for_values,
 )
 from imagegen_plugins.model_task_status_info import (
-    _append_table_rows,
-    _series_after_this_one_value,
-    _table_row,
     apply_cooldown_to_status_html,
     cooldown_skip_icon_html,
     format_caption_status_html,
     format_image_generation_queue_status_html,
     format_image_generation_status_html,
-    format_series_line_value,
     freeze_status_html_generation_elapsed,
     refresh_expand_task_status_html_for_display,
     remove_elapsed_row,
@@ -283,8 +279,7 @@ class ImageGenController(QObject):
         self._progressive_browse_opened = False
 
         if status_html:
-            self._task_status_info_html = status_html
-            self.task_status_info_changed.emit()
+            pass  # queue pane rebuilds compact HTML from live controller state
 
         self.queue_changed.emit()
         return self._launch_generation_job()
@@ -327,7 +322,7 @@ class ImageGenController(QObject):
         self._output_path = output_path
         if isinstance(payload.get("steps"), (int, float)):
             self._pending_values["steps"] = int(payload["steps"])
-        if self._copies_done == 0 and not self._task_status_info_html:
+        if self._copies_done == 0:
             self._task_status_info_html = format_image_generation_status_html(
                 plugin, values, payload
             )
@@ -632,34 +627,81 @@ class ImageGenController(QObject):
         self._step_seconds_per_step = None
 
     def get_task_queue_status_info_html(self) -> str:
-        """Active-job info table (job queue top row and status-bar dot menu)."""
-        html = self.get_task_status_info_html()
-        series_after = self._series_images_after_for_queue_display()
-        if series_after and html:
-            html = _append_table_rows(
-                html,
-                [
-                    _table_row(
-                        "Series:",
-                        format_series_line_value(
-                            _series_after_this_one_value(series_after),
-                            self._pending_values,
-                        ),
-                    )
-                ],
-            )
-        if html:
-            return html
+        """Compact info table for the job queue pane and sidebar (rebuilt from live state)."""
         plugin = self._active_plugin
         if plugin is None:
             return ""
-        return format_image_generation_queue_status_html(
+
+        series_after = self._series_images_after_for_queue_display()
+        step: int | None = None
+        step_total: int | None = None
+        elapsed: float | None = None
+        estimate: float | None = None
+        if self._live_step_total > 0:
+            step_total = self._live_step_total
+            step = self._live_step
+            if step > 0:
+                elapsed = self._live_elapsed_seconds
+                if elapsed is None:
+                    elapsed = self._live_generation_elapsed_seconds()
+                estimate = self._live_estimate_seconds
+                if (
+                    estimate is None
+                    and elapsed is not None
+                    and self._step_seconds_per_step is not None
+                ):
+                    estimate = self._estimate_remaining_seconds(
+                        elapsed=elapsed,
+                        completed_steps=step,
+                        total_steps=step_total,
+                        seconds_per_step=self._step_seconds_per_step,
+                    )
+
+        html = format_image_generation_queue_status_html(
             plugin,
             self._pending_values,
             source_path=self._expand_source_path,
             base_path=self._expand_base_path,
+            step=step,
+            step_total=step_total,
+            elapsed_seconds=elapsed if step and step > 0 else None,
+            estimate_seconds=estimate,
+            running=self._tasks.is_running(),
             series_images_after=series_after,
         )
+        if not html:
+            return ""
+
+        in_cooldown = self._is_in_copy_cooldown()
+        if (
+            self._task_reference_paths
+            or self._expand_source_path
+            or self._expand_base_path
+        ):
+            show_elapsed = bool(self._expand_source_path or self._expand_base_path)
+            expand_elapsed = None
+            if show_elapsed:
+                expand_elapsed = (
+                    self._frozen_elapsed_seconds if in_cooldown else None
+                )
+                if expand_elapsed is None and self._step_progress_start_time is not None:
+                    expand_elapsed = (
+                        time.perf_counter() - self._step_progress_start_time
+                    )
+            html, self._task_reference_paths = refresh_expand_task_status_html_for_display(
+                html,
+                elapsed_seconds=expand_elapsed,
+                source_path=self._expand_source_path,
+                base_path=self._expand_base_path,
+                reference_paths=self._task_reference_paths,
+            )
+        if in_cooldown:
+            html = apply_cooldown_to_status_html(
+                html,
+                self._cooldown_seconds_remaining(),
+                skip_icon_html=cooldown_skip_icon_html(),
+            )
+        return html
 
     def get_show_progressive_images_menu_state(self) -> Optional[tuple[bool, bool]]:
         """Return (supported, enabled) for the active image-generation task, or None."""
