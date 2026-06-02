@@ -54,7 +54,8 @@ from imagegen_plugins.model_task_status_info import (
     update_status_html_steps_progress,
 )
 from model_tasks_controller import get_model_tasks_controller
-from utils import show_styled_critical, show_styled_question, show_styled_warning
+from imagegen_plugins.image_gen_dialog import prompt_enable_random_seed_for_copies
+from utils import show_styled_critical, show_styled_question
 
 _COPY_COOLDOWN_MS = 60_000
 _COPIES_MIN = 1
@@ -74,6 +75,11 @@ class ImageGenController(QObject):
     caption_error = Signal(str)
     caption_finished = Signal()
 
+    flux_prompt_chunk = Signal(str)
+    flux_prompt_ready = Signal(str)
+    flux_prompt_error = Signal(str)
+    flux_prompt_finished = Signal()
+
     def __init__(self, main_window, parent=None):
         super().__init__(parent)
         self.main_window = main_window
@@ -84,6 +90,9 @@ class ImageGenController(QObject):
         self._tasks.caption_chunk.connect(self.caption_chunk.emit)
         self._tasks.caption_ready.connect(self.caption_ready.emit)
         self._tasks.caption_error.connect(self._on_caption_error)
+        self._tasks.flux_prompt_chunk.connect(self.flux_prompt_chunk.emit)
+        self._tasks.flux_prompt_ready.connect(self.flux_prompt_ready.emit)
+        self._tasks.flux_prompt_error.connect(self._on_flux_prompt_error)
         self._tasks.task_started.connect(self._on_task_started)
         self._tasks.job_processing_started.connect(self._on_job_processing_started)
         self._tasks.task_finished.connect(self._on_task_finished)
@@ -188,13 +197,9 @@ class ImageGenController(QObject):
         values = dict(values)
         values["copies"] = copies
         if copies > 1 and not values.get("random_seed"):
-            show_styled_warning(
-                self.main_window,
-                "Random seed required",
-                "Copies greater than 1 require Random seed to be enabled "
-                "so each image uses a different seed.",
-            )
-            return False
+            if not prompt_enable_random_seed_for_copies(self.main_window):
+                return False
+            values["random_seed"] = True
 
         if self.is_running():
             return self.enqueue_generation(plugin, values)
@@ -347,20 +352,27 @@ class ImageGenController(QObject):
     def get_task_status_info_html(self) -> str:
         html = self._task_status_info_html
         in_cooldown = self._is_in_copy_cooldown()
+        elapsed, estimate = self._snapshot_live_timing(in_cooldown=in_cooldown)
         if (
             self._task_reference_paths
             or self._expand_source_path
             or self._expand_base_path
         ):
             show_elapsed = bool(self._expand_source_path or self._expand_base_path)
-            elapsed = None
+            expand_elapsed = None
+            expand_estimate = None
             if show_elapsed:
-                elapsed = self._frozen_elapsed_seconds if in_cooldown else None
-                if elapsed is None and self._step_progress_start_time is not None:
-                    elapsed = time.perf_counter() - self._step_progress_start_time
+                if elapsed is not None:
+                    expand_elapsed = elapsed
+                    expand_estimate = estimate
+                else:
+                    expand_elapsed = self._wall_clock_elapsed_seconds(
+                        in_cooldown=in_cooldown
+                    )
             html, self._task_reference_paths = refresh_expand_task_status_html_for_display(
                 html,
-                elapsed_seconds=elapsed,
+                elapsed_seconds=expand_elapsed,
+                estimate_seconds=expand_estimate,
                 source_path=self._expand_source_path,
                 base_path=self._expand_base_path,
                 reference_paths=self._task_reference_paths,
@@ -372,12 +384,18 @@ class ImageGenController(QObject):
                 skip_icon_html=cooldown_skip_icon_html(),
             )
         if self._step_progress_start_time is not None and self._live_step_total > 0:
-            if self._live_step > 0:
-                html = self._apply_live_steps_progress(html)
-            else:
-                html = update_status_html_steps_progress(
-                    html, 0, self._live_step_total
+            display_elapsed = elapsed
+            if display_elapsed is None:
+                display_elapsed = self._wall_clock_elapsed_seconds(
+                    in_cooldown=in_cooldown
                 )
+            html = update_status_html_steps_progress(
+                html,
+                self._live_step,
+                self._live_step_total,
+                elapsed_seconds=display_elapsed,
+                estimate_seconds=estimate,
+            )
         return html
 
     def _live_generation_elapsed_seconds(self) -> Optional[float]:
@@ -385,6 +403,38 @@ class ImageGenController(QObject):
         if start is None:
             return None
         return time.perf_counter() - start
+
+    def _snapshot_live_timing(
+        self, *, in_cooldown: bool = False
+    ) -> tuple[Optional[float], Optional[float]]:
+        """Elapsed and estimate from one clock read (kept in sync for display)."""
+        if self._live_step_total <= 0:
+            return None, None
+        if in_cooldown:
+            elapsed = self._frozen_elapsed_seconds
+            return (elapsed, None) if elapsed is not None else (None, None)
+        elapsed = self._live_generation_elapsed_seconds()
+        if elapsed is None:
+            return None, None
+        estimate = None
+        if self._live_step > 0:
+            estimate = self._estimate_remaining_seconds(
+                elapsed=elapsed,
+                completed_steps=self._live_step,
+                total_steps=self._live_step_total,
+                seconds_per_step=self._step_seconds_per_step,
+            )
+        self._live_elapsed_seconds = elapsed
+        self._live_estimate_seconds = estimate
+        return elapsed, estimate
+
+    def _wall_clock_elapsed_seconds(self, *, in_cooldown: bool) -> Optional[float]:
+        """Elapsed since job processing started (before first step completes)."""
+        if self._step_progress_start_time is None:
+            return None
+        if in_cooldown and self._frozen_elapsed_seconds is not None:
+            return self._frozen_elapsed_seconds
+        return time.perf_counter() - self._step_progress_start_time
 
     @staticmethod
     def _estimate_remaining_seconds(
@@ -408,17 +458,11 @@ class ImageGenController(QObject):
     def _apply_live_steps_progress(self, html: str) -> str:
         if not html or self._live_step_total <= 0 or self._live_step <= 0:
             return html
-        elapsed = self._live_generation_elapsed_seconds()
+        elapsed, estimate = self._snapshot_live_timing(
+            in_cooldown=self._is_in_copy_cooldown()
+        )
         if elapsed is None:
             return html
-        estimate = self._estimate_remaining_seconds(
-            elapsed=elapsed,
-            completed_steps=self._live_step,
-            total_steps=self._live_step_total,
-            seconds_per_step=self._step_seconds_per_step,
-        )
-        self._live_elapsed_seconds = elapsed
-        self._live_estimate_seconds = estimate
         return update_status_html_steps_progress(
             html,
             self._live_step,
@@ -632,30 +676,11 @@ class ImageGenController(QObject):
         if plugin is None:
             return ""
 
+        in_cooldown = self._is_in_copy_cooldown()
+        elapsed, estimate = self._snapshot_live_timing(in_cooldown=in_cooldown)
         series_after = self._series_images_after_for_queue_display()
-        step: int | None = None
-        step_total: int | None = None
-        elapsed: float | None = None
-        estimate: float | None = None
-        if self._live_step_total > 0:
-            step_total = self._live_step_total
-            step = self._live_step
-            if step > 0:
-                elapsed = self._live_elapsed_seconds
-                if elapsed is None:
-                    elapsed = self._live_generation_elapsed_seconds()
-                estimate = self._live_estimate_seconds
-                if (
-                    estimate is None
-                    and elapsed is not None
-                    and self._step_seconds_per_step is not None
-                ):
-                    estimate = self._estimate_remaining_seconds(
-                        elapsed=elapsed,
-                        completed_steps=step,
-                        total_steps=step_total,
-                        seconds_per_step=self._step_seconds_per_step,
-                    )
+        step = self._live_step if self._live_step_total > 0 else None
+        step_total = self._live_step_total if self._live_step_total > 0 else None
 
         html = format_image_generation_queue_status_html(
             plugin,
@@ -664,7 +689,7 @@ class ImageGenController(QObject):
             base_path=self._expand_base_path,
             step=step,
             step_total=step_total,
-            elapsed_seconds=elapsed if step and step > 0 else None,
+            elapsed_seconds=elapsed,
             estimate_seconds=estimate,
             running=self._tasks.is_running(),
             series_images_after=series_after,
@@ -672,7 +697,6 @@ class ImageGenController(QObject):
         if not html:
             return ""
 
-        in_cooldown = self._is_in_copy_cooldown()
         if (
             self._task_reference_paths
             or self._expand_source_path
@@ -680,17 +704,19 @@ class ImageGenController(QObject):
         ):
             show_elapsed = bool(self._expand_source_path or self._expand_base_path)
             expand_elapsed = None
+            expand_estimate = None
             if show_elapsed:
-                expand_elapsed = (
-                    self._frozen_elapsed_seconds if in_cooldown else None
-                )
-                if expand_elapsed is None and self._step_progress_start_time is not None:
-                    expand_elapsed = (
-                        time.perf_counter() - self._step_progress_start_time
+                if elapsed is not None:
+                    expand_elapsed = elapsed
+                    expand_estimate = estimate
+                else:
+                    expand_elapsed = self._wall_clock_elapsed_seconds(
+                        in_cooldown=in_cooldown
                     )
             html, self._task_reference_paths = refresh_expand_task_status_html_for_display(
                 html,
                 elapsed_seconds=expand_elapsed,
+                estimate_seconds=expand_estimate,
                 source_path=self._expand_source_path,
                 base_path=self._expand_base_path,
                 reference_paths=self._task_reference_paths,
@@ -700,6 +726,19 @@ class ImageGenController(QObject):
                 html,
                 self._cooldown_seconds_remaining(),
                 skip_icon_html=cooldown_skip_icon_html(),
+            )
+        if self._step_progress_start_time is not None and self._live_step_total > 0:
+            display_elapsed = elapsed
+            if display_elapsed is None:
+                display_elapsed = self._wall_clock_elapsed_seconds(
+                    in_cooldown=in_cooldown
+                )
+            html = update_status_html_steps_progress(
+                html,
+                self._live_step,
+                self._live_step_total,
+                elapsed_seconds=display_elapsed,
+                estimate_seconds=estimate,
             )
         return html
 
@@ -762,6 +801,13 @@ class ImageGenController(QObject):
             return False
         return True
 
+    def start_flux_prompt_refine(self, system_prompt: str, user_prompt: str) -> bool:
+        if self.has_pending_work():
+            return False
+        if not self._tasks.start_flux_prompt_job(system_prompt, user_prompt):
+            return False
+        return True
+
     def cancel_generation(self) -> None:
         """Cancel any in-flight generation or caption and terminate the worker."""
         if not self.is_running():
@@ -812,6 +858,11 @@ class ImageGenController(QObject):
             return
         self.caption_error.emit(error_message)
 
+    def _on_flux_prompt_error(self, error_message: str) -> None:
+        if self._suppress_task_failure_ui:
+            return
+        self.flux_prompt_error.emit(error_message)
+
     def _on_generation_started(self) -> None:
         self.generation_started.emit()
 
@@ -850,6 +901,8 @@ class ImageGenController(QObject):
     def _on_task_finished(self, kind: str, _success: bool, _err: str) -> None:
         if kind == "caption":
             self.caption_finished.emit()
+        if kind == "flux_prompt":
+            self.flux_prompt_finished.emit()
         if self._copy_batch_active or self._tasks.is_running():
             if self._copy_batch_active:
                 self._sync_cancel_menu()

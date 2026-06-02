@@ -35,19 +35,42 @@ class SidebarManager:
     def _on_view_mode_changed(self, mode: str):
         """Handle VIEW_MODE_CHANGED - sidebar state may need refresh (manage_sidebar_visibility called by view switch)"""
         pass  # manage_sidebar_visibility_for_view_mode is called by view switch code
+
+    def _leave_browse_then(self, callback):
+        """Run callback after leaving browse mode (left sidebar is thumbnail/list only)."""
+        if getattr(self.main_window, "current_view_mode", None) == "browse":
+            if hasattr(self.main_window, "close_browse_view"):
+                self.main_window.close_browse_view()
+            QTimer.singleShot(50, callback)
+        else:
+            callback()
     
     def toggle_file_tree(self):
         """Toggle the visibility of the file tree and resize canvas accordingly"""
+        def do_toggle():
+            if hasattr(self.main_window, 'combined_sidebar'):
+                self.main_window.combined_sidebar.set_tree_visible(
+                    not self.main_window.combined_sidebar.is_tree_visible()
+                )
+            else:
+                self.main_window.view_manager.toggle_file_tree()
+
+        self._leave_browse_then(do_toggle)
         if hasattr(self.main_window, 'combined_sidebar'):
-            self.main_window.combined_sidebar.set_tree_visible(not self.main_window.combined_sidebar.is_tree_visible())
             return self.main_window.combined_sidebar.is_tree_visible()
-        else:
-            return self.main_window.view_manager.toggle_file_tree()
+        return getattr(self.main_window, 'file_tree_visible', False)
     
     def toggle_preview(self):
         """Toggle the visibility of the preview widget and resize canvas accordingly"""
+        def do_toggle():
+            if hasattr(self.main_window, 'combined_sidebar'):
+                self.main_window.combined_sidebar.set_preview_visible(
+                    not self.main_window.combined_sidebar.is_preview_visible()
+                )
+                return
+
         if hasattr(self.main_window, 'combined_sidebar'):
-            self.main_window.combined_sidebar.set_preview_visible(not self.main_window.combined_sidebar.is_preview_visible())
+            self._leave_browse_then(do_toggle)
             return self.main_window.combined_sidebar.is_preview_visible()
         else:
             # Fallback to old behavior if combined sidebar not available
@@ -89,10 +112,14 @@ class SidebarManager:
 
     def toggle_jobs(self):
         """Toggle the visibility of the jobs pane in the combined sidebar."""
+        def do_toggle():
+            if hasattr(self.main_window, "combined_sidebar"):
+                self.main_window.combined_sidebar.set_jobs_visible(
+                    not self.main_window.combined_sidebar.is_jobs_visible()
+                )
+
         if hasattr(self.main_window, "combined_sidebar"):
-            self.main_window.combined_sidebar.set_jobs_visible(
-                not self.main_window.combined_sidebar.is_jobs_visible()
-            )
+            self._leave_browse_then(do_toggle)
             return self.main_window.combined_sidebar.is_jobs_visible()
         return False
     

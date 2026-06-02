@@ -2145,6 +2145,10 @@ class ImageBrowserWindow(QMainWindow):
 
     def show_jobs_pane(self) -> bool:
         """Show the jobs pane in the combined sidebar (idempotent)."""
+        if getattr(self, "current_view_mode", None) == "browse":
+            self.close_browse_view()
+            QTimer.singleShot(50, self.show_jobs_pane)
+            return getattr(self, "jobs_visible", False)
         if hasattr(self, "combined_sidebar"):
             self.combined_sidebar.set_jobs_visible(True)
             return self.combined_sidebar.is_jobs_visible()
@@ -2163,6 +2167,8 @@ class ImageBrowserWindow(QMainWindow):
 
     def toggle_preview(self):
         """Toggle the visibility of the preview widget and resize canvas accordingly"""
+        if hasattr(self, 'sidebar_manager'):
+            return self.sidebar_manager.toggle_preview()
         if hasattr(self, 'combined_sidebar'):
             self.combined_sidebar.set_preview_visible(not self.combined_sidebar.is_preview_visible())
             return self.combined_sidebar.is_preview_visible()
@@ -2315,7 +2321,7 @@ class ImageBrowserWindow(QMainWindow):
             return
         
         if view_mode == 'thumbnail':
-            if self.combined_sidebar.is_tree_visible() or self.combined_sidebar.is_preview_visible():
+            if self._any_left_sidebar_pane_visible():
                 self.combined_sidebar.show()
                 # Ensure tree is initialized when showing sidebar (critical when exiting browse mode)
                 if self.file_tree_visible or self.combined_sidebar.is_tree_visible():
@@ -2543,6 +2549,17 @@ class ImageBrowserWindow(QMainWindow):
     def _on_tree_visibility_changed(self, visible):
         """Handle tree visibility changes from combined sidebar"""
         self.file_tree_visible = visible
+
+        if self.current_view_mode == "browse":
+            if hasattr(self, "toggle_file_tree_action"):
+                self.toggle_file_tree_action.setChecked(visible)
+                self.toggle_file_tree_action.setText(
+                    "Hide File Tree" if visible else "Show File Tree"
+                )
+            self.config.update_setting("file_tree_visible", visible)
+            if hasattr(self, "combined_sidebar"):
+                self.combined_sidebar.hide()
+            return
         
         # Ensure tree is initialized when it becomes visible
         if visible:
@@ -2609,6 +2626,18 @@ class ImageBrowserWindow(QMainWindow):
         # Update the preview widget's internal visibility flag
         self.preview_widget.preview_visible = visible
         self.preview_visible = visible
+
+        if self.current_view_mode == "browse":
+            if hasattr(self, "toggle_preview_action"):
+                self.toggle_preview_action.setChecked(visible)
+                self.toggle_preview_action.setText(
+                    "Hide Preview" if visible else "Show Preview"
+                )
+            self.config.update_setting("preview_visible", visible)
+            self._preview_was_visible = visible
+            if hasattr(self, "combined_sidebar"):
+                self.combined_sidebar.hide()
+            return
         
         if visible:
             if transitioning_to_visible:
@@ -2680,6 +2709,15 @@ class ImageBrowserWindow(QMainWindow):
     def _on_jobs_visibility_changed(self, visible):
         """Handle jobs pane visibility changes from combined sidebar."""
         self.jobs_visible = visible
+
+        if self.current_view_mode == "browse":
+            if hasattr(self, "toggle_jobs_action"):
+                self.toggle_jobs_action.setChecked(visible)
+                self.toggle_jobs_action.setText("Hide Jobs" if visible else "Show Jobs")
+            self.config.update_setting("jobs_visible", visible)
+            if hasattr(self, "combined_sidebar"):
+                self.combined_sidebar.hide()
+            return
 
         if hasattr(self, "toggle_jobs_action"):
             self.toggle_jobs_action.setChecked(visible)

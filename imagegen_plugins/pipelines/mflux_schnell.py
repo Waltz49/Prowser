@@ -15,6 +15,7 @@ import tempfile
 import time
 from typing import Any, Dict, Final, Optional, Tuple
 
+from imagegen_plugins.image_gen_pipeline_modes import MFLUX_FLOW_MATCH_MIN_STEPS
 from imagegen_plugins.pipelines.mflux_stepwise_progress import (
     atomic_copy2,
     cleanup_stepwise_dir,
@@ -262,7 +263,10 @@ def run_from_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
         raise ValueError("prompt is required")
 
     w, h = align_mflux_dims(int(payload["width"]), int(payload["height"]))
-    steps = max(1, min(30, int(payload.get("steps", 4))))
+    steps = max(
+        MFLUX_FLOW_MATCH_MIN_STEPS,
+        min(30, int(payload.get("steps", 4))),
+    )
     guidance = max(0.0, min(10.0, float(payload.get("guidance_scale", 3.5))))
     quantize = int(payload.get("mflux_quantize", 3))
     model = str(payload.get("hf_model_id") or "schnell")

@@ -361,6 +361,7 @@ copy_and_count "exif_utils.py"
 copy_and_count "speech_utils.py"
 copy_and_count "edit_exif_usercomment_dialog.py"
 copy_and_count "lmstudio_caption.py"
+copy_and_count "lmstudio_flux_prompt.py"
 copy_and_count "lmstudio_launcher.py"
 copy_and_count "random_images_from_recents.py"
 

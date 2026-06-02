@@ -433,8 +433,12 @@ class CombinedSidebarWidget(QWidget):
         """Update overall widget visibility based on section visibility"""
         if not any(self._pane_visibility()):
             self.hide()
-        else:
-            self.show()
+            return
+        mw = getattr(self, "main_window", None)
+        if mw and getattr(mw, "current_view_mode", None) == "browse":
+            self.hide()
+            return
+        self.show()
             
     def _on_splitter_moved(self):
         """Handle splitter resize events"""

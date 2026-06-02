@@ -35,10 +35,7 @@ _FIELD_TOOLTIPS: dict[str, str] = {
 
 _DIM_HELPER_TOOLTIPS: dict[str, str] = {
     "import": (
-        "Load prompt text from the EXIF user comment of the selected image. "
-        "Hold Option while pressing Import to also set width/height from the image "
-        "(scaled down proportionally with aspect lock if larger than this model allows) "
-        "and to load seed, steps, quantization, LoRA, and guidance when present."
+        "Load prompt text from the EXIF user comment of the selected image."
     ),
     "screen_size": (
         "Set width and height from the primary display, aligned to this model's limits."

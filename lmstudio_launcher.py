@@ -33,9 +33,11 @@ def launch_lmstudio() -> bool:
         return False
 
 
-def show_ai_caption_error_dialog(parent, error_msg: str) -> None:
+def show_ai_caption_error_dialog(
+    parent, error_msg: str, *, window_title: str = "AI Caption Error"
+) -> None:
     """
-    Show the AI Caption Error dialog with Ok and LM Studio... buttons.
+    Show an AI / LM Studio error dialog with Ok and LM Studio... buttons.
     LM Studio... verifies installation, launches if installed, and dismisses the dialog.
     """
     from PySide6.QtWidgets import (
@@ -47,7 +49,7 @@ def show_ai_caption_error_dialog(parent, error_msg: str) -> None:
     from utils import get_button_style
 
     dialog = QDialog(parent)
-    dialog.setWindowTitle("AI Caption Error")
+    dialog.setWindowTitle(window_title)
     dialog.setWindowFlags(
         Qt.Window | Qt.WindowTitleHint | Qt.WindowSystemMenuHint
         | Qt.WindowCloseButtonHint | Qt.WindowStaysOnTopHint

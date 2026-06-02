@@ -28,6 +28,17 @@ _COPIES_PIPELINES = frozenset(
 _COPIES_MAX = 200
 _PACKAGE_DIR = Path(__file__).resolve().parent
 
+# MFLUX FlowMatchEulerDiscreteScheduler builds timesteps with / (num_steps - 1).
+MFLUX_FLOW_MATCH_MIN_STEPS = 2
+_MFLUX_PIPELINE_IDS = frozenset(
+    {
+        "flux_schnell_mflux_play",
+        "mflux_fill_expand",
+        "mflux_fill_infill",
+        "mflux_flux2_klein_edit",
+    }
+)
+
 
 @dataclass(frozen=True)
 class PipelineMode:
@@ -57,6 +68,7 @@ PIPELINE_MODES: Dict[str, PipelineMode] = {
     "flux_schnell_mflux_play": PipelineMode(
         pipeline_id="flux_schnell_mflux_play",
         worker_script="mflux_schnell.py",
+        steps_min=MFLUX_FLOW_MATCH_MIN_STEPS,
         steps_default=4,
         steps_max=30,
         guidance_default=3.5,
@@ -119,7 +131,7 @@ PIPELINE_MODES: Dict[str, PipelineMode] = {
     "mflux_flux2_klein_edit": PipelineMode(
         pipeline_id="mflux_flux2_klein_edit",
         worker_script="mflux_flux2_klein_edit.py",
-        steps_min=1,
+        steps_min=MFLUX_FLOW_MATCH_MIN_STEPS,
         steps_max=30,
         steps_default=4,
         guidance_min=1.0,
@@ -195,6 +207,8 @@ def resolve_steps_for_run(pipeline_id: str, values: Dict[str, Any]) -> int:
         lora_id = coerce_lora_preset_id(values.get("mflux_lora", "none"))
         steps = effective_steps_for_lora(steps, lora_id, for_fill=False)
         steps = max(mode.steps_min, min(mode.steps_max, steps))
+    if pipeline_id in _MFLUX_PIPELINE_IDS:
+        steps = max(MFLUX_FLOW_MATCH_MIN_STEPS, steps)
     return steps
 
 

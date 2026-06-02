@@ -36,12 +36,13 @@ from imagegen_plugins.image_gen_dialog import (
     apply_import_extras_from_image_path,
     build_seed_and_random_seed_row,
     configure_image_gen_form_layout,
-    connect_import_button_with_option_modifier,
     field_specs_share_seed_row,
     load_import_prompt_from_path,
     validate_copies_require_random_seed,
 )
 from imagegen_plugins.image_gen_active_model import save_active_plugin_id_for_function
+from imagegen_plugins.imagegen_flux_prompt_ai import ImageGenFluxPromptAi
+from lmstudio_caption import is_lmstudio_services_available
 from imagegen_plugins.image_gen_model_selector import (
     build_model_selector_row,
     resolve_initial_plugin,
@@ -58,8 +59,9 @@ from imagegen_plugins.image_gen_fields import FieldSpec
 from imagegen_plugins.image_gen_registry import ImageGenModelPlugin
 from imagegen_plugins.imagegen_control_tooltips import (
     apply_dialog_button_tooltips,
+    apply_edit_import_all_button_tooltip,
+    apply_edit_import_text_button_tooltip,
     apply_field_control_tooltips,
-    apply_import_button_tooltip,
     apply_model_combo_tooltip,
 )
 from imagegen_plugins.image_gen_source_nav import (
@@ -120,6 +122,7 @@ class ImageGenExpandDialog(ImageGenDimensionAspectMixin, QDialog):
         self._source_nav: Optional[ImageGenSourceNavRow] = None
         self._fields_form: Optional[QFormLayout] = None
         self._init_dim_aspect_state()
+        self._flux_prompt_ai: Optional[ImageGenFluxPromptAi] = None
 
         initial = resolve_initial_plugin(
             self._plugins,
@@ -332,6 +335,7 @@ class ImageGenExpandDialog(ImageGenDimensionAspectMixin, QDialog):
                     self._show_import_button()
                     or self._has_dim_fields()
                     or bool(self.source_path)
+                    or is_lmstudio_services_available()
                 ):
                     row_w = QWidget()
                     row = QHBoxLayout(row_w)
@@ -341,14 +345,17 @@ class ImageGenExpandDialog(ImageGenDimensionAspectMixin, QDialog):
                     btn_col.setContentsMargins(0, 0, 0, 0)
                     btn_col.setSpacing(4)
                     if self._show_import_button() or bool(self.source_path):
-                        import_btn = QPushButton("Import")
-                        connect_import_button_with_option_modifier(
-                            import_btn, self._on_import_prompt
-                        )
-                        apply_import_button_tooltip(import_btn)
-                        btn_col.addWidget(import_btn, 0, Qt.AlignmentFlag.AlignTop)
+                        import_text_btn = QPushButton("Import Prompt")
+                        import_text_btn.clicked.connect(self._on_import_prompt_text)
+                        apply_edit_import_text_button_tooltip(import_text_btn)
+                        btn_col.addWidget(import_text_btn, 0, Qt.AlignmentFlag.AlignTop)
+                        import_all_btn = QPushButton("Import Available")
+                        import_all_btn.clicked.connect(self._on_import_available)
+                        apply_edit_import_all_button_tooltip(import_all_btn)
+                        btn_col.addWidget(import_all_btn, 0, Qt.AlignmentFlag.AlignTop)
                     if self._has_dim_fields():
                         self._add_dim_helper_buttons(btn_col)
+                    self._ensure_flux_prompt_ai().add_button(btn_col)
                     btn_host = QWidget()
                     btn_host.setLayout(btn_col)
                     row.addWidget(btn_host, 0, Qt.AlignmentFlag.AlignTop)
@@ -447,19 +454,37 @@ class ImageGenExpandDialog(ImageGenDimensionAspectMixin, QDialog):
         geom = screen.geometry()
         return int(geom.width()), int(geom.height())
 
-    def _on_import_prompt(self, *, option_held: bool = False) -> None:
-        image_path = self.source_path
-        if not image_path:
-            show_styled_warning(self, "Import", "No image selected.")
-            return
-        prompt_text = load_import_prompt_from_path(self, image_path)
+    def _import_prompt_text_from_source(self) -> bool:
+        """Load prompt text from EXIF; return True on success."""
+        if not self.source_path:
+            show_styled_warning(self, "Import Text", "No image selected.")
+            return False
+        prompt_text = load_import_prompt_from_path(self, self.source_path)
         if prompt_text is None:
-            return
+            return False
         self.set_prompt_text(prompt_text)
-        if option_held:
-            if self._has_dim_fields():
-                self._apply_import_dims_from_image(image_path)
-            apply_import_extras_from_image_path(self, image_path)
+        return True
+
+    def _on_import_prompt_text(self) -> None:
+        self._import_prompt_text_from_source()
+
+    def _on_import_available(self) -> None:
+        if not self._import_prompt_text_from_source():
+            return
+        if not self.source_path:
+            return
+        if self._has_dim_fields():
+            self._apply_import_dims_from_image(self.source_path)
+        apply_import_extras_from_image_path(self, self.source_path)
+
+    def get_prompt_text(self) -> str:
+        entry = self._widgets.get("prompt")
+        if entry is None:
+            return ""
+        widget, _, spec = entry
+        if spec.kind == "text":
+            return widget.toPlainText()
+        return ""
 
     def set_prompt_text(self, text: str) -> None:
         entry = self._widgets.get("prompt")
@@ -468,6 +493,16 @@ class ImageGenExpandDialog(ImageGenDimensionAspectMixin, QDialog):
         widget, _, spec = entry
         if spec.kind == "text":
             widget.setPlainText(text)
+
+    def _ensure_flux_prompt_ai(self) -> ImageGenFluxPromptAi:
+        if self._flux_prompt_ai is None:
+            self._flux_prompt_ai = ImageGenFluxPromptAi(
+                self,
+                task_kind=self._function,
+                get_prompt_text=self.get_prompt_text,
+                set_prompt_text=self.set_prompt_text,
+            )
+        return self._flux_prompt_ai
 
     def _widget_for_spec(self, spec: FieldSpec):
         if spec.kind == "text":

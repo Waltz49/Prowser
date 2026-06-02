@@ -1792,8 +1792,8 @@ class BrowseViewKeyboardHandler(BaseKeyboardHandler):
             return True
         self._double_tap_last_key = Qt.Key_T
         self._double_tap_last_time = now
-        # First tap: do not consume — let View > T (toggle file tree) QAction run.
-        return False
+        # First tap: consume; left sidebar is not available in browse (double-tap exits to thumbnails).
+        return True
 
     def _handle_p_key(self, event: QKeyEvent, context_data: Dict[str, Any]) -> bool:
         """Double-tap P: switch to thumbnail mode and show preview (not toggle)."""
@@ -1813,8 +1813,8 @@ class BrowseViewKeyboardHandler(BaseKeyboardHandler):
             return True
         self._double_tap_last_key = Qt.Key_P
         self._double_tap_last_time = now
-        # First tap: do not consume — let View > P (toggle preview) QAction run.
-        return False
+        # First tap: consume; left sidebar is not available in browse (double-tap exits to thumbnails).
+        return True
 
     def _handle_j_key_browse(self, event: QKeyEvent, context_data: Dict[str, Any]) -> bool:
         """J in browse: return to thumbnails and show jobs pane (always show, not toggle)."""

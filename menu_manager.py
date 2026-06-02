@@ -3318,9 +3318,9 @@ class MenuManager:
     def update_sidebar_menu_actions_for_view_mode(self, view_mode):
         """Update sidebar menu actions enabled state based on view mode"""
         mw = self.main_window
-        # T / P shortcuts are QAction-based; they only fire when the actions are enabled.
-        # Allow toggling tree and preview from thumbnail, browse, and list — not slideshow modes.
-        show_tree_preview_toggles = view_mode in ('thumbnail', 'browse', 'list')
+        # T / P / J shortcuts are QAction-based; they only fire when the actions are enabled.
+        # Left combined sidebar is thumbnail/list only — not browse or slideshow modes.
+        show_tree_preview_toggles = view_mode in ('thumbnail', 'list')
         
         # Enable/disable and show/hide file tree action
         if hasattr(mw, 'toggle_file_tree_action'):

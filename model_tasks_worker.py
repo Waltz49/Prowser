@@ -161,6 +161,37 @@ def _run_generate(payload: Dict[str, Any], job_id: str) -> None:
         )
 
 
+def _run_flux_prompt(system_prompt: str, user_prompt: str, job_id: str) -> None:
+    global _LOADED_KIND
+    _emit({"type": "job_started", "job_id": job_id, "command": "flux_prompt"})
+    _ensure_lmstudio_mode()
+    from lmstudio_flux_prompt import finalize_flux_prompt_text, get_flux_prompt_stream
+
+    _LOADED_KIND = "lmstudio"
+    accumulated = []
+    try:
+        for chunk in get_flux_prompt_stream(system_prompt, user_prompt):
+            if chunk:
+                accumulated.append(chunk)
+                _emit({"type": "flux_prompt_chunk", "job_id": job_id, "text": chunk})
+        full_text = finalize_flux_prompt_text("".join(accumulated))
+        if not full_text:
+            raise RuntimeError(
+                "The model returned an empty response.\n\n"
+                "Try again, or load a text-capable model in LMStudio."
+            )
+        _emit(
+            {
+                "type": "result",
+                "job_id": job_id,
+                "command": "flux_prompt",
+                "prompt": full_text,
+            }
+        )
+    finally:
+        pass
+
+
 def _run_caption(
     file_path: str, user_prompt_override: str | None, job_id: str
 ) -> None:
@@ -222,6 +253,12 @@ def _handle_command(cmd: Dict[str, Any]) -> None:
         if override is not None and not str(override).strip():
             override = None
         _run_caption(str(file_path), override, job_id)
+        return
+
+    if command == "flux_prompt":
+        system_prompt = str(cmd.get("system_prompt") or "")
+        user_prompt = str(cmd.get("user_prompt") or "")
+        _run_flux_prompt(system_prompt, user_prompt, job_id)
         return
 
     raise ValueError(f"Unknown command: {command!r}")

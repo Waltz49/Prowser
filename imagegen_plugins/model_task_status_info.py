@@ -8,7 +8,7 @@ import os
 import re
 from typing import Any, Dict, Optional
 
-from imagegen_plugins.image_gen_model_availability import _resolve_mflux_repo_id
+from imagegen_plugins.image_gen_model_availability import model_display_name
 from imagegen_plugins.image_gen_pipeline_modes import get_pipeline
 from imagegen_plugins.image_gen_registry import ImageGenModelPlugin
 from imagegen_plugins.mflux_lora_presets import MFLUX_LORA_UI_CHOICES
@@ -19,6 +19,7 @@ def _escape(text: str) -> str:
 
 
 PROMPT_DISPLAY_MAX_LEN = 100
+_QUANT_STATUS_LABEL = "Q:"
 
 
 def _truncate(text: str, limit: int = PROMPT_DISPLAY_MAX_LEN) -> str:
@@ -37,8 +38,15 @@ def parse_queue_status_title(html_text: str) -> str:
 
 
 def parse_queue_status_elapsed(html_text: str) -> str:
-    """Elapsed / estimate cell from queue status HTML, or empty when absent."""
-    match = _QUEUE_ELAPSED_ROW_RE.search(html_text or "")
+    """Elapsed / estimate text from queue status HTML, or empty when absent."""
+    text = html_text or ""
+    steps_match = _STEPS_ROW_RE.search(text)
+    if steps_match:
+        timing_match = _STEPS_TIMING_SUFFIX_RE.search(steps_match.group(2))
+        if timing_match:
+            raw = re.sub(r"<[^>]+>", "", timing_match.group(1))
+            return html.unescape(raw).strip()
+    match = _QUEUE_ELAPSED_ROW_RE.search(text)
     if not match:
         return ""
     raw = re.sub(r"<[^>]+>", "", match.group(1))
@@ -74,6 +82,21 @@ def _table_row_html_value(label: str, value_html: str) -> str:
 
 
 _QUEUE_FIELD_SEP = "\u00A0" * 4
+_QUEUE_AFTER_Q_SEP = "\u00A0 "  # NBSP + space before Elapsed (after Q:n)
+
+
+def _inline_field_sep_before(label: str, previous_label: str | None) -> str:
+    if previous_label == _QUANT_STATUS_LABEL and label == "Elapsed:":
+        return _QUEUE_AFTER_Q_SEP
+    return _QUEUE_FIELD_SEP
+
+
+def _inline_field_suffix(
+    label: str, value: str, *, previous_label: str | None = None
+) -> str:
+    value_sep = "" if label == _QUANT_STATUS_LABEL else " "
+    prefix = _inline_field_sep_before(label, previous_label)
+    return f"{prefix}<b>{_escape(label)}</b>{value_sep}{_escape(value)}"
 
 
 def _table_row_primary_plus_inline(
@@ -81,10 +104,12 @@ def _table_row_primary_plus_inline(
 ) -> str:
     """Primary label/value in cols 1–2, extra label/value pairs inline in col 2."""
     cell = _escape(value)
+    previous: str | None = None
     for extra_label, extra_value in inline_parts:
-        cell += (
-            f"{_QUEUE_FIELD_SEP}<b>{_escape(extra_label)}</b> {_escape(extra_value)}"
+        cell += _inline_field_suffix(
+            extra_label, extra_value, previous_label=previous
         )
+        previous = extra_label
     return (
         f"<tr><td><b>{_escape(label)}</b></td>"
         f"<td>{cell}</td></tr>"
@@ -167,13 +192,10 @@ def _series_queued_value(count: int) -> str:
 
 
 def _series_refinement_suffix(values: Dict[str, Any]) -> str:
-    """Suffix when the job dialog exposed 'use last generated image'."""
-    if "use_last_generated_image" not in values:
+    """Suffix when refinement is enabled (use last generated image)."""
+    if not values.get("use_last_generated_image"):
         return ""
-    if values.get("use_last_generated_image"):
-        return "\u00A0\u00A0\u00A0\u00A0(Refinement)"
-   
-    return "\u00A0\u00A0\u00A0\u00A0(No Refinement)"
+    return "\u00A0\u00A0\u00A0\u00A0(Refinement)"
 
 
 def format_series_line_value(base: str, values: Dict[str, Any]) -> str:
@@ -213,7 +235,7 @@ def _generation_status_table_rows(
     if steps_display:
         rows.append(_table_row("Steps:", steps_display))
     if fields.get("quant"):
-        rows.append(_table_row("Quant:", fields["quant"]))
+        rows.append(_table_row(_QUANT_STATUS_LABEL, fields["quant"]))
     if fields.get("prompt"):
         rows.append(_table_row(fields["prompt_label"], fields["prompt"]))
     if fields.get("neg"):
@@ -221,10 +243,30 @@ def _generation_status_table_rows(
     return rows
 
 
+def _steps_row_inline_parts(
+    fields: dict[str, str],
+    *,
+    elapsed_seconds: float | None = None,
+    estimate_seconds: float | None = None,
+) -> list[tuple[str, str]]:
+    """Inline label/value pairs after the Steps cell (Q, Elapsed, Est)."""
+    parts: list[tuple[str, str]] = []
+    quant = fields.get("quant")
+    if quant:
+        parts.append((_QUANT_STATUS_LABEL, quant))
+    if elapsed_seconds is not None:
+        parts.append(("Elapsed:", _format_duration(elapsed_seconds)))
+        if estimate_seconds is not None and estimate_seconds > 0:
+            parts.append(("Est:", _format_duration(estimate_seconds)))
+    return parts
+
+
 def _generation_status_queue_table_rows(
     fields: dict[str, str],
     *,
     steps_value: str | None = None,
+    elapsed_seconds: float | None = None,
+    estimate_seconds: float | None = None,
 ) -> list[str]:
     """Compact job-queue rows: combine short fields on one line where possible."""
     rows: list[str] = []
@@ -242,14 +284,19 @@ def _generation_status_queue_table_rows(
 
     steps_display = steps_value if steps_value is not None else fields.get("steps", "")
     quant = fields.get("quant")
-    if steps_display and quant:
+    steps_inline = _steps_row_inline_parts(
+        fields,
+        elapsed_seconds=elapsed_seconds,
+        estimate_seconds=estimate_seconds,
+    )
+    if steps_display and steps_inline:
         rows.append(
-            _table_row_primary_plus_inline("Steps:", steps_display, [("Quant:", quant)])
+            _table_row_primary_plus_inline("Steps:", steps_display, steps_inline)
         )
     elif steps_display:
         rows.append(_table_row("Steps:", steps_display))
     elif quant:
-        rows.append(_table_row("Quant:", quant))
+        rows.append(_table_row(_QUANT_STATUS_LABEL, quant))
 
     if fields.get("prompt"):
         rows.append(_table_row(fields["prompt_label"], fields["prompt"]))
@@ -264,7 +311,7 @@ def _steps_display_with_progress(
     step: int | None = None,
     step_total: int | None = None,
 ) -> str:
-    """Steps cell text — step count only; timing lives on the Elapsed row."""
+    """Steps cell text (step count only; timing is appended inline on the Steps row)."""
     steps_value = fields_steps or ""
     if step is not None and step_total is not None and step_total > 0:
         step_i = max(0, min(int(step), int(step_total)))
@@ -276,6 +323,7 @@ def refresh_expand_task_status_html_for_display(
     html_text: str,
     *,
     elapsed_seconds: float | None,
+    estimate_seconds: float | None = None,
     source_path: str = "",
     base_path: str = "",
     reference_paths: list[str] | None = None,
@@ -284,15 +332,14 @@ def refresh_expand_task_status_html_for_display(
     if not html_text:
         return html_text, []
 
-    html_text = _EXPAND_ELAPSED_ROW_RE.sub("", html_text)
+    if elapsed_seconds is not None:
+        html_text = remove_elapsed_row(html_text)
+        html_text = _set_steps_row_timing(
+            html_text, elapsed_seconds, estimate_seconds=estimate_seconds
+        )
     html_text = _EXPAND_REFERENCES_ROW_RE.sub("", html_text)
 
     insert_rows: list[str] = []
-    if elapsed_seconds is not None:
-        insert_rows.append(
-            _table_row("Elapsed:", _format_elapsed_cell_value(elapsed_seconds))
-        )
-
     ref_paths = _normalize_reference_paths(reference_paths, source_path)
     base_norm = (
         os.path.normpath(base_path)
@@ -331,13 +378,6 @@ def _table_html(
     return "<table cellspacing=\"0\" cellpadding=\"0\">" + "".join(parts) + "</table>"
 
 
-def _resolve_hf_model_name(pipeline_id: str, hf_model_id: str) -> str:
-    hf_model_id = (hf_model_id or "").strip()
-    if pipeline_id == "flux_schnell_mflux_play":
-        return _resolve_mflux_repo_id(hf_model_id) if hf_model_id else ""
-    return hf_model_id
-
-
 def _lora_display_label(preset_id: str) -> Optional[str]:
     preset_id = (preset_id or "none").strip()
     if not preset_id or preset_id == "none":
@@ -359,12 +399,9 @@ def _collect_generation_status_fields(
     if payload:
         effective.update(payload)
     fields: dict[str, str] = {}
-    hf_id = _resolve_hf_model_name(
-        pipeline_id,
-        str(effective.get("hf_model_id") or plugin.hf_model_id or ""),
-    )
-    if hf_id:
-        fields["model"] = hf_id
+    raw_hf_id = str(effective.get("hf_model_id") or plugin.hf_model_id or "").strip()
+    if raw_hf_id:
+        fields["model"] = model_display_name(pipeline_id, raw_hf_id)
 
     if pipeline_id in ("flux_schnell_mflux_play", "mflux_fill_expand"):
         lora_label = _lora_display_label(str(values.get("mflux_lora") or "none"))
@@ -479,20 +516,18 @@ def format_image_generation_queue_status_html(
         step=step,
         step_total=step_total,
     )
-    rows = _generation_status_queue_table_rows(fields, steps_value=steps_value)
-    if (
+    show_timing = (
         step is not None
         and step_total is not None
         and step_total > 0
-        and step > 0
         and elapsed_seconds is not None
-    ):
-        rows.append(
-            _table_row(
-                "Elapsed:",
-                _format_elapsed_cell_value(elapsed_seconds, estimate_seconds),
-            )
-        )
+    )
+    rows = _generation_status_queue_table_rows(
+        fields,
+        steps_value=steps_value,
+        elapsed_seconds=elapsed_seconds if show_timing else None,
+        estimate_seconds=estimate_seconds if show_timing else None,
+    )
 
     ref_row = _references_row_for_values(
         plugin, values, source_path=source_path, base_path=base_path
@@ -552,12 +587,61 @@ def _format_elapsed_cell_value(
 
 
 _STEPS_QUANT_SUFFIX_RE = re.compile(
-    rf"((?:\u00A0){{2,}}<b>Quant:</b> [^<]+)$"
+    rf"((?:\u00A0){{2,}}<b>{re.escape(_QUANT_STATUS_LABEL)}</b>\s*[^<]+)$"
+)
+_STEPS_TIMING_SUFFIX_RE = re.compile(
+    rf"((?:{re.escape(_QUEUE_AFTER_Q_SEP)}|(?:\u00A0){{4}})"
+    rf"<b>Elapsed:</b> [^<]+(?:\s*<b>Est:</b> [^<]+)?)"
 )
 _STEPS_ROW_RE = re.compile(
     r"(<tr><td><b>Steps:</b></td><td>)(.*?)(</td></tr>)",
     re.DOTALL,
 )
+
+
+def _steps_cell_timing_suffix(
+    elapsed_seconds: float,
+    estimate_seconds: float | None = None,
+    *,
+    after_quant: bool = False,
+) -> str:
+    suffix = ""
+    previous: str | None = _QUANT_STATUS_LABEL if after_quant else None
+    for label, value in _steps_row_inline_parts(
+        {},
+        elapsed_seconds=elapsed_seconds,
+        estimate_seconds=estimate_seconds,
+    ):
+        suffix += _inline_field_suffix(label, value, previous_label=previous)
+        previous = label
+    return suffix
+
+
+def _strip_steps_timing_suffix(cell_html: str) -> str:
+    return _STEPS_TIMING_SUFFIX_RE.sub("", cell_html or "", count=1)
+
+
+def _set_steps_row_timing(
+    html_text: str,
+    elapsed_seconds: float,
+    *,
+    estimate_seconds: float | None = None,
+) -> str:
+    """Set or replace inline Elapsed/Est on the Steps row."""
+    if not html_text:
+        return html_text
+    def _replace_steps_cell(match: re.Match[str]) -> str:
+        cell = _strip_steps_timing_suffix(match.group(2))
+        after_quant = bool(_STEPS_QUANT_SUFFIX_RE.search(cell))
+        timing_suffix = _steps_cell_timing_suffix(
+            elapsed_seconds, estimate_seconds, after_quant=after_quant
+        )
+        return match.group(1) + cell + timing_suffix + match.group(3)
+
+    updated, count = _STEPS_ROW_RE.subn(_replace_steps_cell, html_text, count=1)
+    if count:
+        return _EXPAND_ELAPSED_ROW_RE.sub("", updated, count=1)
+    return _EXPAND_ELAPSED_ROW_RE.sub("", html_text, count=1)
 
 
 def update_status_html_steps_progress(
@@ -568,7 +652,7 @@ def update_status_html_steps_progress(
     elapsed_seconds: float | None = None,
     estimate_seconds: float | None = None,
 ) -> str:
-    """Replace the Steps line and refresh the Elapsed row with live timing."""
+    """Replace the Steps line; Elapsed/Est stay inline on that row when running."""
     if not html_text or total <= 0:
         return html_text
     step = max(0, min(int(step), int(total)))
@@ -577,24 +661,29 @@ def update_status_html_steps_progress(
     step_value = f"{step} of {total}"
 
     def _replace_steps_cell(match: re.Match[str]) -> str:
+        cell = _strip_steps_timing_suffix(match.group(2))
         quant_suffix = ""
-        quant_match = _STEPS_QUANT_SUFFIX_RE.search(match.group(2))
+        quant_match = _STEPS_QUANT_SUFFIX_RE.search(cell)
         if quant_match:
             quant_suffix = quant_match.group(1)
-        return match.group(1) + _escape(step_value) + quant_suffix + match.group(3)
+            cell = cell[: quant_match.start()]
+        timing_suffix = ""
+        if elapsed_seconds is not None:
+            timing_suffix = _steps_cell_timing_suffix(
+                elapsed_seconds,
+                estimate_seconds,
+                after_quant=bool(quant_suffix),
+            )
+        return match.group(1) + _escape(step_value) + quant_suffix + timing_suffix + match.group(3)
 
     updated, count = _STEPS_ROW_RE.subn(_replace_steps_cell, html_text, count=1)
-    html_text = updated if count else html_text
-    if step > 0 and elapsed_seconds is not None:
-        elapsed_cell = _escape(
-            _format_elapsed_cell_value(elapsed_seconds, estimate_seconds)
-        )
-        html_text = _set_elapsed_row(html_text, elapsed_cell)
-    return html_text
+    if count:
+        return _EXPAND_ELAPSED_ROW_RE.sub("", updated, count=1)
+    return _EXPAND_ELAPSED_ROW_RE.sub("", html_text, count=1)
 
 
 def _set_elapsed_row(html_text: str, elapsed_cell: str) -> str:
-    """Replace or insert the Elapsed: table row."""
+    """Legacy: replace a standalone Elapsed row (prefer inline Steps timing)."""
     if not html_text:
         return html_text
     row_html = f"<tr><td><b>Elapsed:</b></td><td>{elapsed_cell}</td></tr>"
@@ -611,10 +700,18 @@ def _set_elapsed_row(html_text: str, elapsed_cell: str) -> str:
 
 
 def remove_elapsed_row(html_text: str) -> str:
-    """Remove the Elapsed: table row if present."""
+    """Remove standalone Elapsed row and inline timing from the Steps row."""
     if not html_text:
         return html_text
-    return _EXPAND_ELAPSED_ROW_RE.sub("", html_text, count=1)
+    html_text = _EXPAND_ELAPSED_ROW_RE.sub("", html_text, count=1)
+
+    def _replace_steps_cell(match: re.Match[str]) -> str:
+        cell = _strip_steps_timing_suffix(match.group(2))
+        cell = _strip_cooldown_from_steps_cell(cell)
+        return match.group(1) + cell + match.group(3)
+
+    updated, count = _STEPS_ROW_RE.subn(_replace_steps_cell, html_text, count=1)
+    return updated if count else html_text
 
 
 def freeze_status_html_generation_elapsed(
@@ -624,33 +721,33 @@ def freeze_status_html_generation_elapsed(
     step: int | None = None,
     step_total: int | None = None,
 ) -> str:
-    """Lock elapsed on its own row and leave Steps showing step count only."""
+    """Lock elapsed/estimate inline on the Steps row."""
     if not html_text:
         return html_text
     if step is not None and step_total is not None and step_total > 0:
-        step_i = max(0, min(int(step), int(step_total)))
-        step_value = f"{step_i} of {int(step_total)}"
-        def _replace_steps_cell(match: re.Match[str]) -> str:
-            quant_suffix = ""
-            quant_match = _STEPS_QUANT_SUFFIX_RE.search(match.group(2))
-            if quant_match:
-                quant_suffix = quant_match.group(1)
-            return match.group(1) + _escape(step_value) + quant_suffix + match.group(3)
-
-        updated, count = _STEPS_ROW_RE.subn(_replace_steps_cell, html_text, count=1)
-        if count:
-            html_text = updated
-    elapsed_cell = _escape(_format_elapsed_cell_value(elapsed_seconds))
-    return _set_elapsed_row(html_text, elapsed_cell)
+        html_text = update_status_html_steps_progress(
+            html_text,
+            step,
+            step_total,
+            elapsed_seconds=elapsed_seconds,
+        )
+        return html_text
+    return _set_steps_row_timing(html_text, elapsed_seconds)
 
 
-_ELAPSED_ROW_RE = _EXPAND_ELAPSED_ROW_RE
+_STEPS_ROW_FOR_COOLDOWN_RE = _STEPS_ROW_RE
 _COOLDOWN_SUFFIX_RE = re.compile(r"\s+\(Cooldown\)\s+\d+")
 _SKIP_COOLDOWN_LINK_RE = re.compile(
     r'\s*<a href="skipcooldown://".*?</a>',
     re.DOTALL,
 )
 _CACHED_SKIP_COOLDOWN_ICON_HTML: str | None = None
+
+
+def _strip_cooldown_from_steps_cell(cell: str) -> str:
+    cell = _SKIP_COOLDOWN_LINK_RE.sub("", cell or "")
+    cell = _COOLDOWN_SUFFIX_RE.sub("", cell)
+    return cell.rstrip()
 
 
 def cooldown_skip_icon_html() -> str:
@@ -678,7 +775,7 @@ def apply_cooldown_to_status_html(
     *,
     skip_icon_html: str = "",
 ) -> str:
-    """Append cooldown countdown (and optional skip icon) to the Elapsed row."""
+    """Append cooldown countdown and skip icon at the end of the Steps row."""
     if not html_text:
         return html_text
     remaining = max(0, int(remaining_seconds))
@@ -686,28 +783,48 @@ def apply_cooldown_to_status_html(
     if skip_icon_html:
         suffix += f" {skip_icon_html}"
 
-    def _replace_row(match: re.Match[str]) -> str:
+    def _replace_steps_row(match: re.Match[str]) -> str:
+        prefix, cell, closing = match.group(1), match.group(2), match.group(3)
+        clean = _strip_cooldown_from_steps_cell(cell)
+        return prefix + clean + suffix + closing
+
+    updated, count = _STEPS_ROW_FOR_COOLDOWN_RE.subn(
+        _replace_steps_row, html_text, count=1
+    )
+    if count:
+        return updated
+
+    def _replace_elapsed_row(match: re.Match[str]) -> str:
         prefix, content, closing = match.group(1), match.group(2), match.group(3)
         clean = _SKIP_COOLDOWN_LINK_RE.sub("", content)
         clean = _COOLDOWN_SUFFIX_RE.sub("", clean).rstrip()
         return prefix + clean + suffix + closing
 
-    updated, count = _ELAPSED_ROW_RE.subn(_replace_row, html_text, count=1)
+    updated, count = _EXPAND_ELAPSED_ROW_RE.subn(_replace_elapsed_row, html_text, count=1)
     return updated if count else html_text
 
 
 def strip_cooldown_from_status_html(html_text: str) -> str:
-    """Remove cooldown countdown and skip icon from the Elapsed row."""
+    """Remove cooldown countdown and skip icon from Steps timing or Elapsed row."""
     if not html_text:
         return html_text
 
-    def _replace_row(match: re.Match[str]) -> str:
+    def _replace_steps_row(match: re.Match[str]) -> str:
+        prefix, cell, closing = match.group(1), match.group(2), match.group(3)
+        return prefix + _strip_cooldown_from_steps_cell(cell) + closing
+
+    updated, count = _STEPS_ROW_FOR_COOLDOWN_RE.subn(
+        _replace_steps_row, html_text, count=1
+    )
+    if count:
+        return updated
+
+    def _replace_elapsed_row(match: re.Match[str]) -> str:
         prefix, content, closing = match.group(1), match.group(2), match.group(3)
-        clean = _SKIP_COOLDOWN_LINK_RE.sub("", content)
-        clean = _COOLDOWN_SUFFIX_RE.sub("", clean).rstrip()
+        clean = _strip_cooldown_from_steps_cell(content)
         return prefix + clean + closing
 
-    updated, count = _ELAPSED_ROW_RE.subn(_replace_row, html_text, count=1)
+    updated, count = _EXPAND_ELAPSED_ROW_RE.subn(_replace_elapsed_row, html_text, count=1)
     return updated if count else html_text
 
 

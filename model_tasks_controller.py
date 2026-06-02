@@ -27,6 +27,10 @@ class ModelTasksController(QObject):
     caption_ready = Signal(str)
     caption_error = Signal(str)
 
+    flux_prompt_chunk = Signal(str)
+    flux_prompt_ready = Signal(str)
+    flux_prompt_error = Signal(str)
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self._process: Optional[QProcess] = None
@@ -34,7 +38,7 @@ class ModelTasksController(QObject):
         self._stdout_buffer = ""
         self._stderr_buffer: list[str] = []
         self._active_job_id: str = ""
-        self._active_kind: str = ""  # "generate" | "caption"
+        self._active_kind: str = ""  # "generate" | "caption" | "flux_prompt"
         self._pending_command: Optional[Dict[str, Any]] = None
         self._progress_callback = None
         self._worker_result: Optional[Dict[str, Any]] = None
@@ -84,6 +88,21 @@ class ModelTasksController(QObject):
             "user_prompt_override": user_prompt_override,
         }
         return self._start_job("caption", cmd)
+
+    def start_flux_prompt_job(self, system_prompt: str, user_prompt: str) -> bool:
+        if self.is_running():
+            return False
+        job_id = uuid.uuid4().hex
+        self._active_job_id = job_id
+        self._active_kind = "flux_prompt"
+        self._stderr_buffer = []
+        cmd = {
+            "command": "flux_prompt",
+            "job_id": job_id,
+            "system_prompt": system_prompt,
+            "user_prompt": user_prompt,
+        }
+        return self._start_job("flux_prompt", cmd)
 
     def cancel_task(self) -> None:
         """Kill worker process and clear in-flight job (unload all models)."""
@@ -192,6 +211,12 @@ class ModelTasksController(QObject):
                 self.caption_chunk.emit(str(text))
             return
 
+        if msg_type == "flux_prompt_chunk":
+            text = msg.get("text")
+            if text:
+                self.flux_prompt_chunk.emit(str(text))
+            return
+
         if msg_type == "result":
             self._on_worker_result(msg)
             return
@@ -209,6 +234,14 @@ class ModelTasksController(QObject):
                 self._finish_job("caption", True, "")
             else:
                 self._finish_job("caption", False, "Empty caption.")
+            return
+        if kind == "flux_prompt":
+            prompt = str(msg.get("prompt") or "").strip()
+            if prompt:
+                self.flux_prompt_ready.emit(prompt)
+                self._finish_job("flux_prompt", True, "")
+            else:
+                self._finish_job("flux_prompt", False, "Empty prompt.")
             return
         if kind == "generate":
             self._finish_generate_success(msg)
@@ -250,6 +283,9 @@ class ModelTasksController(QObject):
         elif kind == "caption":
             if not success and error_message != "Cancelled":
                 self.caption_error.emit(error_message or "Caption failed.")
+        elif kind == "flux_prompt":
+            if not success and error_message != "Cancelled":
+                self.flux_prompt_error.emit(error_message or "Prompt refinement failed.")
         self.task_finished.emit(kind, success, error_message)
         self._clear_job()
 

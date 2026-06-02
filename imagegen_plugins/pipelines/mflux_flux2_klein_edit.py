@@ -16,6 +16,7 @@ from typing import Any, Dict, Final
 
 from PIL import Image
 
+from imagegen_plugins.image_gen_pipeline_modes import MFLUX_FLOW_MATCH_MIN_STEPS
 from imagegen_plugins.outpaint_mask import fit_edit_output_dims
 from imagegen_plugins.pipelines.mflux_stepwise_progress import (
     atomic_copy2,
@@ -103,7 +104,10 @@ def run_from_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     if not prompt:
         raise ValueError("prompt is required")
 
-    steps = max(1, min(50, int(payload.get("steps", 4))))
+    steps = max(
+        MFLUX_FLOW_MATCH_MIN_STEPS,
+        min(50, int(payload.get("steps", 4))),
+    )
     quantize = int(payload.get("mflux_quantize", 4))
     if quantize not in _MFLUX_ALLOWED_QUANT:
         raise ValueError(f"mflux_quantize must be one of {sorted(_MFLUX_ALLOWED_QUANT)}")

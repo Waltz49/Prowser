@@ -75,6 +75,7 @@ from imagegen_plugins.image_gen_persistence import (
 from imagegen_plugins.image_gen_pipeline_modes import finalize_run_values
 from imagegen_plugins.image_gen_fields import FieldSpec
 from imagegen_plugins.image_gen_registry import ImageGenModelPlugin
+from imagegen_plugins.imagegen_flux_prompt_ai import ImageGenFluxPromptAi
 from reference_graph import valid_exif_reference_paths_for_image
 from imagegen_plugins.imagegen_control_tooltips import (
     apply_dialog_button_tooltips,
@@ -624,6 +625,7 @@ class ImageGenEditDialog(QDialog):
         self._preview_host: Optional[QFrame] = None
         self._preview_layout: Optional[QVBoxLayout] = None
         self._use_last_generated_cb: Optional[QCheckBox] = None
+        self._flux_prompt_ai: Optional[ImageGenFluxPromptAi] = None
 
         initial = resolve_initial_plugin(
             self._plugins,
@@ -913,6 +915,7 @@ class ImageGenEditDialog(QDialog):
                 import_all_btn.clicked.connect(self._on_import_all)
                 apply_edit_import_all_button_tooltip(import_all_btn)
                 btn_col.addWidget(import_all_btn, 0, Qt.AlignmentFlag.AlignTop)
+                self._ensure_flux_prompt_ai().add_button(btn_col)
                 btn_host = QWidget()
                 btn_host.setLayout(btn_col)
                 row.addWidget(btn_host, 0, Qt.AlignmentFlag.AlignTop)
@@ -1034,6 +1037,15 @@ class ImageGenEditDialog(QDialog):
         )
         self._set_edit_source_paths(ref_paths)
 
+    def get_prompt_text(self) -> str:
+        entry = self._widgets.get("prompt")
+        if entry is None:
+            return ""
+        widget, _, spec = entry
+        if spec.kind == "text":
+            return widget.toPlainText()
+        return ""
+
     def set_prompt_text(self, text: str) -> None:
         entry = self._widgets.get("prompt")
         if entry is None:
@@ -1041,6 +1053,16 @@ class ImageGenEditDialog(QDialog):
         widget, _, spec = entry
         if spec.kind == "text":
             widget.setPlainText(text)
+
+    def _ensure_flux_prompt_ai(self) -> ImageGenFluxPromptAi:
+        if self._flux_prompt_ai is None:
+            self._flux_prompt_ai = ImageGenFluxPromptAi(
+                self,
+                task_kind=self._function,
+                get_prompt_text=self.get_prompt_text,
+                set_prompt_text=self.set_prompt_text,
+            )
+        return self._flux_prompt_ai
 
     def _widget_for_spec(self, spec: FieldSpec):
         if spec.kind == "text":

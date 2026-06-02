@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
     QFormLayout,
     QHBoxLayout,
     QLabel,
+    QMessageBox,
     QPlainTextEdit,
     QPushButton,
     QScrollArea,
@@ -56,16 +57,20 @@ from imagegen_plugins.image_gen_registry import ImageGenModelPlugin
 from imagegen_plugins.imagegen_control_tooltips import (
     apply_dialog_button_tooltips,
     apply_dim_helper_tooltips,
+    apply_edit_import_all_button_tooltip,
+    apply_edit_import_text_button_tooltip,
     apply_field_control_tooltips,
-    apply_import_button_tooltip,
     apply_model_combo_tooltip,
 )
+from imagegen_plugins.imagegen_flux_prompt_ai import ImageGenFluxPromptAi
+from lmstudio_caption import is_lmstudio_services_available
 from theme_service import get_active_theme
 from utils import (
     _center_styled_dialog_on_screen,
     restore_dialog_geometry_hex,
     save_dialog_geometry_hex,
     show_styled_warning,
+    styled_message_box,
 )
 
 _EXIF_USERCOMMENT_EXTENSIONS = frozenset(
@@ -73,17 +78,50 @@ _EXIF_USERCOMMENT_EXTENSIONS = frozenset(
 )
 
 
+_COPIES_RANDOM_SEED_MESSAGE = (
+    "Copies greater than 1 require Random seed to be enabled "
+    "so each image uses a different seed."
+)
+
+
+def prompt_enable_random_seed_for_copies(parent) -> bool:
+    """Ask to enable random seed when copies > 1. Returns True to continue."""
+    msg_box = styled_message_box(
+        parent,
+        QMessageBox.Warning,
+        "Random seed required",
+        _COPIES_RANDOM_SEED_MESSAGE,
+        buttons=QMessageBox.StandardButton.Cancel | QMessageBox.StandardButton.Yes,
+        default_button=QMessageBox.StandardButton.Yes,
+        button_label_overrides={
+            QMessageBox.StandardButton.Yes: "Continue with Random",
+        },
+    )
+    msg_box.exec()
+    return msg_box.result_data["button"] == QMessageBox.StandardButton.Yes
+
+
+def _sync_random_seed_widget(parent, value: bool) -> None:
+    widgets = getattr(parent, "_widgets", None)
+    if not widgets:
+        return
+    entry = widgets.get("random_seed")
+    if entry is None:
+        return
+    widget, _, spec = entry
+    if spec.kind == "bool":
+        widget.setChecked(bool(value))
+
+
 def validate_copies_require_random_seed(parent, values: Dict[str, Any]) -> bool:
-    """Return False when copies > 1 but random seed is off."""
+    """Return False when copies > 1, random seed is off, and user cancels."""
     copies = int(values.get("copies", 1) or 1)
-    if copies > 1 and not values.get("random_seed"):
-        show_styled_warning(
-            parent,
-            "Random seed required",
-            "Copies greater than 1 require Random seed to be enabled "
-            "so each image uses a different seed.",
-        )
+    if copies <= 1 or values.get("random_seed"):
+        return True
+    if not prompt_enable_random_seed_for_copies(parent):
         return False
+    values["random_seed"] = True
+    _sync_random_seed_widget(parent, True)
     return True
 
 
@@ -521,10 +559,6 @@ class ImageGenDimensionAspectMixin:
         if self._aspect_checkbox is not None:
             out["aspect_ratio_lock"] = self._aspect_checkbox.isChecked()
 
-    @staticmethod
-    def _import_option_held() -> bool:
-        return import_option_held()
-
     def _apply_import_dims_from_image(self, image_path: str) -> None:
         """Set width/height from image pixels; lock aspect if scaled to model max."""
         if not self._has_dim_fields():
@@ -829,6 +863,7 @@ class ImageGenDialog(ImageGenDimensionAspectMixin, QDialog):
         self._specs: List[FieldSpec] = []
         self._fields_form: Optional[QFormLayout] = None
         self._init_dim_aspect_state()
+        self._flux_prompt_ai: Optional[ImageGenFluxPromptAi] = None
 
         initial = resolve_initial_plugin(
             self._plugins,
@@ -974,7 +1009,9 @@ class ImageGenDialog(ImageGenDimensionAspectMixin, QDialog):
 
             if spec.kind == "text":
                 if spec.key == "prompt" and (
-                    self._show_import_button() or self._has_dim_fields()
+                    self._show_import_button()
+                    or self._has_dim_fields()
+                    or is_lmstudio_services_available()
                 ):
                     row_w = QWidget()
                     row = QHBoxLayout(row_w)
@@ -984,14 +1021,17 @@ class ImageGenDialog(ImageGenDimensionAspectMixin, QDialog):
                     btn_col.setContentsMargins(0, 0, 0, 0)
                     btn_col.setSpacing(4)
                     if self._show_import_button():
-                        import_btn = QPushButton("Import")
-                        connect_import_button_with_option_modifier(
-                            import_btn, self._on_import_prompt
-                        )
-                        apply_import_button_tooltip(import_btn)
-                        btn_col.addWidget(import_btn, 0, Qt.AlignmentFlag.AlignTop)
+                        import_text_btn = QPushButton("Import Prompt")
+                        import_text_btn.clicked.connect(self._on_import_prompt_text)
+                        apply_edit_import_text_button_tooltip(import_text_btn)
+                        btn_col.addWidget(import_text_btn, 0, Qt.AlignmentFlag.AlignTop)
+                        import_all_btn = QPushButton("Import Available")
+                        import_all_btn.clicked.connect(self._on_import_available)
+                        apply_edit_import_all_button_tooltip(import_all_btn)
+                        btn_col.addWidget(import_all_btn, 0, Qt.AlignmentFlag.AlignTop)
                     if self._has_dim_fields():
                         self._add_dim_helper_buttons(btn_col)
+                    self._ensure_flux_prompt_ai().add_button(btn_col)
                     btn_host = QWidget()
                     btn_host.setLayout(btn_col)
                     row.addWidget(btn_host, 0, Qt.AlignmentFlag.AlignTop)
@@ -1153,21 +1193,39 @@ class ImageGenDialog(ImageGenDimensionAspectMixin, QDialog):
             return None
         return image_path
 
-    def _on_import_prompt(self, *, option_held: bool = False) -> None:
+    def _import_prompt_text_from_active_image(self) -> bool:
+        """Load prompt text from EXIF; return True on success."""
         image_path = self._active_image_path_for_import()
         if not image_path:
-            show_styled_warning(self, "Import", "No image selected.")
-            return
-
+            show_styled_warning(self, "Import Text", "No image selected.")
+            return False
         prompt_text = load_import_prompt_from_path(self, image_path)
         if prompt_text is None:
-            return
-
+            return False
         self.set_prompt_text(prompt_text)
-        if option_held:
-            if self._has_dim_fields():
-                self._apply_import_dims_from_image(image_path)
-            apply_import_extras_from_image_path(self, image_path)
+        return True
+
+    def _on_import_prompt_text(self) -> None:
+        self._import_prompt_text_from_active_image()
+
+    def _on_import_available(self) -> None:
+        if not self._import_prompt_text_from_active_image():
+            return
+        image_path = self._active_image_path_for_import()
+        if not image_path:
+            return
+        if self._has_dim_fields():
+            self._apply_import_dims_from_image(image_path)
+        apply_import_extras_from_image_path(self, image_path)
+
+    def get_prompt_text(self) -> str:
+        entry = self._widgets.get("prompt")
+        if entry is None:
+            return ""
+        widget, _, spec = entry
+        if spec.kind == "text":
+            return widget.toPlainText()
+        return ""
 
     def set_prompt_text(self, text: str) -> None:
         entry = self._widgets.get("prompt")
@@ -1176,6 +1234,16 @@ class ImageGenDialog(ImageGenDimensionAspectMixin, QDialog):
         widget, _, spec = entry
         if spec.kind == "text":
             widget.setPlainText(text)
+
+    def _ensure_flux_prompt_ai(self) -> ImageGenFluxPromptAi:
+        if self._flux_prompt_ai is None:
+            self._flux_prompt_ai = ImageGenFluxPromptAi(
+                self,
+                task_kind=self._function,
+                get_prompt_text=self.get_prompt_text,
+                set_prompt_text=self.set_prompt_text,
+            )
+        return self._flux_prompt_ai
 
     def _widget_for_spec(self, spec: FieldSpec):
         if spec.kind == "text":
