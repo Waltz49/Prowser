@@ -481,6 +481,12 @@ class ImageGenController(QObject):
             return 0
         return max(0, int(round(deadline - time.perf_counter())))
 
+    def copy_cooldown_seconds_remaining(self) -> int:
+        """Seconds left in inter-copy cooldown (0 when not cooling down)."""
+        if not self._is_in_copy_cooldown():
+            return 0
+        return self._cooldown_seconds_remaining()
+
     def task_status_display_needs_refresh(self) -> bool:
         """False when only the cooldown countdown second is unchanged (timer polls)."""
         if not self._is_in_copy_cooldown():
@@ -777,6 +783,43 @@ class ImageGenController(QObject):
 
     def _show_progressive_images_enabled(self) -> bool:
         return bool(self._pending_values.get("show_progressive_images", False))
+
+    def viewing_path_matches_active_generation(self, path: str) -> bool:
+        """True when *path* is the active output (generating or inter-copy cooldown)."""
+        if not path or not self._output_path:
+            return False
+        if self._active_plugin is None:
+            return False
+        if not self._show_progressive_images_enabled():
+            return False
+        if os.path.normpath(path) != os.path.normpath(self._output_path):
+            return False
+        if self._tasks.is_running():
+            return True
+        return self._is_in_copy_cooldown() and self._copy_batch_active
+
+    def is_viewing_output_in_copy_cooldown(self, path: str) -> bool:
+        if not path or not self._output_path:
+            return False
+        if not self._show_progressive_images_enabled():
+            return False
+        return (
+            self._is_in_copy_cooldown()
+            and self._copy_batch_active
+            and os.path.normpath(path) == os.path.normpath(self._output_path)
+        )
+
+    def snapshot_generation_timing_for_info_panel(
+        self,
+    ) -> tuple[Optional[float], Optional[float]]:
+        """Elapsed and estimate for File Information live timing (one clock read)."""
+        if not self._tasks.is_running() or not self._output_path:
+            return None, None
+        in_cooldown = self._is_in_copy_cooldown()
+        elapsed, estimate = self._snapshot_live_timing(in_cooldown=in_cooldown)
+        if elapsed is None:
+            elapsed = self._wall_clock_elapsed_seconds(in_cooldown=in_cooldown)
+        return elapsed, estimate
 
     def get_task_reference_paths(self) -> list[str]:
         return list(self._task_reference_paths)

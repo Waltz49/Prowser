@@ -243,6 +243,70 @@ def _generation_status_table_rows(
     return rows
 
 
+def _information_panel_inline_row_html(text_html: str, icon_html: str = "") -> str:
+    """Vertically center text and trailing icon in the File Information timing row."""
+    if not icon_html:
+        return text_html
+    return (
+        '<table cellpadding="0" cellspacing="0" style="border:none;margin:0;">'
+        "<tr>"
+        f'<td style="border:none;padding:0;vertical-align:middle;">{text_html}</td>'
+        f'<td style="border:none;padding:0 0 0 6px;vertical-align:middle;">'
+        f"{icon_html}</td>"
+        "</tr></table>"
+    )
+
+
+def format_information_generation_timing_cell_html(
+    elapsed_seconds: float,
+    estimate_seconds: float | None = None,
+    *,
+    cancel_icon_html: str = "",
+) -> str:
+    """Single-line Elapsed/Est (and optional cancel icon) for the File Information panel."""
+    parts: list[str] = [f"Elapsed: {_escape(_format_duration(elapsed_seconds))}"]
+    if estimate_seconds is not None and estimate_seconds > 0:
+        parts.append(f"Est: {_escape(_format_duration(estimate_seconds))}")
+    text = " ".join(parts)
+    return _information_panel_inline_row_html(text, cancel_icon_html)
+
+
+def _information_panel_skip_cooldown_icon_html() -> str:
+    from theme_base import asset_file_url
+
+    url = asset_file_url("skip_cooldown_icon.png")
+    return (
+        f'<a href="skipcooldown://" title="Skip cooldown" '
+        f'style="text-decoration:none;line-height:0;">'
+        f'<img src="{url}" width="16" height="16" '
+        f'style="display:block;margin:0;padding:0;border:none;">'
+        f"</a>"
+    )
+
+
+def format_information_generation_cooldown_cell_html(remaining_seconds: int) -> str:
+    """Cooldown row for File Information: label, seconds in parens, skip icon."""
+    remaining = max(0, int(remaining_seconds))
+    text = f"Cooldown: ({remaining})"
+    return _information_panel_inline_row_html(
+        text, _information_panel_skip_cooldown_icon_html()
+    )
+
+
+def generation_cancel_icon_html() -> str:
+    """Inline cancel-generation icon for the File Information timing row."""
+    from theme_base import asset_file_url
+
+    url = asset_file_url("trash_icon_info.png")
+    return (
+        f'<a href="cancelgen://" title="Cancel generation" '
+        f'style="text-decoration:none;line-height:0;">'
+        f'<img src="{url}" width="16" height="16" '
+        f'style="display:block;margin:0;padding:0;border:none;">'
+        f"</a>"
+    )
+
+
 def _steps_row_inline_parts(
     fields: dict[str, str],
     *,

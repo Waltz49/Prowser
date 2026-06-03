@@ -15,7 +15,13 @@ from PySide6.QtWidgets import QApplication, QLabel, QPushButton, QTextBrowser, Q
 
 from combined_sidebar_widget import HeaderWidget
 from theme_service import get_active_theme
-from utils import format_file_size, get_file_extension, normalize_path_for_display, styled_message_box
+from utils import (
+    format_file_size,
+    get_file_extension,
+    normalize_path_for_display,
+    show_styled_question,
+    styled_message_box,
+)
 from speech_utils import speak_or_stop
 from tooltip_popup_utils import ensure_tooltip_label, position_tooltip_near_cursor
 from reference_graph import (
@@ -109,6 +115,10 @@ class InformationSidebar(QWidget):
         self.information_header = None
         self._speakable_description = None
         self._reference_level_paths: Optional[List[str]] = None
+        self._gen_timing_path: Optional[str] = None
+        self._overlay_has_image_model = False
+        self._gen_timing_timer: Optional[QTimer] = None
+        self._gen_timing_signal_connected = False
         self.setup_ui()
 
     def setup_ui(self):
@@ -163,6 +173,7 @@ class InformationSidebar(QWidget):
 
     def clear_info(self):
         """Clear the info text edit content"""
+        self._stop_gen_timing_updates()
         if self.info_text_edit:
             self.info_text_edit.clear()
 
@@ -194,6 +205,8 @@ class InformationSidebar(QWidget):
         "create://": "Create an image from text...",
         "editai://": "Edit with AI",
         "delete://": "Delete user comment",
+        "cancelgen://": "Cancel generation",
+        "skipcooldown://": "Skip cooldown",
         "reflevel://": (
             "click: Show the reference graph for complete history.\n"
             f"{ALT_SYMBOL}+click: Show only this image and its direct references "
@@ -522,6 +535,34 @@ class InformationSidebar(QWidget):
             self._on_edit_with_ai()
         elif url.toString() == "delete://":
             self._on_delete_user_comment()
+        elif url.toString() == "cancelgen://":
+            self._on_cancel_generation()
+        elif url.toString() == "skipcooldown://":
+            try:
+                from imagegen_plugins.image_gen_controller import get_imagegen_controller
+
+                get_imagegen_controller(self.main_window).skip_copy_cooldown()
+            except ImportError:
+                pass
+
+    def _on_cancel_generation(self) -> None:
+        """Cancel the active generation job after confirmation (same as job pane)."""
+        from PySide6.QtWidgets import QMessageBox
+
+        answer = show_styled_question(
+            self.main_window,
+            "Cancel job?",
+            "Cancel the running job?",
+            default_no=True,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            from imagegen_plugins.image_gen_controller import get_imagegen_controller
+
+            get_imagegen_controller(self.main_window).cancel_generation()
+        except ImportError:
+            pass
 
     def _on_create_image_prompt(self):
         """Open Create > Create an image from text..., primed from the user comment."""
@@ -859,32 +900,227 @@ class InformationSidebar(QWidget):
 
         return exif_data
 
+    @staticmethod
+    def _comment_has_image_model_section(text: Optional[str]) -> bool:
+        if not text:
+            return False
+        return bool(re.search(r"(?im)^image model:", text))
+
+    def _update_overlay_image_model_flag(
+        self, image_path: str, speakable_plain_text: Optional[str]
+    ) -> None:
+        """Sticky per-path Image Model section flag (not re-checked on timing polls)."""
+        norm = os.path.normpath(image_path) if image_path else ""
+        if norm != (self._gen_timing_path or ""):
+            self._gen_timing_path = norm or None
+            self._overlay_has_image_model = self._comment_has_image_model_section(
+                speakable_plain_text
+            )
+        elif speakable_plain_text and self._comment_has_image_model_section(
+            speakable_plain_text
+        ):
+            self._overlay_has_image_model = True
+
+    def _should_show_generation_timing_row(self) -> bool:
+        if not self._overlay_has_image_model:
+            return False
+        path = getattr(self.main_window, "current_image_path", None)
+        if not path:
+            return False
+        try:
+            from imagegen_plugins.image_gen_controller import get_imagegen_controller
+
+            return get_imagegen_controller(
+                self.main_window
+            ).viewing_path_matches_active_generation(path)
+        except ImportError:
+            return False
+
+    def _build_generation_timing_cell_html(self) -> Optional[str]:
+        if not self._should_show_generation_timing_row():
+            return None
+        try:
+            from imagegen_plugins.image_gen_controller import get_imagegen_controller
+            from imagegen_plugins.model_task_status_info import (
+                format_information_generation_cooldown_cell_html,
+                format_information_generation_timing_cell_html,
+                generation_cancel_icon_html,
+            )
+
+            controller = get_imagegen_controller(self.main_window)
+            path = getattr(self.main_window, "current_image_path", None) or ""
+            if controller.is_viewing_output_in_copy_cooldown(path):
+                return format_information_generation_cooldown_cell_html(
+                    controller.copy_cooldown_seconds_remaining()
+                )
+            elapsed, estimate = controller.snapshot_generation_timing_for_info_panel()
+            if elapsed is None:
+                return None
+            return format_information_generation_timing_cell_html(
+                elapsed,
+                estimate,
+                cancel_icon_html=generation_cancel_icon_html(),
+            )
+        except ImportError:
+            return None
+
+    def _apply_info_html_to_browser(self, info_text: str) -> None:
+        if not self.info_text_edit or not info_text:
+            return
+        info_text = info_text.rstrip("\x00")
+        doc = self.info_text_edit.document()
+        doc.setHtml(info_text)
+        th = get_active_theme()
+        doc.setDefaultStyleSheet(
+            f"body {{ color: {self._info_text_hex()}; background-color: {th.information_textbrowser_bg_hex}; font-size: 12pt; }}"
+        )
+        self.info_text_edit.setReadOnly(True)
+
+        def update_text_width():
+            if self.isVisible():
+                sidebar_width = self.width()
+                if sidebar_width > 0:
+                    doc.setTextWidth(sidebar_width - 36)
+            elif hasattr(self.main_window, "right_sidebar_width"):
+                doc.setTextWidth(self.main_window.right_sidebar_width - 36)
+            self.info_text_edit.update()
+
+        QTimer.singleShot(0, update_text_width)
+        if self.isVisible():
+            sidebar_width = self.width()
+            if sidebar_width > 0:
+                doc.setTextWidth(sidebar_width - 36)
+        elif hasattr(self.main_window, "right_sidebar_width"):
+            doc.setTextWidth(self.main_window.right_sidebar_width - 36)
+        self.info_text_edit.update()
+
+    def _rebuild_overlay_from_cache(self, *, hovered_anchor: str | None = None) -> None:
+        if not getattr(self, "_last_overlay_data", None) or not self.info_text_edit:
+            return
+        data = self._last_overlay_data
+        gen_timing_cell = self._build_generation_timing_cell_html()
+        info_text = self._build_info_overlay_html(
+            data["filename"],
+            data["field_value_pairs"],
+            data.get("description"),
+            data.get("speakable_plain_text"),
+            hovered_anchor=hovered_anchor,
+            gen_timing_cell_html=gen_timing_cell,
+        )
+        if info_text:
+            self.info_text_edit.blockSignals(True)
+            self.info_text_edit.clear()
+            self._apply_info_html_to_browser(info_text)
+            self.info_text_edit.blockSignals(False)
+
+    def _stop_gen_timing_updates(self) -> None:
+        timer = self._gen_timing_timer
+        self._gen_timing_timer = None
+        if timer is not None:
+            try:
+                timer.stop()
+            except (RuntimeError, SystemError):
+                pass
+            try:
+                timer.deleteLater()
+            except (RuntimeError, SystemError):
+                pass
+        if self._gen_timing_signal_connected:
+            try:
+                from imagegen_plugins.image_gen_controller import get_imagegen_controller
+
+                controller = get_imagegen_controller(self.main_window)
+                controller.task_status_info_changed.disconnect(
+                    self._on_gen_timing_task_status_changed
+                )
+                controller.generation_finished.disconnect(
+                    self._stop_gen_timing_updates
+                )
+            except (ImportError, TypeError, RuntimeError, SystemError):
+                pass
+            self._gen_timing_signal_connected = False
+        if getattr(self, "_last_overlay_data", None) and self.info_text_edit:
+            self._rebuild_overlay_from_cache(
+                hovered_anchor=getattr(self, "_hovered_anchor", None)
+            )
+
+    def _on_gen_timing_task_status_changed(self) -> None:
+        self._refresh_generation_timing_display(force=True)
+
+    def _refresh_generation_timing_display(self, *, force: bool = False) -> None:
+        if not getattr(self, "_last_overlay_data", None) or not self.info_text_edit:
+            return
+        if not self._should_show_generation_timing_row():
+            if self._gen_timing_timer is not None:
+                self._rebuild_overlay_from_cache(
+                    hovered_anchor=getattr(self, "_hovered_anchor", None)
+                )
+                self._stop_gen_timing_updates()
+            return
+        if not force:
+            try:
+                from imagegen_plugins.image_gen_controller import get_imagegen_controller
+
+                if not get_imagegen_controller(
+                    self.main_window
+                ).task_status_display_needs_refresh():
+                    return
+            except ImportError:
+                pass
+        self._rebuild_overlay_from_cache(
+            hovered_anchor=getattr(self, "_hovered_anchor", None)
+        )
+
+    def _sync_gen_timing_updates(self) -> None:
+        if self._should_show_generation_timing_row():
+            self._start_gen_timing_updates()
+        else:
+            self._stop_gen_timing_updates()
+
+    def _start_gen_timing_updates(self) -> None:
+        try:
+            from imagegen_plugins.image_gen_controller import get_imagegen_controller
+
+            controller = get_imagegen_controller(self.main_window)
+        except ImportError:
+            return
+        if not self._gen_timing_signal_connected:
+            controller.task_status_info_changed.connect(
+                self._on_gen_timing_task_status_changed
+            )
+            controller.generation_finished.connect(self._stop_gen_timing_updates)
+            self._gen_timing_signal_connected = True
+        timer = self._gen_timing_timer
+        if timer is None:
+            timer = QTimer(self)
+            timer.setInterval(500)
+            timer.timeout.connect(
+                lambda: self._refresh_generation_timing_display(force=False)
+            )
+            timer.start()
+            self._gen_timing_timer = timer
+        elif not timer.isActive():
+            timer.start()
+        self._refresh_generation_timing_display(force=True)
+
     def _refresh_overlay_for_hover(self, hovered_anchor=None):
         """Rebuild overlay HTML with hovered link highlighted (text and border #50c8ff)."""
         if not hasattr(self, '_last_overlay_data') or not self._last_overlay_data:
             return
         if not self.info_text_edit:
             return
-        data = self._last_overlay_data
-        info_text = self._build_info_overlay_html(
-            data['filename'], data['field_value_pairs'],
-            data.get('description'), data.get('speakable_plain_text'),
-            hovered_anchor=hovered_anchor
-        )
-        if info_text:
-            self.info_text_edit.blockSignals(True)
-            self.info_text_edit.clear()
-            doc = self.info_text_edit.document()
-            doc.setHtml(info_text.rstrip('\x00'))
-            th = get_active_theme()
-            doc.setDefaultStyleSheet(
-                f"body {{ color: {self._info_text_hex()}; background-color: {th.information_textbrowser_bg_hex}; font-size: 12pt; }}"
-            )
-            self.info_text_edit.blockSignals(False)
-            self.info_text_edit.update()
+        self._rebuild_overlay_from_cache(hovered_anchor=hovered_anchor)
 
-    def _build_info_overlay_html(self, filename: str, field_value_pairs: list, description: str = None,
-                                 speakable_plain_text: str = None, hovered_anchor: str = None) -> str:
+    def _build_info_overlay_html(
+        self,
+        filename: str,
+        field_value_pairs: list,
+        description: str = None,
+        speakable_plain_text: str = None,
+        hovered_anchor: str = None,
+        *,
+        gen_timing_cell_html: str | None = None,
+    ) -> str:
         """Build HTML overlay from field-value pairs using table format.
 
         Args:
@@ -923,6 +1159,25 @@ class InformationSidebar(QWidget):
                 html_parts.append('</tr>')
 
             html_parts.append('</table>')
+
+        if gen_timing_cell_html:
+            active_bdr = _th.current_image_border_color_hex
+            active_bdr_w = max(
+                1, int(getattr(_th, "current_image_border_width_index", 2))
+            )
+            active_border = f"{active_bdr_w}px solid {active_bdr}"
+            html_parts.append(
+                f'<div style="margin-top: 12px; padding-top: 10px; padding-bottom: 4px; '
+                f'border-top: 1px solid {bdr};">'
+                f'<div style="font-weight: bold; font-size: 12pt; color: {text_hex}; '
+                f'margin-bottom: 6px;">Active Job</div>'
+                f'<table style="border: {active_border}; border-collapse: collapse; '
+                f'width: 100%;">'
+                f'<tr><td style="border: {active_border}; padding: 4px 8px; color: {text_hex}; '
+                f'white-space: nowrap; vertical-align: middle; line-height: 16px;">'
+                f"{gen_timing_cell_html}</td></tr></table>"
+                f"</div>"
+            )
 
         # Constants for font size and color
         ACTION_ICON_FONT_SIZE = "16px"
@@ -1191,6 +1446,10 @@ class InformationSidebar(QWidget):
                     value_str = elide_value(value_str)
                     field_value_pairs.append((field, value_str))
 
+            self._update_overlay_image_model_flag(
+                current_image_path, speakable_plain_text
+            )
+
             # Build HTML using shared method
             self._speakable_description = speakable_plain_text if (speakable_plain_text and len(speakable_plain_text) > 30) else None
             self._last_overlay_data = {
@@ -1199,7 +1458,14 @@ class InformationSidebar(QWidget):
                 'description': description,
                 'speakable_plain_text': speakable_plain_text,
             }
-            info_text = self._build_info_overlay_html(filename, field_value_pairs, description, speakable_plain_text)
+            gen_timing_cell = self._build_generation_timing_cell_html()
+            info_text = self._build_info_overlay_html(
+                filename,
+                field_value_pairs,
+                description,
+                speakable_plain_text,
+                gen_timing_cell_html=gen_timing_cell,
+            )
 
         except Exception as e:
             # Fallback basic info with error logging
@@ -1239,6 +1505,8 @@ class InformationSidebar(QWidget):
             if hasattr(self.main_window, 'scale_factor'):
                 field_value_pairs.append(('Scale', f"{self.main_window.scale_factor:.2f}x"))
 
+            self._update_overlay_image_model_flag(current_image_path, None)
+
             # Build HTML using shared method
             self._speakable_description = None
             self._last_overlay_data = {
@@ -1256,42 +1524,12 @@ class InformationSidebar(QWidget):
         # Display in right sidebar instead of overlay
         if self.info_text_edit:
             self._hovered_anchor = None
-            # Clear any existing content
             self.info_text_edit.clear()
-            # Set HTML content directly on the document
-            info_text = info_text.rstrip('\x00')
-            doc = self.info_text_edit.document()
-            doc.setHtml(info_text)
-            # Ensure default text color is set
-            th = get_active_theme()
-            doc.setDefaultStyleSheet(
-                f"body {{ color: {self._info_text_hex()}; background-color: {th.information_textbrowser_bg_hex}; font-size: 12pt; }}"
-            )
-            # Set read-only
-            self.info_text_edit.setReadOnly(True)
-            # The text edit will fill the sidebar width and scroll internally
-            # Set text width based on sidebar width (accounting for padding)
-            # Use a QTimer to ensure sidebar width is accurate after layout
-            def update_text_width():
-                if self.isVisible():
-                    sidebar_width = self.width()
-                    if sidebar_width > 0:
-                        doc.setTextWidth(sidebar_width - 36)  # Account for padding (18px each side)
-                elif hasattr(self.main_window, 'right_sidebar_width'):
-                    doc.setTextWidth(self.main_window.right_sidebar_width - 36)
-                self.info_text_edit.update()
-            QTimer.singleShot(0, update_text_width)
-            # Also update immediately in case sidebar is already sized
-            if self.isVisible():
-                sidebar_width = self.width()
-                if sidebar_width > 0:
-                    doc.setTextWidth(sidebar_width - 36)
-            elif hasattr(self.main_window, 'right_sidebar_width'):
-                doc.setTextWidth(self.main_window.right_sidebar_width - 36)
-            # Update the widget
-            self.info_text_edit.update()
+            self._apply_info_html_to_browser(info_text)
+            self._sync_gen_timing_updates()
 
     def hide_image_info_overlay(self):
         """Hide image info overlay"""
+        self._stop_gen_timing_updates()
         if self.info_text_edit:
             self.info_text_edit.hide()
