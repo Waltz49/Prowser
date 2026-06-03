@@ -812,6 +812,7 @@ class SettingsDialog(QDialog):
         initial_index = self.tab_widget.currentIndex()
         if initial_index >= 0:
             self.on_tab_changed(initial_index)
+        self._settings_tab_prev_index = self.tab_widget.currentIndex()
         self._settings_dialog_initializing = False
 
     def _apply_saved_settings_dialog_geometry(self):
@@ -983,9 +984,14 @@ class SettingsDialog(QDialog):
                 'caption_temperature': self.caption_temperature_spinbox.value(),
             }
         elif tab_widget == self.lora_settings_tab:
+            self._ensure_lora_tab_ready()
+            model_key = self._current_lora_model_key()
+            self._save_lora_widgets_to_draft(model_key)
+            slice_ = self._lora_draft_slice(model_key)
             return {
-                'imagegen_lora_enabled_ids': self._get_lora_enabled_ids_from_widgets(),
-                'imagegen_lora_deleted_ids': sorted(getattr(self, '_lora_deleted_ids', set())),
+                'imagegen_lora_model_key': model_key,
+                'imagegen_lora_enabled_ids': list(slice_["enabled_ids"]),
+                'imagegen_lora_hidden_ids': list(slice_["hidden_ids"]),
             }
         elif tab_widget == self.cache_management_tab:
             return {}  # No editable settings on cache tab
@@ -1206,9 +1212,24 @@ class SettingsDialog(QDialog):
             if 'caption_temperature' in settings:
                 self.caption_temperature_spinbox.setValue(settings['caption_temperature'])
         elif tab_widget == self.lora_settings_tab:
-            self._lora_deleted_ids = set(settings.get('imagegen_lora_deleted_ids') or [])
-            self._rebuild_lora_settings_grid()
-            self._apply_lora_settings_to_widgets(settings.get('imagegen_lora_enabled_ids', []))
+            from imagegen_plugins.lora_model_registry import (
+                legacy_host_id_to_model_key,
+            )
+
+            self._load_lora_drafts_from_settings(settings)
+            model_key = settings.get("imagegen_lora_model_key")
+            if not model_key and settings.get("imagegen_lora_host_id"):
+                model_key = legacy_host_id_to_model_key(
+                    str(settings.get("imagegen_lora_host_id"))
+                )
+            model_key = model_key or self._current_lora_model_key()
+            if hasattr(self, "_lora_model_combo"):
+                idx = self._lora_model_combo.findData(model_key)
+                if idx >= 0:
+                    self._lora_model_combo.blockSignals(True)
+                    self._lora_model_combo.setCurrentIndex(idx)
+                    self._lora_model_combo.blockSignals(False)
+            self._show_lora_draft_for_model(model_key)
         elif tab_widget == self.faces_tab:
             pass  # Faces persisted via known_faces.json; nothing to apply from settings dict
         elif tab_widget == self.favorites_tab:
@@ -1374,10 +1395,20 @@ class SettingsDialog(QDialog):
             self.caption_max_words_spinbox.setValue(CAPTION_DEFAULTS['caption_max_words'])
             self.caption_temperature_spinbox.setValue(CAPTION_DEFAULTS['caption_temperature'])
         elif tab_widget == self.lora_settings_tab:
-            from imagegen_plugins.flux_lora_catalog import DEFAULT_ENABLED_LORA_IDS
-            self._lora_deleted_ids = set()
-            self._rebuild_lora_settings_grid()
-            self._apply_lora_settings_to_widgets(list(DEFAULT_ENABLED_LORA_IDS))
+            from imagegen_plugins.lora_catalog_settings import (
+                DEFAULT_ENABLED_LORA_IDS_BY_MODEL,
+            )
+
+            model_key = self._current_lora_model_key()
+            if not hasattr(self, "_lora_draft_by_model"):
+                self._lora_draft_by_model = {}
+            self._lora_draft_by_model[model_key] = {
+                "enabled_ids": list(
+                    DEFAULT_ENABLED_LORA_IDS_BY_MODEL.get(model_key, ())
+                ),
+                "hidden_ids": [],
+            }
+            self._show_lora_draft_for_model(model_key)
         elif tab_widget == self.favorites_tab:
             if hasattr(self, 'favorite_destination_input_fields'):
                 for field in self.favorite_destination_input_fields:
@@ -1529,10 +1560,20 @@ class SettingsDialog(QDialog):
             self.caption_max_words_spinbox.setValue(CAPTION_DEFAULTS['caption_max_words'])
             self.caption_temperature_spinbox.setValue(CAPTION_DEFAULTS['caption_temperature'])
         elif tab_widget == self.lora_settings_tab:
-            from imagegen_plugins.flux_lora_catalog import DEFAULT_ENABLED_LORA_IDS
-            self._lora_deleted_ids = set()
-            self._rebuild_lora_settings_grid()
-            self._apply_lora_settings_to_widgets(list(DEFAULT_ENABLED_LORA_IDS))
+            from imagegen_plugins.lora_catalog_settings import (
+                DEFAULT_ENABLED_LORA_IDS_BY_MODEL,
+            )
+
+            model_key = self._current_lora_model_key()
+            if not hasattr(self, "_lora_draft_by_model"):
+                self._lora_draft_by_model = {}
+            self._lora_draft_by_model[model_key] = {
+                "enabled_ids": list(
+                    DEFAULT_ENABLED_LORA_IDS_BY_MODEL.get(model_key, ())
+                ),
+                "hidden_ids": [],
+            }
+            self._show_lora_draft_for_model(model_key)
         elif tab_widget == self.favorites_tab:
             if hasattr(self, 'favorite_destination_input_fields'):
                 for field in self.favorite_destination_input_fields:
@@ -4558,154 +4599,304 @@ class SettingsDialog(QDialog):
         """
 
     def setup_lora_settings_tab(self):
-        """Setup the FLUX LoRA catalog tab (enable LoRAs for Create / Expand / Infill dialogs)."""
+        """LoRA catalog tab: per base model dropdown, enable / install / hide."""
         from config import get_config
-        from imagegen_plugins.flux_lora_catalog import (
-            catalog_entries_for_settings,
-            deleted_lora_ids,
-            is_lora_installed,
-            lora_settings_display_name,
-        )
+        from imagegen_plugins.lora_catalog_settings import hidden_lora_ids_for_model
+        from imagegen_plugins.lora_host_registry import PROBE_DEV
+        from imagegen_plugins.lora_model_registry import lora_models_for_settings
 
         layout = QVBoxLayout(self.lora_settings_tab)
-        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setContentsMargins(12, 8, 12, 8)
+        layout.setSpacing(8)
+
+        model_row = QHBoxLayout()
+        model_lbl = QLabel("Model:")
+        model_lbl.setMinimumWidth(52)
+        model_row.addWidget(model_lbl)
+        self._lora_model_combo = QComboBox()
+        self._lora_model_combo.setMinimumWidth(220)
+        for model in lora_models_for_settings():
+            self._lora_model_combo.addItem(model.display_name, model.model_key)
+        model_row.addWidget(self._lora_model_combo, 1)
+        layout.addLayout(model_row)
+
+        self._lora_intro_label = QLabel()
+        self._lora_intro_label.setWordWrap(True)
+        self._lora_intro_label.setStyleSheet(self.NOTE_TEXT_STYLE)
+        layout.addWidget(self._lora_intro_label)
+
+        cfg_settings = get_config().load_settings()
+        self._lora_model_key: str = PROBE_DEV
+        self._lora_catalog_loaded = False
+        self._lora_hidden_ids: set = set(
+            hidden_lora_ids_for_model(self._lora_model_key, cfg_settings)
+        )
+        self._lora_checkboxes: dict = {}
+        self._lora_row_widgets: dict = {}
+        self._lora_draft_by_model: dict = {}
+        self._lora_syncing_checkboxes = False
+
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.NoFrame)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        inner = QWidget()
-        inner_layout = QVBoxLayout(inner)
-        inner_layout.setContentsMargins(12, 8, 12, 16)
-        inner_layout.setSpacing(10)
-
-        intro = QLabel(
-            "Enable FLUX LoRA adapters for local image Create, Expand, and Infill dialogs. "
-            "Weights download on first use. Many Hugging Face adapters are not compatible with MFLUX; "
-            "verified entries are marked. Dev-trained LoRAs on Schnell switch the base model to dev at run time. "
-            "Use the trash icon to hide an entry from this list and from Create/Expand/Infill LoRA menus; "
-            "remove its id from imagegen.lora_catalog.deleted_ids in settings.json to show it again."
-        )
-        intro.setWordWrap(True)
-        intro.setStyleSheet(self.NOTE_TEXT_STYLE)
-        inner_layout.addWidget(intro)
-
-        cfg_settings = get_config().load_settings()
-        self._lora_deleted_ids: set = set(deleted_lora_ids(cfg_settings))
-        self._lora_checkboxes: dict = {}
-        self._lora_row_widgets: dict = {}
-        self._lora_grid = QGridLayout()
+        grid_host = QWidget()
+        self._lora_grid = QGridLayout(grid_host)
+        self._lora_grid.setContentsMargins(0, 0, 0, 0)
         self._lora_grid.setColumnStretch(1, 1)
         self._lora_grid.setHorizontalSpacing(10)
         self._lora_grid.setVerticalSpacing(8)
+        scroll.setWidget(grid_host)
+        layout.addWidget(scroll, 1)
 
-        grid_host = QWidget()
-        grid_host.setLayout(self._lora_grid)
-        row_idx = 0
-        for entry in catalog_entries_for_settings(self._lora_settings_overlay(cfg_settings)):
-            installed = is_lora_installed(entry.lora_id)
-            cb = QCheckBox()
-            cb.setStyleSheet(self.SMALL_CHECKBOX_STYLE)
-            cb.setToolTip(entry.repo_id or entry.local_path or entry.lora_id)
-            self._lora_checkboxes[entry.lora_id] = cb
+        self._lora_model_combo.currentIndexChanged.connect(self._on_lora_model_combo_changed)
+        self._load_lora_drafts_from_settings(cfg_settings)
+        self._show_lora_draft_for_model(self._lora_model_key)
+        self._lora_catalog_loaded = True
 
-            name_lbl = QLabel(lora_settings_display_name(entry, cfg_settings))
-            name_lbl.setToolTip(entry.lora_id)
-            if installed:
-                font = QFont(name_lbl.font())
-                base_pt = font.pointSize()
-                if base_pt <= 0:
-                    base_pt = 12
-                font.setPointSize(base_pt + 1)
-                font.setBold(True)
-                name_lbl.setFont(font)
+    def _ensure_lora_tab_ready(self) -> None:
+        """Load LoRA drafts from disk once (parent-window path may skip dialog load_settings)."""
+        if getattr(self, "_lora_catalog_loaded", False):
+            return
+        if not hasattr(self, "_lora_checkboxes"):
+            return
+        from config import get_config
 
-            status_parts = [entry.lora_id]
-            if entry.repo_id:
-                status_parts.append(entry.repo_id)
-            if entry.mflux_compatible is True:
-                status_parts.append("MFLUX verified")
-            elif entry.mflux_compatible is None:
-                status_parts.append("untested")
-            if installed:
-                status_parts.append("installed")
-            status_lbl = QLabel(" · ".join(status_parts))
-            status_lbl.setStyleSheet(f"color: {TEXT_DISABLED_HEX}; font-size: 11px;")
-            status_lbl.setWordWrap(True)
+        self._load_lora_settings(get_config().load_settings())
 
-            desc_w = QWidget()
-            desc_layout = QVBoxLayout(desc_w)
-            desc_layout.setContentsMargins(0, 0, 0, 0)
-            desc_layout.setSpacing(2)
-            desc_layout.addWidget(name_lbl)
-            desc_layout.addWidget(status_lbl)
+    def _current_lora_model_key(self) -> str:
+        if hasattr(self, "_lora_model_combo"):
+            mk = self._lora_model_combo.currentData()
+            if mk:
+                return str(mk)
+        return getattr(self, "_lora_model_key", "dev")
 
-            del_btn = QPushButton()
-            del_btn.setToolTip(
-                f"Hide {lora_settings_display_name(entry, cfg_settings)} from this list"
-            )
-            del_btn.setStyleSheet(self._lora_trash_button_style())
-            del_btn.clicked.connect(
-                lambda checked=False, lid=entry.lora_id: self._hide_lora_catalog_entry(lid)
-            )
+    def _current_lora_host_id(self) -> str:
+        """Legacy alias; prefer _current_lora_model_key."""
+        from imagegen_plugins.lora_model_registry import host_id_for_lora_model
 
-            self._lora_grid.addWidget(cb, row_idx, 0, Qt.AlignmentFlag.AlignTop)
-            self._lora_grid.addWidget(desc_w, row_idx, 1)
-            self._lora_grid.addWidget(del_btn, row_idx, 2, Qt.AlignmentFlag.AlignTop)
-            self._lora_row_widgets[entry.lora_id] = (cb, desc_w, del_btn)
-            row_idx += 1
+        host = host_id_for_lora_model(self._current_lora_model_key())
+        return host or "flux1_t2i"
 
-        inner_layout.addWidget(grid_host)
-        inner_layout.addStretch()
-        scroll.setWidget(inner)
-        layout.addWidget(scroll)
+    def _update_lora_intro_text(self) -> None:
+        if not hasattr(self, "_lora_intro_label"):
+            return
+        from imagegen_plugins.lora_model_registry import lora_models_for_settings
+
+        model_key = self._current_lora_model_key()
+        model = next(
+            (m for m in lora_models_for_settings() if m.model_key == model_key),
+            None,
+        )
+        if model is None:
+            self._lora_intro_label.setText("")
+            return
+        text = (
+            f"LoRAs listed here are valid for {model.display_name} only. "
+            f"Used in: {model.used_in}. "
+            "Only LoRAs that passed Check LoRAs for this model are listed (run Tools → Debug → "
+            "Check LoRAs if the list is empty). Enable and Install adapters for the generation menu. "
+            "The app does not change your selected base model when you pick a LoRA."
+        )
+        self._lora_intro_label.setText(text)
+
+    def _load_lora_drafts_from_settings(self, settings: Optional[dict] = None) -> None:
+        """Load per-model LoRA enable/hide drafts (session source of truth)."""
+        from config import get_config
+        from imagegen_plugins.lora_catalog_settings import model_state
+        from imagegen_plugins.lora_model_registry import LORA_SETTINGS_MODEL_ORDER
+
+        if settings is None:
+            settings = get_config().load_settings()
+        drafts: dict = {}
+        for model_key in LORA_SETTINGS_MODEL_ORDER:
+            st = model_state(settings, model_key)
+            drafts[model_key] = {
+                "enabled_ids": list(st["enabled_ids"]),
+                "hidden_ids": list(st["hidden_ids"]),
+            }
+        self._lora_draft_by_model = drafts
+
+    def _lora_draft_slice(self, model_key: str) -> dict:
+        draft = getattr(self, "_lora_draft_by_model", {}).get(model_key)
+        if isinstance(draft, dict):
+            return {
+                "enabled_ids": list(draft.get("enabled_ids") or []),
+                "hidden_ids": list(draft.get("hidden_ids") or []),
+            }
+        return {"enabled_ids": [], "hidden_ids": []}
+
+    def _save_lora_widgets_to_draft(self, model_key: str) -> None:
+        if not model_key:
+            return
+        if not hasattr(self, "_lora_draft_by_model"):
+            self._lora_draft_by_model = {}
+        self._lora_draft_by_model[model_key] = {
+            "enabled_ids": self._get_lora_enabled_ids_from_widgets(),
+            "hidden_ids": sorted(getattr(self, "_lora_hidden_ids", set())),
+        }
+
+    def _show_lora_draft_for_model(self, model_key: str) -> None:
+        """Rebuild grid and checkmarks for one base model from in-memory draft."""
+        slice_ = self._lora_draft_slice(model_key)
+        self._lora_model_key = model_key
+        self._lora_hidden_ids = set(slice_["hidden_ids"])
+        self._update_lora_intro_text()
+        self._rebuild_lora_settings_grid()
+        self._apply_lora_settings_to_widgets(slice_["enabled_ids"])
 
     def _lora_settings_overlay(self, base_settings: dict) -> dict:
-        """Merge in-memory deleted LoRA ids for catalog filtering."""
+        """Merge in-memory LoRA draft for the current base model."""
+        from imagegen_plugins.lora_catalog_settings import migrate_lora_catalog
+
         cfg = dict(base_settings)
         imagegen = dict(cfg.get("imagegen") or {})
-        lc = dict(imagegen.get("lora_catalog") or {})
-        lc["deleted_ids"] = sorted(getattr(self, "_lora_deleted_ids", set()))
+        lc = migrate_lora_catalog(dict(imagegen.get("lora_catalog") or {}))
+        model_key = self._current_lora_model_key()
+        bm = dict(lc.get("by_model") or {})
+        slice_ = self._lora_draft_slice(model_key)
+        bm[model_key] = slice_
+        lc["by_model"] = bm
         imagegen["lora_catalog"] = lc
         cfg["imagegen"] = imagegen
         return cfg
 
-    def _persist_lora_catalog_state(self) -> None:
+    def _persist_lora_catalog_state(
+        self,
+        *,
+        model_id: Optional[str] = None,
+        include_enabled: bool = False,
+        hidden_ids: Optional[list] = None,
+        enabled_ids: Optional[list] = None,
+    ) -> None:
+        """Persist one base-model slice of the LoRA catalog to settings.json."""
         from imagegen_plugins.image_gen_persistence import save_lora_catalog_state
 
+        mid = model_id or self._current_lora_model_key()
+        kwargs: dict = {"model_id": mid}
+        if hidden_ids is not None:
+            kwargs["hidden_ids"] = hidden_ids
+        elif mid == getattr(self, "_lora_model_key", None) or mid == self._current_lora_model_key():
+            kwargs["hidden_ids"] = sorted(getattr(self, "_lora_hidden_ids", set()))
+        if include_enabled:
+            kwargs["enabled_ids"] = (
+                enabled_ids
+                if enabled_ids is not None
+                else self._get_lora_enabled_ids_from_widgets()
+            )
+        if "hidden_ids" not in kwargs and "enabled_ids" not in kwargs:
+            return
+        save_lora_catalog_state(**kwargs)
+        mw = self.parent()
+        if mw is not None and hasattr(mw, "refresh_open_imagegen_lora_combos"):
+            mw.refresh_open_imagegen_lora_combos()
+
+    def _flush_lora_tab_to_disk(self) -> None:
+        """Write all per-model LoRA drafts to settings.json."""
+        if not hasattr(self, "_lora_checkboxes"):
+            return
+        self._ensure_lora_tab_ready()
+        model_key = getattr(self, "_lora_model_key", None) or self._current_lora_model_key()
+        self._save_lora_widgets_to_draft(model_key)
+        self._persist_all_lora_drafts_to_disk()
+
+    def _persist_all_lora_drafts_to_disk(self) -> None:
+        from imagegen_plugins.image_gen_persistence import save_lora_catalog_state
+
+        drafts = getattr(self, "_lora_draft_by_model", None)
+        if not isinstance(drafts, dict) or not drafts:
+            return
         save_lora_catalog_state(
-            enabled_ids=self._get_lora_enabled_ids_from_widgets(),
-            deleted_ids=sorted(getattr(self, "_lora_deleted_ids", set())),
+            by_model={
+                str(mk): {
+                    "enabled_ids": list((sl or {}).get("enabled_ids") or []),
+                    "hidden_ids": list((sl or {}).get("hidden_ids") or []),
+                }
+                for mk, sl in drafts.items()
+                if isinstance(sl, dict)
+            }
         )
         mw = self.parent()
         if mw is not None and hasattr(mw, "refresh_open_imagegen_lora_combos"):
             mw.refresh_open_imagegen_lora_combos()
 
+    def _on_lora_model_combo_changed(self, _index: int = 0) -> None:
+        self._ensure_lora_tab_ready()
+        previous_model_key = getattr(self, "_lora_model_key", None)
+        new_model_key = self._current_lora_model_key()
+        if previous_model_key and previous_model_key != new_model_key:
+            self._save_lora_widgets_to_draft(previous_model_key)
+
+        if new_model_key:
+            self._show_lora_draft_for_model(new_model_key)
+
+    def _install_lora_catalog_entry(self, lora_id: str) -> None:
+        from PySide6.QtCore import QThread, Signal
+        from PySide6.QtWidgets import QApplication
+
+        from imagegen_plugins.mflux_lora_presets import resolve_lora_path
+
+        progress = QProgressDialog("Downloading LoRA weights…", "Cancel", 0, 0, self)
+        progress.setWindowTitle("Install LoRA")
+        progress.setWindowModality(Qt.WindowModality.WindowModal)
+        progress.setMinimumDuration(0)
+        progress.show()
+        QApplication.processEvents()
+        cancel_flag = [False]
+        progress.canceled.connect(lambda: cancel_flag.__setitem__(0, True))
+
+        class InstallWorker(QThread):
+            finished_ok = Signal(bool, str)
+
+            def run(self) -> None:
+                if cancel_flag[0]:
+                    self.finished_ok.emit(False, "Cancelled")
+                    return
+                try:
+                    resolve_lora_path(lora_id)
+                    self.finished_ok.emit(True, "")
+                except Exception as e:
+                    self.finished_ok.emit(False, str(e))
+
+        worker = InstallWorker(self)
+
+        def on_done(ok: bool, err: str) -> None:
+            progress.close()
+            if ok:
+                self._rebuild_lora_settings_grid()
+                self._apply_lora_settings_to_widgets(
+                    self._get_lora_enabled_ids_from_widgets()
+                )
+            elif err and err != "Cancelled":
+                show_styled_warning(self, "Install LoRA", err)
+
+        worker.finished_ok.connect(on_done)
+        worker.start()
+
     def _hide_lora_catalog_entry(self, lora_id: str) -> None:
-        """Hide a LoRA row and persist so Create/Expand/Infill pulldowns update."""
+        """Hide a LoRA row for the current base model."""
         row = getattr(self, "_lora_row_widgets", {}).get(lora_id)
         if row is None:
             return
-        self._lora_deleted_ids.add(lora_id)
-        cb, desc_w, del_btn = row
-        for w in (cb, desc_w, del_btn):
+        self._lora_hidden_ids.add(lora_id)
+        widgets = row if isinstance(row, (list, tuple)) else (row,)
+        for w in widgets:
             w.setParent(None)
             w.deleteLater()
         self._lora_row_widgets.pop(lora_id, None)
         self._lora_checkboxes.pop(lora_id, None)
-        self._persist_lora_catalog_state()
+        self._save_lora_widgets_to_draft(self._lora_model_key)
         if hasattr(self, "original_settings"):
-            self.original_settings["imagegen_lora_deleted_ids"] = sorted(self._lora_deleted_ids)
-            self.original_settings["imagegen_lora_enabled_ids"] = (
-                self._get_lora_enabled_ids_from_widgets()
-            )
+            self.original_settings["imagegen_lora_model_key"] = self._current_lora_model_key()
+            self.original_settings["imagegen_lora_hidden_ids"] = sorted(self._lora_hidden_ids)
 
     def _rebuild_lora_settings_grid(self) -> None:
-        """Rebuild LoRA rows after deleted_ids changes (e.g. reset to defaults)."""
+        """Rebuild LoRA rows for the selected base model."""
         if not hasattr(self, "_lora_grid"):
             return
         from config import get_config
-        from imagegen_plugins.flux_lora_catalog import (
-            catalog_entries_for_settings,
+        from imagegen_plugins.lora_catalog import (
+            catalog_entries_for_model,
             is_lora_installed,
             lora_settings_display_name,
         )
@@ -4718,13 +4909,15 @@ class SettingsDialog(QDialog):
         self._lora_checkboxes = {}
         self._lora_row_widgets = {}
         cfg_settings = self._lora_settings_overlay(get_config().load_settings())
+        model_key = self._current_lora_model_key()
 
         row_idx = 0
-        for entry in catalog_entries_for_settings(cfg_settings):
+        for entry in catalog_entries_for_model(cfg_settings, model_key):
             installed = is_lora_installed(entry.lora_id)
             cb = QCheckBox()
             cb.setStyleSheet(self.SMALL_CHECKBOX_STYLE)
             cb.setToolTip(entry.repo_id or entry.local_path or entry.lora_id)
+            cb.stateChanged.connect(self._on_lora_checkbox_state_changed)
             self._lora_checkboxes[entry.lora_id] = cb
 
             name_lbl = QLabel(lora_settings_display_name(entry, cfg_settings))
@@ -4745,8 +4938,7 @@ class SettingsDialog(QDialog):
                 status_parts.append("MFLUX verified")
             elif entry.mflux_compatible is None:
                 status_parts.append("untested")
-            if installed:
-                status_parts.append("installed")
+            status_parts.append("installed" if installed else "not installed")
             status_lbl = QLabel(" · ".join(status_parts))
             status_lbl.setStyleSheet(f"color: {TEXT_DISABLED_HEX}; font-size: 11px;")
             status_lbl.setWordWrap(True)
@@ -4758,9 +4950,19 @@ class SettingsDialog(QDialog):
             desc_layout.addWidget(name_lbl)
             desc_layout.addWidget(status_lbl)
 
+            install_btn = None
+            if not installed and (entry.repo_id or entry.local_path):
+                install_btn = QPushButton("Install")
+                install_btn.setToolTip(f"Download {entry.display_name}")
+                install_btn.clicked.connect(
+                    lambda checked=False, lid=entry.lora_id: self._install_lora_catalog_entry(
+                        lid
+                    )
+                )
+
             del_btn = QPushButton()
             del_btn.setToolTip(
-                f"Hide {lora_settings_display_name(entry, cfg_settings)} from this list"
+                f"Hide {lora_settings_display_name(entry, cfg_settings)} for this base model"
             )
             del_btn.setStyleSheet(self._lora_trash_button_style())
             del_btn.clicked.connect(
@@ -4769,9 +4971,32 @@ class SettingsDialog(QDialog):
 
             self._lora_grid.addWidget(cb, row_idx, 0, Qt.AlignmentFlag.AlignTop)
             self._lora_grid.addWidget(desc_w, row_idx, 1)
-            self._lora_grid.addWidget(del_btn, row_idx, 2, Qt.AlignmentFlag.AlignTop)
-            self._lora_row_widgets[entry.lora_id] = (cb, desc_w, del_btn)
+            col = 2
+            if install_btn is not None:
+                self._lora_grid.addWidget(
+                    install_btn, row_idx, col, Qt.AlignmentFlag.AlignTop
+                )
+                col += 1
+            self._lora_grid.addWidget(del_btn, row_idx, col, Qt.AlignmentFlag.AlignTop)
+            row_widgets = [cb, desc_w]
+            if install_btn is not None:
+                row_widgets.append(install_btn)
+            row_widgets.append(del_btn)
+            self._lora_row_widgets[entry.lora_id] = tuple(row_widgets)
             row_idx += 1
+        if row_idx == 0:
+            empty = QLabel(
+                "No LoRAs passed Check LoRAs for this base model yet. "
+                "Run Tools → Debug → Check LoRAs, or pick another model above."
+            )
+            empty.setStyleSheet(self.NOTE_TEXT_STYLE)
+            self._lora_grid.addWidget(empty, 0, 0, 1, 4)
+
+    def _on_lora_checkbox_state_changed(self, _state: int = 0) -> None:
+        if getattr(self, "_lora_syncing_checkboxes", False):
+            return
+        model_key = getattr(self, "_lora_model_key", None) or self._current_lora_model_key()
+        self._save_lora_widgets_to_draft(model_key)
 
     def _get_lora_enabled_ids_from_widgets(self) -> List[str]:
         if not hasattr(self, "_lora_checkboxes"):
@@ -4782,8 +5007,12 @@ class SettingsDialog(QDialog):
         if not hasattr(self, "_lora_checkboxes"):
             return
         enabled = set(enabled_ids or [])
-        for lora_id, cb in self._lora_checkboxes.items():
-            cb.setChecked(lora_id in enabled)
+        self._lora_syncing_checkboxes = True
+        try:
+            for lora_id, cb in self._lora_checkboxes.items():
+                cb.setChecked(lora_id in enabled)
+        finally:
+            self._lora_syncing_checkboxes = False
 
     def browse_move_destination(self, index: int):
         """Open directory picker dialog for move destination"""
@@ -5325,6 +5554,7 @@ class SettingsDialog(QDialog):
                 self._load_map_settings(settings)
                 self._load_editor_settings(settings)
                 self._load_captioning_settings(settings)
+                self._load_lora_settings(settings)
                 
             else:
                 # Fall back to config values if no parent window
@@ -5788,21 +6018,29 @@ class SettingsDialog(QDialog):
         self.original_settings['caption_temperature'] = self.caption_temperature_spinbox.value()
 
     def _load_lora_settings(self, settings):
-        """Load enabled FLUX LoRA ids from config."""
+        """Load per-model LoRA enable/hide state from config."""
         if not hasattr(self, "_lora_checkboxes"):
             return
-        from imagegen_plugins.image_gen_persistence import load_lora_catalog_enabled_ids
+        from imagegen_plugins.lora_model_registry import legacy_host_id_to_model_key
 
-        imagegen = settings.get("imagegen") or {}
-        lc = imagegen.get("lora_catalog") or {}
-        enabled = lc.get("enabled_ids")
-        if not isinstance(enabled, list):
-            enabled = load_lora_catalog_enabled_ids()
-        self._apply_lora_settings_to_widgets(list(enabled))
-        self.original_settings["imagegen_lora_enabled_ids"] = list(self._get_lora_enabled_ids_from_widgets())
-        self.original_settings["imagegen_lora_deleted_ids"] = sorted(
-            getattr(self, "_lora_deleted_ids", set())
-        )
+        self._lora_catalog_loaded = False
+        self._load_lora_drafts_from_settings(settings)
+        model_key = settings.get("imagegen_lora_model_key")
+        if not model_key and settings.get("imagegen_lora_host_id"):
+            model_key = legacy_host_id_to_model_key(str(settings["imagegen_lora_host_id"]))
+        model_key = model_key or self._current_lora_model_key()
+        if hasattr(self, "_lora_model_combo"):
+            idx = self._lora_model_combo.findData(model_key)
+            if idx >= 0:
+                self._lora_model_combo.blockSignals(True)
+                self._lora_model_combo.setCurrentIndex(idx)
+                self._lora_model_combo.blockSignals(False)
+        self._show_lora_draft_for_model(model_key)
+        self._lora_catalog_loaded = True
+        slice_ = self._lora_draft_slice(model_key)
+        self.original_settings["imagegen_lora_model_key"] = model_key
+        self.original_settings["imagegen_lora_enabled_ids"] = list(slice_["enabled_ids"])
+        self.original_settings["imagegen_lora_hidden_ids"] = list(slice_["hidden_ids"])
     
     def _load_editor_settings(self, settings):
         """Load image editor preference from config"""
@@ -6074,6 +6312,8 @@ class SettingsDialog(QDialog):
     def accept(self):
         """Apply settings and close dialog"""
         try:
+            if hasattr(self, "_lora_checkboxes"):
+                self._flush_lora_tab_to_disk()
             get_config().set_browse_transparency_preview(None)
             # Persist faces if we have the Faces tab data
             if hasattr(self, '_faces_subjects'):
@@ -6120,7 +6360,12 @@ class SettingsDialog(QDialog):
                     # Handle None values
                     original_value = original_value or 0
                     new_value = new_value or 0
-                elif key in ('imagegen_lora_enabled_ids', 'imagegen_lora_deleted_ids'):
+                elif key in (
+                    'imagegen_lora_enabled_ids',
+                    'imagegen_lora_hidden_ids',
+                    'imagegen_lora_model_key',
+                    'imagegen_lora_deleted_ids',
+                ):
                     original_value = sorted(original_value or [])
                     new_value = sorted(new_value or [])
                 elif key == 'browse_transparency_settings':
@@ -6200,20 +6445,14 @@ class SettingsDialog(QDialog):
                         orig_enabled = sorted(
                             self.original_settings.get('imagegen_lora_enabled_ids') or []
                         )
-                        orig_deleted = sorted(
-                            self.original_settings.get('imagegen_lora_deleted_ids') or []
+                        orig_hidden = sorted(
+                            self.original_settings.get('imagegen_lora_hidden_ids') or []
                         )
                         new_enabled = sorted(value or [])
-                        new_deleted = sorted(getattr(self, '_lora_deleted_ids', set()))
-                        if orig_enabled != new_enabled or orig_deleted != new_deleted:
-                            from imagegen_plugins.image_gen_persistence import (
-                                save_lora_catalog_state,
-                            )
-
-                            save_lora_catalog_state(
-                                enabled_ids=new_enabled,
-                                deleted_ids=new_deleted,
-                            )
+                        new_hidden = sorted(getattr(self, '_lora_hidden_ids', set()))
+                        self._flush_lora_tab_to_disk()
+                        continue
+                    if key in ('imagegen_lora_hidden_ids', 'imagegen_lora_model_key'):
                         continue
                     if key == 'imagegen_lora_deleted_ids':
                         continue
@@ -6372,8 +6611,9 @@ class SettingsDialog(QDialog):
             settings['caption_temperature'] = self.caption_temperature_spinbox.value()
         
         if hasattr(self, '_lora_checkboxes'):
+            settings['imagegen_lora_model_key'] = self._current_lora_model_key()
             settings['imagegen_lora_enabled_ids'] = self._get_lora_enabled_ids_from_widgets()
-            settings['imagegen_lora_deleted_ids'] = sorted(getattr(self, '_lora_deleted_ids', set()))
+            settings['imagegen_lora_hidden_ids'] = sorted(getattr(self, '_lora_hidden_ids', set()))
         
         if hasattr(self, 'theme_preset_combo'):
             tid = self.theme_preset_combo.currentData()
@@ -6684,6 +6924,19 @@ class SettingsDialog(QDialog):
 
     def on_tab_changed(self, index):
         """Handle tab changes to ensure proper sizing"""
+        if not getattr(self, "_settings_dialog_initializing", False):
+            lora_idx = self.tab_widget.indexOf(self.lora_settings_tab)
+            prev_idx = getattr(self, "_settings_tab_prev_index", -1)
+            if index == lora_idx:
+                self._ensure_lora_tab_ready()
+            if (
+                prev_idx == lora_idx
+                and index != lora_idx
+                and hasattr(self, "_lora_checkboxes")
+            ):
+                self._flush_lora_tab_to_disk()
+            self._settings_tab_prev_index = index
+
         # Lazy-load Faces tab on first visit (face_recognition import is slow)
         is_faces_tab = index == self.tab_widget.indexOf(self.faces_tab)
         is_cache_tab = index == self.tab_widget.indexOf(self.cache_management_tab)

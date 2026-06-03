@@ -12,21 +12,24 @@ if TYPE_CHECKING:
 if TYPE_CHECKING:
     from PySide6.QtWidgets import QComboBox
 
-from imagegen_plugins.flux_lora_catalog import (
+from imagegen_plugins.lora_catalog import (
     DEFAULT_CACHE,
-    FLUX_LORA_CATALOG,
+    LORA_CATALOG,
     FluxLoraEntry,
-    PAPER_CUTOUT_LORA_PATH,
     catalog_cache_path,
     get_lora_entry,
+    lora_choices_for_plugin,
     lora_choices_for_pipeline,
     lora_entry_min_steps,
     manual_download_help,
 )
+from imagegen_plugins.lora_entry import PAPER_CUTOUT_LORA_PATH
+
+FLUX_LORA_CATALOG = LORA_CATALOG
 
 MFLUX_LORA_UI_CHOICES: Tuple[Tuple[str, str], ...] = (("None", "none"),) + tuple(
     (e.display_name, e.lora_id)
-    for e in sorted(FLUX_LORA_CATALOG.values(), key=lambda x: x.display_name.lower())
+    for e in sorted(LORA_CATALOG.values(), key=lambda x: x.display_name.lower())
 )
 
 # Migrate saved UI settings from removed presets.
@@ -40,18 +43,24 @@ def lora_choice_ids() -> Tuple[str, ...]:
 def repopulate_mflux_lora_combo(
     combo: "QComboBox",
     *,
-    pipeline_id: str,
-    plugin_hf_model_id: str,
+    plugin: Any = None,
+    pipeline_id: str = "",
+    plugin_hf_model_id: str = "",
     current_preset_id: Any = None,
 ) -> None:
-    """Rebuild LoRA pulldown items from settings (enabled + deleted catalog state)."""
+    """Rebuild LoRA pulldown items from settings (enabled + installed for plugin host)."""
     from config import get_config
 
-    choices = lora_choices_for_pipeline(
-        pipeline_id,
-        plugin_hf_model_id,
-        get_config().load_settings(),
-    )
+    settings = get_config().load_settings()
+    if plugin is not None and getattr(plugin, "lora_host_id", None):
+        choices = lora_choices_for_plugin(plugin, settings)
+    else:
+        choices = lora_choices_for_pipeline(
+            pipeline_id,
+            plugin_hf_model_id,
+            settings,
+            lora_host_id=getattr(plugin, "lora_host_id", None) if plugin else None,
+        )
     preset_id = coerce_lora_preset_id(
         current_preset_id if current_preset_id is not None else combo.currentData()
     )
@@ -95,8 +104,10 @@ def _normalize_preset_id(preset_id: Any) -> str:
     return _LEGACY_PRESET_IDS.get(preset_id, preset_id)
 
 
-def _assert_mflux_compatible_lora(path: str) -> None:
-    """Reject LoRA key layouts known to crash MFLUX at first denoise step."""
+def _assert_mflux_compatible_lora(path: str, *, host_id: str | None = None) -> None:
+    """Reject FLUX.1 LoRA key layouts known to crash MFLUX (not used for FLUX.2 Klein)."""
+    if host_id == "flux2_klein":
+        return
     try:
         from safetensors import safe_open
     except ImportError:
@@ -123,7 +134,7 @@ def _resolve_local_path(entry: FluxLoraEntry) -> str:
     path = Path(entry.local_path or "").expanduser().resolve()
     if path.is_file() and path.stat().st_size > 1024:
         resolved = str(path)
-        _assert_mflux_compatible_lora(resolved)
+        _assert_mflux_compatible_lora(resolved, host_id=entry.host_id)
         return resolved
     alt = (
         Path.home()
@@ -134,7 +145,7 @@ def _resolve_local_path(entry: FluxLoraEntry) -> str:
     )
     if alt.is_file() and alt.stat().st_size > 1024:
         resolved = str(alt.resolve())
-        _assert_mflux_compatible_lora(resolved)
+        _assert_mflux_compatible_lora(resolved, host_id=entry.host_id)
         return resolved
     raise FileNotFoundError(f"LoRA file not found: {path}")
 
@@ -159,7 +170,7 @@ def resolve_lora_path(preset_id: str, *, cache_dir: Optional[Path] = None) -> st
     dest_path = dest_dir / entry.filename
     if dest_path.is_file() and dest_path.stat().st_size > 1024:
         resolved = str(dest_path.resolve())
-        _assert_mflux_compatible_lora(resolved)
+        _assert_mflux_compatible_lora(resolved, host_id=entry.host_id)
         return resolved
 
     try:
@@ -182,7 +193,7 @@ def resolve_lora_path(preset_id: str, *, cache_dir: Optional[Path] = None) -> st
     if not path.is_file():
         raise RuntimeError(f"LoRA download failed: {downloaded}")
     resolved = str(path.resolve())
-    _assert_mflux_compatible_lora(resolved)
+    _assert_mflux_compatible_lora(resolved, host_id=entry.host_id)
     return resolved
 
 
@@ -213,6 +224,7 @@ def apply_lora_to_mflux_payload(
     merged: Dict[str, object],
     *,
     for_fill: bool = False,
+    for_klein: bool = False,
 ) -> None:
     """Set mflux_lora_paths/scales and optional dev model + steps when a preset is selected."""
     preset_id = _normalize_preset_id(merged.pop("mflux_lora", "none") or "none")
@@ -225,11 +237,66 @@ def apply_lora_to_mflux_payload(
     if entry is None:
         raise ValueError(f"Unknown mflux LoRA preset: {preset_id}")
 
+    from config import get_config
+    from imagegen_plugins.lora_catalog import (
+        lora_model_key_from_values,
+        lora_probe_passed_for_model,
+    )
+
+    model_key = lora_model_key_from_values(dict(merged))
+    if for_fill:
+        from imagegen_plugins.lora_host_registry import PROBE_FILL
+
+        model_key = model_key or PROBE_FILL
+    elif for_klein:
+        from imagegen_plugins.lora_catalog import klein_variant_from_values
+        from imagegen_plugins.lora_host_registry import PROBE_KLEIN_4B, PROBE_KLEIN_9B
+
+        variant = klein_variant_from_values(dict(merged))
+        if variant == "9b":
+            model_key = PROBE_KLEIN_9B
+        elif variant == "4b":
+            model_key = PROBE_KLEIN_4B
+    elif not model_key:
+        from imagegen_plugins.lora_host_registry import PROBE_DEV
+
+        model_key = PROBE_DEV
+
+    settings = get_config().load_settings()
+    if model_key and not lora_probe_passed_for_model(
+        preset_id, model_key, settings
+    ):
+        raise ValueError(
+            f"LoRA «{entry.display_name}» did not pass Check LoRAs for this base model. "
+            "Run Tools → Debug → Check LoRAs, or enable a passing LoRA in Settings → LoRA."
+        )
+
+    if for_klein and entry.klein_variant:
+        from imagegen_plugins.lora_catalog import (
+            klein_lora_mismatch_message,
+            klein_variant_from_values,
+        )
+
+        active = klein_variant_from_values(dict(merged))
+        if active and entry.klein_variant != active:
+            raise ValueError(klein_lora_mismatch_message(entry, active))
+
     path = resolve_lora_path(preset_id)
     merged["mflux_lora_paths"] = [path]
     merged["mflux_lora_scales"] = [entry.scale]
-    if not for_fill:
-        merged["hf_model_id"] = entry.mflux_model
+    if not for_fill and not for_klein:
+        required = (entry.mflux_model or "dev").strip().lower()
+        active = str(merged.get("hf_model_id") or "").strip().lower()
+        if required == "dev" and active not in ("", "dev"):
+            raise ValueError(
+                f"LoRA «{entry.display_name}» requires FLUX.1 Dev. "
+                "Select the Dev model in the Create dialog, then choose this LoRA."
+            )
+        if required == "schnell" and active != "schnell":
+            raise ValueError(
+                f"LoRA «{entry.display_name}» requires FLUX.1 Schnell. "
+                "Select the Schnell model in the Create dialog, then choose this LoRA."
+            )
         merged["steps"] = effective_steps_for_lora(
             int(merged.get("steps") or entry.min_steps),
             preset_id,
@@ -244,6 +311,7 @@ __all__ = [
     "coerce_lora_preset_id",
     "effective_steps_for_lora",
     "lora_choice_ids",
+    "lora_choices_for_plugin",
     "lora_choices_for_pipeline",
     "lora_preset_min_steps",
     "manual_download_help",

@@ -11,7 +11,6 @@ from typing import Any, Dict, Optional
 from imagegen_plugins.image_gen_model_availability import model_display_name
 from imagegen_plugins.image_gen_pipeline_modes import get_pipeline
 from imagegen_plugins.image_gen_registry import ImageGenModelPlugin
-from imagegen_plugins.mflux_lora_presets import MFLUX_LORA_UI_CHOICES
 
 
 def _escape(text: str) -> str:
@@ -337,14 +336,10 @@ def _generation_status_queue_table_rows(
     if fields.get("model"):
         rows.append(_table_row("Model:", fields["model"]))
 
-    lora = fields.get("lora")
-    size = fields.get("size")
-    if lora and size:
-        rows.append(_table_row_primary_plus_inline("LoRA:", lora, [("Size:", size)]))
-    elif lora:
-        rows.append(_table_row("LoRA:", lora))
-    elif size:
-        rows.append(_table_row("Size:", size))
+    if fields.get("lora"):
+        rows.append(_table_row("LoRA:", fields["lora"]))
+    if fields.get("size"):
+        rows.append(_table_row("Size:", fields["size"]))
 
     steps_display = steps_value if steps_value is not None else fields.get("steps", "")
     quant = fields.get("quant")
@@ -442,16 +437,6 @@ def _table_html(
     return "<table cellspacing=\"0\" cellpadding=\"0\">" + "".join(parts) + "</table>"
 
 
-def _lora_display_label(preset_id: str) -> Optional[str]:
-    preset_id = (preset_id or "none").strip()
-    if not preset_id or preset_id == "none":
-        return None
-    for label, pid in MFLUX_LORA_UI_CHOICES:
-        if pid == preset_id:
-            return label
-    return preset_id
-
-
 def _collect_generation_status_fields(
     plugin: ImageGenModelPlugin,
     values: Dict[str, Any],
@@ -467,8 +452,10 @@ def _collect_generation_status_fields(
     if raw_hf_id:
         fields["model"] = model_display_name(pipeline_id, raw_hf_id)
 
-    if pipeline_id in ("flux_schnell_mflux_play", "mflux_fill_expand"):
-        lora_label = _lora_display_label(str(values.get("mflux_lora") or "none"))
+    if getattr(plugin, "lora_host_id", None):
+        from imagegen_plugins.image_gen_naming import lora_name_for_exif
+
+        lora_label = lora_name_for_exif(effective.get("mflux_lora"))
         if lora_label:
             fields["lora"] = lora_label
 

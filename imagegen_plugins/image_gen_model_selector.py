@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QComboBox, QHBoxLayout, QLabel, QSizePolicy, QWidget
@@ -130,3 +130,36 @@ def resolve_initial_plugin(
     if saved_id and saved_id in by_id:
         return by_id[saved_id]
     return usable[0]
+
+
+def values_after_plugin_switch(
+    current: Dict[str, Any],
+    new_plugin: ImageGenModelPlugin,
+) -> Dict[str, Any]:
+    """
+    Drop model-specific keys from dialog values when the user picks another plugin.
+
+    Ensures field_specs and the LoRA pulldown target the new base model (e.g. Klein 4B vs 9B).
+    """
+    out = dict(current)
+    for key in (
+        "mflux_lora",
+        "mflux_lora_paths",
+        "mflux_lora_scales",
+        "hf_model_id",
+        "mflux_model_name",
+    ):
+        out.pop(key, None)
+    defaults = getattr(new_plugin, "model_defaults", None) or {}
+    if defaults.get("mflux_model_name"):
+        out["mflux_model_name"] = defaults["mflux_model_name"]
+    if new_plugin.hf_model_id:
+        out["hf_model_id"] = new_plugin.hf_model_id
+    return out
+
+
+def refresh_dialog_mflux_lora_combo(dialog: Any) -> None:
+    """Repopulate the LoRA pulldown for the dialog's current plugin, if present."""
+    refresh = getattr(dialog, "refresh_mflux_lora_combo", None)
+    if callable(refresh):
+        refresh()

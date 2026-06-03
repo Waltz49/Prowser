@@ -63,7 +63,9 @@ from imagegen_plugins.image_gen_source_nav import (
 from imagegen_plugins.image_gen_active_model import save_active_plugin_id_for_function
 from imagegen_plugins.image_gen_model_selector import (
     build_model_selector_row,
+    refresh_dialog_mflux_lora_combo,
     resolve_initial_plugin,
+    values_after_plugin_switch,
     sync_model_comment_label,
 )
 from imagegen_plugins.image_gen_persistence import (
@@ -872,31 +874,17 @@ class ImageGenEditDialog(QDialog):
         self._clear_field_rows()
 
         spec_keys = {s.key for s in self._specs}
-        combine_guidance_lora = (
-            "guidance_scale" in spec_keys and "mflux_lora" in spec_keys
-        )
         combine_seed_random = field_specs_share_seed_row(spec_keys)
 
         for spec in self._specs:
-            if combine_guidance_lora and spec.key == "mflux_lora":
-                continue
             if combine_seed_random and spec.key == "random_seed":
                 continue
 
             widget, extra = self._widget_for_spec(spec)
             self._widgets[spec.key] = (widget, extra, spec)
 
-            if combine_guidance_lora and spec.key == "guidance_scale":
-                lora_spec = next(s for s in self._specs if s.key == "mflux_lora")
-                lora_widget, lora_extra = self._widget_for_spec(lora_spec)
-                self._widgets[lora_spec.key] = (lora_widget, lora_extra, lora_spec)
-                row_w = QWidget()
-                row = QHBoxLayout(row_w)
-                row.setContentsMargins(0, 0, 0, 0)
-                row.addWidget(widget, 1)
-                row.addWidget(QLabel("LoRA:"), 0)
-                row.addWidget(lora_widget, 0)
-                self._fields_form.addRow(spec.label, row_w)
+            if spec.key == "mflux_lora":
+                self._fields_form.addRow(spec.label, widget)
                 continue
 
             if spec.kind == "text" and spec.key == "prompt":
@@ -970,6 +958,22 @@ class ImageGenEditDialog(QDialog):
         if self._source_nav is not None:
             refresh_source_nav_keyboard_shortcuts(self)
 
+    def refresh_mflux_lora_combo(self) -> None:
+        """Refresh LoRA pulldown for the active edit model (4B vs 9B, etc.)."""
+        entry = self._widgets.get("mflux_lora")
+        if entry is None:
+            return
+        lora_widget, _, lora_spec = entry
+        if lora_spec.kind != "choice":
+            return
+        from imagegen_plugins.mflux_lora_presets import repopulate_mflux_lora_combo
+
+        repopulate_mflux_lora_combo(
+            lora_widget,
+            plugin=self.plugin,
+            current_preset_id="none",
+        )
+
     def _on_model_combo_changed(self, _index: int = 0) -> None:
         plugin_id = self._model_combo.currentData()
         new_plugin = self._plugins_by_id.get(plugin_id)
@@ -979,7 +983,7 @@ class ImageGenEditDialog(QDialog):
             or not new_plugin.is_available()
         ):
             return
-        current = self.collect_values()
+        current = values_after_plugin_switch(self.collect_values(), new_plugin)
         prompt_entry = self._widgets.get("prompt")
         if prompt_entry is not None:
             widget, _, spec = prompt_entry
@@ -993,6 +997,7 @@ class ImageGenEditDialog(QDialog):
         self._load_plugin_state(saved_override=current)
         sync_model_comment_label(self._model_comment_label, new_plugin)
         self._populate_field_rows()
+        refresh_dialog_mflux_lora_combo(self)
         save_active_plugin_id_for_function(self._function, new_plugin.plugin_id)
 
     def _wrap(self, layout: QHBoxLayout) -> QWidget:

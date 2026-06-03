@@ -2,6 +2,7 @@
 """Create plugin: Expand via local MFLUX FLUX.1 Fill."""
 
 from imagegen_plugins.image_gen_registry import ImageGenModelPlugin
+from imagegen_plugins.lora_host_registry import HOST_FLUX1_FILL
 
 HF_MODEL_ID = "black-forest-labs/FLUX.1-Fill-dev"
 
@@ -11,6 +12,7 @@ FLUX_FILL_EXPAND_PLUGIN = ImageGenModelPlugin(
     display_name=HF_MODEL_ID,
     hf_model_id=HF_MODEL_ID,
     function="expand",
+    lora_host_id=HOST_FLUX1_FILL,
     model_comment="High Quality",
     model_defaults={
         "prompt": "",

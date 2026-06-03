@@ -275,6 +275,7 @@ def field_specs_for_pipeline(
     values: Dict[str, Any],
     *,
     plugin_hf_model_id: str = "schnell",
+    lora_host_id: Optional[str] = None,
 ) -> List[FieldSpec]:
     mode = get_pipeline(pipeline_id)
     specs: List[FieldSpec] = [
@@ -354,27 +355,32 @@ def field_specs_for_pipeline(
             )
         )
     specs.extend(step_specs)
-    if pipeline_id in ("flux_schnell_mflux_play", "mflux_fill_expand", "mflux_fill_infill"):
+    if lora_host_id:
         from config import get_config
+
+        from imagegen_plugins.lora_catalog import klein_variant_from_values
 
         lora_choices = lora_choices_for_pipeline(
             pipeline_id,
             plugin_hf_model_id,
             get_config().load_settings(),
+            lora_host_id=lora_host_id,
+            klein_variant=klein_variant_from_values(values),
         )
-        current_lora = coerce_lora_preset_id(values.get("mflux_lora", "none"))
-        choice_ids = {c[1] for c in lora_choices}
-        if current_lora not in choice_ids:
-            current_lora = "none"
-        specs.append(
-            FieldSpec(
-                key="mflux_lora",
-                label="LoRA",
-                kind="choice",
-                default=current_lora,
-                choices=lora_choices,
+        if len(lora_choices) > 1:
+            current_lora = coerce_lora_preset_id(values.get("mflux_lora", "none"))
+            choice_ids = {c[1] for c in lora_choices}
+            if current_lora not in choice_ids:
+                current_lora = "none"
+            specs.append(
+                FieldSpec(
+                    key="mflux_lora",
+                    label="LoRA",
+                    kind="choice",
+                    default=current_lora,
+                    choices=lora_choices,
+                )
             )
-        )
     if pipeline_id in (
         "flux_schnell_mflux_play",
         "mflux_fill_expand",
@@ -519,7 +525,9 @@ def build_worker_payload(
         )
     if pipeline_id == "mflux_flux2_klein_edit":
         from imagegen_plugins.image_gen_naming import resolve_source_image_paths
+        from imagegen_plugins.mflux_lora_presets import apply_lora_to_mflux_payload
 
+        apply_lora_to_mflux_payload(merged, for_fill=False, for_klein=True)
         source_paths = resolve_source_image_paths(merged)
         if source_paths:
             merged["source_image_paths"] = source_paths

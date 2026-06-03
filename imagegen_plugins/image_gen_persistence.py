@@ -23,12 +23,22 @@ def _ensure_imagegen_dict(settings: dict) -> dict:
 
 def _mutate_imagegen_settings(mutator: Callable[[dict], None]) -> None:
     """Load settings, mutate imagegen under lock, save (avoids lost LoRA catalog updates)."""
+    import copy
+    import shutil
+
     config = get_config()
     with _imagegen_settings_lock:
         settings = config.load_settings()
         imagegen = _ensure_imagegen_dict(settings)
         mutator(imagegen)
-        config.save_settings(settings)
+        settings_path = config.settings_file
+        if settings_path.exists():
+            try:
+                backup = settings_path.with_suffix(".json.pre_imagegen_write")
+                shutil.copy2(settings_path, backup)
+            except OSError:
+                pass
+        config.save_settings(copy.deepcopy(settings))
 
 
 def _normalize_plugin_id(plugin_id: str) -> str:
@@ -202,30 +212,31 @@ def save_infill_paint_dialog_geometry_hex(geom_hex: str) -> None:
     _mutate_imagegen_settings(mutate)
 
 
-def load_lora_catalog_enabled_ids() -> list:
-    from imagegen_plugins.flux_lora_catalog import DEFAULT_ENABLED_LORA_IDS, FLUX_LORA_CATALOG
+def load_lora_catalog_enabled_ids(host_id: str = "flux1_t2i") -> list:
+    from imagegen_plugins.lora_catalog_settings import enabled_lora_ids_for_host
 
-    settings = get_config().load_settings()
-    imagegen = settings.get("imagegen") or {}
-    lc = imagegen.get("lora_catalog") or {}
-    raw = lc.get("enabled_ids")
-    if isinstance(raw, list):
-        return [str(x) for x in raw if str(x) in FLUX_LORA_CATALOG]
-    return list(DEFAULT_ENABLED_LORA_IDS)
+    return list(enabled_lora_ids_for_host(host_id))
+
+
+def load_lora_catalog_hidden_ids(host_id: str) -> list:
+    from imagegen_plugins.lora_catalog_settings import hidden_lora_ids_for_host
+
+    return sorted(hidden_lora_ids_for_host(host_id))
 
 
 def load_lora_catalog_deleted_ids() -> list:
-    from imagegen_plugins.flux_lora_catalog import deleted_lora_ids
+    """All hidden LoRA ids (any host). Back-compat name."""
+    from imagegen_plugins.lora_catalog import deleted_lora_ids
 
     return sorted(deleted_lora_ids(get_config().load_settings()))
 
 
-def save_lora_catalog_enabled_ids(enabled_ids: list) -> None:
-    save_lora_catalog_state(enabled_ids=enabled_ids)
+def save_lora_catalog_enabled_ids(enabled_ids: list, *, host_id: str = "flux1_t2i") -> None:
+    save_lora_catalog_state(host_id=host_id, enabled_ids=enabled_ids)
 
 
 def load_lora_catalog_model_support() -> dict:
-    from imagegen_plugins.flux_lora_catalog import lora_model_support
+    from imagegen_plugins.lora_catalog import lora_model_support
 
     return {
         lid: list(models)
@@ -235,35 +246,140 @@ def load_lora_catalog_model_support() -> dict:
 
 def save_lora_catalog_state(
     *,
+    host_id: Optional[str] = None,
+    model_id: Optional[str] = None,
     enabled_ids: Optional[list] = None,
+    hidden_ids: Optional[list] = None,
     deleted_ids: Optional[list] = None,
+    by_host: Optional[Dict[str, Dict[str, list]]] = None,
+    by_model: Optional[Dict[str, Dict[str, list]]] = None,
     model_support: Optional[dict] = None,
 ) -> None:
-    from imagegen_plugins.flux_lora_catalog import FLUX_LORA_CATALOG, LORA_PROBE_MODEL_ORDER
+    from imagegen_plugins.lora_catalog import LORA_CATALOG
+    from imagegen_plugins.lora_catalog_settings import migrate_lora_catalog
+    from imagegen_plugins.lora_host_registry import LORA_PROBE_MODEL_ORDER
+    from imagegen_plugins.lora_model_registry import entry_matches_lora_model
+
+    hidden = hidden_ids if hidden_ids is not None else deleted_ids
 
     def mutate(imagegen: dict) -> None:
         lc = imagegen.get("lora_catalog")
         if not isinstance(lc, dict):
             lc = {}
             imagegen["lora_catalog"] = lc
-        if enabled_ids is not None:
-            lc["enabled_ids"] = [str(x) for x in enabled_ids if str(x) in FLUX_LORA_CATALOG]
-        if deleted_ids is not None:
-            lc["deleted_ids"] = [str(x) for x in deleted_ids if str(x) in FLUX_LORA_CATALOG]
+        lc = migrate_lora_catalog(lc)
+
+        if by_host is not None:
+            bh = dict(lc.get("by_host") or {})
+            for hid, slice_ in by_host.items():
+                if not isinstance(slice_, dict):
+                    continue
+                prev = dict(bh.get(hid) or {"enabled_ids": [], "hidden_ids": []})
+                if "enabled_ids" in slice_:
+                    prev["enabled_ids"] = [
+                        str(x)
+                        for x in slice_["enabled_ids"]
+                        if str(x) in LORA_CATALOG and LORA_CATALOG[str(x)].host_id == hid
+                    ]
+                if "hidden_ids" in slice_:
+                    prev["hidden_ids"] = [
+                        str(x)
+                        for x in slice_["hidden_ids"]
+                        if str(x) in LORA_CATALOG and LORA_CATALOG[str(x)].host_id == hid
+                    ]
+                bh[hid] = prev
+            lc["by_host"] = bh
+
+        if host_id and (enabled_ids is not None or hidden is not None):
+            bh = dict(lc.get("by_host") or {})
+            prev = dict(bh.get(host_id) or {"enabled_ids": [], "hidden_ids": []})
+            if enabled_ids is not None:
+                prev["enabled_ids"] = [
+                    str(x)
+                    for x in enabled_ids
+                    if str(x) in LORA_CATALOG and LORA_CATALOG[str(x)].host_id == host_id
+                ]
+            if hidden is not None:
+                prev["hidden_ids"] = [
+                    str(x)
+                    for x in hidden
+                    if str(x) in LORA_CATALOG and LORA_CATALOG[str(x)].host_id == host_id
+                ]
+            bh[host_id] = prev
+            lc["by_host"] = bh
+
+        if by_model is not None:
+            bm = dict(lc.get("by_model") or {})
+            for mid, slice_ in by_model.items():
+                if not isinstance(slice_, dict):
+                    continue
+                prev = dict(bm.get(mid) or {"enabled_ids": [], "hidden_ids": []})
+                if "enabled_ids" in slice_:
+                    prev["enabled_ids"] = [
+                        str(x)
+                        for x in slice_["enabled_ids"]
+                        if str(x) in LORA_CATALOG
+                        and entry_matches_lora_model(LORA_CATALOG[str(x)], mid)
+                    ]
+                if "hidden_ids" in slice_:
+                    prev["hidden_ids"] = [
+                        str(x)
+                        for x in slice_["hidden_ids"]
+                        if str(x) in LORA_CATALOG
+                        and entry_matches_lora_model(LORA_CATALOG[str(x)], mid)
+                    ]
+                bm[mid] = prev
+            lc["by_model"] = bm
+
+        if model_id and (enabled_ids is not None or hidden is not None):
+            bm = dict(lc.get("by_model") or {})
+            prev = dict(bm.get(model_id) or {"enabled_ids": [], "hidden_ids": []})
+            if enabled_ids is not None:
+                prev["enabled_ids"] = [
+                    str(x)
+                    for x in enabled_ids
+                    if str(x) in LORA_CATALOG
+                    and entry_matches_lora_model(LORA_CATALOG[str(x)], model_id)
+                ]
+            if hidden is not None:
+                prev["hidden_ids"] = [
+                    str(x)
+                    for x in hidden
+                    if str(x) in LORA_CATALOG
+                    and entry_matches_lora_model(LORA_CATALOG[str(x)], model_id)
+                ]
+            bm[model_id] = prev
+            lc["by_model"] = bm
+
+        # Legacy flat keys (flux1_t2i only) for older readers.
+        if enabled_ids is not None and host_id in (None, "flux1_t2i"):
+            lc["enabled_ids"] = [
+                str(x)
+                for x in (enabled_ids if host_id else lc.get("by_host", {}).get("flux1_t2i", {}).get("enabled_ids", []))
+                if str(x) in LORA_CATALOG
+            ]
+        if hidden is not None and host_id is None:
+            lc["deleted_ids"] = sorted(
+                {
+                    str(x)
+                    for hid, slice_ in (lc.get("by_host") or {}).items()
+                    for x in (slice_.get("hidden_ids") or [])
+                    if str(x) in LORA_CATALOG
+                }
+            )
+
         if model_support is not None:
             cleaned: dict = {}
             allowed = set(LORA_PROBE_MODEL_ORDER)
             for lid, models in model_support.items():
                 lid_s = str(lid)
-                if lid_s not in FLUX_LORA_CATALOG:
+                if lid_s not in LORA_CATALOG:
                     continue
                 if not isinstance(models, (list, tuple)):
                     continue
-                cleaned[lid_s] = [
-                    str(m)
-                    for m in models
-                    if str(m) in allowed
-                ]
+                cleaned[lid_s] = [str(m) for m in models if str(m) in allowed]
             lc["model_support"] = cleaned
+
+        imagegen["lora_catalog"] = lc
 
     _mutate_imagegen_settings(mutate)

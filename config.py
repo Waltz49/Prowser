@@ -10,8 +10,13 @@ import json
 import os
 import shutil
 import getpass
+import threading
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
+
+# Serialize reads/writes of ~/.prowser/data/settings.json (avoid corrupt partial reads).
+_settings_file_lock = threading.Lock()
 
 BROWSE_TRANSPARENCY_THEME_IDS = ("dark", "light", "user")
 
@@ -118,6 +123,21 @@ from theme_defaults import (
     default_light_theme_colors,
     default_user_theme_colors,
 )
+
+def _try_parse_settings_file(path: Path) -> Optional[dict]:
+    """Return parsed settings dict, or None if missing/unreadable/invalid JSON."""
+    try:
+        if not path.is_file() or path.stat().st_size == 0:
+            return None
+        with open(path, "r") as f:
+            content = f.read().strip()
+        if not content:
+            return None
+        data = json.loads(content)
+        return data if isinstance(data, dict) else None
+    except (json.JSONDecodeError, OSError, TypeError, ValueError):
+        return None
+
 
 class ImageBrowserConfig:
     """Configuration manager for Image Browser paths and settings"""
@@ -478,106 +498,134 @@ class ImageBrowserConfig:
             **IMAGEGEN_DEFAULTS,
         }
         
+        with _settings_file_lock:
+            return self._load_settings_locked(default_settings)
+
+    def _backup_settings_snapshot(self, path: Path, *, label: str) -> None:
+        """Keep a timestamped copy; never replace a good .json.bak with a tiny corrupt file."""
         try:
-            if self.settings_file.exists():
-                # Check if file is empty or too small (corrupted)
-                file_size = self.settings_file.stat().st_size
-                if file_size == 0:
-                    # File is empty, treat as if it doesn't exist
-                    self.save_settings(default_settings)
-                    return self._merge_browse_preview_into_loaded_settings(default_settings)
-                
-                with open(self.settings_file, 'r') as f:
-                    content = f.read().strip()
-                    if not content:
-                        # File is empty or whitespace only
-                        self.save_settings(default_settings)
-                        return self._merge_browse_preview_into_loaded_settings(default_settings)
-                    
-                    settings = json.loads(content)
-                    # Merge with defaults to handle missing keys
-                    needs_save = False
-                    # Only check keys missing from settings
-                    missing_keys = default_settings.keys() - settings.keys()
-                    if missing_keys:
-                        for key in missing_keys:
-                            # Filled by merge_browse_transparency_settings below (uses legacy keys if present)
-                            if key == "browse_transparency_settings":
-                                continue
-                            settings[key] = default_settings[key]
-                        needs_save = True
-                    # Validate image_extensions format
-                    if 'image_extensions' in settings:
-                        extensions = settings['image_extensions']
-                        if not isinstance(extensions, list) or len(extensions) == 0:
-                            settings['image_extensions'] = default_settings['image_extensions']
-                            needs_save = True
-                    # Normalize per-theme browse transparency; mirror legacy keys for active theme
-                    prev_bts = settings.get("browse_transparency_settings")
-                    raw_bts = prev_bts if isinstance(prev_bts, dict) and prev_bts else None
-                    settings["browse_transparency_settings"] = merge_browse_transparency_settings(
-                        raw_bts,
-                        settings.get("transparency_color"),
-                        settings.get("use_diamonds"),
-                    )
-                    tc, ud = effective_browse_transparency(settings)
-                    if (
-                        settings.get("transparency_color") != tc
-                        or settings.get("use_diamonds") != ud
-                        or prev_bts != settings["browse_transparency_settings"]
-                    ):
-                        settings["transparency_color"] = list(tc)
-                        settings["use_diamonds"] = ud
-                        needs_save = True
-                    # Save if defaults were added or validation fixed something
-                    if needs_save:
-                        self.save_settings(settings)
-                    return self._merge_browse_preview_into_loaded_settings(settings)
+            if not path.is_file() or path.stat().st_size < 64:
+                return
+            stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            tagged = path.with_name(f"{path.stem}.{label}.{stamp}{path.suffix}")
+            shutil.copy2(path, tagged)
+            bak = path.with_suffix(".json.bak")
+            if not bak.is_file() or path.stat().st_size >= bak.stat().st_size:
+                shutil.copy2(path, bak)
+        except OSError:
+            pass
+
+    def _recover_settings_from_backups(self) -> Optional[dict]:
+        """Try alternate settings files (newest/largest valid JSON first)."""
+        candidates: List[Path] = []
+        for pattern in (
+            "settings.json.pre_imagegen_write",
+            "settings.json.bak",
+            "settings.json.corrupt.*",
+        ):
+            if "*" in pattern:
+                candidates.extend(self.data_dir.glob(pattern))
             else:
-                # File doesn't exist, save defaults
-                self.save_settings(default_settings)
-                return self._merge_browse_preview_into_loaded_settings(default_settings)
-        except json.JSONDecodeError as e:
-            print(f"Error loading settings (JSON decode error): {e}")
-            # File is corrupted, backup and recreate
-            try:
-                if self.settings_file.exists():
-                    # Backup corrupted file
-                    backup_path = self.settings_file.with_suffix('.json.bak')
-                    shutil.copy2(self.settings_file, backup_path)
-            except Exception:
-                pass
-            # On error, save defaults and return them
-            try:
-                self.save_settings(default_settings)
-            except Exception:
-                pass
+                p = self.data_dir / pattern
+                if p.is_file():
+                    candidates.append(p)
+        candidates = sorted(
+            {p.resolve() for p in candidates if p.is_file()},
+            key=lambda p: (p.stat().st_size, p.stat().st_mtime),
+            reverse=True,
+        )
+        for path in candidates:
+            data = _try_parse_settings_file(path)
+            if data:
+                print(f"[settings] Recovered from backup: {path}")
+                return data
+        return None
+
+    def _merge_loaded_with_defaults(
+        self, settings: dict, default_settings: dict, *, save_merged: bool
+    ) -> dict:
+        needs_save = False
+        missing_keys = default_settings.keys() - settings.keys()
+        if missing_keys:
+            for key in missing_keys:
+                if key == "browse_transparency_settings":
+                    continue
+                settings[key] = default_settings[key]
+            needs_save = True
+        if "image_extensions" in settings:
+            extensions = settings["image_extensions"]
+            if not isinstance(extensions, list) or len(extensions) == 0:
+                settings["image_extensions"] = default_settings["image_extensions"]
+                needs_save = True
+        prev_bts = settings.get("browse_transparency_settings")
+        raw_bts = prev_bts if isinstance(prev_bts, dict) and prev_bts else None
+        settings["browse_transparency_settings"] = merge_browse_transparency_settings(
+            raw_bts,
+            settings.get("transparency_color"),
+            settings.get("use_diamonds"),
+        )
+        tc, ud = effective_browse_transparency(settings)
+        if (
+            settings.get("transparency_color") != tc
+            or settings.get("use_diamonds") != ud
+            or prev_bts != settings["browse_transparency_settings"]
+        ):
+            settings["transparency_color"] = list(tc)
+            settings["use_diamonds"] = ud
+            needs_save = True
+        if save_merged and needs_save:
+            self._save_settings_unlocked(settings)
+        return self._merge_browse_preview_into_loaded_settings(settings)
+
+    def _load_settings_locked(self, default_settings: dict) -> dict:
+        path = self.settings_file
+        if not path.exists():
+            self._save_settings_unlocked(default_settings)
             return self._merge_browse_preview_into_loaded_settings(default_settings)
-        except Exception as e:
-            print(f"Error loading settings: {e}")
-            # On error, save defaults and return them
-            try:
-                self.save_settings(default_settings)
-            except Exception:
-                pass
-            return self._merge_browse_preview_into_loaded_settings(default_settings)
-    
-    def save_settings(self, settings: dict):
-        """Save user settings to ~/.prowser/data/settings.json"""
+
+        settings = _try_parse_settings_file(path)
+        if settings is not None:
+            return self._merge_loaded_with_defaults(
+                settings, default_settings, save_merged=True
+            )
+
+        # Primary file unreadable — backup corrupt snapshot, try recovery (never factory-reset).
+        print(
+            "Error loading settings: primary file is missing, empty, or invalid JSON. "
+            "Attempting backup recovery."
+        )
+        self._backup_settings_snapshot(path, label="corrupt")
+        recovered = self._recover_settings_from_backups()
+        if recovered is not None:
+            self._save_settings_unlocked(recovered)
+            return self._merge_loaded_with_defaults(
+                recovered, default_settings, save_merged=True
+            )
+
+        print(
+            "[settings] No valid backup found; using in-memory defaults only "
+            "(your settings.json was not overwritten)."
+        )
+        return self._merge_browse_preview_into_loaded_settings(default_settings)
+
+    def _save_settings_unlocked(self, settings: dict) -> None:
+        """Write settings.json (caller must hold _settings_file_lock)."""
         try:
-            # Ensure data directory exists before saving
             self.data_dir.mkdir(parents=True, exist_ok=True)
-            # Write to a temporary file first, then rename (atomic write)
-            import tempfile
-            temp_file = self.settings_file.with_suffix('.json.tmp')
-            with open(temp_file, 'w') as f:
-                json.dump(settings, f, indent=2)
+            temp_file = self.settings_file.with_suffix(".json.tmp")
+            payload = copy.deepcopy(settings)
+            with open(temp_file, "w") as f:
+                json.dump(payload, f, indent=2)
                 f.flush()
-                os.fsync(f.fileno())  # Force write to disk
-            # Atomic rename
+                os.fsync(f.fileno())
             temp_file.replace(self.settings_file)
         except Exception as e:
             print(f"Error saving settings: {e}")
+    
+    def save_settings(self, settings: dict):
+        """Save user settings to ~/.prowser/data/settings.json"""
+        with _settings_file_lock:
+            self._save_settings_unlocked(settings)
     
     def update_setting(self, key: str, value):
         """Update a single setting and save to file"""
@@ -707,14 +755,23 @@ IMAGEGEN_DEFAULTS = {
         },
         "last_function": "create",
         "lora_catalog": {
-            "enabled_ids": [
-                "mspaint1",
-                "super_realism",
-                "sldr_nsfw_v2",
-                "pola_photo_flux",
-                "paper_cutout",
-            ],
-            "deleted_ids": [],
+            "by_model": {
+                "schnell": {"enabled_ids": [], "hidden_ids": []},
+                "dev": {
+                    "enabled_ids": [
+                        "mspaint1",
+                        "super_realism",
+                        "sldr_nsfw_v2",
+                        "pola_photo_flux",
+                        "paper_cutout",
+                    ],
+                    "hidden_ids": [],
+                },
+                "fill": {"enabled_ids": [], "hidden_ids": []},
+                "klein_4b": {"enabled_ids": [], "hidden_ids": []},
+                "klein_9b": {"enabled_ids": [], "hidden_ids": []},
+            },
+            "model_support": {},
         },
         "models": {
             "flux_schnell_mflux": {

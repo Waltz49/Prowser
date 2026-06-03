@@ -10,14 +10,15 @@ from PySide6.QtCore import QThread, Signal, Qt
 from PySide6.QtWidgets import QApplication, QLabel, QProgressDialog
 
 from config import get_config
-from imagegen_plugins.flux_lora_catalog import (
-    FLUX_LORA_CATALOG,
+from imagegen_plugins.lora_catalog import (
+    LORA_CATALOG,
     LORA_MODEL_ABBREV,
     catalog_entries_for_settings,
-    deleted_lora_ids,
-    enabled_lora_ids,
     probe_models_for_lora_entry,
 )
+from imagegen_plugins.lora_host_registry import lora_hosts_for_settings
+
+FLUX_LORA_CATALOG = LORA_CATALOG
 from imagegen_plugins.image_gen_persistence import save_lora_catalog_state
 from imagegen_plugins.lora_compatibility_checker import (
     LoraCheckStats,
@@ -69,7 +70,9 @@ def run_check_loras_dialog(parent) -> None:
         return
 
     settings = get_config().load_settings()
-    entries = catalog_entries_for_settings(settings)
+    entries = []
+    for host in lora_hosts_for_settings():
+        entries.extend(catalog_entries_for_settings(settings, host.host_id))
     if not entries:
         show_styled_information(
             parent,
@@ -185,15 +188,8 @@ def run_check_loras_dialog(parent) -> None:
             show_styled_information(parent, "Check LoRAs", "Cancelled.")
             return
 
-        enabled = list(enabled_lora_ids(settings))
-        deleted = sorted(set(deleted_lora_ids(settings)) | set(result.deleted_ids))
-        enabled = [lid for lid in enabled if lid not in result.deleted_ids]
-
-        save_lora_catalog_state(
-            enabled_ids=enabled,
-            deleted_ids=deleted,
-            model_support=result.model_support,
-        )
+        save_lora_catalog_state(model_support=result.model_support)
+        settings = get_config().load_settings()
 
         mw = parent
         if hasattr(mw, "refresh_open_imagegen_lora_combos"):
@@ -201,25 +197,40 @@ def run_check_loras_dialog(parent) -> None:
 
         sd = getattr(mw, "settings_dialog", None)
         if sd is not None and getattr(sd, "isVisible", lambda: False)():
-            if hasattr(sd, "_lora_deleted_ids"):
-                sd._lora_deleted_ids = set(deleted)
+            from imagegen_plugins.lora_catalog_settings import (
+                enabled_lora_ids_for_model,
+                hidden_lora_ids_for_model,
+            )
+
+            model_key = (
+                sd._current_lora_model_key()
+                if hasattr(sd, "_current_lora_model_key")
+                else "dev"
+            )
+            if hasattr(sd, "_lora_hidden_ids"):
+                sd._lora_hidden_ids = set(hidden_lora_ids_for_model(model_key, settings))
             if hasattr(sd, "_rebuild_lora_settings_grid"):
                 sd._rebuild_lora_settings_grid()
             if hasattr(sd, "_apply_lora_settings_to_widgets"):
-                sd._apply_lora_settings_to_widgets(enabled)
+                sd._apply_lora_settings_to_widgets(
+                    list(enabled_lora_ids_for_model(model_key, settings))
+                )
 
         st = result.stats
-        show_styled_information(
-            parent,
-            "Check LoRAs",
-            (
-                f"Finished.\n\n"
-                f"Supported: {st.supported_loras} LoRA(s)\n"
-                f"Removed (no model): {st.removed_loras}\n"
-                f"Skipped: {st.skipped_loras}\n"
-                f"Probes run: {st.probes_done}/{st.probes_total}"
-            ),
-        )
+        lines = [
+            f"Catalog entries checked: {st.loras_total}",
+            f"Passed probe: {st.supported_loras}",
+            f"Failed probe: {st.removed_loras}",
+            f"Skipped (download/error): {st.skipped_loras}",
+            f"Probes run: {st.probes_done}/{st.probes_total}",
+            "",
+            "Only LoRAs that passed the probe for a base model appear in Settings → LoRA "
+            "and in that model’s generation LoRA menu (after enable + install).",
+            "",
+            "Re-run Check LoRAs after installing new weights. Use Hide in Settings to "
+            "remove a passing LoRA you do not want listed.",
+        ]
+        show_styled_information(parent, "Check LoRAs", "\n".join(lines))
 
     worker = LoraCheckWorker(parent)
     worker.progress_signal.connect(on_progress)

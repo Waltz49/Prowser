@@ -45,7 +45,9 @@ from imagegen_plugins.imagegen_flux_prompt_ai import ImageGenFluxPromptAi
 from lmstudio_caption import is_lmstudio_services_available
 from imagegen_plugins.image_gen_model_selector import (
     build_model_selector_row,
+    refresh_dialog_mflux_lora_combo,
     resolve_initial_plugin,
+    values_after_plugin_switch,
     sync_model_comment_label,
 )
 from imagegen_plugins.image_gen_persistence import (
@@ -195,12 +197,17 @@ class ImageGenExpandDialog(ImageGenDimensionAspectMixin, QDialog):
         lora_widget, _, lora_spec = entry
         if lora_spec.kind != "choice":
             return
-        from imagegen_plugins.mflux_lora_presets import repopulate_mflux_lora_combo
+        from imagegen_plugins.mflux_lora_presets import (
+            coerce_lora_preset_id,
+            repopulate_mflux_lora_combo,
+        )
 
         repopulate_mflux_lora_combo(
             lora_widget,
-            pipeline_id=self.plugin.pipeline_id,
-            plugin_hf_model_id=self.plugin.hf_model_id,
+            plugin=self.plugin,
+            current_preset_id=coerce_lora_preset_id(
+                (self._values or {}).get("mflux_lora", "none")
+            ),
         )
 
     def _on_source_image_changed(self, path: str) -> None:
@@ -303,31 +310,17 @@ class ImageGenExpandDialog(ImageGenDimensionAspectMixin, QDialog):
         self._clear_field_rows()
 
         spec_keys = {s.key for s in self._specs}
-        combine_guidance_lora = (
-            "guidance_scale" in spec_keys and "mflux_lora" in spec_keys
-        )
         combine_seed_random = field_specs_share_seed_row(spec_keys)
 
         for spec in self._specs:
-            if combine_guidance_lora and spec.key == "mflux_lora":
-                continue
             if combine_seed_random and spec.key == "random_seed":
                 continue
 
             widget, extra = self._widget_for_spec(spec)
             self._widgets[spec.key] = (widget, extra, spec)
 
-            if combine_guidance_lora and spec.key == "guidance_scale":
-                lora_spec = next(s for s in self._specs if s.key == "mflux_lora")
-                lora_widget, lora_extra = self._widget_for_spec(lora_spec)
-                self._widgets[lora_spec.key] = (lora_widget, lora_extra, lora_spec)
-                row_w = QWidget()
-                row = QHBoxLayout(row_w)
-                row.setContentsMargins(0, 0, 0, 0)
-                row.addWidget(widget, 1)
-                row.addWidget(QLabel("LoRA:"), 0)
-                row.addWidget(lora_widget, 0)
-                self._fields_form.addRow(spec.label, row_w)
+            if spec.key == "mflux_lora":
+                self._fields_form.addRow(spec.label, widget)
                 continue
 
             if spec.kind == "text":
@@ -394,7 +387,7 @@ class ImageGenExpandDialog(ImageGenDimensionAspectMixin, QDialog):
             or not new_plugin.is_available()
         ):
             return
-        current = self.collect_values()
+        current = values_after_plugin_switch(self.collect_values(), new_plugin)
         try:
             save_dialog_settings(self._function, current)
         except Exception:
@@ -403,6 +396,7 @@ class ImageGenExpandDialog(ImageGenDimensionAspectMixin, QDialog):
         self._load_plugin_state(saved_override=current)
         sync_model_comment_label(self._model_comment_label, new_plugin)
         self._populate_field_rows()
+        refresh_dialog_mflux_lora_combo(self)
         save_active_plugin_id_for_function(self._function, new_plugin.plugin_id)
 
     def _connect_canvas_dimension_fields(self) -> None:

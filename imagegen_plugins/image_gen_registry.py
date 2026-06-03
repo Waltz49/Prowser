@@ -30,6 +30,7 @@ class ImageGenModelPlugin:
         *,
         function: str = "create",
         model_comment: str = "",
+        lora_host_id: Optional[str] = None,
     ):
         # AI/dev: ``function`` is create | edit | expand | infill. Multiple plugins may
         # share a pipeline; the user picks the model in the function dialog dropdown.
@@ -41,6 +42,7 @@ class ImageGenModelPlugin:
         self.hf_model_id = hf_model_id
         self.function = function
         self.model_comment = model_comment.strip()
+        self.lora_host_id = lora_host_id
 
     def is_available(self) -> bool:
         return pipeline_is_available(self.pipeline_id)
@@ -63,6 +65,7 @@ class ImageGenModelPlugin:
             self.pipeline_id,
             values,
             plugin_hf_model_id=self.hf_model_id,
+            lora_host_id=self.lora_host_id,
         )
 
     def worker_script(self) -> str:
