@@ -149,6 +149,8 @@ class InfillPaintSettingsDialog(ImageGenDialog):
 
     def _hide_prompt_and_import_rows(self) -> None:
         """Hide prompt/import UI while keeping widgets and import handlers intact."""
+        if self._side_btn_host is not None:
+            self._side_btn_host.hide()
         if self._fields_form is None:
             return
         entry = self._widgets.get("prompt")

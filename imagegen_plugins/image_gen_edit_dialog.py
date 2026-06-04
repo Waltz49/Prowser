@@ -52,7 +52,10 @@ from imagegen_plugins.image_gen_dialog import (
     build_seed_and_random_seed_row,
     configure_image_gen_form_layout,
     field_specs_share_seed_row,
+    finalize_image_gen_side_button_column,
+    prepare_image_gen_side_button_column,
     validate_copies_require_random_seed,
+    wrap_image_gen_controls_with_side_buttons,
 )
 from imagegen_plugins.image_gen_source_nav import (
     ImageGenSourceNavRow,
@@ -628,6 +631,8 @@ class ImageGenEditDialog(QDialog):
         self._preview_layout: Optional[QVBoxLayout] = None
         self._use_last_generated_cb: Optional[QCheckBox] = None
         self._flux_prompt_ai: Optional[ImageGenFluxPromptAi] = None
+        self._side_btn_host: Optional[QWidget] = None
+        self._side_btn_col: Optional[QVBoxLayout] = None
 
         initial = resolve_initial_plugin(
             self._plugins,
@@ -846,7 +851,10 @@ class ImageGenEditDialog(QDialog):
 
         self._populate_field_rows()
         scroll.setWidget(fields_inner)
-        splitter.add_controls_pane(scroll)
+        controls = wrap_image_gen_controls_with_side_buttons(
+            scroll, self._side_btn_host
+        )
+        splitter.add_controls_pane(controls)
         layout.addWidget(splitter, 1)
         if self._source_nav is not None:
             install_source_nav_keyboard_shortcuts(self, self._source_nav)
@@ -888,26 +896,12 @@ class ImageGenEditDialog(QDialog):
                 continue
 
             if spec.kind == "text" and spec.key == "prompt":
-                row_w = QWidget()
-                row = QHBoxLayout(row_w)
-                row.setContentsMargins(0, 0, 0, 0)
-                row.addWidget(widget, 1)
-                btn_col = QVBoxLayout()
-                btn_col.setContentsMargins(0, 0, 0, 0)
-                btn_col.setSpacing(4)
-                import_text_btn = QPushButton("Import Prompt")
-                import_text_btn.clicked.connect(self._on_import_text)
-                apply_edit_import_text_button_tooltip(import_text_btn)
-                btn_col.addWidget(import_text_btn, 0, Qt.AlignmentFlag.AlignTop)
-                import_all_btn = QPushButton("Import Available")
-                import_all_btn.clicked.connect(self._on_import_all)
-                apply_edit_import_all_button_tooltip(import_all_btn)
-                btn_col.addWidget(import_all_btn, 0, Qt.AlignmentFlag.AlignTop)
-                self._ensure_flux_prompt_ai().add_button(btn_col)
-                btn_host = QWidget()
-                btn_host.setLayout(btn_col)
-                row.addWidget(btn_host, 0, Qt.AlignmentFlag.AlignTop)
-                self._fields_form.addRow(spec.label, row_w)
+                btn_col = prepare_image_gen_side_button_column(
+                    self, needed=True
+                )
+                if btn_col is not None:
+                    self._populate_prompt_side_buttons(btn_col)
+                self._fields_form.addRow(spec.label, widget)
             elif combine_seed_random and spec.key == "seed":
                 random_spec = next(s for s in self._specs if s.key == "random_seed")
                 random_widget, random_extra = self._widget_for_spec(random_spec)
@@ -1058,6 +1052,18 @@ class ImageGenEditDialog(QDialog):
         widget, _, spec = entry
         if spec.kind == "text":
             widget.setPlainText(text)
+
+    def _populate_prompt_side_buttons(self, btn_col: QVBoxLayout) -> None:
+        import_text_btn = QPushButton("Import Prompt")
+        import_text_btn.clicked.connect(self._on_import_text)
+        apply_edit_import_text_button_tooltip(import_text_btn)
+        btn_col.addWidget(import_text_btn, 0, Qt.AlignmentFlag.AlignTop)
+        import_all_btn = QPushButton("Import Available")
+        import_all_btn.clicked.connect(self._on_import_all)
+        apply_edit_import_all_button_tooltip(import_all_btn)
+        btn_col.addWidget(import_all_btn, 0, Qt.AlignmentFlag.AlignTop)
+        self._ensure_flux_prompt_ai().add_button(btn_col)
+        finalize_image_gen_side_button_column(btn_col)
 
     def _ensure_flux_prompt_ai(self) -> ImageGenFluxPromptAi:
         if self._flux_prompt_ai is None:

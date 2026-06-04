@@ -6,7 +6,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional, Tuple
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QComboBox, QHBoxLayout, QLabel, QSizePolicy, QWidget
+from PySide6.QtWidgets import QComboBox, QLabel, QSizePolicy, QVBoxLayout, QWidget
 
 from imagegen_plugins.image_gen_persistence import load_dialog_settings
 from imagegen_plugins.image_gen_pipeline_modes import menu_label_with_quant
@@ -49,7 +49,7 @@ def sync_model_comment_label(
     label: QLabel,
     plugin: Optional[ImageGenModelPlugin],
 ) -> None:
-    """Update the hint printed beside the model pulldown for the selected plugin."""
+    """Update the hint printed under the model pulldown for the selected plugin."""
     text = (plugin.model_comment or "").strip() if plugin is not None else ""
     label.setText(text)
     label.setVisible(bool(text))
@@ -87,7 +87,7 @@ def build_model_selector_row(
     selected_plugin_id: Optional[str],
     parent: Optional[QWidget] = None,
 ) -> Tuple[QWidget, QComboBox, QLabel, Dict[str, ImageGenModelPlugin]]:
-    """Row widget: model pulldown + optional ``model_comment`` beside it."""
+    """Block widget: model pulldown with optional ``model_comment`` underneath."""
     combo, plugins_by_id = build_plugin_model_combo(
         plugins,
         selected_plugin_id=selected_plugin_id,
@@ -103,12 +103,13 @@ def build_model_selector_row(
     )
     sync_model_comment_label(comment_label, plugin)
 
-    row = QWidget(parent)
-    row_layout = QHBoxLayout(row)
-    row_layout.setContentsMargins(0, 0, 0, 0)
-    row_layout.addWidget(combo, 0)
-    row_layout.addWidget(comment_label, 1)
-    return row, combo, comment_label, plugins_by_id
+    block = QWidget(parent)
+    block_layout = QVBoxLayout(block)
+    block_layout.setContentsMargins(0, 0, 0, 0)
+    block_layout.setSpacing(4)
+    block_layout.addWidget(combo, 0)
+    block_layout.addWidget(comment_label, 0)
+    return block, combo, comment_label, plugins_by_id
 
 
 def resolve_initial_plugin(

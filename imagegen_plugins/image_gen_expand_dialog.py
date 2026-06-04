@@ -37,8 +37,11 @@ from imagegen_plugins.image_gen_dialog import (
     build_seed_and_random_seed_row,
     configure_image_gen_form_layout,
     field_specs_share_seed_row,
+    finalize_image_gen_side_button_column,
     load_import_prompt_from_path,
+    prepare_image_gen_side_button_column,
     validate_copies_require_random_seed,
+    wrap_image_gen_controls_with_side_buttons,
 )
 from imagegen_plugins.image_gen_active_model import save_active_plugin_id_for_function
 from imagegen_plugins.imagegen_flux_prompt_ai import ImageGenFluxPromptAi
@@ -125,6 +128,8 @@ class ImageGenExpandDialog(ImageGenDimensionAspectMixin, QDialog):
         self._fields_form: Optional[QFormLayout] = None
         self._init_dim_aspect_state()
         self._flux_prompt_ai: Optional[ImageGenFluxPromptAi] = None
+        self._side_btn_host: Optional[QWidget] = None
+        self._side_btn_col: Optional[QVBoxLayout] = None
 
         initial = resolve_initial_plugin(
             self._plugins,
@@ -265,7 +270,10 @@ class ImageGenExpandDialog(ImageGenDimensionAspectMixin, QDialog):
 
         self._populate_field_rows()
         scroll.setWidget(fields_inner)
-        splitter.add_controls_pane(scroll)
+        controls = wrap_image_gen_controls_with_side_buttons(
+            scroll, self._side_btn_host
+        )
+        splitter.add_controls_pane(controls)
         layout.addWidget(splitter, 1)
         install_source_nav_keyboard_shortcuts(self, self._source_nav)
 
@@ -324,35 +332,13 @@ class ImageGenExpandDialog(ImageGenDimensionAspectMixin, QDialog):
                 continue
 
             if spec.kind == "text":
-                if spec.key == "prompt" and (
-                    self._show_import_button()
-                    or self._has_dim_fields()
-                    or bool(self.source_path)
-                    or is_lmstudio_services_available()
-                ):
-                    row_w = QWidget()
-                    row = QHBoxLayout(row_w)
-                    row.setContentsMargins(0, 0, 0, 0)
-                    row.addWidget(widget, 1)
-                    btn_col = QVBoxLayout()
-                    btn_col.setContentsMargins(0, 0, 0, 0)
-                    btn_col.setSpacing(4)
-                    if self._show_import_button() or bool(self.source_path):
-                        import_text_btn = QPushButton("Import Prompt")
-                        import_text_btn.clicked.connect(self._on_import_prompt_text)
-                        apply_edit_import_text_button_tooltip(import_text_btn)
-                        btn_col.addWidget(import_text_btn, 0, Qt.AlignmentFlag.AlignTop)
-                        import_all_btn = QPushButton("Import Available")
-                        import_all_btn.clicked.connect(self._on_import_available)
-                        apply_edit_import_all_button_tooltip(import_all_btn)
-                        btn_col.addWidget(import_all_btn, 0, Qt.AlignmentFlag.AlignTop)
-                    if self._has_dim_fields():
-                        self._add_dim_helper_buttons(btn_col)
-                    self._ensure_flux_prompt_ai().add_button(btn_col)
-                    btn_host = QWidget()
-                    btn_host.setLayout(btn_col)
-                    row.addWidget(btn_host, 0, Qt.AlignmentFlag.AlignTop)
-                    self._fields_form.addRow(spec.label, row_w)
+                if spec.key == "prompt":
+                    btn_col = prepare_image_gen_side_button_column(
+                        self, needed=self._needs_prompt_side_column()
+                    )
+                    if btn_col is not None:
+                        self._populate_prompt_side_buttons(btn_col)
+                    self._fields_form.addRow(spec.label, widget)
                 else:
                     self._fields_form.addRow(spec.label, widget)
             elif combine_seed_random and spec.key == "seed":
@@ -430,6 +416,29 @@ class ImageGenExpandDialog(ImageGenDimensionAspectMixin, QDialog):
         if parent is not None and hasattr(parent, "current_view_mode"):
             return parent
         return None
+
+    def _needs_prompt_side_column(self) -> bool:
+        return (
+            self._show_import_button()
+            or self._has_dim_fields()
+            or bool(self.source_path)
+            or is_lmstudio_services_available()
+        )
+
+    def _populate_prompt_side_buttons(self, btn_col: QVBoxLayout) -> None:
+        if self._show_import_button() or bool(self.source_path):
+            import_text_btn = QPushButton("Import Prompt")
+            import_text_btn.clicked.connect(self._on_import_prompt_text)
+            apply_edit_import_text_button_tooltip(import_text_btn)
+            btn_col.addWidget(import_text_btn, 0, Qt.AlignmentFlag.AlignTop)
+            import_all_btn = QPushButton("Import Available")
+            import_all_btn.clicked.connect(self._on_import_available)
+            apply_edit_import_all_button_tooltip(import_all_btn)
+            btn_col.addWidget(import_all_btn, 0, Qt.AlignmentFlag.AlignTop)
+        if self._has_dim_fields():
+            self._add_dim_helper_buttons(btn_col)
+        self._ensure_flux_prompt_ai().add_button(btn_col)
+        finalize_image_gen_side_button_column(btn_col)
 
     def _show_import_button(self) -> bool:
         mw = self._main_window()

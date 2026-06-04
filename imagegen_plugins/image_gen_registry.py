@@ -34,7 +34,7 @@ class ImageGenModelPlugin:
     ):
         # AI/dev: ``function`` is create | edit | expand | infill. Multiple plugins may
         # share a pipeline; the user picks the model in the function dialog dropdown.
-        # ``model_comment`` is shown beside the model pulldown (e.g. speed/quality notes).
+        # ``model_comment`` is shown under the model pulldown (e.g. speed/quality notes).
         self.plugin_id = plugin_id
         self.pipeline_id = pipeline_id
         self.display_name = display_name

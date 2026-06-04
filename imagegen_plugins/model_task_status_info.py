@@ -284,12 +284,15 @@ def _information_panel_skip_cooldown_icon_html() -> str:
 
 
 def format_information_generation_cooldown_cell_html(remaining_seconds: int) -> str:
-    """Cooldown row for File Information: label, seconds in parens, skip icon."""
+    """Cooldown row for File Information: label, seconds in parens, skip + cancel icons."""
     remaining = max(0, int(remaining_seconds))
     text = f"Cooldown: ({remaining})"
-    return _information_panel_inline_row_html(
-        text, _information_panel_skip_cooldown_icon_html()
+    icons = (
+        _information_panel_skip_cooldown_icon_html()
+        + '<span style="display:inline-block;width:4px;"></span>'
+        + generation_cancel_icon_html()
     )
+    return _information_panel_inline_row_html(text, icons)
 
 
 def generation_cancel_icon_html() -> str:
