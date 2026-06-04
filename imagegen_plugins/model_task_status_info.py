@@ -261,12 +261,22 @@ def format_information_generation_timing_cell_html(
     estimate_seconds: float | None = None,
     *,
     cancel_icon_html: str = "",
+    completed_steps: int | None = None,
+    total_steps: int | None = None,
 ) -> str:
-    """Single-line Elapsed/Est (and optional cancel icon) for the File Information panel."""
-    parts: list[str] = [f"Elapsed: {_escape(_format_duration(elapsed_seconds))}"]
+    """Elapsed/Est and step progress (two lines) for the File Information active-job box."""
+    elapsed_parts = [f"Elapsed: {_escape(_format_duration(elapsed_seconds))}"]
     if estimate_seconds is not None and estimate_seconds > 0:
-        parts.append(f"Est: {_escape(_format_duration(estimate_seconds))}")
-    text = " ".join(parts)
+        elapsed_parts.append(f"Est: {_escape(_format_duration(estimate_seconds))}")
+    lines = [" ".join(elapsed_parts)]
+    if (
+        completed_steps is not None
+        and total_steps is not None
+        and total_steps > 0
+        and 0 < completed_steps < total_steps
+    ):
+        lines.append(f"{completed_steps} of {total_steps} steps completed")
+    text = "\n".join(lines)
     return _information_panel_inline_row_html(text, cancel_icon_html)
 
 

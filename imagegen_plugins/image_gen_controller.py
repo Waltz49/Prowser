@@ -811,15 +811,17 @@ class ImageGenController(QObject):
 
     def snapshot_generation_timing_for_info_panel(
         self,
-    ) -> tuple[Optional[float], Optional[float]]:
-        """Elapsed and estimate for File Information live timing (one clock read)."""
+    ) -> tuple[Optional[float], Optional[float], Optional[int], Optional[int]]:
+        """Elapsed, estimate, and step progress for File Information active-job box."""
         if not self._tasks.is_running() or not self._output_path:
-            return None, None
+            return None, None, None, None
         in_cooldown = self._is_in_copy_cooldown()
         elapsed, estimate = self._snapshot_live_timing(in_cooldown=in_cooldown)
         if elapsed is None:
             elapsed = self._wall_clock_elapsed_seconds(in_cooldown=in_cooldown)
-        return elapsed, estimate
+        step = self._live_step if self._live_step_total > 0 else None
+        step_total = self._live_step_total if self._live_step_total > 0 else None
+        return elapsed, estimate, step, step_total
 
     def get_task_reference_paths(self) -> list[str]:
         return list(self._task_reference_paths)
@@ -1164,22 +1166,13 @@ class ImageGenController(QObject):
                         )
                     )
                     elapsed = self._live_generation_elapsed_seconds()
-                    estimate = None
-                    if elapsed is not None:
-                        estimate = self._estimate_remaining_seconds(
-                            elapsed=elapsed,
-                            completed_steps=step,
-                            total_steps=total,
-                            seconds_per_step=self._step_seconds_per_step,
-                        )
                     make_readable_user_comment_before_browse(
                         output_path,
                         model_name=plugin.menu_label(values),
                         values=values,
                         elapsed_seconds=elapsed,
-                        intermediate_step=step,
-                        intermediate_total=total,
-                        estimate_seconds=estimate,
+                        completed_step=step,
+                        total_steps=total,
                         reference_entries=ref_entries,
                         allow_cross_directory_references=allow_cross_dir,
                     )

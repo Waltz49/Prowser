@@ -953,13 +953,17 @@ class InformationSidebar(QWidget):
                 return format_information_generation_cooldown_cell_html(
                     controller.copy_cooldown_seconds_remaining()
                 )
-            elapsed, estimate = controller.snapshot_generation_timing_for_info_panel()
+            elapsed, estimate, step, step_total = (
+                controller.snapshot_generation_timing_for_info_panel()
+            )
             if elapsed is None:
                 return None
             return format_information_generation_timing_cell_html(
                 elapsed,
                 estimate,
                 cancel_icon_html=generation_cancel_icon_html(),
+                completed_steps=step,
+                total_steps=step_total,
             )
         except ImportError:
             return None
@@ -1174,7 +1178,7 @@ class InformationSidebar(QWidget):
                 f'<table style="border: {active_border}; border-collapse: collapse; '
                 f'width: 100%;">'
                 f'<tr><td style="border: {active_border}; padding: 4px 8px; color: {text_hex}; '
-                f'white-space: nowrap; vertical-align: middle; line-height: 16px;">'
+                f'white-space: pre-line; vertical-align: middle; line-height: 16px;">'
                 f"{gen_timing_cell_html}</td></tr></table>"
                 f"</div>"
             )
@@ -1422,7 +1426,6 @@ class InformationSidebar(QWidget):
                             disp = escape(desc)
                             disp = disp.replace('\n', '<br>')
                             disp = disp.replace('Image Model:<br>', '<h4>Image model</h4>')
-                            disp = disp.replace('Intermediate:<br>', '<h4>Intermediate</h4>')
                             disp = disp.replace('Prompt:<br>', '<h4>Prompt</h4>')
                             disp = disp.replace('Title:<br>', '<h4>Title</h4>')
                             disp = disp.replace('Description:<br>', '<h4>Description</h4>')

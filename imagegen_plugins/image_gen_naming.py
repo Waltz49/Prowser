@@ -254,9 +254,6 @@ def format_image_exif_prompt(
     quantization: Optional[int] = None,
     lora: Optional[str] = None,
     guidance: Optional[float] = None,
-    intermediate_step: Optional[int] = None,
-    intermediate_total: Optional[int] = None,
-    estimate_seconds: Optional[float] = None,
 ) -> str:
     """EXIF UserComment body: Image Model block then Prompt."""
     prompt_text = (prompt_text or "").strip()
@@ -284,27 +281,6 @@ def format_image_exif_prompt(
         except (TypeError, ValueError):
             pass
 
-    intermediate_line: Optional[str] = None
-    if (
-        intermediate_step is not None
-        and intermediate_total is not None
-        and int(intermediate_step) != int(intermediate_total)
-    ):
-        intermediate_parts = [
-            "Intermediate:",
-            (
-                f"Generated at Step {int(intermediate_step)} "
-                f"of {int(intermediate_total)}"
-            ),
-        ]
-        if estimate_seconds is not None and estimate_seconds > 0:
-            from imagegen_plugins.model_task_status_info import _format_duration
-
-            intermediate_parts.append(
-                f"Estimate: {_format_duration(estimate_seconds)} remaining"
-            )
-        intermediate_line = "\n".join(intermediate_parts)
-
     if model_name:
         iter_suffix = f" [{iterations}]" if iterations is not None else ""
         model_block = f"Image Model:\n{model_name}{iter_suffix}"
@@ -319,10 +295,6 @@ def format_image_exif_prompt(
                     f" ({format_elapsed_hms(elapsed_seconds / step_count)}/iter)"
                 )
             model_block += f"\n{elapsed_line}"
-            if intermediate_line:
-                model_block += f"\n\n{intermediate_line}"
-        elif intermediate_line:
-            model_block += f"\n\n{intermediate_line}"
         return f"{model_block}\n\nPrompt:\n{prompt_text}"
 
     if param_lines:
@@ -502,9 +474,6 @@ def format_exif_comment_from_mflux_metadata(
     model_name: str = "",
     values: Optional[Dict[str, Any]] = None,
     elapsed_seconds: Optional[float] = None,
-    intermediate_step: Optional[int] = None,
-    intermediate_total: Optional[int] = None,
-    estimate_seconds: Optional[float] = None,
     seed: Optional[int] = None,
 ) -> str:
     """Build Image Model / Prompt EXIF body from mflux JSON metadata."""
@@ -548,9 +517,6 @@ def format_exif_comment_from_mflux_metadata(
         quantization=quant,
         lora=lora_name_for_exif(values.get("mflux_lora")),
         guidance=guidance,
-        intermediate_step=intermediate_step,
-        intermediate_total=intermediate_total,
-        estimate_seconds=estimate_seconds,
     )
 
 
@@ -591,9 +557,8 @@ def make_readable_user_comment_before_browse(
     model_name: str,
     values: Dict[str, Any],
     elapsed_seconds: Optional[float] = None,
-    intermediate_step: int,
-    intermediate_total: int,
-    estimate_seconds: Optional[float] = None,
+    completed_step: int,
+    total_steps: int,
     seed: Optional[int] = None,
     reference_entries: Optional[List[Tuple[str, Optional[str]]]] = None,
     allow_cross_directory_references: bool = False,
@@ -601,7 +566,7 @@ def make_readable_user_comment_before_browse(
     """Write final-style Image Model / Prompt EXIF for in-progress step previews."""
     if not image_path or not os.path.isfile(image_path):
         return
-    if intermediate_step >= intermediate_total:
+    if completed_step >= total_steps:
         return
     try:
         from exif_utils import decode_usercomment, get_usercomment_from_path
@@ -621,9 +586,6 @@ def make_readable_user_comment_before_browse(
             model_name=model_name,
             values=values,
             elapsed_seconds=elapsed_seconds,
-            intermediate_step=intermediate_step,
-            intermediate_total=intermediate_total,
-            estimate_seconds=estimate_seconds,
             seed=seed,
         )
     else:
@@ -642,9 +604,6 @@ def make_readable_user_comment_before_browse(
             quantization=values.get("mflux_quantize"),
             lora=lora_name_for_exif(values.get("mflux_lora")),
             guidance=values.get("guidance_scale"),
-            intermediate_step=intermediate_step,
-            intermediate_total=intermediate_total,
-            estimate_seconds=estimate_seconds,
         )
     if not write_exif_user_comment(
         image_path,
