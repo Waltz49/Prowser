@@ -284,7 +284,7 @@ class ImageBrowserWindow(QMainWindow):
         # Essential state
         # Initialize FileDataModel for centralized data management
         from file_data_model import FileDataModel
-        from event_bus import EventBus, DIRECTORY_CHANGED, DISPLAYED_IMAGES_CHANGED, CURRENT_IMAGE_CHANGED
+        from event_bus import EventBus
         self.file_data_model = FileDataModel()
         self.event_bus = EventBus()
         # displayed_images, highlight_index, current_index, current_image_path, current_directory, current_view_mode
@@ -298,23 +298,10 @@ class ImageBrowserWindow(QMainWindow):
         self.file_data_model.displayed_images_changed.connect(self._on_displayed_images_changed)
         self.file_data_model.current_image_changed.connect(self._on_current_image_changed)
         self.file_data_model.directory_changed.connect(self._on_directory_changed)
-        # Wire FileDataModel to EventBus for event-driven subscribers
-        from event_bus import CURRENT_INDEX_CHANGED, VIEW_MODE_CHANGED
-        self.file_data_model.displayed_images_changed.connect(
-            lambda imgs: self.event_bus.emit(DISPLAYED_IMAGES_CHANGED, imgs)
-        )
-        self.file_data_model.current_image_changed.connect(
-            lambda path: self.event_bus.emit(CURRENT_IMAGE_CHANGED, path)
-        )
-        self.file_data_model.directory_changed.connect(
-            lambda path: self.event_bus.emit(DIRECTORY_CHANGED, path)
-        )
-        self.file_data_model.current_index_changed.connect(
-            lambda idx: self.event_bus.emit(CURRENT_INDEX_CHANGED, idx)
-        )
-        self.file_data_model.view_mode_changed.connect(
-            lambda mode: self.event_bus.emit(VIEW_MODE_CHANGED, mode)
-        )
+        from window_model_bridge import WindowModelBridge
+
+        self._model_event_bridge = WindowModelBridge(self.file_data_model, self.event_bus)
+        self._model_event_bridge.connect()
         # Normalize limit: None or 0 becomes 99999 (unlimited), always a number internally
         if limit is None or limit == 0:
             self.limit = 99999
@@ -1748,6 +1735,38 @@ class ImageBrowserWindow(QMainWindow):
         if getattr(self, 'menu_manager', None):
             self.menu_manager.update_view_menu_enabled_states()
 
+    def _wire_settings_dialog_signals(self):
+        """Connect settings dialog signals once per dialog instance (avoids disconnect warnings)."""
+        dlg = self.settings_dialog
+        if dlg is None or getattr(dlg, "_main_window_signals_wired", False):
+            return
+        dlg.settings_changed.connect(self.on_settings_changed)
+        dlg.accepted.connect(self._schedule_post_settings_menu_refresh)
+        dlg._main_window_signals_wired = True
+
+    def _schedule_post_settings_menu_refresh(self):
+        """Refresh File>Favorites, Move menu shortcuts, and sidebar after settings dialog closes.
+
+        Deferred so macOS can finish tearing down the modal menu bar before we rebuild menus.
+        Called from on_settings_changed and from SettingsDialog.accepted as a backup.
+        """
+        QTimer.singleShot(100, self._refresh_menus_after_settings)
+
+    def _refresh_menus_after_settings(self):
+        """Apply favorite_directories and move_destinations from disk to menus and key bindings."""
+        if getattr(self, 'menu_manager', None):
+            self.menu_manager.update_file_menu_favorites()
+            self.menu_manager.update_edit_menu_states()
+        if getattr(self, 'keyboard_handler_manager', None):
+            self.keyboard_handler_manager.refresh_favorite_bindings()
+        if (
+            getattr(self, 'right_sidebar', None)
+            and hasattr(self.right_sidebar, 'shortcuts_widget')
+            and self.right_sidebar.shortcuts_widget
+            and self.right_sidebar.is_shortcuts_visible()
+        ):
+            self.right_sidebar.shortcuts_widget.refresh_shortcuts()
+
     def update_edit_menu_states(self):
         """Update the enabled states and text of edit menu actions based on view mode and last drop location"""
         if getattr(self, 'menu_manager', None):
@@ -2771,37 +2790,24 @@ class ImageBrowserWindow(QMainWindow):
         QTimer.singleShot(50, lambda: self.refresh_from_configuration(configuration))
 
     def get_current_image_path(self) -> Optional[str]:
-        """Get the path of the currently displayed image.
-        
-        File path is ALWAYS the source of truth. This method prioritizes current_image_path
-        and falls back to deriving it from highlight_index only if current_image_path is not set.
-        """
-        displayed = self.get_displayed_images()
+        """Get the path of the currently displayed image (FileDataModel is source of truth)."""
+        if not getattr(self, "file_data_model", None):
+            return None
+        displayed = self.file_data_model.get_displayed_images()
         if not displayed:
             return None
-        
-        # ALWAYS use current_image_path if it's set and valid - this is the source of truth
-        if getattr(self, 'current_image_path', None):
-            # Verify it's still in displayed_images
-            if self.current_image_path in displayed:
-                return self.current_image_path
-        
-        # Fallback: derive from highlight_index (only if current_image_path not set)
-        # This handles cases where current_image_path hasn't been set yet
+        path = self.file_data_model.get_current_image_path()
+        if path and path in displayed:
+            return path
         if not (0 <= self.highlight_index < len(displayed)):
             return None
-            
-        # CRITICAL: Use current_image_path as source of truth, not highlight_index
-        # Sync highlight_index from current_image_path first (updates model)
         self._sync_highlight_index_from_current_image_path(displayed)
-        # Read from model directly - do NOT call get_current_image_path() (would recurse)
-        path = self.current_image_path
+        path = self.file_data_model.get_current_image_path()
         if path:
             return path
-        # Fallback: if no current_image_path, use highlight_index but update current_image_path
-        if displayed and 0 <= self.highlight_index < len(displayed):
+        if 0 <= self.highlight_index < len(displayed):
             path = displayed[self.highlight_index]
-            self.configuration_sync_manager._set_current_image_path_with_sync(path)
+            self._set_current_image_path_with_sync(path)
             return path
         return None
     
@@ -3056,15 +3062,21 @@ class ImageBrowserWindow(QMainWindow):
     
     def _set_displayed_images_with_sync(self, images: List[str], sync: bool = True):
         """Set displayed_images and optionally sync with FileDataModel."""
-        return self.configuration_sync_manager._set_displayed_images_with_sync(images, sync)
-    
+        from window_sync import set_displayed_images_for_window
+
+        set_displayed_images_for_window(self, images, sync)
+
     def _set_current_image_path_with_sync(self, path: Optional[str], sync: bool = True):
         """Set current_image_path and optionally sync with FileDataModel."""
-        return self.configuration_sync_manager._set_current_image_path_with_sync(path, sync)
+        from window_sync import set_current_image_path_for_window
+
+        set_current_image_path_for_window(self, path, sync)
 
     def _set_current_directory_with_sync(self, directory: Optional[str], sync: bool = True):
         """Set current_directory and optionally sync with FileDataModel."""
-        return self.configuration_sync_manager._set_current_directory_with_sync(directory, sync)
+        from window_sync import set_current_directory_for_window
+
+        set_current_directory_for_window(self, directory, sync)
     
     def _on_displayed_images_changed(self, images: List[str]):
         """Handle displayed_images change from FileDataModel - update main_window and sync tree view"""
@@ -5229,17 +5241,13 @@ class ImageBrowserWindow(QMainWindow):
             self.settings_dialog
             and getattr(self.settings_dialog, "_applied_theme_id", "dark") != current_theme_id
         ):
-            try:
-                self.settings_dialog.settings_changed.disconnect(self.on_settings_changed)
-            except Exception:
-                pass
             self.settings_dialog.close()
             self.settings_dialog.deleteLater()
             self.settings_dialog = None
 
         if not self.settings_dialog:
             self.settings_dialog = SettingsDialog(self)
-            self.settings_dialog.settings_changed.connect(self.on_settings_changed)
+            self._wire_settings_dialog_signals()
         else:
             # Reload settings every time dialog is shown to ensure original_settings is up to date
             self.settings_dialog.load_current_settings()
@@ -5866,35 +5874,15 @@ class ImageBrowserWindow(QMainWindow):
         if getattr(self, 'slideshow3_manager', None):
             self.slideshow3_manager.update_slideshow3_settings(new_settings)
         
-        # Handle move_destinations and destination_menu_action settings
-        # Defer update (like favorite_directories) so config is saved first and macOS menu bar
-        # has finished recreating after the settings dialog closes
-        if 'move_destinations' in new_settings or 'destination_menu_action' in new_settings:
-            def _deferred_move_menu_update():
-                self.update_edit_menu_states()
-                if (getattr(self, 'right_sidebar', None) and hasattr(self.right_sidebar, 'shortcuts_widget') and
-                        self.right_sidebar.shortcuts_widget and self.right_sidebar.is_shortcuts_visible()):
-                    self.right_sidebar.shortcuts_widget.refresh_shortcuts()
-            QTimer.singleShot(0, _deferred_move_menu_update)
-        
-        # Handle favorite_directories setting - update favorites menu and keyboard bindings
-        # DO NOT DELETE THIS COMMENT: Favorites menu and Ctrl+number shortcuts must be updated
-        # after the settings dialog has fully closed. On macOS, when a modal dialog closes,
-        # the native menu bar can be recreated; if we update immediately (before the dialog
-        # close completes), our changes are lost and the menu/shortcuts show stale values.
-        # This regression was fixed multiple times - deferring via QTimer.singleShot(0, ...)
-        # ensures the update runs in the next event loop iteration, after the dialog is gone.
-        if 'favorite_directories' in new_settings:
-            def _deferred_favorites_update():
-                if getattr(self, 'menu_manager', None):
-                    self.menu_manager.update_file_menu_favorites()
-                if getattr(self, 'keyboard_handler_manager', None):
-                    self.keyboard_handler_manager.refresh_favorite_bindings()
-                # Refresh Shortcuts sidebar if visible
-                if (getattr(self, 'right_sidebar', None) and hasattr(self.right_sidebar, 'shortcuts_widget') and
-                        self.right_sidebar.shortcuts_widget and self.right_sidebar.is_shortcuts_visible()):
-                    self.right_sidebar.shortcuts_widget.refresh_shortcuts()
-            QTimer.singleShot(0, _deferred_favorites_update)
+        # Favorites (Ctrl+number / File>Favorites) and move destinations (Move menu / ⌘+number)
+        # must reload from disk after the settings dialog closes — see _schedule_post_settings_menu_refresh.
+        if (
+            'favorite_directories' in new_settings
+            or 'move_destinations' in new_settings
+            or 'destination_menu_action' in new_settings
+            or 'move_keys_mode' in new_settings
+        ):
+            self._schedule_post_settings_menu_refresh()
         
         # Handle image_editor_app setting - update Tools menu text
         if 'image_editor_app' in new_settings:
@@ -9914,153 +9902,6 @@ class ImageBrowserWindow(QMainWindow):
         
         # Update status bar
         self.update_status_bar_sections()
-        
-    def _refresh_with_existing_thumbnails(self):
-        """Refresh with existing thumbnails"""  
-        print(f"{RED}Deprecated: {RESET}: {RED}_refresh_with_existing_thumbnails{RESET} called from {GREEN}{inspect.stack()[1].function}{RESET}") 
-        if not self.current_directory:
-            return
-        
-        # Skip refresh in specific-files mode to preserve the original specific files list
-        if getattr(self, 'specific_files_active', False):
-            return
-        
-        current_files = self._get_current_directory_files()
-        if current_files is None:
-            self.status_bar_manager.show_message("Error reading directory")
-            return
-        
-        current_files_list = list(current_files)
-        
-        # Preserve random order (marked by is_browsing_at_random) - don't re-sort
-        if self.current_sort_mode == SortMode.RANDOM and self.displayed_images:
-            # Keep the random order - just filter and update if needed
-            current_files_list = self.displayed_images.copy()
-            # Filter out files that no longer exist
-            # CRITICAL: Filter out files that no longer exist on disk (not just in current_files set)
-            current_files_list = [f for f in current_files_list if os.path.exists(f) and f in current_files]
-            # Add any new files that weren't in the original list (append to end)
-            new_files = [f for f in current_files if f not in current_files_list]
-            current_files_list.extend(new_files)
-        elif self.current_sort_mode == SortMode.NAME:
-            # Sort by name case-insensitively
-            current_files_list.sort(key=lambda path: path.lower(), reverse=self.is_reversed)
-        else:
-            # Date sorting - respect the is_reversed flag
-            # is_reversed=False means newest first (descending), is_reversed=True means oldest first (ascending)
-            # Ensure that when date sorting is active, other sort modes are disabled
-            # Clear random and duplicate modes - handled by setting current_sort_mode
-            try:
-                current_files_list.sort(key=self.get_sort_key, reverse=not self.is_reversed)
-            except Exception:
-                # If date sorting fails completely, fallback to alphabetical
-                current_files_list.sort(key=lambda p: p.lower())
-        
-        if self.filter_pattern:
-            current_files_list = self.sorting_manager.filter_images_by_pattern(current_files_list)
-            if not current_files_list:
-                self.status_bar_manager.show_message(f"No images found matching pattern '{self.filter_pattern}' in directory {self.current_directory}")
-                return
-            else:
-                self.status_bar_manager.clear_message()
-        
-        # Only apply limit if we're not in windowing mode
-        # In windowing mode, the window should be maintained by the unified windowing system
-        if len(current_files_list) > self.limit:
-            # Check if we're in windowing mode - if so, don't truncate the list
-            # The windowing system will handle the display
-            if not (getattr(self, 'limit', None) and getattr(self, 'current_image_path', None)):
-                if self.is_reversed:
-                    current_files_list = current_files_list[-self.limit:]
-                else:
-                    current_files_list = current_files_list[:self.limit]
-        
-        # Only update displayed_images if we're not in windowing mode
-        # In windowing mode, the window should be maintained by the unified windowing system
-        if not (getattr(self, 'limit', None) is not None and getattr(self, 'current_image_path', None)):
-            self.displayed_images = current_files_list
-        
-        # Preserve name sorting and other modes across directory navigation
-        
-        # Apply preserved sorting modes after loading new directory
-        if self.current_sort_mode == SortMode.NAME:
-            # Apply name sorting to the newly loaded files
-            # CRITICAL: Use centralized display ordering to ensure locked files are always at top
-            directory = self.current_directory if self.current_directory else (os.path.dirname(self.displayed_images[0]) if self.displayed_images else None)
-            if directory:
-                self.displayed_images = self.sorting_manager.apply_display_order(self.displayed_images, directory)
-        
-        # Preserve the current highlight_index before calling populate_indices_arrays
-        saved_highlight_index = self.highlight_index
-        
-        self.populate_indices_arrays()
-        
-        # Check if there's a pending rename path - if so, use it to find the correct index
-        if getattr(self, 'pending_rename_path', None):
-            renamed_path = self.pending_rename_path
-            # Clear it immediately so it's only used once
-            self.pending_rename_path = None
-            # Normalize the path for comparison (resolve any symlinks, etc.)
-            try:
-                renamed_path_normalized = os.path.normpath(os.path.realpath(renamed_path))
-            except (OSError, ValueError):
-                renamed_path_normalized = os.path.normpath(renamed_path)
-            # Find the renamed file's new index - try both normalized and original path
-            new_index = self.find_thumbnail_index_by_path(renamed_path)
-            if new_index is None:
-                # Try with normalized path comparison
-                if self.displayed_images:
-                    for idx, img_path in enumerate(self.displayed_images):
-                        try:
-                            img_path_normalized = os.path.normpath(os.path.realpath(img_path))
-                        except (OSError, ValueError):
-                            img_path_normalized = os.path.normpath(img_path)
-                        if img_path_normalized == renamed_path_normalized or img_path == renamed_path:
-                            new_index = idx
-                            break
-            if new_index is not None:
-                self.highlight_index = new_index
-                # Update current_image_path if it exists
-                if hasattr(self, 'current_image_path'):
-                    self.current_image_path = renamed_path
-                
-                # Update selected_files if the renamed file was selected
-                if getattr(self, 'pending_rename_old_path', None):
-                    old_path = self.pending_rename_old_path
-                    # Clear it immediately so it's only used once
-                    delattr(self, 'pending_rename_old_path')
-                    # If old path was in selected_files, replace it with new path
-                    if hasattr(self, 'selected_files') and old_path in self.selected_files:
-                        self.selected_files.remove(old_path)
-                        self.selected_files.add(renamed_path)
-                        self._emit_selection_changed()
-            else:
-                # File not found, fall back to saved index or 0
-                if 0 <= saved_highlight_index < len(self.displayed_images):
-                    self.highlight_index = saved_highlight_index
-                else:
-                    self.highlight_index = 0
-        else:
-            # Restore the highlight_index if it's valid for the new displayed_images
-            if 0 <= saved_highlight_index < len(self.displayed_images):
-                self.highlight_index = saved_highlight_index
-            else:
-                self.highlight_index = 0
-        # Convert thumbnail index to actual image index
-        if self.image_indices and self.highlight_index < len(self.image_indices):
-            self.current_index = self.image_indices[self.highlight_index]
-        else:
-            self.current_index = self.highlight_index
-        
-        # Calculate optimal thumbnail size and grid dimensions
-        optimal_size, columns, _ = self.thumbnail_operations_manager.calculate_grid_for_images(len(self.displayed_images))
-        self.current_thumbnail_size = optimal_size
-        
-        # Cache grid dimensions for future comparisons
-        self._cached_grid_columns = columns
-        self._cached_thumbnail_size = optimal_size
-        
-        self.highlight_image()
 
     def restore_multiple_files_from_trash_(self, deleted_files_batch):
         """Restore multiple files from trash"""

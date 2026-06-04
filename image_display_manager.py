@@ -170,8 +170,12 @@ class ImageDisplayManager:
             self.main_window.update_image_display()
     
     def get_current_image_path(self) -> Optional[str]:
-        """Get the current image path (source of truth)"""
-        return getattr(self.main_window, 'current_image_path', None)
+        """Get the current image path (FileDataModel via main window)."""
+        if hasattr(self.main_window, "get_current_image_path"):
+            return self.main_window.get_current_image_path()
+        if getattr(self.main_window, "file_data_model", None):
+            return self.main_window.file_data_model.get_current_image_path()
+        return None
     
     def set_current_image_by_path(self, image_path: Optional[str], fallback_index: Optional[int] = None):
         """Set current image by path (source of truth)"""

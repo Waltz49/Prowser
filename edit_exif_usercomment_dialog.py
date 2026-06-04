@@ -22,6 +22,8 @@ from thumbnail_constants import (
 )
 from config import get_config
 from exif_utils import truncate_usercomment_before_prompt
+from theme_base import asset_path
+from theme_service import get_active_theme
 from lmstudio_caption import is_lmstudio_services_available
 from speech_utils import speak_or_stop
 from utils import create_gear_icon, get_main_window
@@ -69,19 +71,15 @@ def _create_check_icon(color: str = VALIDATION_SUCCESS_COLOR_HEX) -> QIcon:
     return QIcon(pixmap)
 
 
-def _create_plus_icon(color: str = ACCENT_COLOR_HEX) -> QIcon:
-    """Create a plus icon for the instructions toggle button."""
-    pixmap = QPixmap(18, 18)
-    pixmap.fill(QColor(0, 0, 0, 0))
-    painter = QPainter(pixmap)
-    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-    painter.setPen(QPen(QColor(color), 2.0))
-    cx, cy = 9.0, 9.0
-    arm = 6.0  # half-length of each cross arm
-    painter.drawLine(cx - arm, cy, cx + arm, cy)
-    painter.drawLine(cx, cy - arm, cx, cy + arm)
-    painter.end()
-    return QIcon(pixmap)
+def _create_ai_instructions_icon() -> QIcon:
+    """Theme-aware 'AI' icon (40x40 asset) for the system-prompt toggle button."""
+    th = get_active_theme()
+    name = (
+        "ai_icon_info_light.png"
+        if getattr(th, "theme_id", "dark") == "light"
+        else "ai_icon_info_dark.png"
+    )
+    return QIcon(asset_path(name))
 
 
 class EditExifUserCommentDialog(QDialog):
@@ -310,8 +308,8 @@ class EditExifUserCommentDialog(QDialog):
         if is_lmstudio_services_available():
             self.instructions_btn = QPushButton()
             self.instructions_btn.setObjectName("instructions_btn")
-            self._instructions_icon_normal = _create_plus_icon(TEXT_DISABLED_HEX)
-            self._instructions_icon_hover = _create_plus_icon(BUTTON_TEXT_HOVER_HEX)
+            self._instructions_icon_normal = _create_ai_instructions_icon()
+            self._instructions_icon_hover = _create_ai_instructions_icon()
             self.instructions_btn.setIcon(self._instructions_icon_normal)
             self.instructions_btn.setIconSize(QSize(16, 16))
             self.instructions_btn.setToolTip("Show/hide Instructions field (override AI user prompt)")

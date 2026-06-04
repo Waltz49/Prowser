@@ -34,30 +34,58 @@ class DirectoryLoader:
         """Scan directory efficiently using os.scandir instead of os.listdir"""
         if not os.path.exists(directory) or not os.path.isdir(directory):
             return []
-         
+
         image_files = []
-        
+
         try:
             with os.scandir(directory) as entries:
                 for entry in entries:
                     if entry.is_file():
                         if get_file_extension(entry.name) in get_image_extensions():
                             image_files.append(entry.path)
-        except Exception:
+        except PermissionError:
+            raise
+        except OSError as e:
+            # macOS Desktop/Documents often return EPERM without Full Disk Access
+            if getattr(e, "errno", None) in (1, 13):
+                raise PermissionError(directory) from e
             return []
-        
+
         return image_files
-    
+
     def _get_current_directory_files(self) -> Optional[Set[str]]:
         """Get current image files in directory efficiently"""
         if not self.main_window.current_directory or not os.path.exists(self.main_window.current_directory):
             return None
-        
+
         try:
             image_files = self._scan_directory_efficiently(self.main_window.current_directory)
             return set(image_files)
+        except PermissionError:
+            return None
         except Exception:
             return None
+
+    def _handle_directory_listing_denied(self, directory: str) -> None:
+        """Empty UI with a clear message when macOS blocks directory listing (e.g. Desktop)."""
+        self.main_window._directory_listing_denied = True
+        self.main_window.displayed_images = []
+        self.main_window.clear_thumbnails()
+        self.main_window.populate_indices_arrays()
+        self.main_window._current_highlighted_file_directory = self.main_window.current_directory
+        self.main_window.update_status_bar_sections()
+        self.main_window.status_bar_manager.show_message(
+            "Access denied — enable Full Disk Access in System Settings → Privacy & Security",
+            duration=8000,
+        )
+        show_styled_warning(
+            self.main_window,
+            "Folder Access Denied",
+            f"macOS prevented Prowser from listing images in:\n\n{directory}\n\n"
+            "Grant Full Disk Access to the app you use to launch Prowser "
+            "(Prowser.app, Terminal, or iTerm) under "
+            "System Settings → Privacy & Security → Full Disk Access, then reopen this folder.",
+        )
     
     def count_total_files_in_directory(self, directory: str) -> int:
         """Count total image files in directory that match the current filter pattern"""
@@ -172,10 +200,16 @@ class DirectoryLoader:
         self.main_window.window_target_file = None
         
         self.main_window.current_directory = directory
+        self.main_window._directory_listing_denied = False
         self.main_window.setWindowTitle(f"Prowser - {os.path.basename(directory)}")
         
         current_files = self._get_current_directory_files()
         if current_files is None:
+            try:
+                self._scan_directory_efficiently(directory)
+            except PermissionError:
+                self._handle_directory_listing_denied(directory)
+                return
             # Handle error reading directory: set displayed_images to empty and update status bar
             self.main_window.displayed_images = []
             self.main_window.populate_indices_arrays()

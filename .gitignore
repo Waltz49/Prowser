@@ -28,6 +28,10 @@ prowser.entitlements
 pyinstaller_dependencies.py
 pyinstaller_directives.json
 test*
+!tests/
+!tests/**
+*.fix
+*.cmdhfix
 venv/
 venv_image_browser/
 venv_pyinstaller/

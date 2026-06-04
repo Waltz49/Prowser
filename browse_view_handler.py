@@ -221,26 +221,9 @@ class BrowseViewHandler:
     
     def get_physical_screen_size(self) -> QSize:
         """Get the physical screen size for actual size calculations"""
-        try:
-            if MACOS_SCREEN_AVAILABLE and NSScreen:
-                screen = NSScreen.mainScreen()
-                if screen:
-                    frame_size = screen.frame().size
-                    return QSize(int(frame_size.width), int(frame_size.height))
-        except Exception:
-            pass
-        
-        # Fallback: use QApplication primary screen
-        try:
-            app = QApplication.instance()
-            if app and app.primaryScreen():
-                screen_geometry = app.primaryScreen().geometry()
-                return QSize(screen_geometry.width(), screen_geometry.height())
-        except Exception:
-            pass
-        
-        # Final fallback: use window size (not ideal but better than nothing)
-        return self.main_window.size()
+        from screen_geometry import get_physical_screen_size
+
+        return get_physical_screen_size(fallback_size=self.main_window.size())
     
     def get_effective_display_size(self) -> QSize:
         """Get the effective display size, accounting for status bar visibility, file tree, and right sidebar"""

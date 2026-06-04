@@ -762,44 +762,15 @@ class SortingManager:
             return None
         
         try:
-            is_reversed = False
-            filenames = []
-            locked_files = set()
-            with open(prsort_path, 'r', encoding='utf-8') as f:
-                lines = [line.strip() for line in f if line.strip()]
-                if not lines:
-                    return None
-                
-                # Skip the warning comment if present
-                if lines[0].startswith('# THIS FILE IS ONLY FOR') or lines[0].startswith('# THIS FILE MUST NOT BE USED'):
-                    lines = lines[1:]
-                    # Skip second line if it's also a warning comment
-                    if lines and lines[0].startswith('# DO NOT USE'):
-                        lines = lines[1:]
-                
-                # Check first line for reversed flag
-                first_line = lines[0]
-                if first_line.startswith('#reversed:'):
-                    is_reversed_str = first_line.split(':', 1)[1].lower()
-                    is_reversed = is_reversed_str == 'true'
-                    filenames = lines[1:]  # Skip the header line
-                else:
-                    # Invalid format - file must have header
-                    return None
-                
-                # Extract lock status and clean filenames
-                cleaned_filenames = []
-                for line in filenames:
-                    if line.startswith('*'):
-                        # Locked file - remove prefix
-                        filename = line[1:]
-                        cleaned_filenames.append(filename)
-                        locked_files.add(filename)
-                    else:
-                        # Unlocked file
-                        cleaned_filenames.append(line)
-            
-            return (cleaned_filenames, is_reversed, locked_files)
+            from prsort_io import parse_custom_sort_file, read_prsort_lines
+
+            lines = read_prsort_lines(prsort_path)
+            if not lines:
+                return None
+            parsed = parse_custom_sort_file(lines)
+            if parsed is None:
+                return None
+            return parsed
         except Exception as e:
             print(f"Error reading .prsort file: {e}")
             return None

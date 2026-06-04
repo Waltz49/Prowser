@@ -14,6 +14,7 @@ from PySide6.QtCore import QEvent, QObject, Qt, QTimer
 from PySide6.QtWidgets import QApplication, QLabel, QPushButton, QTextBrowser, QVBoxLayout, QWidget
 
 from combined_sidebar_widget import HeaderWidget
+from theme_base import asset_file_url
 from theme_service import get_active_theme
 from utils import (
     format_file_size,
@@ -40,6 +41,23 @@ if os.path.exists(_TRASH_ICON_PATH):
     _DELETE_ICON_HTML = f'<img src="{_trash_url}" width="16" height="16" style="margin:0;padding:0;vertical-align:bottom;">'
 else:
     _DELETE_ICON_HTML = "⊘"
+
+_INFO_AI_ICON_SIZE = 16  # display size; source assets are 40x40
+
+
+def _information_ai_icon_html() -> str:
+    """Theme-aware 'AI' label icon for File Information imagegen actions."""
+    th = get_active_theme()
+    asset = (
+        "ai_icon_info_light.png"
+        if getattr(th, "theme_id", "dark") == "light"
+        else "ai_icon_info_dark.png"
+    )
+    url = asset_file_url(asset)
+    return (
+        f'<img src="{url}" width="{_INFO_AI_ICON_SIZE}" height="{_INFO_AI_ICON_SIZE}" '
+        f'style="display:block;margin:0 auto;padding:0;border:none;vertical-align:bottom;">'
+    )
 
 
 class _DeleteUserCommentYesNoTabFilter(QObject):
@@ -430,7 +448,9 @@ class InformationSidebar(QWidget):
                 "create://", "◇", "Create an image from text..."
             )
         if imagegen_edit_plugins_available():
-            cells += spacer_box() + icon_box("editai://", "✦", "Edit with AI")
+            cells += spacer_box() + icon_box(
+                "editai://", _information_ai_icon_html(), "Edit with AI"
+            )
         return cells
 
     def eventFilter(self, obj, event):

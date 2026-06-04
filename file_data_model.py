@@ -3,6 +3,17 @@
 File Data Model Manager
 Centralizes management of displayed_images and ensures UI consistency.
 This provides a single source of truth for file data displayed in thumbnails and tree views.
+
+Navigation contract (read before changing current image / index):
+- Source of truth: _current_image_path and _displayed_images; _current_index is derived.
+- Prefer set_current_image_path(path) when the path is known (thumbnail widget path, tree
+  selection, browse navigation). It syncs index when the path is in displayed_images.
+- Use set_current_index(index) only when the index into displayed_images is authoritative
+  (e.g. keyboard move in thumbnail grid). It updates current_image_path from displayed_images.
+- Never set index from a canvas/visual slot index; that index may not match displayed_images
+  (see mvc_controller._on_thumbnail_clicked).
+- Multi-select lives on ImageBrowserWindow.selected_files; it does not replace current path.
+- Reads: use get_current_image_path() / get_current_index(); avoid parallel caches.
 """
 
 import os

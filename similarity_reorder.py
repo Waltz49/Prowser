@@ -461,15 +461,10 @@ def reorder_images_by_similarity(mw):
                 new_displayed_images.append(source_img)
                 result_set.add(source_img)
         
-        # Remove duplicates while preserving order
-        seen = set()
-        unique_images = []
-        for img in new_displayed_images:
-            if img not in seen:
-                seen.add(img)
-                unique_images.append(img)
-        new_displayed_images = unique_images
-        
+        from list_utils import dedupe_preserve_order
+
+        new_displayed_images = dedupe_preserve_order(new_displayed_images)
+
         # Check if no matches found (only source images in results)
         if recursive and len(new_displayed_images) <= len(source_images_set):
             show_styled_information(
@@ -1071,15 +1066,10 @@ def reorder_images_by_clip_search(mw):
             else:
                 print(f"CLIP {mode_str} search: Found {len(new_displayed_images)} matching images out of {len(displayed_images)} total (threshold: {threshold:.2f})")
         
-        # Remove duplicates while preserving order
-        seen = set()
-        unique_images = []
-        for img in new_displayed_images:
-            if img not in seen:
-                seen.add(img)
-                unique_images.append(img)
-        new_displayed_images = unique_images
-        
+        from list_utils import dedupe_preserve_order
+
+        new_displayed_images = dedupe_preserve_order(new_displayed_images)
+
         # Check if no matches found
         if recursive and len(new_displayed_images) == 0:
             show_styled_information(

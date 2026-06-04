@@ -40,7 +40,7 @@ from thumbnail_constants import (get_image_extensions, EXCLUDED_EXTENSIONS, SKIP
     TREE_DRAG_AUTO_SCROLL_SPEEDS, TREE_DRAG_AUTO_SCROLL_TIMER_MS, asset_path,
 )
 import thumbnail_constants as tc
-from path_exclusions import _get_excluded_paths, _is_excluded_path
+from path_exclusions import _get_excluded_paths, _is_excluded_path, prune_walk_dirs
 from theme_service import get_active_theme
 from utils import (
     entry_debug,
@@ -841,29 +841,17 @@ class CustomTreeView(QTreeView):
         follow_symlinks = get_follow_symlinks()
 
         for root, dirs, files in os.walk(root_dir):
-            root_resolved = os.path.realpath(root)
-
-            # Skip excluded directories (cache, Photos Library, and ignore directories)
-            if _is_excluded_path(root_resolved, excluded_paths):
-                dirs[:] = []  # Don't recurse into excluded directory
+            if prune_walk_dirs(
+                root,
+                dirs,
+                excluded_paths=excluded_paths,
+                process_hidden=process_hidden,
+                skipped_patterns=SKIPPED_PATTERNS,
+            ):
                 continue
-
-            # Filter hidden directories if not processing them
-            if not process_hidden:
-                dirs[:] = [d for d in dirs if not d.startswith('.')]
 
             # Filter symlinks if not following them (except enabled root dirs on Directories tab)
             filter_walk_symlink_dirs(root, dirs, follow_symlinks)
-
-            # Skip directories matching SKIPPED_PATTERNS
-            skip_dir = False
-            for pattern in SKIPPED_PATTERNS:
-                if pattern in root:
-                    skip_dir = True
-                    break
-            if skip_dir:
-                dirs[:] = []  # Don't recurse into skipped directories
-                continue
 
             # Calculate depth relative to root_dir
             rel_path = os.path.relpath(root, root_dir)

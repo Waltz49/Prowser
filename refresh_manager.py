@@ -2,6 +2,14 @@
 """
 Refresh Manager
 Handles directory refresh logic and efficient updates
+
+Refresh contract:
+- Entry: refresh_directory(), REFRESH_REQUESTED / FILES_CHANGED_ON_DISK on EventBus.
+- Guards: specific_files_active uses _refresh_specific_files_list; skip when sets match
+  (and optional mtime pass for small sets); respect browse_view_exit_in_progress and
+  main_window._refresh_in_progress / beachball_fix safe_refresh_wrapper for concurrency.
+- displayed_images updates go through main_window._set_displayed_images_with_sync so
+  FileDataModel and subscribers stay aligned.
 """
 
 import os

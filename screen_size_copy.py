@@ -10,16 +10,8 @@ from PIL import Image
 
 from exif_utils import get_exif_bytes_from_pil, format_supports_exif
 from PySide6.QtCore import QSize
-from PySide6.QtWidgets import QApplication
 
-# macOS-specific imports
-try:
-    from AppKit import NSScreen
-    MACOS_SCREEN_AVAILABLE = True
-except ImportError:
-    MACOS_SCREEN_AVAILABLE = False
-    NSScreen = None
-
+from screen_geometry import get_physical_screen_size as _get_physical_screen_size
 
 # Fit method constants
 FIT_CONTAIN = "contain"  # Fit within bounds, no overflow (min scale)
@@ -29,27 +21,8 @@ FIT_HEIGHT = "height"  # Match screen height exactly
 
 
 def get_physical_screen_size() -> QSize:
-    """Get the screen size in points (logical size for display/wallpaper use).
-    Uses NSScreen.frame() or QScreen.geometry() - both return logical pixels.
-    Do NOT multiply by backingScaleFactor; that would produce oversized images."""
-    try:
-        if MACOS_SCREEN_AVAILABLE and NSScreen:
-            screen = NSScreen.mainScreen()
-            if screen:
-                frame_size = screen.frame().size
-                return QSize(int(frame_size.width), int(frame_size.height))
-    except Exception:
-        pass
-
-    try:
-        app = QApplication.instance()
-        if app and app.primaryScreen():
-            geom = app.primaryScreen().geometry()
-            return QSize(geom.width(), geom.height())
-    except Exception:
-        pass
-
-    return QSize(1920, 1080)
+    """Get the screen size in points (logical size for display/wallpaper use)."""
+    return _get_physical_screen_size()
 
 
 def generate_unique_filename(original_path: str) -> str:

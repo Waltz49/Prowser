@@ -30,59 +30,22 @@ class ConfigurationSyncManager:
         pass
     
     def _set_displayed_images_with_sync(self, images: List[str], sync: bool = True):
-        """
-        Set displayed_images via FileDataModel. Model emits, handler sets main_window.displayed_images.
-        Subscribers (thumbnail, tree) react to EventBus DISPLAYED_IMAGES_CHANGED.
-        
-        Args:
-            images: List of image paths to set
-            sync: If True, update FileDataModel which emits (default: True)
-        """
-        if sync and hasattr(self.main_window, 'file_data_model') and self.main_window.file_data_model:
-            try:
-                self.main_window.file_data_model.set_displayed_images(images, notify=True)
-            except Exception:
-                pass
-        else:
-            self.main_window.displayed_images = images
-            if sync:
-                try:
-                    self._sync_to_file_data_model()
-                except Exception:
-                    pass
-    
+        """Delegate to window_sync (FileDataModel is source of truth)."""
+        from window_sync import set_displayed_images_for_window
+
+        set_displayed_images_for_window(self.main_window, images, sync)
+
     def _set_current_image_path_with_sync(self, path: Optional[str], sync: bool = True):
-        """
-        Set current_image_path via model (single source of truth).
-        Model emits current_image_changed -> EventBus CURRENT_IMAGE_CHANGED.
-        
-        Args:
-            path: Path to current image file
-            sync: If True, update model (default: True)
-        """
-        old_path = self.main_window.current_image_path
-        path_changed = (old_path != path)
-        
-        if hasattr(self.main_window, 'file_data_model') and self.main_window.file_data_model:
-            self.main_window.file_data_model.set_current_image_path(path, notify=True)
-        
-        # Update status bar directly for immediate feedback
-        if path_changed and not getattr(self.main_window, 'browse_view_exit_in_progress', False):
-            try:
-                displayed = self.main_window.displayed_images
-                if hasattr(self.main_window, 'update_status_bar_current_image'):
-                    self.main_window.update_status_bar_current_image(path, displayed)
-                    self.main_window._last_status_bar_image_path = path
-            except Exception:
-                pass
+        """Delegate to window_sync (FileDataModel is source of truth)."""
+        from window_sync import set_current_image_path_for_window
+
+        set_current_image_path_for_window(self.main_window, path, sync)
 
     def _set_current_directory_with_sync(self, directory: Optional[str], sync: bool = True):
-        """
-        Set current_directory via model (single source of truth).
-        Model emits directory_changed -> EventBus DIRECTORY_CHANGED.
-        """
-        if hasattr(self.main_window, 'file_data_model') and self.main_window.file_data_model:
-            self.main_window.file_data_model.set_current_directory(directory, notify=True)
+        """Delegate to window_sync (FileDataModel is source of truth)."""
+        from window_sync import set_current_directory_for_window
+
+        set_current_directory_for_window(self.main_window, directory, sync)
     
     def _on_displayed_images_changed(self, images: List[str]):
         """Handle displayed_images change from FileDataModel - sync tree view"""

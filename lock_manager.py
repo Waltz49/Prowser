@@ -7,11 +7,18 @@ Handles file locking operations for organizing images within directories
 import os
 from typing import List, Set, Optional, Dict, Tuple
 
+from prsort_io import (
+    LOCK_PREFIX,
+    parse_custom_sort_file,
+    parse_locked_filenames,
+    read_prsort_lines,
+)
+
 
 class LockManager:
     """Manages file locking operations"""
     
-    LOCK_PREFIX = '*'  # Prefix marker for locked files in .prsort
+    LOCK_PREFIX = LOCK_PREFIX  # Prefix marker for locked files in .prsort
     
     _max_cache_size = 500  # Limit cache size for directories from recursive searches
     
@@ -57,28 +64,11 @@ class LockManager:
             del self._locked_files_cache[directory]
         
         try:
-            locked_files = set()
-            with open(prsort_path, 'r', encoding='utf-8') as f:
-                lines = [stripped for line in f if (stripped := line.strip())]
-                if not lines:
-                    return set()
-                
-                # Skip the warning comment if present
-                if lines[0].startswith('# THIS FILE IS ONLY FOR') or lines[0].startswith('# THIS FILE MUST NOT BE USED'):
-                    lines = lines[1:]
-                    # Skip second line if it's also a warning comment
-                    if lines and lines[0].startswith('# DO NOT USE'):
-                        lines = lines[1:]
-                
-                # Skip header line if present
-                start_idx = 1 if lines[0].startswith('#reversed:') else 0
-                
-                for line in lines[start_idx:]:
-                    if line.startswith(self.LOCK_PREFIX):
-                        # Remove prefix to get filename
-                        filename = line[1:]  # Remove '*' prefix
-                        locked_files.add(filename)
-            
+            lines = read_prsort_lines(prsort_path)
+            if not lines:
+                return set()
+            locked_files = parse_locked_filenames(lines)
+
             # Cache result
             if len(self._locked_files_cache) >= self._max_cache_size:
                 # Evict oldest (first) entry
@@ -316,51 +306,53 @@ class LockManager:
             True if cleanup was performed, False otherwise
         """
         prsort_path = os.path.join(directory, '.prsort')
-        if not os.path.exists(prsort_path):
-            return False
-        
         try:
-            is_reversed = False
-            filenames = []
-            
-            with open(prsort_path, 'r', encoding='utf-8') as f:
-                lines = [stripped for line in f if (stripped := line.strip())]
-                if not lines:
-                    return False
-                
-                # Check first line for reversed flag
-                first_line = lines[0]
-                if first_line.startswith('#reversed:'):
-                    is_reversed_str = first_line.split(':', 1)[1].lower()
-                    is_reversed = is_reversed_str == 'true'
-                    filenames = lines[1:]  # Skip header
-                else:
-                    filenames = lines
-            
-            # Check which files still exist
+            if not os.path.isdir(directory):
+                return False
+            if not os.access(directory, os.R_OK | os.X_OK):
+                return False
+            if not os.path.isfile(prsort_path):
+                return False
+            if not os.access(prsort_path, os.R_OK | os.W_OK):
+                return False
+
+            lines = read_prsort_lines(prsort_path)
+            if not lines:
+                return False
+            parsed = parse_custom_sort_file(lines)
+            if parsed is None:
+                return False
+            filenames, is_reversed, _locked = parsed
+            body_lines = lines[1:]  # preserve lock markers on each line
+
             existing_files = set()
-            if os.path.isdir(directory):
-                for item in os.listdir(directory):
-                    item_path = os.path.join(directory, item)
-                    if os.path.isfile(item_path):
-                        existing_files.add(item)
-            
-            # Filter out orphaned entries
+            for item in os.listdir(directory):
+                item_path = os.path.join(directory, item)
+                if os.path.isfile(item_path):
+                    existing_files.add(item)
+
             cleaned_filenames = []
-            for line in filenames:
+            for line in body_lines:
                 filename = line.lstrip(self.LOCK_PREFIX)
                 if filename in existing_files:
                     cleaned_filenames.append(line)
-            
-            # Only rewrite if we removed entries
-            if len(cleaned_filenames) < len(filenames):
+
+            if len(cleaned_filenames) < len(body_lines):
                 with open(prsort_path, 'w', encoding='utf-8') as f:
                     f.write(f'#reversed:{str(is_reversed).lower()}\n')
                     for line in cleaned_filenames:
                         f.write(f'{line}\n')
-                self._invalidate_locked_cache(directory)  # Cache now stale
+                self._invalidate_locked_cache(directory)
                 return True
-            
+
+            return False
+        except OSError as e:
+            # macOS may deny Desktop/Documents without Full Disk Access (EPERM).
+            if getattr(e, 'errno', None) == 1 and not getattr(
+                self.main_window, 'debug_mode', False
+            ):
+                return False
+            print(f"Error cleaning up orphaned locks: {e}")
             return False
         except Exception as e:
             print(f"Error cleaning up orphaned locks: {e}")

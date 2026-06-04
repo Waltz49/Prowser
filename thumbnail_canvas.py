@@ -2334,7 +2334,14 @@ class ThumbnailCanvas(QWidget):
                         # Get filter pattern
                         filter_pattern = getattr(self.main_window, 'filter_pattern', None)
                         # Always show message when no thumbnails exist
-                        if filter_pattern and filter_pattern != '*':
+                        if getattr(self.main_window, '_directory_listing_denied', False):
+                            message = (
+                                "macOS denied access to list images in\n\n"
+                                f"{normalize_path_for_display(current_directory)}\n\n"
+                                "Enable Full Disk Access for Prowser (or your terminal) under\n"
+                                "System Settings → Privacy & Security"
+                            )
+                        elif filter_pattern and filter_pattern != '*':
                             # Show message about filter pattern
                             message = f"No Images matching filter pattern \"{filter_pattern}\" are available in\n\n{normalize_path_for_display(current_directory)}"
                         else:

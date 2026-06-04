@@ -2,6 +2,7 @@
 """Shared path exclusion helpers (cache, Photos Library, ignore directories)."""
 
 import os
+from typing import Iterable, List, Optional, Sequence, Set
 
 
 def _get_excluded_paths(config):
@@ -46,3 +47,42 @@ def _is_excluded_path(path, excluded_paths):
     except Exception:
         pass
     return False
+
+
+def prune_walk_dirs(
+    root: str,
+    dirs: List[str],
+    *,
+    excluded_paths: Sequence[str],
+    process_hidden: bool = True,
+    skipped_patterns: Optional[Iterable[str]] = None,
+) -> bool:
+    """
+    In-place prune of ``dirs`` during os.walk; returns True if this root should be skipped
+    entirely (excluded, or matches skipped_patterns).
+    """
+    root_resolved = os.path.realpath(root)
+    if _is_excluded_path(root_resolved, excluded_paths):
+        dirs.clear()
+        return True
+
+    if not process_hidden:
+        dirs[:] = [d for d in dirs if not d.startswith('.')]
+
+    if skipped_patterns:
+        for pattern in skipped_patterns:
+            if pattern in root:
+                dirs.clear()
+                return True
+
+    return False
+
+
+def is_under_cache_dir(root_resolved: str, cache_dir_resolved: Optional[str]) -> bool:
+    """True if root is the cache dir or inside it."""
+    if not cache_dir_resolved:
+        return False
+    return (
+        root_resolved == cache_dir_resolved
+        or root_resolved.startswith(cache_dir_resolved + os.sep)
+    )
