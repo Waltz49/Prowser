@@ -922,8 +922,6 @@ class InformationSidebar(QWidget):
             self._overlay_has_image_model = True
 
     def _should_show_generation_timing_row(self) -> bool:
-        if not self._overlay_has_image_model:
-            return False
         path = getattr(self.main_window, "current_image_path", None)
         if not path:
             return False
@@ -1049,17 +1047,27 @@ class InformationSidebar(QWidget):
             )
 
     def _on_gen_timing_task_status_changed(self) -> None:
-        self._refresh_generation_timing_display(force=True)
+        self._sync_gen_timing_updates()
+
+    def _ensure_gen_timing_signal_connected(self) -> None:
+        if self._gen_timing_signal_connected:
+            return
+        try:
+            from imagegen_plugins.image_gen_controller import get_imagegen_controller
+
+            controller = get_imagegen_controller(self.main_window)
+        except ImportError:
+            return
+        controller.task_status_info_changed.connect(
+            self._on_gen_timing_task_status_changed
+        )
+        controller.generation_finished.connect(self._stop_gen_timing_updates)
+        self._gen_timing_signal_connected = True
 
     def _refresh_generation_timing_display(self, *, force: bool = False) -> None:
         if not getattr(self, "_last_overlay_data", None) or not self.info_text_edit:
             return
         if not self._should_show_generation_timing_row():
-            if self._gen_timing_timer is not None:
-                self._rebuild_overlay_from_cache(
-                    hovered_anchor=getattr(self, "_hovered_anchor", None)
-                )
-                self._stop_gen_timing_updates()
             return
         if not force:
             try:
@@ -1076,24 +1084,10 @@ class InformationSidebar(QWidget):
         )
 
     def _sync_gen_timing_updates(self) -> None:
-        if self._should_show_generation_timing_row():
-            self._start_gen_timing_updates()
-        else:
+        self._ensure_gen_timing_signal_connected()
+        if not self._should_show_generation_timing_row():
             self._stop_gen_timing_updates()
-
-    def _start_gen_timing_updates(self) -> None:
-        try:
-            from imagegen_plugins.image_gen_controller import get_imagegen_controller
-
-            controller = get_imagegen_controller(self.main_window)
-        except ImportError:
             return
-        if not self._gen_timing_signal_connected:
-            controller.task_status_info_changed.connect(
-                self._on_gen_timing_task_status_changed
-            )
-            controller.generation_finished.connect(self._stop_gen_timing_updates)
-            self._gen_timing_signal_connected = True
         timer = self._gen_timing_timer
         if timer is None:
             timer = QTimer(self)
@@ -1106,6 +1100,9 @@ class InformationSidebar(QWidget):
         elif not timer.isActive():
             timer.start()
         self._refresh_generation_timing_display(force=True)
+
+    def _start_gen_timing_updates(self) -> None:
+        self._sync_gen_timing_updates()
 
     def _refresh_overlay_for_hover(self, hovered_anchor=None):
         """Rebuild overlay HTML with hovered link highlighted (text and border #50c8ff)."""

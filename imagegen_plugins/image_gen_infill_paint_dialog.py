@@ -37,6 +37,7 @@ from imagegen_plugins.image_gen_persistence import (
     save_infill_paint_dialog_geometry_hex,
 )
 from imagegen_plugins.image_gen_pipeline_modes import finalize_run_values
+from imagegen_plugins.image_gen_fields import FieldSpec
 from imagegen_plugins.image_gen_registry import ImageGenModelPlugin
 from imagegen_plugins.infill_paint_canvas import InfillPaintCanvas
 from imagegen_plugins.image_gen_source_nav import (
@@ -58,8 +59,7 @@ _SUBMIT_NOTICE_TEXT = "Infill job submitted"
 _SUBMIT_NOTICE_VISIBLE_MS = 5000
 _SUBMIT_NOTICE_FADE_MS = 1000
 _SUBMIT_NOTICE_GAP_MM = 2.0
-# Set True to show infill prompt + Import in paint infill Settings dialog.
-_SHOW_INFILL_PAINT_PROMPT_AND_IMPORT = False
+_INFILL_PAINT_PROMPT_LINES = 3
 
 
 def active_image_path_for_infill(main_window) -> Optional[str]:
@@ -139,37 +139,18 @@ class InfillPaintSettingsDialog(ImageGenDialog):
                 ok_btn = buttons.button(QDialogButtonBox.StandardButton.Ok)
                 if ok_btn is not None:
                     ok_btn.setText("Done")
-        if not _SHOW_INFILL_PAINT_PROMPT_AND_IMPORT:
-            self._hide_prompt_and_import_rows()
 
-    def _populate_field_rows(self) -> None:
-        super()._populate_field_rows()
-        if not _SHOW_INFILL_PAINT_PROMPT_AND_IMPORT:
-            self._hide_prompt_and_import_rows()
+    def _needs_prompt_side_column(self) -> bool:
+        return False
 
-    def _hide_prompt_and_import_rows(self) -> None:
-        """Hide prompt/import UI while keeping widgets and import handlers intact."""
-        if self._side_btn_host is not None:
-            self._side_btn_host.hide()
-        if self._fields_form is None:
-            return
-        entry = self._widgets.get("prompt")
-        if entry is None:
-            return
-        prompt_widget, _, _ = entry
-        row_host = prompt_widget.parent()
-        while row_host is not None and self._fields_form.indexOf(row_host) < 0:
-            row_host = row_host.parent()
-            if row_host == self:
-                row_host = None
-                break
-        if row_host is None:
-            prompt_widget.hide()
-            return
-        label = self._fields_form.labelForField(row_host)
-        if label is not None:
-            label.hide()
-        row_host.hide()
+    def _widget_for_spec(self, spec: FieldSpec):
+        widget, extra = super()._widget_for_spec(spec)
+        if spec.kind == "text" and spec.key == "prompt":
+            fm = widget.fontMetrics()
+            h = fm.lineSpacing() * _INFILL_PAINT_PROMPT_LINES + 12
+            widget.setMinimumHeight(h)
+            widget.setMaximumHeight(h)
+        return widget, extra
 
     def _show_import_button(self) -> bool:
         return bool(self._source_path)

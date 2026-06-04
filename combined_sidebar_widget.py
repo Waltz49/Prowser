@@ -140,7 +140,6 @@ class CombinedSidebarWidget(QWidget):
     # Signals
     tree_visibility_changed = Signal(bool)
     preview_visibility_changed = Signal(bool)
-    jobs_visibility_changed = Signal(bool)
     widget_resized = Signal()
     
     def __init__(self, main_window, parent=None):
@@ -148,13 +147,11 @@ class CombinedSidebarWidget(QWidget):
         self.main_window = main_window
         self.tree_visible = True
         self.preview_visible = True
-        self.jobs_visible = False
         self.tree_widget = None
         self.preview_widget = None
-        self.jobs_widget = None
         
         # Store saved splitter sizes for session persistence
-        # Format: [tree_size, preview_size, jobs_size] or None if not yet set
+        # Format: [tree_size, preview_size] or None if not yet set
         self.saved_splitter_sizes = None
         
         # Set focus policy to be in tab order
@@ -172,8 +169,6 @@ class CombinedSidebarWidget(QWidget):
         elif self.preview_visible and self.preview_widget:
             # If only preview is visible, focus the preview
             self.preview_widget.setFocus()
-        elif self.jobs_visible and self.jobs_widget:
-            self.jobs_widget.setFocus()
         
     def setup_ui(self):
         """Setup the combined widget UI"""
@@ -195,25 +190,18 @@ class CombinedSidebarWidget(QWidget):
         
         # Create preview section  
         self.preview_section = self._create_section("Preview", "preview")
-
-        # Create jobs section (below preview; visibility independent of tree/preview)
-        self.jobs_section = self._create_section("Jobs", "jobs")
         
         # Add sections to splitter
         self.splitter.addWidget(self.tree_section)
         self.splitter.addWidget(self.preview_section)
-        self.splitter.addWidget(self.jobs_section)
         
-        # Set initial sizes (tree / preview / jobs)
-        self.splitter.setSizes([160, 160, 120])
+        # Set initial sizes (tree / preview)
+        self.splitter.setSizes([200, 200])
         
         # Connect splitter resize events
         self.splitter.splitterMoved.connect(self._on_splitter_moved)
         
         layout.addWidget(self.splitter)
-
-        self.jobs_content.setVisible(False)
-        self.jobs_header.hide_button.setText("+")
         
     def _apply_splitter_theme_styles(self):
         w = get_active_theme().view_border_width_px
@@ -238,8 +226,6 @@ class CombinedSidebarWidget(QWidget):
             self.tree_header.refresh_theme_styles()
         if getattr(self, "preview_header", None):
             self.preview_header.refresh_theme_styles()
-        if getattr(self, "jobs_header", None):
-            self.jobs_header.refresh_theme_styles()
         if getattr(self, "tree_widget", None):
             self._update_tree_header_focus(self.tree_widget.hasFocus())
 
@@ -257,12 +243,9 @@ class CombinedSidebarWidget(QWidget):
         if section_type == "tree":
             self.tree_header = header
             header.hide_button.clicked.connect(self._toggle_tree)
-        elif section_type == "preview":
+        else:
             self.preview_header = header
             header.hide_button.clicked.connect(self._toggle_preview)
-        else:
-            self.jobs_header = header
-            header.hide_button.clicked.connect(self._toggle_jobs)
         
         layout.addWidget(header)
         
@@ -282,10 +265,8 @@ class CombinedSidebarWidget(QWidget):
         
         if section_type == "tree":
             self.tree_content = content_area
-        elif section_type == "preview":
-            self.preview_content = content_area
         else:
-            self.jobs_content = content_area
+            self.preview_content = content_area
             
         layout.addWidget(content_area)
         
@@ -332,19 +313,6 @@ class CombinedSidebarWidget(QWidget):
             
             # Ensure the preview widget is visible
             self.preview_widget.show()
-
-    def set_jobs_widget(self, jobs_widget):
-        """Set the jobs widget in the jobs section"""
-        self.jobs_widget = jobs_widget
-        if self.jobs_widget:
-            if self.jobs_widget.parent():
-                self.jobs_widget.setParent(None)
-            self.jobs_widget.setSizePolicy(
-                QSizePolicy.Expanding, QSizePolicy.Expanding
-            )
-            layout = self.jobs_content.layout()
-            layout.addWidget(self.jobs_widget)
-            self.jobs_widget.show()
             
     def _toggle_tree(self):
         """Toggle tree visibility"""
@@ -380,18 +348,9 @@ class CombinedSidebarWidget(QWidget):
         
         # If all panes are hidden, hide the entire widget
         self._update_overall_visibility()
-
-    def _toggle_jobs(self):
-        """Toggle jobs pane visibility"""
-        self.jobs_visible = not self.jobs_visible
-        self.jobs_content.setVisible(self.jobs_visible)
-        self.jobs_header.hide_button.setText("−" if self.jobs_visible else "+")
-        self._update_splitter_sizes()
-        self.jobs_visibility_changed.emit(self.jobs_visible)
-        self._update_overall_visibility()
         
     def _pane_visibility(self) -> list[bool]:
-        return [self.tree_visible, self.preview_visible, self.jobs_visible]
+        return [self.tree_visible, self.preview_visible]
 
     def _update_splitter_sizes(self):
         """Update splitter sizes based on which panes are visible"""
@@ -406,13 +365,18 @@ class CombinedSidebarWidget(QWidget):
             return
 
         saved = self.saved_splitter_sizes
-        if saved and len(saved) == 3:
-            vis_saved = [saved[i] if vis[i] else 0 for i in range(3)]
+        if saved and len(saved) >= 2:
+            tree_saved = saved[0]
+            preview_saved = saved[1] if len(saved) > 1 else saved[0]
+            vis_saved = [
+                tree_saved if vis[0] else 0,
+                preview_saved if vis[1] else 0,
+            ]
             total_saved = sum(vis_saved)
             if total_saved > 0:
                 scaled = [
                     int(vis_saved[i] * current_height / total_saved) if vis[i] else 0
-                    for i in range(3)
+                    for i in range(2)
                 ]
                 total_scaled = sum(scaled)
                 if total_scaled != current_height and visible_indices:
@@ -421,7 +385,7 @@ class CombinedSidebarWidget(QWidget):
                 return
 
         each = current_height // len(visible_indices)
-        sizes = [0, 0, 0]
+        sizes = [0, 0]
         for i in visible_indices:
             sizes[i] = each
         remainder = current_height - sum(sizes)
@@ -445,10 +409,7 @@ class CombinedSidebarWidget(QWidget):
         # Save the current splitter sizes when user manually adjusts them
         if all(self._pane_visibility()):
             current_sizes = self.splitter.sizes()
-            if (
-                len(current_sizes) == 3
-                and all(s > 0 for s in current_sizes)
-            ):
+            if len(current_sizes) == 2 and all(s > 0 for s in current_sizes):
                 self.saved_splitter_sizes = current_sizes.copy()
         
         self.widget_resized.emit()
@@ -500,22 +461,6 @@ class CombinedSidebarWidget(QWidget):
     def is_preview_visible(self):
         """Check if preview is visible"""
         return self.preview_visible
-
-    def set_jobs_visible(self, visible):
-        """Set jobs pane visibility programmatically"""
-        if self.jobs_visible != visible:
-            self.jobs_visible = visible
-            self.jobs_content.setVisible(visible)
-            self.jobs_header.hide_button.setText("−" if visible else "+")
-            self._update_splitter_sizes()
-            self.jobs_visibility_changed.emit(visible)
-            self._update_overall_visibility()
-        elif visible and self.jobs_widget:
-            self.jobs_widget.show()
-
-    def is_jobs_visible(self):
-        """Check if jobs pane is visible"""
-        return self.jobs_visible
         
     def resizeEvent(self, event):
         """Handle resize events"""

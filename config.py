@@ -387,14 +387,14 @@ class ImageBrowserConfig:
             'status_bar_visible': True,  # Default to showing status bar
             'thumbnail_filename_visible': False,  # Default to hiding thumbnail filenames
             'preview_visible': False,  # Default to hiding preview panel
-            'jobs_visible': False,  # Default to hiding jobs pane in combined sidebar
+            'jobs_visible': False,  # Default to hiding jobs pane in right combined sidebar
             'sidebar_width': 300,  # Default width for combined sidebar (tree + preview)
             'right_sidebar_width': 300,  # Default width for right sidebar (info panel)
             'right_sidebar_visible': False,  # Default to hiding right sidebar (legacy; derived from information/shortcuts)
             'information_sidebar_visible': False,  # Default to hiding Information widget (I key)
             'shortcuts_sidebar_visible': False,  # Default to hiding Shortcuts within right_sidebar (O key)
             'shortcuts_sidebar_scroll_position': 0,  # Vertical scroll position for Shortcuts widget
-            'shortcuts_splitter_sizes': [250, 150],  # [information_height, shortcuts_height] for right sidebar splitter
+            'shortcuts_splitter_sizes': [150, 250, 120],  # [shortcuts, information, jobs] heights for right sidebar splitter
             'list_view_row_height': 48,  # Default row height for list view (28-64px)
             
             # External editor settings

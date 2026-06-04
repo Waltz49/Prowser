@@ -269,13 +269,9 @@ def format_information_generation_timing_cell_html(
     if estimate_seconds is not None and estimate_seconds > 0:
         elapsed_parts.append(f"Est: {_escape(_format_duration(estimate_seconds))}")
     lines = [" ".join(elapsed_parts)]
-    if (
-        completed_steps is not None
-        and total_steps is not None
-        and total_steps > 0
-        and 0 < completed_steps < total_steps
-    ):
-        lines.append(f"{completed_steps} of {total_steps} steps completed")
+    if completed_steps is not None and total_steps is not None and total_steps > 0:
+        step_i = max(0, min(int(completed_steps), int(total_steps)))
+        lines.append(f"{step_i} of {int(total_steps)} steps completed")
     text = "\n".join(lines)
     return _information_panel_inline_row_html(text, cancel_icon_html)
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Job queue list for the combined left sidebar Jobs pane (matches dialog data)."""
+"""Job queue list for the right combined sidebar Jobs pane (matches dialog data)."""
 
 from __future__ import annotations
 
@@ -252,7 +252,7 @@ class _JobCard(QFrame):
 
 
 class SidebarJobsWidget(QWidget):
-    """Scrollable job queue for the combined sidebar (dialog-equivalent data)."""
+    """Scrollable job queue for the right combined sidebar (dialog-equivalent data)."""
 
     def __init__(self, main_window, parent=None):
         super().__init__(parent)

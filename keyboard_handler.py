@@ -1764,7 +1764,7 @@ class BrowseViewKeyboardHandler(BaseKeyboardHandler):
         self.add_key_binding("p_key", KeyBinding(Qt.Key_P, description="Double-tap: switch to thumbnails and show preview"), self._handle_p_key)
         self.add_key_binding(
             "j_key",
-            KeyBinding(Qt.Key_J, description="Switch to thumbnails and show jobs pane"),
+            KeyBinding(Qt.Key_J, description="Jobs pane toggle / imagegen task menu"),
             self._handle_j_key_browse,
         )
 
@@ -1817,12 +1817,12 @@ class BrowseViewKeyboardHandler(BaseKeyboardHandler):
         return True
 
     def _handle_j_key_browse(self, event: QKeyEvent, context_data: Dict[str, Any]) -> bool:
-        """J in browse: return to thumbnails and show jobs pane (always show, not toggle)."""
+        """J in browse: imagegen task menu when active, else toggle jobs pane on right sidebar."""
         if event.isAutoRepeat():
             return True
-        self.main_window.close_browse_view()
-
-        QTimer.singleShot(50, self.main_window.show_jobs_pane)
+        if self._handle_j_imagegen_activity_menu(event, context_data):
+            return True
+        self.main_window.toggle_jobs()
         event.accept()
         return True
 

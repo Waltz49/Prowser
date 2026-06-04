@@ -784,36 +784,55 @@ class ImageGenController(QObject):
     def _show_progressive_images_enabled(self) -> bool:
         return bool(self._pending_values.get("show_progressive_images", False))
 
+    def _active_generation_in_progress_or_cooldown(self) -> bool:
+        return self._tasks.is_running() or (
+            self._is_in_copy_cooldown() and self._copy_batch_active
+        )
+
+    def _paths_associated_with_active_generation(self) -> set[str]:
+        """Output, expand source/base, and reference thumbnails for the active job."""
+        paths: list[str] = []
+        if self._output_path:
+            paths.append(self._output_path)
+        if self._expand_source_path:
+            paths.append(self._expand_source_path)
+        if self._expand_base_path:
+            paths.append(self._expand_base_path)
+        paths.extend(self._task_reference_paths)
+        paths.extend(self._active_thumbnail_paths)
+        out: set[str] = set()
+        for p in paths:
+            if p:
+                out.add(os.path.normpath(p))
+        return out
+
     def viewing_path_matches_active_generation(self, path: str) -> bool:
-        """True when *path* is the active output (generating or inter-copy cooldown)."""
-        if not path or not self._output_path:
+        """True when *path* is tied to the active job (output, sources, or cooldown)."""
+        if not path or self._active_plugin is None:
             return False
-        if self._active_plugin is None:
+        if not self._active_generation_in_progress_or_cooldown():
             return False
-        if not self._show_progressive_images_enabled():
+        associated = self._paths_associated_with_active_generation()
+        if not associated:
             return False
-        if os.path.normpath(path) != os.path.normpath(self._output_path):
-            return False
-        if self._tasks.is_running():
-            return True
-        return self._is_in_copy_cooldown() and self._copy_batch_active
+        return os.path.normpath(path) in associated
 
     def is_viewing_output_in_copy_cooldown(self, path: str) -> bool:
-        if not path or not self._output_path:
-            return False
-        if not self._show_progressive_images_enabled():
+        if not path:
             return False
         return (
             self._is_in_copy_cooldown()
             and self._copy_batch_active
-            and os.path.normpath(path) == os.path.normpath(self._output_path)
+            and self.viewing_path_matches_active_generation(path)
         )
 
     def snapshot_generation_timing_for_info_panel(
         self,
     ) -> tuple[Optional[float], Optional[float], Optional[int], Optional[int]]:
         """Elapsed, estimate, and step progress for File Information active-job box."""
-        if not self._tasks.is_running() or not self._output_path:
+        if not self._active_generation_in_progress_or_cooldown():
+            return None, None, None, None
+        if not self._tasks.is_running():
             return None, None, None, None
         in_cooldown = self._is_in_copy_cooldown()
         elapsed, estimate = self._snapshot_live_timing(in_cooldown=in_cooldown)

@@ -111,16 +111,12 @@ class SidebarManager:
             return self.main_window.preview_visible
 
     def toggle_jobs(self):
-        """Toggle the visibility of the jobs pane in the combined sidebar."""
-        def do_toggle():
-            if hasattr(self.main_window, "combined_sidebar"):
-                self.main_window.combined_sidebar.set_jobs_visible(
-                    not self.main_window.combined_sidebar.is_jobs_visible()
-                )
-
-        if hasattr(self.main_window, "combined_sidebar"):
-            self._leave_browse_then(do_toggle)
-            return self.main_window.combined_sidebar.is_jobs_visible()
+        """Toggle the visibility of the jobs pane in the right combined sidebar."""
+        if hasattr(self.main_window, "right_sidebar"):
+            self.main_window.right_sidebar.set_jobs_visible(
+                not self.main_window.right_sidebar.is_jobs_visible()
+            )
+            return self.main_window.right_sidebar.is_jobs_visible()
         return False
     
     def toggle_preview_fit_mode(self):
@@ -385,7 +381,6 @@ class SidebarManager:
                 if (
                     self.main_window.file_tree_visible
                     or self.main_window.preview_visible
-                    or getattr(self.main_window, "jobs_visible", False)
                 ):
                     self.main_window.combined_sidebar.show()
                     QApplication.processEvents()

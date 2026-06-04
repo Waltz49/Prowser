@@ -462,7 +462,7 @@ class MenuManager:
         self.main_window.toggle_preview_action.triggered.connect(self.main_window.toggle_preview)
         view_menu.addAction(self.main_window.toggle_preview_action)
 
-        # Jobs pane toggle (combined sidebar)
+        # Jobs pane toggle (right combined sidebar)
         self.main_window.toggle_jobs_action = QAction('Show Jobs', self.main_window)
         self.main_window.toggle_jobs_action.setCheckable(True)
         self.main_window.toggle_jobs_action.setChecked(
@@ -501,7 +501,8 @@ class MenuManager:
             preview_visible = self.main_window.combined_sidebar.is_preview_visible()
             self.main_window.toggle_preview_action.setText('Hide Preview' if preview_visible else 'Show Preview')
             self.main_window.toggle_preview_action.setChecked(preview_visible)
-            jobs_visible = self.main_window.combined_sidebar.is_jobs_visible()
+            rs = getattr(self.main_window, 'right_sidebar', None)
+            jobs_visible = rs.is_jobs_visible() if rs else getattr(self.main_window, 'jobs_visible', False)
             self.main_window.toggle_jobs_action.setText('Hide Jobs' if jobs_visible else 'Show Jobs')
             self.main_window.toggle_jobs_action.setChecked(jobs_visible)
         
@@ -2765,7 +2766,7 @@ class MenuManager:
             'browse': {
                 'toggle_file_tree_action': False,
                 'toggle_preview_action': False,
-                'toggle_jobs_action': False,
+                'toggle_jobs_action': True,
                 'toggle_status_bar_action': True,
                 'browse_view_action': True,
                 'native_fullscreen_action': True,
@@ -3321,6 +3322,7 @@ class MenuManager:
         # T / P / J shortcuts are QAction-based; they only fire when the actions are enabled.
         # Left combined sidebar is thumbnail/list only — not browse or slideshow modes.
         show_tree_preview_toggles = view_mode in ('thumbnail', 'list')
+        show_jobs_toggle = view_mode in ('thumbnail', 'list', 'browse')
         
         # Enable/disable and show/hide file tree action
         if hasattr(mw, 'toggle_file_tree_action'):
@@ -3332,5 +3334,5 @@ class MenuManager:
             mw.toggle_preview_action.setEnabled(show_tree_preview_toggles)
             mw.toggle_preview_action.setVisible(show_tree_preview_toggles)
         if hasattr(mw, 'toggle_jobs_action'):
-            mw.toggle_jobs_action.setEnabled(show_tree_preview_toggles)
-            mw.toggle_jobs_action.setVisible(show_tree_preview_toggles)
+            mw.toggle_jobs_action.setEnabled(show_jobs_toggle)
+            mw.toggle_jobs_action.setVisible(show_jobs_toggle)
