@@ -37,6 +37,15 @@ from exif_utils import (
 from imagegen_plugins.image_gen_naming import parse_exif_generation_metadata
 from imagegen_plugins.image_gen_active_model import save_active_plugin_id_for_function
 from imagegen_plugins.image_gen_fields import FieldSpec
+from imagegen_plugins.image_gen_form_layout import (
+    IMAGE_GEN_SEED_SPIN_MAX_WIDTH,
+    ImageGenFieldsPanel,
+    image_gen_field_label_stylesheet,
+    image_gen_prompt_height_for_lines,
+    mount_image_gen_fields_in_scroll,
+    populate_image_gen_field_rows,
+    wrap_image_gen_slider_row,
+)
 from imagegen_plugins.image_gen_model_selector import (
     build_model_selector_row,
     resolve_initial_plugin,
@@ -318,6 +327,9 @@ def load_import_prompt_from_path(parent: QWidget, image_path: str) -> Optional[s
     return prompt_text
 
 
+IMAGE_GEN_SIDE_BUTTON_WIDTH = 112
+
+
 def _text_input_stylesheet() -> str:
     """Bordered arbitrary-text fields (prompt, negative prompt, etc.) in the image-gen dialog."""
     t = get_active_theme()
@@ -328,7 +340,6 @@ def _text_input_stylesheet() -> str:
         color: {t.dialog_text_color_hex};
         border: 1px solid {t.border_default_hex};
         border-radius: 4px;
-        padding: 6px;
         font-size: 13px;
     }}
     #imageGenDialog QPlainTextEdit:focus,
@@ -345,10 +356,7 @@ def _text_input_stylesheet() -> str:
         color: {t.dialog_text_color_hex};
         border: 1px solid {t.border_default_hex};
         border-radius: 4px;
-        padding: 4px 8px;
-        min-height: 24px;
-        min-width: 300px;
-        max-width: 480px;
+        min-width: 0px;
     }}
     #imageGenDialog QComboBox {{
         background-color: {t.button_bg_default_hex};
@@ -369,13 +377,20 @@ def _text_input_stylesheet() -> str:
         padding-right: 0px;
         min-width: 0px;
     }}
-    """
+    #imageGenDialog QPushButton#imageGenSideActionBtn {{
+        padding: 5px 6px;
+        font-size: 12px;
+        min-height: 24px;
+        min-width: 0px;
+        max-width: {IMAGE_GEN_SIDE_BUTTON_WIDTH}px;
+    }}
+    """ + image_gen_field_label_stylesheet()
 
 
 DEFAULT_IMAGE_GEN_DIALOG_TITLE = "Image Generation"
 EXPAND_IMAGE_DIALOG_TITLE = "Expand Image"
 IMAGE_GEN_FORM_ROW_SPACING = 4
-IMAGE_GEN_SIDE_BUTTON_SPACING = 12
+IMAGE_GEN_SIDE_BUTTON_SPACING = 6
 
 
 def clear_image_gen_side_button_layout(col: QVBoxLayout) -> None:
@@ -386,19 +401,58 @@ def clear_image_gen_side_button_layout(col: QVBoxLayout) -> None:
             widget.deleteLater()
 
 
+def configure_image_gen_side_button(button: QPushButton) -> None:
+    """Narrow vertical-column action buttons beside the fields panel."""
+    button.setObjectName("imageGenSideActionBtn")
+    button.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+    button.setFixedWidth(IMAGE_GEN_SIDE_BUTTON_WIDTH)
+
+
 def create_image_gen_side_button_column(
     parent: QWidget,
 ) -> tuple[QWidget, QVBoxLayout]:
     host = QWidget(parent)
     host.setObjectName("imageGenSideButtonColumn")
     host.setSizePolicy(
-        QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Expanding
+        QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Minimum
     )
+    host.setFixedWidth(IMAGE_GEN_SIDE_BUTTON_WIDTH)
     col = QVBoxLayout(host)
     col.setContentsMargins(0, 0, 0, 0)
     col.setSpacing(IMAGE_GEN_SIDE_BUTTON_SPACING)
     col.setAlignment(Qt.AlignmentFlag.AlignTop)
     return host, col
+
+
+def repopulate_image_gen_side_buttons(
+    owner: Any,
+    buttons: Optional[List[QPushButton]],
+) -> None:
+    """Fill side buttons in the row below the prompt (right of sliders/checkboxes)."""
+    host = getattr(owner, "_side_btn_host", None)
+    col = getattr(owner, "_side_btn_col", None)
+    panel = getattr(owner, "_fields_panel", None)
+    if host is None or col is None:
+        if not buttons:
+            if panel is not None:
+                panel.attach_side_button_column(None)
+            return
+        col = prepare_image_gen_side_button_column(owner, needed=True)
+        host = getattr(owner, "_side_btn_host", None)
+        if col is None or host is None:
+            return
+    clear_image_gen_side_button_layout(col)
+    if not buttons:
+        host.hide()
+        if panel is not None:
+            panel.attach_side_button_column(None)
+        return
+    for button in buttons:
+        configure_image_gen_side_button(button)
+        col.addWidget(button, 0, Qt.AlignmentFlag.AlignTop)
+    finalize_image_gen_side_button_column(col)
+    if panel is not None:
+        panel.attach_side_button_column(host)
 
 
 def finalize_image_gen_side_button_column(col: QVBoxLayout) -> None:
@@ -439,27 +493,12 @@ def wrap_image_gen_controls_with_side_buttons(
     scroll: QScrollArea,
     side_btn_host: Optional[QWidget],
 ) -> QWidget:
-    if side_btn_host is None:
-        return scroll
-    layout = side_btn_host.layout()
-    widget_count = 0
-    if layout is not None:
-        for index in range(layout.count()):
-            item = layout.itemAt(index)
-            if item is not None and item.widget() is not None:
-                widget_count += 1
-    if widget_count == 0:
-        return scroll
-    pane = QWidget(scroll.parent())
-    row = QHBoxLayout(pane)
-    row.setContentsMargins(0, 0, 0, 0)
-    row.setSpacing(8)
+    """Side buttons live inside the fields panel below the prompt; return scroll only."""
+    del side_btn_host
     scroll.setSizePolicy(
         QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
     )
-    row.addWidget(scroll, 1)
-    row.addWidget(side_btn_host, 0, Qt.AlignmentFlag.AlignTop)
-    return pane
+    return scroll
 
 
 def _snap_nearest_multiple(value: int, step: int = 8) -> int:
@@ -868,7 +907,7 @@ class ImageGenPreviewSplitter(QSplitter):
 
 
 def configure_image_gen_form_layout(form: QFormLayout) -> None:
-    """Shared vertical spacing and left-aligned labels between dynamic field rows."""
+    """Legacy no-op; fields use :class:`ImageGenFieldsPanel` instead."""
     form.setVerticalSpacing(IMAGE_GEN_FORM_ROW_SPACING)
     form.setFormAlignment(
         Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop
@@ -884,23 +923,31 @@ def field_specs_share_seed_row(spec_keys: set) -> bool:
 
 
 def build_seed_and_random_seed_row(seed_widget: QWidget, random_widget: QWidget) -> QWidget:
-    """Horizontal row: seed spinbox, gap, then Randomize label + checkbox."""
+    """Horizontal row: seed spinbox, then Randomize checkbox (no clipping)."""
+    from PySide6.QtWidgets import QCheckBox, QSpinBox
+
+    if isinstance(seed_widget, QSpinBox):
+        seed_widget.setMaximumWidth(IMAGE_GEN_SEED_SPIN_MAX_WIDTH)
+        seed_widget.setSizePolicy(
+            QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed
+        )
+    if isinstance(random_widget, QCheckBox):
+        random_widget.setSizePolicy(
+            QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed
+        )
+        random_widget.setMinimumWidth(random_widget.sizeHint().width())
+
     row_w = QWidget()
     row = QHBoxLayout(row_w)
     row.setContentsMargins(0, 0, 0, 0)
-    row.setSpacing(0)
-    row.addWidget(seed_widget, 0)
-    row.addSpacing(28)
-
-    random_group = QWidget()
-    random_row = QHBoxLayout(random_group)
-    random_row.setContentsMargins(12, 0, 0, 0)
-    random_row.setSpacing(8)
-    random_label = QLabel("Randomize")
-    random_row.addWidget(random_label, 0)
-    random_row.addWidget(random_widget, 0)
-    row.addWidget(random_group, 0)
-    row.addStretch(1)
+    row.setSpacing(10)
+    row.addWidget(
+        seed_widget, 0, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+    )
+    row.addWidget(
+        random_widget, 0, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+    )
+    row_w.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
     return row_w
 
 
@@ -946,7 +993,7 @@ class ImageGenDialog(ImageGenDimensionAspectMixin, QDialog):
         self._plugins_by_id: Dict[str, ImageGenModelPlugin] = {}
         self._widgets: Dict[str, Any] = {}
         self._specs: List[FieldSpec] = []
-        self._fields_form: Optional[QFormLayout] = None
+        self._fields_panel: Optional[ImageGenFieldsPanel] = None
         self._init_dim_aspect_state()
         self._flux_prompt_ai: Optional[ImageGenFluxPromptAi] = None
         self._side_btn_host: Optional[QWidget] = None
@@ -1018,15 +1065,10 @@ class ImageGenDialog(ImageGenDimensionAspectMixin, QDialog):
         layout = QVBoxLayout(self)
 
         scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        fields_inner = QWidget()
-        self._fields_form = QFormLayout(fields_inner)
-        configure_image_gen_form_layout(self._fields_form)
-        self._fields_form.setFieldGrowthPolicy(
-            QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow
+        self._fields_panel = ImageGenFieldsPanel(self)
+        self._side_btn_host, self._side_btn_col = create_image_gen_side_button_column(
+            self
         )
-
         (
             model_row,
             self._model_combo,
@@ -1035,14 +1077,14 @@ class ImageGenDialog(ImageGenDimensionAspectMixin, QDialog):
         ) = build_model_selector_row(
             self._plugins,
             selected_plugin_id=self.plugin.plugin_id,
-            parent=self,
+            parent=self._fields_panel.widget,
         )
         self._model_combo.currentIndexChanged.connect(self._on_model_combo_changed)
         apply_model_combo_tooltip(self._model_combo)
-        self._fields_form.addRow("Model:", model_row)
+        self._fields_panel.add_labeled_field("Model", model_row, to_outer=True)
 
         self._populate_field_rows()
-        scroll.setWidget(fields_inner)
+        mount_image_gen_fields_in_scroll(scroll, self._fields_panel)
         controls = wrap_image_gen_controls_with_side_buttons(
             scroll, self._side_btn_host
         )
@@ -1058,62 +1100,42 @@ class ImageGenDialog(ImageGenDimensionAspectMixin, QDialog):
         layout.addWidget(buttons)
 
     def _clear_field_rows(self) -> None:
-        if self._fields_form is None:
+        if self._fields_panel is None:
             return
-        while self._fields_form.rowCount() > 1:
-            self._fields_form.removeRow(1)
+        self._fields_panel.clear(keep=1)
         self._widgets.clear()
 
     def _populate_field_rows(self) -> None:
-        if self._fields_form is None:
+        if self._fields_panel is None:
             return
         self._clear_field_rows()
 
         spec_keys = {s.key for s in self._specs}
-        combine_seed_random = field_specs_share_seed_row(spec_keys)
-
-        for spec in self._specs:
-            if combine_seed_random and spec.key == "random_seed":
-                continue
-
-            widget, extra = self._widget_for_spec(spec)
-            self._widgets[spec.key] = (widget, extra, spec)
-
-            if spec.key == "mflux_lora":
-                self._fields_form.addRow(spec.label, widget)
-                continue
-
-            if spec.kind == "text":
-                if spec.key == "prompt":
-                    btn_col = prepare_image_gen_side_button_column(
-                        self, needed=self._needs_prompt_side_column()
-                    )
-                    if btn_col is not None:
-                        self._populate_prompt_side_buttons(btn_col)
-                    self._fields_form.addRow(spec.label, widget)
-                else:
-                    self._fields_form.addRow(spec.label, widget)
-            elif combine_seed_random and spec.key == "seed":
-                random_spec = next(s for s in self._specs if s.key == "random_seed")
-                random_widget, random_extra = self._widget_for_spec(random_spec)
-                self._widgets[random_spec.key] = (
-                    random_widget,
-                    random_extra,
-                    random_spec,
-                )
-                self._fields_form.addRow(
-                    spec.label,
-                    build_seed_and_random_seed_row(widget, random_widget),
-                )
-            elif spec.kind == "seed":
-                row = QHBoxLayout()
-                row.addWidget(widget)
-                self._fields_form.addRow(spec.label, self._wrap(row))
-            else:
-                self._fields_form.addRow(spec.label, widget)
+        populate_image_gen_field_rows(
+            self._fields_panel,
+            self._specs,
+            self._widgets,
+            self._widget_for_spec,
+            combine_seed_random=field_specs_share_seed_row(spec_keys),
+            build_seed_and_random_seed_row=build_seed_and_random_seed_row,
+        )
+        self._repopulate_side_buttons()
+        if self._has_dim_fields():
+            self._aspect_checkbox = QCheckBox("Aspect ratio lock")
+            self._aspect_checkbox.toggled.connect(self._on_aspect_lock_toggled)
+            apply_dim_helper_tooltips(aspect_checkbox=self._aspect_checkbox)
+            self._fields_panel.add_labeled_field(
+                None, self._aspect_checkbox, stretch_control=False
+            )
 
         self._connect_lora_steps_floor()
         self._connect_dim_aspect_lock()
+
+    def _repopulate_side_buttons(self) -> None:
+        if not self._needs_prompt_side_column():
+            repopulate_image_gen_side_buttons(self, None)
+            return
+        repopulate_image_gen_side_buttons(self, self._build_prompt_action_buttons())
 
     def _on_model_combo_changed(self, _index: int = 0) -> None:
         plugin_id = self._model_combo.currentData()
@@ -1228,19 +1250,46 @@ class ImageGenDialog(ImageGenDimensionAspectMixin, QDialog):
             or is_lmstudio_services_available()
         )
 
-    def _populate_prompt_side_buttons(self, btn_col: QVBoxLayout) -> None:
+    def _build_prompt_action_buttons(self) -> Optional[List[QPushButton]]:
+        if not self._needs_prompt_side_column():
+            return None
+        buttons: List[QPushButton] = []
         if self._show_import_button():
             import_text_btn = QPushButton("Import Prompt")
             import_text_btn.clicked.connect(self._on_import_prompt_text)
             apply_edit_import_text_button_tooltip(import_text_btn)
-            btn_col.addWidget(import_text_btn, 0, Qt.AlignmentFlag.AlignTop)
+            buttons.append(import_text_btn)
             import_all_btn = QPushButton("Import Available")
             import_all_btn.clicked.connect(self._on_import_available)
             apply_edit_import_all_button_tooltip(import_all_btn)
-            btn_col.addWidget(import_all_btn, 0, Qt.AlignmentFlag.AlignTop)
+            buttons.append(import_all_btn)
         if self._has_dim_fields():
-            self._add_dim_helper_buttons(btn_col)
-        self._ensure_flux_prompt_ai().add_button(btn_col)
+            screen_btn = QPushButton("Screen size")
+            screen_btn.clicked.connect(self._on_screen_size_dims)
+            buttons.append(screen_btn)
+            square_btn = QPushButton("Square")
+            square_btn.clicked.connect(self._on_square_dims)
+            buttons.append(square_btn)
+            reverse_btn = QPushButton("Reverse")
+            reverse_btn.clicked.connect(self._on_reverse_dims)
+            buttons.append(reverse_btn)
+            apply_dim_helper_tooltips(
+                screen_btn=screen_btn,
+                square_btn=square_btn,
+                reverse_btn=reverse_btn,
+                aspect_checkbox=None,
+            )
+        ai = self._ensure_flux_prompt_ai()
+        buttons.extend(ai.make_action_buttons())
+        return buttons or None
+
+    def _populate_prompt_side_buttons(self, btn_col: QVBoxLayout) -> None:
+        """Legacy side column hook; prompt actions are inline under the prompt field."""
+        buttons = self._build_prompt_action_buttons()
+        if not buttons:
+            return
+        for button in buttons:
+            btn_col.addWidget(button, 0, Qt.AlignmentFlag.AlignTop)
         finalize_image_gen_side_button_column(btn_col)
 
     def _show_import_button(self) -> bool:
@@ -1337,12 +1386,20 @@ class ImageGenDialog(ImageGenDimensionAspectMixin, QDialog):
         if spec.kind == "text":
             edit = QPlainTextEdit()
             edit.setPlainText(str(spec.default or ""))
-            edit.setMinimumHeight(120 if spec.key == "prompt" else 72)
+            if spec.key == "prompt":
+                edit.setMinimumHeight(
+                    image_gen_prompt_height_for_lines(4, edit.fontMetrics())
+                )
+            else:
+                edit.setMinimumHeight(72)
             edit.setLineWrapMode(QPlainTextEdit.LineWrapMode.WidgetWidth)
             return edit, None
 
         if spec.kind == "bool":
-            cb = QCheckBox()
+            label = spec.label
+            if spec.key == "random_seed":
+                label = "Randomize"
+            cb = QCheckBox(label)
             cb.setChecked(bool(spec.default))
             apply_field_control_tooltips(spec, cb)
             return cb, None
@@ -1376,13 +1433,11 @@ class ImageGenDialog(ImageGenDimensionAspectMixin, QDialog):
             spin.setMaximum(hi)
             spin.setSingleStep(step)
             spin.setValue(val)
+            spin.setMaximumWidth(72)
             slider.valueChanged.connect(spin.setValue)
             spin.valueChanged.connect(slider.setValue)
             apply_field_control_tooltips(spec, slider, slider=slider, spin=spin)
-            row = QHBoxLayout()
-            row.addWidget(slider, 1)
-            row.addWidget(spin)
-            return self._wrap(row), None
+            return wrap_image_gen_slider_row(slider, spin), None
 
         if spec.kind == "float_slider":
             slider = QSlider(Qt.Orientation.Horizontal)
@@ -1402,16 +1457,15 @@ class ImageGenDialog(ImageGenDimensionAspectMixin, QDialog):
 
             slider.valueChanged.connect(update_label)
             apply_field_control_tooltips(spec, slider, slider=slider)
-            row = QHBoxLayout()
-            row.addWidget(slider, 1)
-            row.addWidget(label)
-            return self._wrap(row), scale
+            return wrap_image_gen_slider_row(slider, label), scale
 
         if spec.kind == "seed":
             spin = QSpinBox()
             spin.setMinimum(0)
             spin.setMaximum(2**31 - 1)
             spin.setValue(int(spec.default or 0))
+            spin.setMaximumWidth(IMAGE_GEN_SEED_SPIN_MAX_WIDTH)
+            spin.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
             return spin, None
 
         label = QLabel(str(spec.default))

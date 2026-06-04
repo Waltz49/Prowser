@@ -372,6 +372,7 @@ copy_and_count "build_dmg.sh"
 copy_and_count "make_icns.sh"
 copy_and_count "copy_project_files.sh"
 copy_and_count "setup.sh"
+copy_and_count "create_sample_images.py"
 copy_and_count ".gitignore"
 copy_and_count "pyinstaller_runtime_hook.py"
 

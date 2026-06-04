@@ -146,10 +146,15 @@ class InfillPaintSettingsDialog(ImageGenDialog):
     def _widget_for_spec(self, spec: FieldSpec):
         widget, extra = super()._widget_for_spec(spec)
         if spec.kind == "text" and spec.key == "prompt":
-            fm = widget.fontMetrics()
-            h = fm.lineSpacing() * _INFILL_PAINT_PROMPT_LINES + 12
-            widget.setMinimumHeight(h)
-            widget.setMaximumHeight(h)
+            from imagegen_plugins.image_gen_form_layout import (
+                image_gen_prompt_height_for_lines,
+            )
+
+            widget.setMinimumHeight(
+                image_gen_prompt_height_for_lines(
+                    _INFILL_PAINT_PROMPT_LINES, widget.fontMetrics()
+                )
+            )
         return widget, extra
 
     def _show_import_button(self) -> bool:

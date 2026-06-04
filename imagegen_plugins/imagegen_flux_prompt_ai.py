@@ -39,8 +39,12 @@ class ImageGenFluxPromptAi:
         self._dot_timer.timeout.connect(self._on_dot_tick)
 
     def add_button(self, btn_col: QVBoxLayout) -> None:
+        for button in self.make_action_buttons():
+            btn_col.addWidget(button, 0, Qt.AlignmentFlag.AlignTop)
+
+    def make_action_buttons(self) -> list[QPushButton]:
         if not is_lmstudio_services_available():
-            return
+            return []
         self._ai_btn = QPushButton("AI")
         self._ai_btn.setObjectName("flux_prompt_ai_btn")
         self._ai_btn.setToolTip(
@@ -48,14 +52,15 @@ class ImageGenFluxPromptAi:
             "(requires a text model loaded in LM Studio)"
         )
         self._ai_btn.clicked.connect(self._on_ai_clicked)
-        btn_col.addWidget(self._ai_btn, 0, Qt.AlignmentFlag.AlignTop)
 
         self._undo_btn = QPushButton("Undo AI")
         self._undo_btn.setObjectName("flux_prompt_undo_ai_btn")
-        self._undo_btn.setToolTip("Restore the prompt from before the last AI refinement")
+        self._undo_btn.setToolTip(
+            "Restore the prompt from before the last AI refinement"
+        )
         self._undo_btn.clicked.connect(self._on_undo_clicked)
-        self._undo_btn.hide()
-        btn_col.addWidget(self._undo_btn, 0, Qt.AlignmentFlag.AlignTop)
+        self._update_undo_visibility()
+        return [self._ai_btn, self._undo_btn]
 
     def _update_undo_visibility(self) -> None:
         if self._undo_btn is None:

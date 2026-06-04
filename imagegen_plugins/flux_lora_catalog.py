@@ -2,6 +2,10 @@
 """Back-compat re-exports for LoRA catalog (prefer imagegen_plugins.lora_catalog)."""
 
 from imagegen_plugins.lora_catalog import *  # noqa: F403
+from imagegen_plugins.lora_catalog import (  # explicit: import * skips _-prefixed names
+    _lora_download_local_dir,
+    sample_flux_lora_download_entries,
+)
 from imagegen_plugins.lora_catalog_settings import migrate_lora_catalog
 from imagegen_plugins.lora_entry import (
     DEFAULT_CACHE,

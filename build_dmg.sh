@@ -8,7 +8,19 @@ cd "$SCRIPT_DIR"
 # Config
 #######################################
 APP_NAME="Prowser"
-APP_VERSION="0.9.0"
+INIT_PY="$SCRIPT_DIR/__init__.py"
+APP_VERSION=$(python3 -c "
+import importlib.util
+import sys
+spec = importlib.util.spec_from_file_location('prowser_init', sys.argv[1])
+mod = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(mod)
+print(mod.__version__)
+" "$INIT_PY")
+if [ -z "$APP_VERSION" ]; then
+  echo "❌ Error: could not read __version__ from $INIT_PY"
+  exit 1
+fi
 VOLUME_NAME="Prowser Installer"
 
 APP_PATH="/Applications/${APP_NAME}.app"
@@ -47,7 +59,7 @@ ln -s /Applications "$WORKDIR/Applications"
 # Copy pre-blessed source folder into staging (icon preserved)
 if [ -d "$SOURCE_FOLDER" ]; then
     cp -R "$SOURCE_FOLDER" "$WORKDIR/source"
-    "$SCRIPT_DIR/copy_project_files.sh" "$WORKDIR/source" -f
+    "$SCRIPT_DIR/copy_project_files.sh" -f "$WORKDIR/source"
 else
     echo "❌ Error: pre-blessed source folder not found at $SOURCE_FOLDER"
     echo "To create a folder with a custom icon, create $SOURCE_FOLDER and use Finder"

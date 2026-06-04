@@ -37,12 +37,13 @@ def available_plugins(
 
 
 def configure_model_combo(combo: QComboBox) -> None:
-    """Model pulldown width: overrides app theme max-width 160px on QComboBox."""
+    """Model pulldown fills available width in the dialog."""
     combo.setObjectName(_MODEL_COMBO_OBJECT_NAME)
-    combo.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
-    combo.setMinimumWidth(_MODEL_COMBO_MIN_WIDTH)
-    combo.setMaximumWidth(_MODEL_COMBO_MAX_WIDTH)
+    combo.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
     combo.setMinimumContentsLength(_MODEL_COMBO_MIN_CONTENTS_LENGTH)
+    combo.setMinimumWidth(0)
+    # Override global theme QComboBox max-width (160px); avoid QWIDGETSIZE_MAX (warns).
+    combo.setMaximumWidth(4096)
 
 
 def sync_model_comment_label(

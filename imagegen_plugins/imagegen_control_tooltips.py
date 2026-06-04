@@ -92,16 +92,20 @@ def apply_field_control_tooltips(
 
 def apply_dim_helper_tooltips(
     *,
-    screen_btn: QPushButton,
-    square_btn: QPushButton,
-    reverse_btn: QPushButton,
-    aspect_checkbox: QCheckBox,
+    screen_btn: Optional[QPushButton] = None,
+    square_btn: Optional[QPushButton] = None,
+    reverse_btn: Optional[QPushButton] = None,
+    aspect_checkbox: Optional[QCheckBox] = None,
     import_btn: Optional[QPushButton] = None,
 ) -> None:
-    screen_btn.setToolTip(_DIM_HELPER_TOOLTIPS["screen_size"])
-    square_btn.setToolTip(_DIM_HELPER_TOOLTIPS["square"])
-    reverse_btn.setToolTip(_DIM_HELPER_TOOLTIPS["reverse"])
-    aspect_checkbox.setToolTip(_DIM_HELPER_TOOLTIPS["aspect"])
+    if screen_btn is not None:
+        screen_btn.setToolTip(_DIM_HELPER_TOOLTIPS["screen_size"])
+    if square_btn is not None:
+        square_btn.setToolTip(_DIM_HELPER_TOOLTIPS["square"])
+    if reverse_btn is not None:
+        reverse_btn.setToolTip(_DIM_HELPER_TOOLTIPS["reverse"])
+    if aspect_checkbox is not None:
+        aspect_checkbox.setToolTip(_DIM_HELPER_TOOLTIPS["aspect"])
     if import_btn is not None:
         import_btn.setToolTip(_DIM_HELPER_TOOLTIPS["import"])
 
