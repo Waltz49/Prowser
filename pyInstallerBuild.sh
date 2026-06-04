@@ -1275,6 +1275,13 @@ print(f\"EXCLUDES={repr(all_excludes)}\")
         RUNTIME_HOOKS="[]"
         print_warning "Runtime hook file not found, PYTHON_JIT will not be set"
     fi
+
+    RUNTIME_ASSET_DATAS=$("$PYTHON_CMD" "$SCRIPT_DIR/list_runtime_assets.py" --format pyinstaller)
+    if [ -z "$RUNTIME_ASSET_DATAS" ]; then
+        print_error "list_runtime_assets.py produced no asset datas entries"
+        exit 1
+    fi
+    print_status "Bundling $(echo "$RUNTIME_ASSET_DATAS" | wc -l | tr -d ' ') runtime asset(s)"
     
     cat > "$SPEC_FILE" << EOF
 # -*- mode: python ; coding: utf-8 -*-
@@ -1318,30 +1325,7 @@ a = Analysis(
         ('.pyinstaller_face_models/mmod_human_face_detector.dat', 'face_recognition_models/models'),
         ('.pyinstaller_face_models/shape_predictor_5_face_landmarks.dat', 'face_recognition_models/models'),
         ('.pyinstaller_face_models/shape_predictor_68_face_landmarks.dat', 'face_recognition_models/models'),
-        ('assets/beachball.png', 'assets'),
-        ('assets/checkbox_x.svg', 'assets'),
-        ('assets/combo_arrow.svg', 'assets'),
-        ('assets/edit_icon.png', 'assets'),
-        ('assets/edit_icon_hover.png', 'assets'),
-        ('assets/expansion_template.webp', 'assets'),
-        ('assets/gear.svg', 'assets'),
-        ('assets/gear_hover.svg', 'assets'),
-        ('assets/noimage.svg', 'assets'),
-        ('assets/padlock.png', 'assets'),
-        ('assets/qmark.png', 'assets'),
-        ('assets/radio_dot.svg', 'assets'),
-        ('assets/series_minus_icon.png', 'assets'),
-        ('assets/series_minus_icon_hover.png', 'assets'),
-        ('assets/series_plus_icon.png', 'assets'),
-        ('assets/series_plus_icon_hover.png', 'assets'),
-        ('assets/series_refinement_icon.png', 'assets'),
-        ('assets/series_refinement_icon_active.png', 'assets'),
-        ('assets/series_refinement_icon_active_hover.png', 'assets'),
-        ('assets/series_refinement_icon_hover.png', 'assets'),
-        ('assets/skip_cooldown_icon.png', 'assets'),
-        ('assets/trash_icon.png', 'assets'),
-        ('assets/trash_icon.svg', 'assets'),
-        ('assets/trash_icon_hover.svg', 'assets'),
+$RUNTIME_ASSET_DATAS
     ] + _imagegen_collect_datas,
     hiddenimports=list(set(_hidden_from_directives + _imagegen_collect_hidden)),
     hookspath=$HOOKSPATH_JSON,
