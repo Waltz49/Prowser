@@ -10,7 +10,6 @@ import logging
 import os
 import re
 import shutil
-import tempfile
 import time
 from typing import Optional
 
@@ -84,13 +83,17 @@ class WallpaperManager:
             status_notification: Optional status notification object for user feedback
         """
         self.status_notification = status_notification
-        self.temp_dir = os.path.expanduser("~/tmp/prowser_wallpaper")
-        os.makedirs(self.temp_dir, exist_ok=True)
-        
+
         # Wallpaper undo functionality
         self.previous_wallpaper_path = None
         self.previous_wallpaper_backup_path = None
-    
+
+    @property
+    def temp_dir(self) -> str:
+        from prowser_temp_files import prowser_temp_subdir
+
+        return prowser_temp_subdir("wallpaper")
+
     def set_image_as_desktop_background(self, image_path: str, transformation: Optional[tuple] = None, fit_method: str = 'contain') -> bool:
         """
         Set the given image as the desktop background with letterboxing

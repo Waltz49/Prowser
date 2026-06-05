@@ -11,7 +11,7 @@ import os
 import random
 import subprocess
 import sys
-import tempfile
+from prowser_temp_files import prowser_mkstemp_path
 import time
 from typing import Any, Dict, Final, Optional, Tuple
 
@@ -286,8 +286,7 @@ def run_from_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
 
     stepwise_dir, progressive_output_path = stepwise_dirs_for_run(steps, output_path)
 
-    fd, mflux_output_path = tempfile.mkstemp(prefix="imagegen-mflux-", suffix=".png")
-    os.close(fd)
+    mflux_output_path = prowser_mkstemp_path(prefix="imagegen-mflux-", suffix=".png")
     try:
         os.unlink(mflux_output_path)
     except OSError:

@@ -428,6 +428,9 @@ class ImageBrowserConfig:
             # Image creation directory (generated images; disabled => ~/Downloads)
             'image_creation_directory': {'path': None, 'enabled': False},
 
+            # Work temp files (infill, masking, etc.); None/blank => /tmp/prowser_{user}/
+            'temporary_files_directory': None,
+
             # Ignore directories (list of dicts with 'path' and 'enabled' keys to ignore in search, find duplicates, etc.)
             'ignore_directories': [{'path': None, 'enabled': False}] * 3,
             
@@ -626,6 +629,12 @@ class ImageBrowserConfig:
         """Save user settings to ~/.prowser/data/settings.json"""
         with _settings_file_lock:
             self._save_settings_unlocked(settings)
+        try:
+            from prowser_temp_files import invalidate_temporary_files_directory_cache
+
+            invalidate_temporary_files_directory_cache()
+        except ImportError:
+            pass
     
     def _apply_setting_in_memory(self, settings: dict, key: str, value) -> None:
         """Apply one key to an in-memory settings dict (no save)."""

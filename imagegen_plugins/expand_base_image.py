@@ -4,8 +4,9 @@
 from __future__ import annotations
 
 import os
-import tempfile
 from typing import Any, Dict
+
+from prowser_temp_files import prowser_mkstemp_path
 
 from PIL import Image
 
@@ -13,15 +14,11 @@ from imagegen_plugins.outpaint_mask import clamp_outpaint_dims, prepare_image_an
 
 
 def create_expand_base_temp_path() -> str:
-    """Unique expand fill input path in /tmp (mode 600, mktemp-style)."""
-    fd, path = tempfile.mkstemp(
+    """Unique expand fill input path under the configured temp directory."""
+    return prowser_mkstemp_path(
         prefix="imagegen-expand-base-",
         suffix=".png",
-        dir="/tmp",
     )
-    os.close(fd)
-    os.chmod(path, 0o600)
-    return path
 
 
 def remove_expand_base_temp(path: str) -> None:
@@ -35,8 +32,8 @@ def remove_expand_base_temp(path: str) -> None:
 
 
 def prepare_and_save_expand_base(values: Dict[str, Any], output_path: str) -> str:
-    """Build the fill input image and save it to a private temp file in /tmp."""
-    _ = output_path  # caller API; temp path is always under /tmp
+    """Build the fill input image and save it to a private temp file."""
+    _ = output_path  # caller API; temp path uses configured Prowser temp directory
     source_path = str(values.get("source_image_path") or "")
     if not source_path or not os.path.isfile(source_path):
         raise ValueError("source_image_path is required and must exist")

@@ -14,7 +14,6 @@ import inspect
 import os
 import re
 import shutil
-import tempfile
 import threading
 import time
 from datetime import datetime
@@ -6697,8 +6696,10 @@ class ImageBrowserWindow(QMainWindow):
                 x, y, w, h = rect
                 cropped = source_pixmap.copy(x, y, w, h)
                 if not cropped.isNull():
-                    fd, temp_path = tempfile.mkstemp(suffix='.png', prefix='prowser_wallpaper_zoom_')
-                    os.close(fd)
+                    from prowser_temp_files import prowser_mkstemp_path
+                    temp_path = prowser_mkstemp_path(
+                        suffix='.png', prefix='prowser_wallpaper_zoom_'
+                    )
                     if cropped.save(temp_path, 'PNG'):
                         return (temp_path, None, temp_path)
                     try:

@@ -12,7 +12,12 @@ from imagegen_plugins.image_gen_pipeline_modes import get_pipeline
 from imagegen_plugins.image_gen_registry import ImageGenModelPlugin
 from imagegen_plugins.model_task_status_info import format_image_generation_queue_status_html
 
-_PREVIEW_OUTPUT = "/tmp/.__imagegen_queue_preview__.png"
+def _preview_output_path() -> str:
+    from prowser_temp_files import ensure_temporary_files_directory
+
+    return os.path.join(
+        ensure_temporary_files_directory(), ".__imagegen_queue_preview__.png"
+    )
 
 
 @dataclass
@@ -54,7 +59,7 @@ def thumbnail_paths_for_values(
 
 def refresh_queued_job_status(job: QueuedGenerateJob) -> None:
     """Rebuild status HTML after queue-row series edits (copies / refinement)."""
-    payload = job.plugin.build_payload(job.values, _PREVIEW_OUTPUT)
+    payload = job.plugin.build_payload(job.values, _preview_output_path())
     job.status_html = format_image_generation_queue_status_html(
         job.plugin,
         job.values,

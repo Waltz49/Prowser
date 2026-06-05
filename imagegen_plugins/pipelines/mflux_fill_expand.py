@@ -11,7 +11,7 @@ import os
 import random
 import subprocess
 import sys
-import tempfile
+from prowser_temp_files import prowser_mkstemp_path
 import time
 from typing import Any, Dict, Final
 
@@ -213,10 +213,9 @@ def _run_fill_generation(
             os.unlink(output_path)
         except OSError:
             pass
-    fd, mflux_output_path = tempfile.mkstemp(
+    mflux_output_path = prowser_mkstemp_path(
         prefix="imagegen-mflux-fill-out-", suffix=".png"
     )
-    os.close(fd)
     try:
         os.unlink(mflux_output_path)
     except OSError:
@@ -303,10 +302,8 @@ def _run_infill_from_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     finally:
         mask_src.close()
 
-    fd_img, img_path = tempfile.mkstemp(prefix="imagegen-mflux-infill-", suffix=".png")
-    os.close(fd_img)
-    fd_mask, mask_tmp = tempfile.mkstemp(prefix="imagegen-mflux-infill-mask-", suffix=".png")
-    os.close(fd_mask)
+    img_path = prowser_mkstemp_path(prefix="imagegen-mflux-infill-", suffix=".png")
+    mask_tmp = prowser_mkstemp_path(prefix="imagegen-mflux-infill-mask-", suffix=".png")
     try:
         background.save(img_path)
         mask.save(mask_tmp)
@@ -398,10 +395,8 @@ def run_from_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
         )
         image.close()
 
-    fd_img, img_path = tempfile.mkstemp(prefix="imagegen-mflux-fill-", suffix=".png")
-    os.close(fd_img)
-    fd_mask, mask_path = tempfile.mkstemp(prefix="imagegen-mflux-mask-", suffix=".png")
-    os.close(fd_mask)
+    img_path = prowser_mkstemp_path(prefix="imagegen-mflux-fill-", suffix=".png")
+    mask_path = prowser_mkstemp_path(prefix="imagegen-mflux-mask-", suffix=".png")
     try:
         background.save(img_path)
         mask.save(mask_path)

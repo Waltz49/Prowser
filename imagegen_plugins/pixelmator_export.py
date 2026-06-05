@@ -6,7 +6,7 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
-import tempfile
+from prowser_temp_files import prowser_mkdtemp, prowser_temp_subdir
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -39,9 +39,7 @@ def is_pixelmator_pro_installed() -> bool:
 
 def pixelmator_export_dir() -> str:
     """Directory for Pixelmator WebP exports (base.webp, mask.webp)."""
-    export_dir = os.path.expanduser("~/tmp")
-    os.makedirs(export_dir, exist_ok=True)
-    return export_dir
+    return prowser_temp_subdir("pixelmator")
 
 
 def pixelmator_base_path() -> str:
@@ -155,7 +153,7 @@ def export_pixelmator_base_and_mask() -> Tuple[bool, Dict[str, Any], Optional[st
         return (
             False,
             meta,
-            "Export did not create base.webp and mask.webp in ~/tmp. "
+            f"Export did not create base.webp and mask.webp in {pixelmator_export_dir()}. "
             "Use a square canvas with at least two layers (mask on top, image below).",
         )
 
@@ -179,7 +177,7 @@ def persist_pixelmator_exports(meta: Dict[str, Any]) -> Dict[str, Any]:
         return meta
     if not os.path.isfile(base_path) or not os.path.isfile(mask_path):
         return meta
-    job_dir = tempfile.mkdtemp(prefix="imagegen-infill-")
+    job_dir = prowser_mkdtemp(prefix="imagegen-infill-")
     base_dest = os.path.join(job_dir, "base.webp")
     mask_dest = os.path.join(job_dir, "mask.webp")
     shutil.copy2(base_path, base_dest)
@@ -202,7 +200,7 @@ def persist_paint_infill_exports(source_path: str, mask_image) -> Dict[str, Any]
     else:
         mask_w, mask_h = mask_image.size
 
-    job_dir = tempfile.mkdtemp(prefix="imagegen-infill-")
+    job_dir = prowser_mkdtemp(prefix="imagegen-infill-")
     _, src_ext = os.path.splitext(source_path)
     ext = src_ext if src_ext else ".png"
     base_dest = os.path.join(job_dir, f"base{ext}")

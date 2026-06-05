@@ -4,8 +4,9 @@
 from __future__ import annotations
 
 import os
-import tempfile
 from typing import List, Tuple
+
+from prowser_temp_files import prowser_mkstemp_path
 
 from PIL import Image
 
@@ -21,28 +22,20 @@ def _fit_dimensions(w: int, h: int, ref_w: int, ref_h: int) -> tuple[int, int]:
 
 
 def create_edit_aspect_pad_temp_path() -> str:
-    fd, path = tempfile.mkstemp(
+    return prowser_mkstemp_path(
         prefix="imagegen-edit-aspect-pad-",
         suffix=".png",
-        dir="/tmp",
     )
-    os.close(fd)
-    os.chmod(path, 0o600)
-    return path
 
 
 EXPANSION_TEMPLATE_ASSET = "expansion_template.webp"
 
 
 def create_screen_size_expansion_template_temp_path() -> str:
-    fd, path = tempfile.mkstemp(
+    return prowser_mkstemp_path(
         prefix="imagegen-edit-screen-size-",
         suffix=".webp",
-        dir="/tmp",
     )
-    os.close(fd)
-    os.chmod(path, 0o600)
-    return path
 
 
 def save_screen_size_expansion_template_webp() -> str:

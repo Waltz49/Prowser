@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 import os
-import tempfile
+from prowser_temp_files import prowser_mkstemp_path
 import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Tuple
@@ -101,8 +101,7 @@ def _probe_t2i(
     if cancel_check():
         return False
     w, h = align_mflux_dims(256, 256)
-    fd, out_path = tempfile.mkstemp(prefix="lora-probe-", suffix=".png")
-    os.close(fd)
+    out_path = prowser_mkstemp_path(prefix="lora-probe-", suffix=".png")
     try:
         try:
             os.unlink(out_path)
@@ -151,12 +150,9 @@ def _probe_fill(
     img = Image.new("RGB", (w, h), (90, 90, 90))
     mask = Image.new("L", (w, h), 0)
     ImageDraw.Draw(mask).rectangle([w // 4, h // 4, 3 * w // 4, 3 * h // 4], fill=255)
-    fd_img, img_path = tempfile.mkstemp(prefix="lora-probe-fill-", suffix=".png")
-    os.close(fd_img)
-    fd_mask, mask_path = tempfile.mkstemp(prefix="lora-probe-fill-mask-", suffix=".png")
-    os.close(fd_mask)
-    fd_out, out_path = tempfile.mkstemp(prefix="lora-probe-fill-out-", suffix=".png")
-    os.close(fd_out)
+    img_path = prowser_mkstemp_path(prefix="lora-probe-fill-", suffix=".png")
+    mask_path = prowser_mkstemp_path(prefix="lora-probe-fill-mask-", suffix=".png")
+    out_path = prowser_mkstemp_path(prefix="lora-probe-fill-out-", suffix=".png")
     try:
         img.save(img_path)
         mask.save(mask_path)
@@ -209,10 +205,8 @@ def _probe_klein_edit(
     if cancel_check():
         return False
     w, h = 256, 256
-    fd_img, img_path = tempfile.mkstemp(prefix="lora-probe-klein-src-", suffix=".png")
-    os.close(fd_img)
-    fd_out, out_path = tempfile.mkstemp(prefix="lora-probe-klein-out-", suffix=".png")
-    os.close(fd_out)
+    img_path = prowser_mkstemp_path(prefix="lora-probe-klein-src-", suffix=".png")
+    out_path = prowser_mkstemp_path(prefix="lora-probe-klein-out-", suffix=".png")
     try:
         Image.new("RGB", (w, h), (100, 120, 140)).save(img_path)
         try:

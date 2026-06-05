@@ -9,6 +9,8 @@ import re
 import shutil
 import tempfile
 import threading
+
+from prowser_temp_files import prowser_mkdtemp
 import time
 from typing import Any, Callable, Dict, Optional, Set, Tuple
 
@@ -100,7 +102,7 @@ def watch_stepwise_to_output(
 def stepwise_dirs_for_run(steps: int, output_path: str) -> tuple[str | None, str | None]:
     """Return (stepwise_dir, progressive_output_path) when steps > 1."""
     if steps > 1:
-        return tempfile.mkdtemp(prefix="imagegen-mflux-stepwise-"), output_path
+        return prowser_mkdtemp(prefix="imagegen-mflux-stepwise-"), output_path
     return None, None
 
 

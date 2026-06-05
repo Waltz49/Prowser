@@ -597,6 +597,7 @@ class SettingsDialog(QDialog):
                 'search_depth': self.search_depth_spinbox.value() if hasattr(self, 'search_depth_spinbox') else self.DEFAULT_SEARCH_DEPTH,
                 'ignore_directories': self.get_ignore_directories(),
                 'image_creation_directory': self.get_image_creation_directory(),
+                'temporary_files_directory': self.get_temporary_files_directory(),
             }
         elif tab_widget == self.extensions_tab:
             return {
@@ -779,6 +780,8 @@ class SettingsDialog(QDialog):
                 self.search_depth_spinbox.setValue(settings['search_depth'])
             if 'image_creation_directory' in settings:
                 self._load_image_creation_directory(settings)
+            if 'temporary_files_directory' in settings:
+                self._load_temporary_files_directory(settings)
             if 'ignore_directories' in settings and hasattr(self, 'ignore_directory_input_fields'):
                 ignore_dirs = settings['ignore_directories']
                 if not isinstance(ignore_dirs, list):
@@ -1007,6 +1010,8 @@ class SettingsDialog(QDialog):
                 self.image_creation_directory_input_field.setText("")
             if hasattr(self, 'image_creation_directory_checkbox'):
                 self.image_creation_directory_checkbox.setChecked(False)
+            if hasattr(self, 'temporary_files_directory_input_field'):
+                self.temporary_files_directory_input_field.setText("")
             if hasattr(self, 'ignore_directory_input_fields'):
                 for field in self.ignore_directory_input_fields:
                     field.setText("")
@@ -1172,6 +1177,8 @@ class SettingsDialog(QDialog):
                 self.image_creation_directory_input_field.setText("")
             if hasattr(self, 'image_creation_directory_checkbox'):
                 self.image_creation_directory_checkbox.setChecked(False)
+            if hasattr(self, 'temporary_files_directory_input_field'):
+                self.temporary_files_directory_input_field.setText("")
             if hasattr(self, 'ignore_directory_input_fields'):
                 for field in self.ignore_directory_input_fields:
                     field.setText("")
@@ -3765,8 +3772,8 @@ class SettingsDialog(QDialog):
         # warning_label.setStyleSheet(self.NOTE_TEXT_STYLE)
         # layout.addWidget(warning_label)
 
-        # Image creation directory (generated imagegen-NNNN files)
-        image_creation_groupbox = QGroupBox("Image Creation Directory")
+        # Image creation directory (generated imagegen-NNNN files) and work temp files
+        image_creation_groupbox = QGroupBox("Image Creation & Temporary Files")
         image_creation_groupbox.setStyleSheet(f"""
             QGroupBox {{
                 font-weight: bold;
@@ -3827,6 +3834,45 @@ class SettingsDialog(QDialog):
         image_creation_row_layout.addWidget(image_creation_browse_button)
 
         image_creation_layout.addWidget(image_creation_row)
+
+        from prowser_temp_files import default_temporary_files_directory
+
+        _default_temp_dir = default_temporary_files_directory() + os.sep
+        temp_files_note = QLabel(
+            "Work files for infill, masking, image generation, wallpaper, and similar "
+            "operations (resize uses the destination folder). Leave blank for the default."
+        )
+        temp_files_note.setWordWrap(True)
+        temp_files_note.setStyleSheet(self.NOTE_TEXT_STYLE)
+        image_creation_layout.addWidget(temp_files_note)
+
+        temp_files_row = QWidget()
+        temp_files_row.setMinimumHeight(28)
+        temp_files_row.setMaximumHeight(28)
+        temp_files_row_layout = QHBoxLayout(temp_files_row)
+        temp_files_row_layout.setContentsMargins(0, 0, 0, 0)
+        temp_files_row_layout.setSpacing(8)
+
+        temp_files_label = QLabel("Temporary files:")
+        temp_files_label.setMinimumWidth(110)
+        temp_files_row_layout.addWidget(temp_files_label)
+
+        self.temporary_files_directory_input_field = QLineEdit()
+        self.temporary_files_directory_input_field.setPlaceholderText(
+            f"Default: {_default_temp_dir}"
+        )
+        self.temporary_files_directory_input_field.setMinimumHeight(28)
+        temp_files_row_layout.addWidget(self.temporary_files_directory_input_field)
+
+        temp_files_browse_button = QPushButton("...")
+        temp_files_browse_button.setToolTip("Browse for temporary files directory")
+        temp_files_browse_button.setFixedWidth(30)
+        temp_files_browse_button.setFixedHeight(28)
+        temp_files_browse_button.setStyleSheet(self._small_ellipsis_button_style())
+        temp_files_browse_button.clicked.connect(self.browse_temporary_files_directory)
+        temp_files_row_layout.addWidget(temp_files_browse_button)
+
+        image_creation_layout.addWidget(temp_files_row)
         layout.addWidget(image_creation_groupbox)
         layout.addSpacing(12)
 
@@ -4769,6 +4815,28 @@ class SettingsDialog(QDialog):
             display_path = self._path_to_display(directory)
             self.image_creation_directory_input_field.setText(display_path)
 
+    def browse_temporary_files_directory(self):
+        """Open directory picker dialog for temporary work files directory."""
+        from prowser_temp_files import default_temporary_files_directory
+
+        current_path = self.temporary_files_directory_input_field.text().strip()
+        if current_path:
+            current_path = self._display_to_path(current_path)
+        default_path = default_temporary_files_directory()
+        start_directory = (
+            current_path
+            if current_path and os.path.isdir(current_path)
+            else (default_path if os.path.isdir(default_path) else "/tmp")
+        )
+        directory = QFileDialog.getExistingDirectory(
+            self,
+            "Select Temporary Files Directory",
+            start_directory,
+        )
+        if directory:
+            display_path = self._path_to_display(directory)
+            self.temporary_files_directory_input_field.setText(display_path)
+
     def browse_ignore_directory(self, index: int):
         """Open directory picker dialog for ignore directory"""
         # Determine starting directory
@@ -5187,6 +5255,7 @@ class SettingsDialog(QDialog):
                 self._load_exclude_destinations(settings)
                 self._load_root_directories(settings)
                 self._load_image_creation_directory(settings)
+                self._load_temporary_files_directory(settings)
                 self._load_ignore_directories(settings)
                 
                 # Load show hidden directories setting
@@ -5338,6 +5407,7 @@ class SettingsDialog(QDialog):
                 self._load_exclude_destinations(settings)
                 self._load_root_directories(settings)
                 self._load_image_creation_directory(settings)
+                self._load_temporary_files_directory(settings)
                 self._load_ignore_directories(settings)
                 
                 # Load show hidden directories setting
@@ -5552,6 +5622,19 @@ class SettingsDialog(QDialog):
             "enabled": enabled,
         }
 
+    def _load_temporary_files_directory(self, settings):
+        """Load temporary files directory from config."""
+        if not hasattr(self, "temporary_files_directory_input_field"):
+            return
+        path = settings.get("temporary_files_directory")
+        if path:
+            self.temporary_files_directory_input_field.setText(
+                self._path_to_display(path)
+            )
+        else:
+            self.temporary_files_directory_input_field.setText("")
+        self.original_settings["temporary_files_directory"] = path
+
     def _load_ignore_directories(self, settings):
         """Load ignore directories from config"""
         if not hasattr(self, 'ignore_directory_input_fields'):
@@ -5724,16 +5807,15 @@ class SettingsDialog(QDialog):
             # This is what Finder uses and returns more comprehensive results
             # Important: Use a file with a real image extension (.png, .jpg) to get comprehensive results
             from LaunchServices import LSCopyApplicationURLsForURL
-            import tempfile
-            
+            from prowser_temp_files import prowser_mkstemp_path
+
             # Create a temporary PNG file to query for apps
             # Using a real image extension ensures we get all apps that can handle images
-            temp_img = None
+            temp_img_path = None
             try:
-                temp_img = tempfile.NamedTemporaryFile(suffix='.png', delete=False)
-                temp_img.write(b'\x89PNG\r\n\x1a\n')  # Minimal PNG header
-                temp_img.close()
-                temp_img_path = temp_img.name
+                temp_img_path = prowser_mkstemp_path(suffix='.png', prefix='image_editor_probe_')
+                with open(temp_img_path, 'wb') as temp_img:
+                    temp_img.write(b'\x89PNG\r\n\x1a\n')  # Minimal PNG header
                 
                 file_url = NSURL.fileURLWithPath_(temp_img_path)
                 app_urls = LSCopyApplicationURLsForURL(file_url, kLSRolesAll)
@@ -5757,10 +5839,10 @@ class SettingsDialog(QDialog):
                     os.unlink(temp_img_path)
             except Exception:
                 # Clean up temp file if it exists
-                if temp_img and os.path.exists(temp_img.name):
+                if temp_img_path and os.path.exists(temp_img_path):
                     try:
-                        os.unlink(temp_img.name)
-                    except:
+                        os.unlink(temp_img_path)
+                    except Exception:
                         pass
             
             # Method 2: Also use LSCopyAllRoleHandlersForContentType as a supplement
@@ -5994,6 +6076,19 @@ class SettingsDialog(QDialog):
                     names_seen[key] = True
                 save_faces(self._faces_subjects)
 
+            from prowser_temp_files import validate_temporary_files_directory_for_settings
+
+            temp_dir_error = validate_temporary_files_directory_for_settings(
+                self.get_temporary_files_directory()
+            )
+            if temp_dir_error:
+                show_styled_warning(
+                    self,
+                    "Temporary files directory",
+                    temp_dir_error,
+                )
+                return
+
             # Get current settings
             new_settings = self.get_settings()
             
@@ -6201,6 +6296,7 @@ class SettingsDialog(QDialog):
             'follow_symlinks': self.follow_symlinks_checkbox.isChecked() if hasattr(self, 'follow_symlinks_checkbox') else False,
             'ignore_directories': self.get_ignore_directories(),
             'image_creation_directory': self.get_image_creation_directory(),
+            'temporary_files_directory': self.get_temporary_files_directory(),
             'map_application': self._get_map_application(),
             'image_editor_app': self._get_image_editor(),
         }
@@ -6359,6 +6455,14 @@ class SettingsDialog(QDialog):
             if text:
                 path = self._display_to_path(text)
         return {"path": path, "enabled": enabled}
+
+    def get_temporary_files_directory(self):
+        """Get temporary work files directory path, or None when blank (use default)."""
+        if hasattr(self, "temporary_files_directory_input_field"):
+            text = self.temporary_files_directory_input_field.text().strip()
+            if text:
+                return self._display_to_path(text)
+        return None
 
     def get_ignore_directories(self):
         """Get ignore directories as a list of dicts with 'path' and 'enabled' keys"""
@@ -7207,7 +7311,8 @@ Total Requests:
                                     fcntl.flock(lock_fd.fileno(), fcntl.LOCK_EX)
                                     try:
                                         # Write updated index atomically
-                                        temp_dir = tempfile.mkdtemp(prefix="cnn_index_scrub_")
+                                        from prowser_temp_files import prowser_mkdtemp
+                                        temp_dir = prowser_mkdtemp(prefix="cnn_index_scrub_")
                                         temp_file = Path(temp_dir) / "index.json"
                                         try:
                                             with open(temp_file, 'w', encoding='utf-8') as f:
@@ -7290,7 +7395,8 @@ Total Requests:
                                     fcntl.flock(lock_fd.fileno(), fcntl.LOCK_EX)
                                     try:
                                         # Write updated index atomically
-                                        temp_dir = tempfile.mkdtemp(prefix="clip_index_scrub_")
+                                        from prowser_temp_files import prowser_mkdtemp
+                                        temp_dir = prowser_mkdtemp(prefix="clip_index_scrub_")
                                         temp_file = Path(temp_dir) / "index.json"
                                         try:
                                             with open(temp_file, 'w', encoding='utf-8') as f:

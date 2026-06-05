@@ -10,7 +10,7 @@ import json
 import os
 import random
 import sys
-import tempfile
+from prowser_temp_files import prowser_mkstemp_path
 import time
 from typing import Any, Dict, Final
 
@@ -142,10 +142,9 @@ def run_from_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
         except OSError:
             pass
 
-    fd, mflux_output_path = tempfile.mkstemp(
+    mflux_output_path = prowser_mkstemp_path(
         prefix="imagegen-mflux-klein-out-", suffix=".png"
     )
-    os.close(fd)
     try:
         os.unlink(mflux_output_path)
     except OSError:
