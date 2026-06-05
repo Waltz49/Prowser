@@ -356,7 +356,7 @@ def _text_input_stylesheet() -> str:
         color: {t.dialog_text_color_hex};
         border: 1px solid {t.border_default_hex};
         border-radius: 4px;
-        min-width: 0px;
+        max-width: 4096px;
     }}
     #imageGenDialog QComboBox {{
         background-color: {t.button_bg_default_hex};

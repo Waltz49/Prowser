@@ -13,9 +13,7 @@ from imagegen_plugins.image_gen_pipeline_modes import menu_label_with_quant
 from imagegen_plugins.image_gen_registry import ImageGenModelPlugin
 
 _MODEL_COMBO_MIN_WIDTH = 300
-_MODEL_COMBO_MAX_WIDTH = 480
 _MODEL_COMBO_OBJECT_NAME = "imageGenModelCombo"
-_MODEL_COMBO_MIN_CONTENTS_LENGTH = 48
 
 
 def model_label_for_plugin(
@@ -36,12 +34,27 @@ def available_plugins(
     return [p for p in plugins if p.is_available()]
 
 
+def sync_model_combo_width(combo: QComboBox) -> None:
+    """Keep the closed model combo wide enough for every plugin label."""
+    if combo.count() < 1:
+        return
+    longest = max(len(combo.itemText(i)) for i in range(combo.count()))
+    combo.setMinimumContentsLength(max(longest, 20))
+    fm = combo.fontMetrics()
+    text_w = max(
+        fm.horizontalAdvance(combo.itemText(i)) for i in range(combo.count())
+    )
+    # Closed combo: text + drop-down affordance + dialog padding (8px each side).
+    combo.setMinimumWidth(max(_MODEL_COMBO_MIN_WIDTH, text_w + 40))
+
+
 def configure_model_combo(combo: QComboBox) -> None:
-    """Model pulldown fills available width in the dialog."""
+    """Model pulldown sized to fit the longest plugin label."""
     combo.setObjectName(_MODEL_COMBO_OBJECT_NAME)
-    combo.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-    combo.setMinimumContentsLength(_MODEL_COMBO_MIN_CONTENTS_LENGTH)
-    combo.setMinimumWidth(0)
+    combo.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
+    combo.setSizeAdjustPolicy(
+        QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon
+    )
     # Override global theme QComboBox max-width (160px); avoid QWIDGETSIZE_MAX (warns).
     combo.setMaximumWidth(4096)
 
@@ -79,6 +92,7 @@ def build_plugin_model_combo(
             combo.setCurrentIndex(idx)
     elif combo.count() and not any(p.is_available() for p in plugins):
         combo.setCurrentIndex(0)
+    sync_model_combo_width(combo)
     return combo, plugins_by_id
 
 
