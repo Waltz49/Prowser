@@ -457,7 +457,7 @@ def field_specs_for_pipeline(
         specs.append(
             FieldSpec(
                 key="aspect_ratio_test",
-                label="Aspect ratio correction",
+                label="Aspect ratio correction for multiple images",
                 kind="bool",
                 default=bool(values.get("aspect_ratio_test", False)),
             )

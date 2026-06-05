@@ -257,6 +257,18 @@ def imagegen_edit_plugins_available() -> bool:
         return False
 
 
+def imagegen_create_from_text_available() -> bool:
+    """True when Create-from-text can run (plugin registered and pipeline backend installed)."""
+    try:
+        if not function_has_plugins(FUNCTION_CREATE):
+            return False
+        from imagegen_plugins.image_gen_model_selector import available_plugins
+
+        return bool(available_plugins(plugins_for_function(FUNCTION_CREATE)))
+    except Exception:
+        return False
+
+
 def initial_prompt_from_usercomment(raw: Optional[str]) -> Optional[str]:
     """Prompt text from EXIF user comment (same rules as image-gen Import)."""
     if not raw:

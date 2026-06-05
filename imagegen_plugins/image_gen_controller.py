@@ -885,6 +885,23 @@ class ImageGenController(QObject):
     def is_foreground_caption_running(self) -> bool:
         return self._foreground_tasks.is_running()
 
+    def cancel_caption(self) -> None:
+        """Stop in-flight AI caption jobs without cancelling image generation."""
+        if self._tasks.is_running() and self._tasks.active_kind == "caption":
+            self._tasks.cancel_task()
+        if (
+            self._foreground_tasks.is_running()
+            and self._foreground_tasks.active_kind == "caption"
+        ):
+            self._foreground_tasks.cancel_task()
+        self._task_status_info_html = ""
+        self.task_status_info_changed.emit()
+        if self._tasks.is_running():
+            self._update_status_bar_indicator(self._tasks.active_kind)
+        else:
+            self._update_status_bar_indicator(None)
+        self._sync_cancel_menu()
+
     def start_flux_prompt_refine(self, system_prompt: str, user_prompt: str) -> bool:
         if self.has_pending_work():
             return False
