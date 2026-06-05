@@ -74,6 +74,42 @@ def _model_key_from_handle(model) -> Optional[str]:
         return None
 
 
+_VISION_REQUIRED_MSG = (
+    "The loaded model does not support image input.\n\n"
+    "Please load a vision-capable model (VLM) in LMStudio."
+)
+
+
+def _loaded_model_supports_vision(model) -> bool | None:
+    """Return True/False from LM Studio model info, or None if unknown."""
+    try:
+        info = model.get_info()
+    except Exception:
+        return None
+    if info is None:
+        return None
+    vision = getattr(info, "vision", None)
+    if vision is None:
+        return None
+    return bool(vision)
+
+
+def _require_vision_capable_model(model) -> None:
+    """Raise RuntimeError when the loaded LLM cannot accept images."""
+    supports = _loaded_model_supports_vision(model)
+    if supports is not False:
+        return
+    display_name = ""
+    try:
+        info = model.get_info()
+        display_name = (getattr(info, "display_name", None) or "").strip()
+    except Exception:
+        pass
+    if display_name:
+        raise RuntimeError(f"{_VISION_REQUIRED_MSG}\n\nLoaded model: {display_name}")
+    raise RuntimeError(_VISION_REQUIRED_MSG)
+
+
 def _remember_loaded_lm_model_keys(client) -> None:
     """Persist modelKey of the first loaded LLM (used before unload / after caption)."""
     try:
@@ -213,6 +249,8 @@ def get_image_caption_stream(file_path: str, user_prompt_override: str | None = 
                 f"Could not retrieve or load a model from LMStudio.\n\nDetail: {e}"
             )
 
+        _require_vision_capable_model(model)
+
         word_count = cap_settings['max_words']
         system_prompt = cap_settings['system_prompt'].format(CAPTION_WORD_COUNT=word_count)
         if user_prompt_override and user_prompt_override.strip():
@@ -295,6 +333,8 @@ def get_image_caption(file_path: str, user_prompt_override: str | None = None) -
                 raise RuntimeError(
                     f"Could not retrieve or load a model from LMStudio.\n\nDetail: {e}"
                 )
+
+            _require_vision_capable_model(model)
 
             word_count = cap_settings['max_words']
             system_prompt = cap_settings['system_prompt'].format(CAPTION_WORD_COUNT=word_count)

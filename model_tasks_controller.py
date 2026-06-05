@@ -222,8 +222,11 @@ class ModelTasksController(QObject):
             return
 
         if msg_type == "error":
+            if not self._active_job_id:
+                return
             err = str(msg.get("message") or "Task failed.")
             self._finish_job(self._active_kind, False, err)
+            return
 
     def _on_worker_result(self, msg: Dict[str, Any]) -> None:
         kind = str(msg.get("command") or self._active_kind)

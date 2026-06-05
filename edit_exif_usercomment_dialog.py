@@ -90,6 +90,8 @@ class EditExifUserCommentDialog(QDialog):
         self.file_path = file_path
         self.original_text = original_text
         self._caption_connected = False
+        self._text_before_ai = original_text
+        self._ai_caption_error_dialog_open = False
         self._base_filename = os.path.basename(file_path)
         self._dot_phase = 0
         self._dot_timer = QTimer(self)
@@ -547,9 +549,16 @@ class EditExifUserCommentDialog(QDialog):
         self.copy_btn.setToolTip("Copy user comment to clipboard.\nOption+click to copy raw text.")
 
     def _on_dot_tick(self):
+        if self._ai_caption_error_dialog_open:
+            return
         self._dot_phase = (self._dot_phase + 1) % 4
         dots = "." * (self._dot_phase + 1)  # 1, 2, 3, or 4 periods
         self.text_edit.setPlainText(dots)
+
+    def _abort_ai_caption_waiting_ui(self) -> None:
+        """Stop the waiting animation and put back the text from before [AI] caption."""
+        self._dot_timer.stop()
+        self.text_edit.setPlainText(self._text_before_ai)
 
     def _restore_filename(self):
         self._dot_timer.stop()
@@ -614,10 +623,9 @@ class EditExifUserCommentDialog(QDialog):
         else:
             started = controller.start_caption(self.file_path, user_override)
         if not started:
+            self._abort_ai_caption_waiting_ui()
             self._on_caption_finished()
-            from lmstudio_launcher import show_ai_caption_error_dialog
-            show_ai_caption_error_dialog(
-                self,
+            self._show_ai_caption_error(
                 "Could not start AI caption (another task may be running).",
             )
 
@@ -632,12 +640,26 @@ class EditExifUserCommentDialog(QDialog):
     def _on_caption_ready(self, caption: str):
         self.text_edit.setPlainText(caption)
 
+    def _show_ai_caption_error(self, error_msg: str) -> None:
+        if self._ai_caption_error_dialog_open:
+            return
+        self._abort_ai_caption_waiting_ui()
+        self._ai_caption_error_dialog_open = True
+        try:
+            from lmstudio_launcher import show_ai_caption_error_dialog
+
+            show_ai_caption_error_dialog(self, error_msg)
+        finally:
+            self._ai_caption_error_dialog_open = False
+            self._abort_ai_caption_waiting_ui()
+
     def _on_caption_error(self, error_msg: str):
-        self.text_edit.setPlainText(self._text_before_ai)
-        from lmstudio_launcher import show_ai_caption_error_dialog
-        show_ai_caption_error_dialog(self, error_msg)
+        self._show_ai_caption_error(error_msg)
 
     def _on_caption_finished(self):
+        self._dot_timer.stop()
+        if self._ai_caption_error_dialog_open:
+            self.text_edit.setPlainText(self._text_before_ai)
         self._restore_filename()
         if self.ai_btn is not None:
             self.ai_btn.setEnabled(True)
