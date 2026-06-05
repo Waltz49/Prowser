@@ -101,6 +101,7 @@ from utils import (
     restore_dialog_geometry_hex,
     save_dialog_geometry_hex,
     show_styled_warning,
+    validate_image_file,
 )
 
 EDIT_IMAGE_DIALOG_TITLE = "Edit Image"
@@ -109,6 +110,105 @@ _EDIT_SOURCE_MIME = "application/x-imagegen-edit-source-path"
 _EDIT_SOURCE_REMOVE_BOX_PX = 32
 _EDIT_SOURCE_REMOVE_BORDER_PX = 2
 _EDIT_SOURCE_REMOVE_INSET_PX = 3
+
+
+def _local_paths_from_mime(mime: QMimeData) -> list[str]:
+    if not mime.hasUrls():
+        return []
+    paths: list[str] = []
+    for url in mime.urls():
+        if url.isLocalFile():
+            paths.append(os.path.abspath(url.toLocalFile()))
+    return paths
+
+
+def _is_external_file_drag(mime: QMimeData) -> bool:
+    return bool(_local_paths_from_mime(mime))
+
+
+def _is_internal_edit_source_drag(mime: QMimeData) -> bool:
+    return mime.hasFormat(_EDIT_SOURCE_MIME)
+
+
+def _merge_external_edit_source_paths(
+    existing: list[str],
+    incoming: list[str],
+    *,
+    insert_index: Optional[int] = None,
+    max_total: int = MAX_EDIT_SOURCE_IMAGES,
+) -> tuple[list[str], list[str]]:
+    """Merge dropped file paths into the edit source list. Returns (paths, warnings)."""
+    warnings: list[str] = []
+    existing_abs = [os.path.abspath(p) for p in existing if p]
+    existing_set = set(existing_abs)
+
+    valid_new: list[str] = []
+    invalid_names: list[str] = []
+    duplicate_names: list[str] = []
+
+    for path in incoming:
+        if not path:
+            continue
+        abs_path = os.path.abspath(path)
+        base = os.path.basename(abs_path)
+        if not os.path.isfile(abs_path):
+            continue
+        if not validate_image_file(abs_path):
+            invalid_names.append(base)
+            continue
+        if abs_path in existing_set or abs_path in valid_new:
+            duplicate_names.append(base)
+            continue
+        valid_new.append(abs_path)
+
+    slots = max(0, max_total - len(existing_abs))
+    added = valid_new[:slots]
+    skipped_capacity = valid_new[slots:]
+
+    if not added and not invalid_names and not duplicate_names and not skipped_capacity:
+        if incoming:
+            warnings.append("No supported image files were dropped.")
+        return existing_abs, warnings
+
+    if not slots and valid_new:
+        warnings.append(
+            f"Already at the maximum of {max_total} source images. "
+            "Remove an image before adding more."
+        )
+
+    new_paths = list(existing_abs)
+    if added:
+        if insert_index is None:
+            insert_index = len(new_paths)
+        insert_index = max(0, min(insert_index, len(new_paths)))
+        for path in added:
+            new_paths.insert(insert_index, path)
+            insert_index += 1
+        new_paths = new_paths[:max_total]
+
+    if added:
+        warnings.append(
+            f"Added {len(added)} image{'s' if len(added) != 1 else ''}."
+        )
+    if skipped_capacity:
+        warnings.append(
+            f"{len(skipped_capacity)} image{'s' if len(skipped_capacity) != 1 else ''} "
+            f"were not added (maximum is {max_total})."
+        )
+    if invalid_names:
+        shown = ", ".join(invalid_names[:5])
+        extra = len(invalid_names) - 5
+        if extra > 0:
+            shown = f"{shown}, and {extra} more"
+        warnings.append(f"Skipped unsupported file type: {shown}.")
+    if duplicate_names:
+        shown = ", ".join(duplicate_names[:5])
+        extra = len(duplicate_names) - 5
+        if extra > 0:
+            shown = f"{shown}, and {extra} more"
+        warnings.append(f"Already in the source list: {shown}.")
+
+    return new_paths, warnings
 
 
 def active_image_paths_for_edit(main_window) -> list[str]:
@@ -149,15 +249,27 @@ class _SourceImagePreview(QLabel):
     _HINT_SIZE = QSize(320, 280)
     _MIN_HINT_SIZE = QSize(160, 120)
 
-    def __init__(self, source_path: str, parent=None):
+    def __init__(
+        self,
+        source_path: str,
+        parent=None,
+        *,
+        on_external_drop=None,
+    ):
         super().__init__(parent)
         self._source_path = os.path.abspath(source_path)
+        self._on_external_drop = on_external_drop
         self._pixmap = QPixmap(self._source_path)
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.setSizePolicy(
             QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored
         )
         self.setFrameShape(QFrame.Shape.StyledPanel)
+        if on_external_drop is not None:
+            self.setAcceptDrops(True)
+            self.setToolTip(
+                "Drag image files here to add source images (up to 4 total)."
+            )
         self._refresh_scaled_pixmap()
 
     def sizeHint(self) -> QSize:
@@ -190,6 +302,31 @@ class _SourceImagePreview(QLabel):
         )
         self.setPixmap(scaled)
 
+    def dragEnterEvent(self, event: QDragEnterEvent) -> None:
+        if self._on_external_drop is not None and _is_external_file_drag(
+            event.mimeData()
+        ):
+            event.acceptProposedAction()
+            return
+        event.ignore()
+
+    def dragMoveEvent(self, event: QDragMoveEvent) -> None:
+        if self._on_external_drop is not None and _is_external_file_drag(
+            event.mimeData()
+        ):
+            event.acceptProposedAction()
+            return
+        event.ignore()
+
+    def dropEvent(self, event: QDropEvent) -> None:
+        if self._on_external_drop is not None and _is_external_file_drag(
+            event.mimeData()
+        ):
+            self._on_external_drop(_local_paths_from_mime(event.mimeData()), None)
+            event.acceptProposedAction()
+            return
+        event.ignore()
+
 
 class _ClickableSourceThumb(_SourceImagePreview):
     """Thumbnail that activates the image in the main browser on click."""
@@ -217,7 +354,10 @@ class _ClickableSourceThumb(_SourceImagePreview):
         self.setCursor(self._default_thumb_cursor)
         if draggable:
             self.setAcceptDrops(True)
-            self.setToolTip("Click to view in browser. Drag to reorder.")
+            self.setToolTip(
+                "Click to view in browser. Drag to reorder. "
+                "Drop image files to add sources (up to 4 total)."
+            )
 
     def enterEvent(self, event: QEnterEvent) -> None:
         self._hover_remove = True
@@ -418,12 +558,14 @@ class _MultiSourceImagePreview(QWidget):
         on_activate,
         on_reorder=None,
         on_remove=None,
+        on_add_paths=None,
         parent=None,
     ):
         super().__init__(parent)
         self._on_activate = on_activate
         self._on_reorder = on_reorder
         self._on_remove = on_remove
+        self._on_add_paths = on_add_paths
         self._source_paths = list(source_paths)
         self._thumbs: list[_ClickableSourceThumb] = []
         self._drop_insert_index: Optional[int] = None
@@ -432,6 +574,9 @@ class _MultiSourceImagePreview(QWidget):
         self._layout.setContentsMargins(0, 0, 0, 0)
         self._layout.setSpacing(6)
         self.setAcceptDrops(True)
+        self.setToolTip(
+            "Drag thumbnails to reorder. Drop image files to add sources (up to 4 total)."
+        )
         self._rebuild_thumbs()
 
     def sizeHint(self) -> QSize:
@@ -547,7 +692,10 @@ class _MultiSourceImagePreview(QWidget):
         self._accept_drag(event)
 
     def _accept_drag(self, event: QDragEnterEvent) -> None:
-        if event.mimeData().hasFormat(_EDIT_SOURCE_MIME):
+        mime = event.mimeData()
+        if _is_internal_edit_source_drag(mime) or (
+            self._on_add_paths is not None and _is_external_file_drag(mime)
+        ):
             event.acceptProposedAction()
             return
         event.ignore()
@@ -556,11 +704,14 @@ class _MultiSourceImagePreview(QWidget):
         self._update_drop_index(event.pos(), event)
 
     def _update_drop_index(self, pos: QPoint, event: QDragMoveEvent) -> None:
-        if not event.mimeData().hasFormat(_EDIT_SOURCE_MIME):
-            event.ignore()
+        mime = event.mimeData()
+        if _is_internal_edit_source_drag(mime) or (
+            self._on_add_paths is not None and _is_external_file_drag(mime)
+        ):
+            self._set_drop_insert_index(self._insert_index_at(pos))
+            event.acceptProposedAction()
             return
-        self._set_drop_insert_index(self._insert_index_at(pos))
-        event.acceptProposedAction()
+        event.ignore()
 
     def dragLeaveEvent(self, event) -> None:
         self._clear_drop_index()
@@ -573,16 +724,19 @@ class _MultiSourceImagePreview(QWidget):
         self._perform_drop(event.pos(), event)
 
     def _perform_drop(self, pos: QPoint, event: QDropEvent) -> None:
-        if not event.mimeData().hasFormat(_EDIT_SOURCE_MIME):
-            event.ignore()
-            return
-        source_path = bytes(
-            event.mimeData().data(_EDIT_SOURCE_MIME)
-        ).decode("utf-8")
+        mime = event.mimeData()
         insert_index = self._insert_index_at(pos)
         self._clear_drop_index()
-        self._reorder_path(source_path, insert_index)
-        event.acceptProposedAction()
+        if _is_internal_edit_source_drag(mime):
+            source_path = bytes(mime.data(_EDIT_SOURCE_MIME)).decode("utf-8")
+            self._reorder_path(source_path, insert_index)
+            event.acceptProposedAction()
+            return
+        if self._on_add_paths is not None and _is_external_file_drag(mime):
+            self._on_add_paths(_local_paths_from_mime(mime), insert_index)
+            event.acceptProposedAction()
+            return
+        event.ignore()
 
 
 def _activate_source_in_main_window(main_window, path: str) -> None:
@@ -732,6 +886,25 @@ class ImageGenEditDialog(QDialog):
         if self._source_paths:
             self.source_path = self._source_paths[0]
 
+    def _on_external_paths_dropped(
+        self,
+        paths: list[str],
+        insert_index: Optional[int] = None,
+    ) -> None:
+        new_paths, warnings = _merge_external_edit_source_paths(
+            self._source_paths,
+            paths,
+            insert_index=insert_index,
+        )
+        if new_paths != self._source_paths:
+            self._set_edit_source_paths(new_paths)
+        if warnings:
+            show_styled_warning(
+                self,
+                "Drop Images",
+                "\n\n".join(warnings),
+            )
+
     def _on_source_path_removed(self, paths: list[str]) -> None:
         self._set_edit_source_paths(paths)
 
@@ -779,12 +952,15 @@ class ImageGenEditDialog(QDialog):
                 _on_thumb_activate,
                 self._on_source_paths_reordered,
                 self._on_source_path_removed,
+                self._on_external_paths_dropped,
                 self._preview_host,
             )
             layout.addWidget(self._multi_source_preview, 1)
         else:
             self._source_preview = _SourceImagePreview(
-                self.source_path, self._preview_host
+                self.source_path,
+                self._preview_host,
+                on_external_drop=self._on_external_paths_dropped,
             )
             self._source_nav = ImageGenSourceNavRow(
                 main_window,
@@ -817,11 +993,16 @@ class ImageGenEditDialog(QDialog):
                 _on_thumb_activate,
                 self._on_source_paths_reordered,
                 self._on_source_path_removed,
+                self._on_external_paths_dropped,
                 preview_host,
             )
             preview_layout.addWidget(self._multi_source_preview, 1)
         else:
-            self._source_preview = _SourceImagePreview(self.source_path, preview_host)
+            self._source_preview = _SourceImagePreview(
+                self.source_path,
+                preview_host,
+                on_external_drop=self._on_external_paths_dropped,
+            )
             self._source_nav = ImageGenSourceNavRow(
                 main_window,
                 self._on_source_image_changed,
