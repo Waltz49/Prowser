@@ -36,6 +36,7 @@ from exif_utils import (
 from screen_size_copy import generate_unique_filename
 from utils import (
     file_string,
+    wrap_progress_dialog_label_elision,
     get_button_style,
     is_inside_photos_library,
     show_styled_critical,
@@ -546,6 +547,7 @@ def resize_selected_images(main_window, files: List[str]) -> bool:
             cancel_after_current = True
 
         progress.canceled.connect(_mark_cancel)
+        wrap_progress_dialog_label_elision(progress)
         progress.show()
         QApplication.processEvents()
 

@@ -627,13 +627,9 @@ class ImageBrowserConfig:
         with _settings_file_lock:
             self._save_settings_unlocked(settings)
     
-    def update_setting(self, key: str, value):
-        """Update a single setting and save to file"""
-        if key == "browse_transparency_settings":
-            self._browse_transparency_settings_preview = None
-        settings = self.load_settings()
-        # Normalize filter patterns when saving
-        if key == 'filter_pattern':
+    def _apply_setting_in_memory(self, settings: dict, key: str, value) -> None:
+        """Apply one key to an in-memory settings dict (no save)."""
+        if key == "filter_pattern":
             value = self.normalize_filter_pattern(value)
         settings[key] = value
         if key == "browse_transparency_settings":
@@ -642,13 +638,36 @@ class ImageBrowserConfig:
                 None,
                 None,
             )
-            tc, ud = effective_browse_transparency(settings)
-            settings["transparency_color"] = list(tc)
-            settings["use_diamonds"] = ud
-        elif key == "ui_theme":
-            tc, ud = effective_browse_transparency(settings)
-            settings["transparency_color"] = list(tc)
-            settings["use_diamonds"] = ud
+
+    def _sync_browse_transparency_legacy_keys(self, settings: dict) -> None:
+        """Mirror active ui_theme browse transparency into legacy top-level keys."""
+        tc, ud = effective_browse_transparency(settings)
+        settings["transparency_color"] = list(tc)
+        settings["use_diamonds"] = ud
+
+    def update_setting(self, key: str, value):
+        """Update a single setting and save to file"""
+        if key == "browse_transparency_settings":
+            self._browse_transparency_settings_preview = None
+        settings = self.load_settings()
+        self._apply_setting_in_memory(settings, key, value)
+        if key in ("browse_transparency_settings", "ui_theme"):
+            self._sync_browse_transparency_legacy_keys(settings)
+        self.save_settings(settings)
+
+    def update_settings(self, updates: Dict[str, Any]) -> None:
+        """Update multiple settings with a single load/save of settings.json."""
+        if not updates:
+            return
+        if "browse_transparency_settings" in updates:
+            self._browse_transparency_settings_preview = None
+        settings = self.load_settings()
+        for key, value in updates.items():
+            if key.startswith("_"):
+                continue
+            self._apply_setting_in_memory(settings, key, value)
+        if "browse_transparency_settings" in updates or "ui_theme" in updates:
+            self._sync_browse_transparency_legacy_keys(settings)
         self.save_settings(settings)
     
     @staticmethod

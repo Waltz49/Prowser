@@ -114,7 +114,7 @@ def _import_clip_modules():
 class ProgressDialogWithStatus:
     """Custom progress dialog with a status line below the progress bar"""
     
-    def __init__(self, label_text, cancel_button_text, minimum, maximum, parent=None):
+    def __init__(self, label_text, cancel_button_text, minimum, maximum, parent=None, window_title=""):
         QtWidgets, QtCore = _import_qt_modules()
         if QtWidgets is None:
             raise ImportError("PySide6.QtWidgets is required for UI components")
@@ -157,28 +157,27 @@ class ProgressDialogWithStatus:
         self._canceled = False
         
         # Set up the dialog
-        self._dialog.setWindowTitle("Progress")
+        if window_title:
+            self._dialog.setWindowTitle(window_title)
         self._dialog.setWindowModality(Qt.WindowModal)
         self._dialog.setMinimumWidth(300)
+        self._dialog.setMaximumWidth(440)
         self._dialog.setMinimumHeight(140)
-        # Don't use fixed size - allow dialog to resize for long messages
         
         # Create layout
         layout = QVBoxLayout(self._dialog)
         layout.setSpacing(10)
         layout.setContentsMargins(20, 20, 20, 20)
         
-        # Main label
-        self.main_label = QLabel(label_text)
-        self.main_label.setWordWrap(True)
-        # Calculate proper height for wrapped text
+        from utils import format_progress_label, PROGRESS_LABEL_MAX_WIDTH_PX
+
+        # Main label — elided text, fixed width; no wrap (avoids dialog growing with long paths)
+        self.main_label = QLabel(format_progress_label(label_text))
+        self.main_label.setWordWrap(False)
+        self.main_label.setMaximumWidth(PROGRESS_LABEL_MAX_WIDTH_PX - 40)
         font_metrics = self.main_label.fontMetrics()
         line_height = font_metrics.height()
-        available_width = 260  # Dialog width (300) minus margins (40)
-        text_rect = font_metrics.boundingRect(0, 0, available_width, 0, 
-                                              Qt.TextWordWrap | Qt.AlignLeft | Qt.AlignTop, label_text)
-        num_lines = max(1, (text_rect.height() + line_height - 1) // line_height)
-        self.main_label.setMinimumHeight(line_height * num_lines + 4)
+        self.main_label.setFixedHeight(line_height * 2 + 4)
         layout.addWidget(self.main_label)
         
         # Progress bar
@@ -210,28 +209,12 @@ class ProgressDialogWithStatus:
         self.minimum_duration = 0
         
     def _update_main_label_height(self):
-        """Update main label height based on wrapped text content"""
-        QtWidgets, QtCore = _import_qt_modules()
-        if QtWidgets is None or QtCore is None:
-            return
-        Qt = QtCore['Qt']
-        font_metrics = self.main_label.fontMetrics()
-        line_height = font_metrics.height()
-        # Get available width (dialog width minus margins)
-        dialog_width = self._dialog.width() if self._dialog.width() > 0 else 300
-        available_width = dialog_width - 40  # margins
-        text = self.main_label.text()
-        if text:
-            text_rect = font_metrics.boundingRect(0, 0, available_width, 0, 
-                                                  Qt.TextWordWrap | Qt.AlignLeft | Qt.AlignTop, text)
-            num_lines = max(1, (text_rect.height() + line_height - 1) // line_height)
-            self.main_label.setMinimumHeight(line_height * num_lines + 4)
-        else:
-            self.main_label.setMinimumHeight(line_height)
-    
+        """No-op; main label uses fixed height with elided text."""
+
     def setStatusText(self, text):
         """Set the status text shown below the progress bar"""
-        self.status_label.setText(text)
+        from utils import format_progress_label
+        self.status_label.setText(format_progress_label(text))
     
     def setFilesRemaining(self, remaining_count=None, text=None, time_estimate=None):
         """Set the files remaining text (above buttons).
@@ -261,9 +244,8 @@ class ProgressDialogWithStatus:
         
     def setLabelText(self, text):
         """Set the main label text"""
-        self.main_label.setText(text)
-        # Update label height based on wrapped text
-        self._update_main_label_height()
+        from utils import format_progress_label
+        self.main_label.setText(format_progress_label(text))
         
     def setValue(self, value):
         """Set the progress bar value"""
@@ -2043,14 +2025,14 @@ class CNNSimilarityUIHelper:
             label_text = "Searching displayed files..."
         
         progress_dialog = ProgressDialogWithStatus(
-            label_text, 
-            "Cancel", 
-            0, 
-            displayed_images_count, 
-            self.parent_widget
+            label_text,
+            "Cancel",
+            0,
+            displayed_images_count,
+            self.parent_widget,
+            window_title="Search for Similar Images",
         )
         progress_dialog.setWindowModality(Qt.WindowModal)
-        progress_dialog.setWindowTitle("Reordering by Similarity")
         progress_dialog.setAutoClose(False)
         progress_dialog.setAutoReset(False)
         progress_dialog.setMinimumDuration(300)  # show at least this fast
@@ -2098,14 +2080,14 @@ class CNNSimilarityUIHelper:
             label_text = f"Searching '{text_prompt}' in displayed files..."
         
         progress_dialog = ProgressDialogWithStatus(
-            label_text, 
-            "Cancel", 
-            0, 
-            displayed_images_count, 
-            self.parent_widget
+            label_text,
+            "Cancel",
+            0,
+            displayed_images_count,
+            self.parent_widget,
+            window_title="Search by Text",
         )
         progress_dialog.setWindowModality(Qt.WindowModal)
-        progress_dialog.setWindowTitle("Find Images")
         progress_dialog.setAutoClose(False)
         progress_dialog.setAutoReset(False)
         progress_dialog.setMinimumDuration(300)  # show at least this fast

@@ -160,7 +160,7 @@ from window_background_workers import (
     PersonSearchPrepWorker,
     ThumbnailLoadingWorker,
 )
-from window_event_filters import ShiftCmdEShortcutFilter, StatusBarPeekFilter
+from window_event_filters import ChromeToggleShortcutFilter, ShiftCmdEShortcutFilter, StatusBarPeekFilter
 
 STATUS_BAR_ANIM_HEIGHT = 24  # Height for status bar slide animation
 STATUS_BAR_ANIM_MS = 250 # Animation duration in milliseconds
@@ -1541,10 +1541,17 @@ class ImageBrowserWindow(QMainWindow):
         # Install app-level filter for shift-cmd-E so it works immediately (before menu shown or view switch)
         self._shortcut_event_filter = ShiftCmdEShortcutFilter(self)
         QApplication.instance().installEventFilter(self._shortcut_event_filter)
+
+        # F4 toggle chrome (sidebars + status bar)
+        self._chrome_toggle_filter = ChromeToggleShortcutFilter(self)
+        QApplication.instance().installEventFilter(self._chrome_toggle_filter)
         
         # Install app-level filter for status bar peek (catch MouseMove from any child widget)
         self._status_bar_peek_filter = StatusBarPeekFilter(self)
         QApplication.instance().installEventFilter(self._status_bar_peek_filter)
+
+        self._chrome_saved_layout = None
+        self._chrome_suppressed = False
         
         # Set initial focus to canvas area
         QTimer.singleShot(200, self._set_initial_focus)
@@ -2099,6 +2106,7 @@ class ImageBrowserWindow(QMainWindow):
 
     def toggle_file_tree(self):
         """Toggle the visibility of the file tree and resize canvas accordingly"""
+        self._chrome_suppressed = False
         return self.sidebar_manager.toggle_file_tree()
     
     def toggle_rename_status(self):
@@ -2175,6 +2183,7 @@ class ImageBrowserWindow(QMainWindow):
 
     def toggle_jobs(self):
         """Toggle the jobs pane in the right combined sidebar."""
+        self._chrome_suppressed = False
         if hasattr(self, "sidebar_manager"):
             return self.sidebar_manager.toggle_jobs()
         if hasattr(self, "right_sidebar"):
@@ -2186,6 +2195,7 @@ class ImageBrowserWindow(QMainWindow):
 
     def toggle_preview(self):
         """Toggle the visibility of the preview widget and resize canvas accordingly"""
+        self._chrome_suppressed = False
         if hasattr(self, 'sidebar_manager'):
             return self.sidebar_manager.toggle_preview()
         if hasattr(self, 'combined_sidebar'):
@@ -2276,6 +2286,15 @@ class ImageBrowserWindow(QMainWindow):
     
     def manage_sidebar_visibility_for_view_mode(self, view_mode):
         """Manage sidebar visibility based on current view mode"""
+        if getattr(self, '_chrome_suppressed', False):
+            total_width = self.main_splitter.width()
+            if total_width > 0:
+                self._set_splitter_sizes_safe([0, total_width, 0])
+            if hasattr(self, 'combined_sidebar'):
+                self.combined_sidebar.hide()
+            if hasattr(self, 'right_sidebar'):
+                self.right_sidebar.hide()
+            return
         if view_mode == 'list':
             # Show sidebars in list view (same as thumbnail view)
             # Use the same sidebar visibility logic as thumbnail view
@@ -3121,6 +3140,15 @@ class ImageBrowserWindow(QMainWindow):
     def apply_dark_theme(self):
         """Backward compatibility: delegates to refresh_theme_styles."""
         self.refresh_theme_styles()
+
+    def refresh_thumbnail_theme_styles(self):
+        """Repaint thumbnail grid after thumbnail-only palette changes (no global QSS)."""
+        if getattr(self, "thumbnail_container", None) and hasattr(self.thumbnail_container, "canvas"):
+            canvas = self.thumbnail_container.canvas
+            if canvas:
+                if canvas._is_reference_graph_mode():
+                    canvas._calculate_reference_graph_layout()
+                canvas.update()
 
     def refresh_theme_styles(self):
         """Re-apply theme-dependent widget styles after global palette change."""
@@ -5653,8 +5681,6 @@ class ImageBrowserWindow(QMainWindow):
                     clip_model_name=clip_model_name,
                     resnet_model=resnet_model
                 )
-            # Save the settings to config
-            self.config.update_setting('similarity_metric', similarity_metric)
             # Search mode: always image for cmd-K (CLIP uses shift-cmd-K)
             self.similarity_search_mode = 'image'
         
@@ -5711,8 +5737,6 @@ class ImageBrowserWindow(QMainWindow):
                     clip_model_name=clip_model_name,
                     resnet_model=resnet_model
                 )
-            # Save the settings to config
-            self.config.update_setting('clip_model_name', clip_model_name)
         
         # Handle ResNet model name changes
         if 'resnet_model' in new_settings:
@@ -5733,16 +5757,10 @@ class ImageBrowserWindow(QMainWindow):
                     clip_model_name=clip_model_name,
                     resnet_model=resnet_model
                 )
-            # Save the settings to config
-            self.config.update_setting('resnet_model', resnet_model)
         
         # Handle CLIP similarity threshold changes
         # Note: Threshold is only used for filtering results, not for feature computation
         # So changing it should NOT invalidate any caches
-        if 'clip_similarity_threshold' in new_settings:
-            # Just save the setting - no cache invalidation needed
-            # Threshold is read from config when needed for filtering
-            self.config.update_setting('clip_similarity_threshold', new_settings['clip_similarity_threshold'])
         
         # Track if any tree-related settings changed
         tree_settings_changed = False
@@ -5752,21 +5770,14 @@ class ImageBrowserWindow(QMainWindow):
             tree_settings_changed = True
         
         if 'show_hidden_directories' in new_settings:
-            # Save the setting to config immediately
             show_hidden_value = new_settings['show_hidden_directories']
-            self.config.update_setting('show_hidden_directories', show_hidden_value)
             tree_settings_changed = True
         
         if 'always_show_work' in new_settings:
-            # Save the setting to config immediately
-            always_show_work_value = new_settings['always_show_work']
-            self.config.update_setting('always_show_work', always_show_work_value)
             tree_settings_changed = True
         
         if 'follow_symlinks' in new_settings:
-            # Save the setting to config immediately
             follow_symlinks_value = new_settings['follow_symlinks']
-            self.config.update_setting('follow_symlinks', follow_symlinks_value)
             tree_settings_changed = True
             # Invalidate filter immediately when follow_symlinks changes
             if hasattr(self, 'file_tree_handler'):
@@ -5805,10 +5816,6 @@ class ImageBrowserWindow(QMainWindow):
         if 'similarity_mode' in new_settings:
             self.similarity_mode = new_settings['similarity_mode']
         
-        if 'similarity_mode' in new_settings:
-            self.similarity_mode = new_settings['similarity_mode']
-            self.config.update_setting('similarity_mode', self.similarity_mode)
-        
         if 'multimodal_hash' in new_settings:
             self.multimodal_hash = new_settings['multimodal_hash']
         
@@ -5845,14 +5852,16 @@ class ImageBrowserWindow(QMainWindow):
                 if self.file_tree_handler.is_tree_initialized():
                     self.file_tree_handler.apply_filter_pattern(self.filter_pattern)
         
-        # Only refresh if limit or filter actually changed
+        # Only refresh if limit or filter actually changed (defer until after settings dialog closes)
         if limit_or_filter_changed and self.current_directory:
             if self.current_view_mode == 'thumbnail':
-                self.refresh_directory(force=True)
-                # Restart thumbnail generation after refresh completes
-                if getattr(self, 'cache_manager', None) and hasattr(self.cache_manager, 'background_loader') and self.cache_manager.background_loader:
-                    self.cache_manager.background_loader.start()
-                self.start_background_thumbnail_loading_if_needed()
+                def _refresh_after_limit_filter_change():
+                    self.refresh_directory(force=True)
+                    if getattr(self, 'cache_manager', None) and hasattr(self.cache_manager, 'background_loader') and self.cache_manager.background_loader:
+                        self.cache_manager.background_loader.start()
+                    self.start_background_thumbnail_loading_if_needed()
+
+                QTimer.singleShot(0, _refresh_after_limit_filter_change)
             elif self.current_view_mode == 'browse':
                 # Settings changed in browse mode - mark for refresh when exiting browse
                 self._settings_changed_in_browse = True
@@ -5897,11 +5906,6 @@ class ImageBrowserWindow(QMainWindow):
             if self.current_view_mode == 'browse':
                 if getattr(self, 'browse_view_handler', None):
                     self.update_image_display()
-        
-        # Save all settings to config (skip internal flags starting with '_')
-        for key, value in new_settings.items():
-            if not key.startswith('_'):
-                self.config.update_setting(key, value)
         
         if self.status_notification:
             self.status_notification.show_message("Settings updated")
@@ -10094,8 +10098,189 @@ class ImageBrowserWindow(QMainWindow):
         if self.current_view_mode == 'browse' and self.current_pixmap:
             QTimer.singleShot(50, self._browse_after_chrome_layout_change)
 
+    def _is_main_window_key_context(self) -> bool:
+        """True when app-wide shortcuts should target the main window (not a popup/dialog)."""
+        active = QApplication.activeWindow()
+        if active is None:
+            return False
+        if active == self:
+            return True
+        w = active
+        while w:
+            if w == self:
+                return True
+            w = w.parentWidget() if hasattr(w, 'parentWidget') else None
+        return False
+
+    def _is_any_chrome_visible(self) -> bool:
+        if getattr(self, 'status_bar', None) and self.status_bar.isVisible():
+            return True
+        if getattr(self, 'combined_sidebar', None) and self.combined_sidebar.isVisible():
+            return True
+        if getattr(self, 'right_sidebar', None) and self.right_sidebar.isVisible():
+            return True
+        return False
+
+    def _capture_chrome_layout(self) -> dict:
+        cs = self.combined_sidebar
+        rs = self.right_sidebar
+        sizes = self.main_splitter.sizes()
+        left_sizes = cs.splitter.sizes() if hasattr(cs, 'splitter') else []
+        right_sizes = rs.splitter.sizes() if hasattr(rs, 'splitter') else []
+        return {
+            'status_bar_visible': self.status_bar.isVisible(),
+            'left_tree_visible': cs.is_tree_visible(),
+            'left_preview_visible': cs.is_preview_visible(),
+            'left_splitter_sizes': (
+                list(cs.saved_splitter_sizes)
+                if cs.saved_splitter_sizes
+                else list(left_sizes)
+            ),
+            'sidebar_width': self.sidebar_width,
+            'right_information_visible': rs.is_information_visible(),
+            'right_shortcuts_visible': rs.is_shortcuts_visible(),
+            'right_jobs_visible': rs.is_jobs_visible(),
+            'right_splitter_sizes': (
+                list(rs.saved_splitter_sizes)
+                if rs.saved_splitter_sizes
+                else list(right_sizes)
+            ),
+            'right_sidebar_width': self.right_sidebar_width,
+            'main_splitter_sizes': list(sizes) if len(sizes) >= 3 else None,
+        }
+
+    def _hide_all_chrome(self):
+        self._chrome_suppressed = True
+        self._status_bar_peek_active = False
+        if getattr(self, '_status_bar_anim', None):
+            self._status_bar_anim.stop()
+        if getattr(self, 'status_bar', None):
+            self.status_bar.setMaximumHeight(0)
+            self.status_bar.hide()
+        if getattr(self, 'combined_sidebar', None):
+            self.combined_sidebar.hide()
+        if getattr(self, 'right_sidebar', None):
+            self.right_sidebar.hide()
+            self.right_sidebar.hide_info()
+        total_width = self.main_splitter.width()
+        if total_width > 0:
+            self._set_splitter_sizes_safe([0, total_width, 0])
+        self._update_chrome_menu_actions()
+        self._peek_layout_update()
+
+    def _restore_chrome_layout(self, layout: dict):
+        self._chrome_suppressed = False
+        cs = self.combined_sidebar
+        rs = self.right_sidebar
+        self.sidebar_width = layout.get('sidebar_width', self.sidebar_width)
+        self.right_sidebar_width = layout.get('right_sidebar_width', self.right_sidebar_width)
+        left_sizes = layout.get('left_splitter_sizes')
+        if left_sizes and len(left_sizes) >= 2:
+            cs.saved_splitter_sizes = list(left_sizes)
+        right_sizes = layout.get('right_splitter_sizes')
+        if right_sizes and len(right_sizes) >= 3:
+            rs.saved_splitter_sizes = list(right_sizes)
+        cs.set_tree_visible(layout.get('left_tree_visible', False))
+        cs.set_preview_visible(layout.get('left_preview_visible', False))
+        rs.set_information_visible(layout.get('right_information_visible', False))
+        rs.set_shortcuts_visible(layout.get('right_shortcuts_visible', False))
+        rs.set_jobs_visible(layout.get('right_jobs_visible', False))
+        self.file_tree_visible = cs.is_tree_visible()
+        self.preview_visible = cs.is_preview_visible()
+        self.jobs_visible = rs.is_jobs_visible()
+        self.manage_sidebar_visibility_for_view_mode(self.current_view_mode)
+        saved_main = layout.get('main_splitter_sizes')
+        if saved_main and len(saved_main) == 3 and sum(saved_main) > 0:
+            self._set_splitter_sizes_safe(saved_main)
+        self._status_bar_peek_active = False
+        if layout.get('status_bar_visible'):
+            if self.status_bar.isVisible():
+                self._update_chrome_menu_actions()
+                self._peek_layout_update()
+            else:
+                self._animate_status_bar_show(self._after_chrome_status_restore)
+        else:
+            self._update_chrome_menu_actions()
+            self._peek_layout_update()
+
+    def _after_chrome_status_restore(self):
+        self._update_chrome_menu_actions()
+        self._peek_layout_update()
+
+    def _show_default_chrome(self):
+        self._chrome_suppressed = False
+        cs = self.combined_sidebar
+        rs = self.right_sidebar
+        cs.set_tree_visible(True)
+        cs.set_preview_visible(True)
+        rs.set_information_visible(True)
+        rs.set_shortcuts_visible(True)
+        rs.set_jobs_visible(True)
+        self.file_tree_visible = True
+        self.preview_visible = True
+        self.jobs_visible = True
+        self.right_sidebar_visible = True
+        self._status_bar_peek_active = False
+        self.manage_sidebar_visibility_for_view_mode(self.current_view_mode)
+        if not self.status_bar.isVisible():
+            self._animate_status_bar_show(self._after_chrome_status_restore)
+        else:
+            self._update_chrome_menu_actions()
+            self._peek_layout_update()
+
+    def _update_chrome_menu_actions(self):
+        if hasattr(self, 'toggle_status_bar_action'):
+            vis = self.status_bar.isVisible()
+            self.toggle_status_bar_action.setChecked(vis)
+            self.toggle_status_bar_action.setText(
+                'Hide Status Bar' if vis else 'Show Status Bar'
+            )
+        if hasattr(self, 'combined_sidebar'):
+            if hasattr(self, 'toggle_file_tree_action'):
+                tree_vis = self.combined_sidebar.is_tree_visible()
+                self.toggle_file_tree_action.setChecked(tree_vis)
+                self.toggle_file_tree_action.setText(
+                    'Hide File Tree' if tree_vis else 'Show File Tree'
+                )
+            if hasattr(self, 'toggle_preview_action'):
+                preview_vis = self.combined_sidebar.is_preview_visible()
+                self.toggle_preview_action.setChecked(preview_vis)
+                self.toggle_preview_action.setText(
+                    'Hide Preview' if preview_vis else 'Show Preview'
+                )
+        if hasattr(self, 'right_sidebar'):
+            if hasattr(self, 'toggle_information_sidebar_action'):
+                info_vis = self.right_sidebar.is_information_visible()
+                self.toggle_information_sidebar_action.setChecked(info_vis)
+                self.toggle_information_sidebar_action.setText(
+                    'Hide Information Sidebar' if info_vis else 'Show Information Sidebar'
+                )
+            if hasattr(self, 'toggle_shortcuts_sidebar_action'):
+                shortcuts_vis = self.right_sidebar.is_shortcuts_visible()
+                self.toggle_shortcuts_sidebar_action.setChecked(shortcuts_vis)
+                self.toggle_shortcuts_sidebar_action.setText(
+                    'Hide Organize Sidebar' if shortcuts_vis else 'Show Organize Sidebar'
+                )
+            if hasattr(self, 'toggle_jobs_action'):
+                jobs_vis = self.right_sidebar.is_jobs_visible()
+                self.toggle_jobs_action.setChecked(jobs_vis)
+                self.toggle_jobs_action.setText(
+                    'Hide Jobs' if jobs_vis else 'Show Jobs'
+                )
+
+    def toggle_chrome(self):
+        """F4: save and hide all chrome, or restore saved/default layout."""
+        if self._is_any_chrome_visible():
+            self._chrome_saved_layout = self._capture_chrome_layout()
+            self._hide_all_chrome()
+        elif self._chrome_saved_layout is not None:
+            self._restore_chrome_layout(self._chrome_saved_layout)
+        else:
+            self._show_default_chrome()
+
     def toggle_status_bar(self):
         """Toggle status bar visibility and resize image display accordingly"""
+        self._chrome_suppressed = False
         # Clear any active peek state so the user's explicit choice takes precedence
         self._status_bar_peek_active = False
         
@@ -10184,11 +10369,13 @@ class ImageBrowserWindow(QMainWindow):
 
     def toggle_information_display(self):
         """Toggle Information sidebar only (I key). visibility_changed triggers _apply_right_sidebar_visibility."""
+        self._chrome_suppressed = False
         if hasattr(self.right_sidebar, 'set_information_visible'):
             self.right_sidebar.set_information_visible(not self.right_sidebar.is_information_visible())
 
     def toggle_shortcuts_display(self):
         """Toggle Shortcuts sidebar only (O key). visibility_changed triggers _apply_right_sidebar_visibility."""
+        self._chrome_suppressed = False
         if hasattr(self.right_sidebar, 'set_shortcuts_visible'):
             self.right_sidebar.set_shortcuts_visible(not self.right_sidebar.is_shortcuts_visible())
 

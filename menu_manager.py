@@ -489,6 +489,11 @@ class MenuManager:
         self.main_window.toggle_status_bar_action.setShortcut(QKeySequence('B'))
         self.main_window.toggle_status_bar_action.triggered.connect(self.main_window.toggle_status_bar)
         view_menu.addAction(self.main_window.toggle_status_bar_action)
+
+        # Toggle Chrome (F4 via ChromeToggleShortcutFilter — app-wide, not popups)
+        self.main_window.toggle_chrome_action = QAction('Toggle Chrome', self.main_window)
+        self.main_window.toggle_chrome_action.triggered.connect(self.main_window.toggle_chrome)
+        view_menu.addAction(self.main_window.toggle_chrome_action)
         
         # Update action text based on initial state
         if self.main_window.file_tree_visible:

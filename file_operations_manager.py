@@ -60,6 +60,9 @@ from utils import (
     show_styled_question,
     show_styled_warning,
     create_file_operation_progress_dialog,
+    create_titled_progress_dialog,
+    elide_progress_filename,
+    wrap_progress_dialog_label_elision,
     file_string,
     get_button_style,
     get_file_extension,
@@ -496,7 +499,10 @@ def _build_similar_image_group_pairs_impl(
             cancelled = True
             break
         if progress_cb:
-            progress_cb(idx, max(1, n), f"Sizing {os.path.basename(file_path)}... ({idx + 1}/{n})")
+            progress_cb(
+                idx, max(1, n),
+                f"Sizing {elide_progress_filename(os.path.basename(file_path))}... ({idx + 1}/{n})",
+            )
 
         if not os.path.exists(file_path) or not os.path.isfile(file_path):
             continue
@@ -601,12 +607,9 @@ def _run_similar_image_group_pairs_ui(
 ) -> Tuple[List[Tuple[str, str]], bool]:
     """Show progress while computing similar-image groups; use a worker thread for large path sets."""
     n = len(image_paths)
-    progress_dialog = QProgressDialog("Analyzing images...", "Cancel", 0, max(1, n), parent)
-    progress_dialog.setWindowTitle(window_title)
-    progress_dialog.setWindowModality(Qt.WindowModal)
-    progress_dialog.setMinimumDuration(0)
-    progress_dialog.setValue(0)
-    QApplication.processEvents()
+    progress_dialog = create_titled_progress_dialog(
+        parent, window_title, max(1, n), label="Analyzing images..."
+    )
 
     if n >= SIMILAR_WORKER_THREAD_MIN_PATHS:
         loop = QEventLoop(parent)
@@ -3130,13 +3133,14 @@ class FileOperationsManager:
             # Preparation phase: 100 steps (sorting: 0-10, calculating: 10-50, building: 50-100)
             PREP_TOTAL = 100
             progress_dialog = QProgressDialog("Preparing rename...", None, 0, PREP_TOTAL, mw)
-            progress_dialog.setWindowTitle("Rename Progress")
+            progress_dialog.setWindowTitle("Rename Files")
             progress_dialog.setWindowModality(Qt.WindowModal)
             progress_dialog.setCancelButton(None)
             progress_dialog.setMinimumDuration(0)
             progress_dialog.setAutoClose(False)  # Don't auto-close when reaching 100% - we'll close manually after cache flush
             progress_dialog.setAutoReset(False)  # Don't reset when reaching 100%
             progress_dialog.setValue(0)
+            wrap_progress_dialog_label_elision(progress_dialog)
             progress_dialog.show()
             QApplication.processEvents()
 
@@ -3708,7 +3712,9 @@ class FileOperationsManager:
                 # Phase 0: Move conflicting existing files to temp names
                 for idx, (source_path, target_path) in enumerate(rename_plan.get('phase0', [])):
                     progress_dialog.setValue(idx)
-                    progress_dialog.setLabelText(f"Moving conflicting file {os.path.basename(source_path)}...")
+                    progress_dialog.setLabelText(
+                        f"Moving conflicting file {elide_progress_filename(os.path.basename(source_path))}..."
+                    )
                     QApplication.processEvents()
                     if source_path == target_path:
                         continue
@@ -3723,7 +3729,9 @@ class FileOperationsManager:
                 # Phase 1: Rename sources to temp names
                 for idx, (source_path, target_path) in enumerate(rename_plan['phase1']):
                     progress_dialog.setValue(phase0_ops + idx)
-                    progress_dialog.setLabelText(f"Renaming {os.path.basename(source_path)}...")
+                    progress_dialog.setLabelText(
+                        f"Renaming {elide_progress_filename(os.path.basename(source_path))}..."
+                    )
                     QApplication.processEvents()
                     if source_path == target_path:
                         continue
@@ -3738,7 +3746,9 @@ class FileOperationsManager:
                 # Phase 2: Rename temps to final names
                 for idx, (temp_path, final_path) in enumerate(rename_plan['phase2']):
                     progress_dialog.setValue(phase0_ops + phase1_ops + idx)
-                    progress_dialog.setLabelText(f"Finalizing {os.path.basename(final_path)}...")
+                    progress_dialog.setLabelText(
+                        f"Finalizing {elide_progress_filename(os.path.basename(final_path))}..."
+                    )
                     QApplication.processEvents()
                     if temp_path == final_path:
                         continue
@@ -4794,13 +4804,9 @@ class FileOperationsManager:
         if hasattr(mw, 'highlight_index') and 0 <= mw.highlight_index < len(displayed):
             current_image_path = displayed[mw.highlight_index]
 
-        # Create progress dialog with cancel button
-        progress_dialog = QProgressDialog("Hashing images...", "Cancel", 0, len(displayed), mw)
-        progress_dialog.setWindowTitle("Find Exact Duplicates")
-        progress_dialog.setWindowModality(Qt.WindowModal)
-        progress_dialog.setMinimumDuration(0)  # Show immediately
-        progress_dialog.setValue(0)
-        QApplication.processEvents()  # Process events to show dialog
+        progress_dialog = create_titled_progress_dialog(
+            mw, "Find Duplicate Image Files", len(displayed)
+        )
 
         # Compute MD5 hash for each file
         hash_to_files = {}
@@ -4815,7 +4821,10 @@ class FileOperationsManager:
 
             # Update progress
             progress_dialog.setValue(idx)
-            progress_dialog.setLabelText(f"Hashing {os.path.basename(file_path)}... ({idx + 1}/{len(displayed)})")
+            progress_dialog.setLabelText(
+                f"Hashing {elide_progress_filename(os.path.basename(file_path))}... "
+                f"({idx + 1}/{len(displayed)})"
+            )
             QApplication.processEvents()  # Keep UI responsive
 
             if not os.path.exists(file_path) or not os.path.isfile(file_path):
@@ -4949,14 +4958,9 @@ class FileOperationsManager:
         image_extensions = get_image_extensions()
         all_image_files = []
         
-        # Create progress dialog for collecting files
-        progress_dialog = QProgressDialog("Scanning directories...", "Cancel", 0, 0, mw)
-        progress_dialog.setWindowTitle("Find Exact Duplicates (Recursive)")
-        progress_dialog.setWindowModality(Qt.WindowModal)
-        progress_dialog.setMinimumDuration(0)
-        progress_dialog.setValue(0)
-        progress_dialog.setMaximum(0)  # Indeterminate progress
-        QApplication.processEvents()
+        progress_dialog = create_titled_progress_dialog(
+            mw, "Find Duplicate Image Files", 0, indeterminate=True
+        )
 
         # Get process hidden directories setting
         from config import get_config
@@ -5021,13 +5025,9 @@ class FileOperationsManager:
             if 0 <= mw.highlight_index < len(mw.displayed_images):
                 current_image_path = mw.displayed_images[mw.highlight_index]
 
-        # Create progress dialog for hashing
-        progress_dialog = QProgressDialog("Hashing images...", "Cancel", 0, len(all_image_files), mw)
-        progress_dialog.setWindowTitle("Find Exact Duplicates (Recursive)")
-        progress_dialog.setWindowModality(Qt.WindowModal)
-        progress_dialog.setMinimumDuration(0)
-        progress_dialog.setValue(0)
-        QApplication.processEvents()
+        progress_dialog = create_titled_progress_dialog(
+            mw, "Find Duplicate Image Files", len(all_image_files)
+        )
 
         # Compute MD5 hash for each file
         hash_to_files = {}
@@ -5042,7 +5042,10 @@ class FileOperationsManager:
 
             # Update progress
             progress_dialog.setValue(idx)
-            progress_dialog.setLabelText(f"Hashing {os.path.basename(file_path)}... ({idx + 1}/{len(all_image_files)})")
+            progress_dialog.setLabelText(
+                f"Hashing {elide_progress_filename(os.path.basename(file_path))}... "
+                f"({idx + 1}/{len(all_image_files)})"
+            )
             QApplication.processEvents()
 
             if not os.path.exists(file_path) or not os.path.isfile(file_path):
@@ -5199,13 +5202,9 @@ class FileOperationsManager:
         image_extensions = get_image_extensions()
         all_image_files: List[str] = []
 
-        progress_dialog = QProgressDialog("Scanning directories...", "Cancel", 0, 0, mw)
-        progress_dialog.setWindowTitle("Find Similar Image Files (Tree)")
-        progress_dialog.setWindowModality(Qt.WindowModal)
-        progress_dialog.setMinimumDuration(0)
-        progress_dialog.setValue(0)
-        progress_dialog.setMaximum(0)
-        QApplication.processEvents()
+        progress_dialog = create_titled_progress_dialog(
+            mw, "Find Similar Image Files", 0, indeterminate=True
+        )
 
         config = get_config()
         process_hidden = config.load_settings().get('show_hidden_directories', False)
@@ -5260,7 +5259,7 @@ class FileOperationsManager:
                 current_image_path = mw.displayed_images[mw.highlight_index]
 
         group_pairs, cancelled = _run_similar_image_group_pairs_ui(
-            mw, all_image_files, "Find Similar Image Files (Tree)"
+            mw, all_image_files, "Find Similar Image Files"
         )
 
         if cancelled:
@@ -5333,13 +5332,9 @@ class FileOperationsManager:
         image_extensions = get_image_extensions()
         all_image_files: List[str] = []
 
-        progress_dialog = QProgressDialog("Scanning directories...", "Cancel", 0, 0, mw)
-        progress_dialog.setWindowTitle("Find Similar Image Files (Recursive)")
-        progress_dialog.setWindowModality(Qt.WindowModal)
-        progress_dialog.setMinimumDuration(0)
-        progress_dialog.setValue(0)
-        progress_dialog.setMaximum(0)
-        QApplication.processEvents()
+        progress_dialog = create_titled_progress_dialog(
+            mw, "Find Similar Image Files", 0, indeterminate=True
+        )
 
         config = get_config()
         process_hidden = config.load_settings().get('show_hidden_directories', False)
@@ -5392,7 +5387,7 @@ class FileOperationsManager:
                 current_image_path = mw.displayed_images[mw.highlight_index]
 
         group_pairs, cancelled = _run_similar_image_group_pairs_ui(
-            mw, all_image_files, "Find Similar Image Files (Recursive)"
+            mw, all_image_files, "Find Similar Image Files"
         )
 
         if cancelled:

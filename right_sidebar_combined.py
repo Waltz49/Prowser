@@ -85,7 +85,7 @@ class RightSidebarCombinedWidget(QWidget):
             "−" if self.information_visible else "+"
         )
 
-        self.jobs_section = self._create_section("Jobs", "jobs")
+        self.jobs_section = self._create_section("Job Control", "jobs")
         self.splitter.addWidget(self.jobs_section)
 
         self.splitter.setSizes([150, 250, 120])

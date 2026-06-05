@@ -16,6 +16,8 @@ class StatusBarPeekFilter(QObject):
         self.main_window = main_window
 
     def eventFilter(self, obj, event):
+        if getattr(self.main_window, '_chrome_suppressed', False):
+            return False
         if event.type() == QEvent.MouseMove and hasattr(obj, 'window') and obj.window() == self.main_window:
             if hasattr(self.main_window, 'status_bar'):
                 cursor_y = self.main_window.mapFromGlobal(QCursor.pos()).y()
@@ -26,6 +28,27 @@ class StatusBarPeekFilter(QObject):
                 elif self.main_window._status_bar_peek_active and not in_zone:
                     self.main_window._status_bar_peek_active = False
                     self.main_window._animate_status_bar_hide(self.main_window._peek_layout_update)
+        return False
+
+
+class ChromeToggleShortcutFilter(QObject):
+    """App-level event filter for F4 toggle-chrome (main window only, not dialogs)."""
+
+    def __init__(self, main_window, parent=None):
+        super().__init__(parent)
+        self.main_window = main_window
+
+    def eventFilter(self, obj, event):
+        if event.type() == QEvent.KeyPress and isinstance(event, QKeyEvent):
+            if event.key() == Qt.Key_F4 and not event.modifiers():
+                mw = self.main_window
+                if not mw.isVisible():
+                    return False
+                if hasattr(mw, '_is_main_window_key_context') and not mw._is_main_window_key_context():
+                    return False
+                if hasattr(mw, 'toggle_chrome'):
+                    mw.toggle_chrome()
+                    return True
         return False
 
 

@@ -84,6 +84,7 @@ from theme_service import (
     USER_THEME_COLOR_KEYS,
     THEME_BORDER_WIDTH_KEYS,
     VIEW_CHROME_THEME_KEYS,
+    theme_apply_scope_for_keys,
 )
 
 
@@ -131,6 +132,18 @@ from settings.widgets.multi_row_tab_widget import (
     TabButtonContainer,
 )
 
+THEME_COLOR_SWATCH_TOOLTIPS = {
+    "default_background_color_hex": "Background for the main window, sidebars, and panels.",
+    "text_color_hex": "Default text color for labels, menus, and general information.",
+    "sidebar_header_bg_hex": "Background of view title bars (e.g. Favorites, folder name headers).",
+    "default_border_color_hex": "Border color around sidebar sections and other chrome dividers.",
+    "default_image_color_hex": "Border color around non-selected thumbnails.",
+    "default_image_background_color_hex": "Background fill behind non-selected thumbnail images.",
+    "current_image_border_color_hex": "Border color for the active image thumbnail.",
+    "current_image_background_color_hex": "Background fill behind the active image thumbnail.",
+    "multiselect_border_color_hex": "Border color when multiple thumbnails are selected.",
+    "multiselect_background_color_hex": "Background fill behind thumbnails in a multi-selection.",
+}
 
 
 class SettingsDialog(QDialog):
@@ -167,6 +180,7 @@ class SettingsDialog(QDialog):
     THEME_SWATCH_COL_WIDTH = 32
     THEME_SLIDER_COL_MIN_WIDTH = 155
     THEME_INNER_WIDTH_EXTRA = 48  # HBox spacing + vertical scrollbar / frame margin
+    THEME_LIVE_PREVIEW_DEBOUNCE_MS = 120
     
     # Session-only: remember last tab index (not persisted across sessions)
     _last_tab_index = None
@@ -199,9 +213,10 @@ class SettingsDialog(QDialog):
 
         self._user_theme_color_live_timer = QTimer(self)
         self._user_theme_color_live_timer.setSingleShot(True)
-        self._user_theme_color_live_timer.setInterval(8)
+        self._user_theme_color_live_timer.setInterval(self.THEME_LIVE_PREVIEW_DEBOUNCE_MS)
         self._user_theme_color_live_timer.timeout.connect(self._debounced_apply_user_theme_preview_live)
         self._user_theme_color_picker_active_key = None
+        self._theme_live_preview_changed_keys: set[str] = set()
 
         self._browse_transparency_live_timer = QTimer(self)
         self._browse_transparency_live_timer.setSingleShot(True)
@@ -1545,6 +1560,7 @@ class SettingsDialog(QDialog):
         key: str,
         width_key: Optional[str] = None,
         width_tooltip: Optional[str] = None,
+        color_tooltip: Optional[str] = None,
     ):
         """Three columns: fixed label | fixed swatch | slider column (or empty spacer)."""
         row = QWidget()
@@ -1570,7 +1586,7 @@ class SettingsDialog(QDialog):
             QPushButton { min-height: 28px; min-width: 28px; max-height: 28px; max-width: 28px;
                           height: 28px; width: 28px; padding: 0px; margin: 0px; border: 1px solid white; }
         """)
-        btn.setToolTip("Click to choose color")
+        btn.setToolTip(color_tooltip or THEME_COLOR_SWATCH_TOOLTIPS.get(key, "Click to choose color"))
         btn.clicked.connect(lambda checked=False, k=key: self._choose_user_theme_color(k))
         self._user_theme_color_buttons[key] = btn
         sw_l.addWidget(btn)
@@ -1589,7 +1605,9 @@ class SettingsDialog(QDialog):
             s.setTickPosition(QSlider.TickPosition.NoTicks)
             s.setToolTip(width_tooltip or "")
             s.setFixedHeight(22)
-            s.valueChanged.connect(self._apply_user_theme_preview_live)
+            s.valueChanged.connect(
+                lambda _v, k=width_key: self._schedule_user_theme_preview_live(k)
+            )
             vl = QLabel("0")
             vl.setFixedWidth(26)
             vl.setAlignment(Qt.AlignCenter)
@@ -1630,7 +1648,9 @@ class SettingsDialog(QDialog):
         s.setTickPosition(QSlider.TickPosition.NoTicks)
         s.setToolTip("Thickness of main splitters and the line above the status bar (px). 0 = hidden.")
         s.setFixedHeight(22)
-        s.valueChanged.connect(self._apply_user_theme_preview_live)
+        s.valueChanged.connect(
+            lambda _v, k="view_border_width_px": self._schedule_user_theme_preview_live(k)
+        )
         vl = QLabel("2")
         vl.setFixedWidth(26)
         vl.setAlignment(Qt.AlignCenter)
@@ -1722,9 +1742,9 @@ class SettingsDialog(QDialog):
             "Active image border:",
             "current_image_border_color_hex",
             width_key="current_image_border_width_index",
-            width_tooltip="Border for the current / keyboard-highlighted thumbnail",
+            width_tooltip="Border for the active image thumbnail",
         )
-        self._add_theme_color_swatch_row(v_thumb, "Current fill:", "current_image_background_color_hex")
+        self._add_theme_color_swatch_row(v_thumb, "Active image background:", "current_image_background_color_hex")
         self._add_theme_color_swatch_row(
             v_thumb,
             "Multiselect Image border:",
@@ -1944,15 +1964,30 @@ class SettingsDialog(QDialog):
             return
         self._user_theme_color_hex[key] = color.name()
         self._update_user_theme_color_button(key)
+        self._schedule_user_theme_preview_live(key)
+
+    def _schedule_user_theme_preview_live(self, key: Optional[str] = None) -> None:
+        """Debounce live theme preview (color picker drags and border-width sliders)."""
+        if key:
+            self._theme_live_preview_changed_keys.add(key)
         self._user_theme_color_live_timer.stop()
         self._user_theme_color_live_timer.start()
 
     def _debounced_apply_user_theme_preview_live(self):
-        if not self._user_theme_color_picker_active_key:
-            return
-        self._apply_user_theme_preview_live()
+        changed = self._theme_live_preview_changed_keys
+        self._theme_live_preview_changed_keys = set()
+        apply_scope = theme_apply_scope_for_keys(changed)
+        self._apply_user_theme_preview_live(
+            apply_scope=apply_scope,
+            skip_dialog_theme=(apply_scope == "thumbnail"),
+        )
 
-    def _apply_user_theme_preview_live(self):
+    def _apply_user_theme_preview_live(
+        self,
+        *,
+        apply_scope: str = "full",
+        skip_dialog_theme: bool = False,
+    ):
         """Apply palette from in-memory swatches without persisting config (live color picker)."""
         tid = self.theme_preset_combo.currentData()
         if tid not in ("dark", "light", "user"):
@@ -1964,6 +1999,7 @@ class SettingsDialog(QDialog):
             main_window=self.parent(),
             persist=False,
             config=cfg,
+            apply_scope=apply_scope,
         )
         if tid == "user":
             kwargs["user_theme_colors"] = colors
@@ -1975,7 +2011,8 @@ class SettingsDialog(QDialog):
             kwargs["light_theme_colors"] = colors
             apply_theme("light", **kwargs)
         self._sync_theme_context()
-        self.apply_theme()
+        if not skip_dialog_theme:
+            self.apply_theme()
         mw = self.parent()
         if mw:
             from theme_service import sync_view_theme_menu_actions
@@ -1997,6 +2034,7 @@ class SettingsDialog(QDialog):
         dlg.currentColorChanged.connect(self._on_user_theme_color_picker_changed)
         result = dlg.exec()
         self._user_theme_color_live_timer.stop()
+        self._theme_live_preview_changed_keys.clear()
         self._user_theme_color_picker_active_key = None
         try:
             dlg.currentColorChanged.disconnect(self._on_user_theme_color_picker_changed)
@@ -2141,16 +2179,15 @@ class SettingsDialog(QDialog):
             return
         snap = self._theme_snapshot_at_open
         cfg = get_config()
-        cfg.update_setting("ui_theme", snap["ui_theme"])
-        cfg.update_setting("user_theme_colors", copy.deepcopy(snap["user_theme_colors"]))
-        cfg.update_setting("dark_theme_colors", copy.deepcopy(snap["dark_theme_colors"]))
-        cfg.update_setting("light_theme_colors", copy.deepcopy(snap["light_theme_colors"]))
-        cfg.update_setting(
-            "browse_transparency_settings",
-            copy.deepcopy(
+        cfg.update_settings({
+            "ui_theme": snap["ui_theme"],
+            "user_theme_colors": copy.deepcopy(snap["user_theme_colors"]),
+            "dark_theme_colors": copy.deepcopy(snap["dark_theme_colors"]),
+            "light_theme_colors": copy.deepcopy(snap["light_theme_colors"]),
+            "browse_transparency_settings": copy.deepcopy(
                 merge_browse_transparency_settings(snap.get("browse_transparency_settings"))
             ),
-        )
+        })
         tid = snap["ui_theme"]
         apply_theme(
             tid,
@@ -5963,6 +6000,8 @@ class SettingsDialog(QDialog):
             # Check if any settings actually changed
             has_changes = False
             limit_or_filter_changed = False
+            favorites_changed = False
+            move_destinations_changed = False
             
             # Optimized: Remove redundant prints, compact special handling, and minimize logic
             for key, new_value in new_settings.items():
@@ -6044,6 +6083,10 @@ class SettingsDialog(QDialog):
                     has_changes = True
                     if key in ('max_images', 'filter_pattern'):
                         limit_or_filter_changed = True
+                    elif key == 'favorite_directories':
+                        favorites_changed = True
+                    elif key == 'move_destinations':
+                        move_destinations_changed = True
             
             # Check if image_extensions changed
             if 'image_extensions' in new_settings:
@@ -6054,34 +6097,22 @@ class SettingsDialog(QDialog):
                     # Clear the cache when extensions change
                     clear_image_extensions_cache()
             
-            # Always save settings to disk (even if no changes detected)
-            # This ensures transparency_color and other settings are always persisted
             config = get_config()
-            favorites_changed = False
-            move_destinations_changed = False
-            for key, value in new_settings.items():
-                if key not in ('_limit_or_filter_changed',):  # Skip internal flags
-                    if key == 'imagegen_lora_enabled_ids':
-                        orig_enabled = sorted(
-                            self.original_settings.get('imagegen_lora_enabled_ids') or []
-                        )
-                        orig_hidden = sorted(
-                            self.original_settings.get('imagegen_lora_hidden_ids') or []
-                        )
-                        new_enabled = sorted(value or [])
-                        new_hidden = sorted(getattr(self, '_lora_hidden_ids', set()))
-                        self._flush_lora_tab_to_disk()
-                        continue
-                    if key in ('imagegen_lora_hidden_ids', 'imagegen_lora_model_key'):
-                        continue
-                    if key == 'imagegen_lora_deleted_ids':
-                        continue
-                    # Track if favorite_directories or move_destinations is being saved
-                    if key == 'favorite_directories':
-                        favorites_changed = True
-                    elif key == 'move_destinations':
-                        move_destinations_changed = True
-                    config.update_setting(key, value)
+            _skip_persist_keys = frozenset({
+                '_limit_or_filter_changed',
+                'imagegen_lora_enabled_ids',
+                'imagegen_lora_hidden_ids',
+                'imagegen_lora_model_key',
+                'imagegen_lora_deleted_ids',
+            })
+            if has_changes:
+                settings_updates = {
+                    key: value
+                    for key, value in new_settings.items()
+                    if key not in _skip_persist_keys
+                }
+                if settings_updates:
+                    config.update_settings(settings_updates)
 
             if hasattr(self, "_lora_checkboxes"):
                 mw = self.parent()

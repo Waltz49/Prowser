@@ -128,6 +128,7 @@ def _apply_task_info_html_to_browser(
     *,
     content_width: int | None = None,
     job_queue_cell: bool = False,
+    max_height: int | None = 420,
 ) -> int:
     """Set task-info HTML on the browser and resize to fit content; returns height."""
     if content_width is not None:
@@ -143,7 +144,8 @@ def _apply_task_info_html_to_browser(
     info_browser.setHtml(_wrap_task_info_html(body_html))
     info_browser.document().setDocumentMargin(0)
     h_pad = 8 if job_queue_cell else 36
-    text_width = max(200, info_browser.width() - h_pad)
+    min_w = 40 if job_queue_cell else 200
+    text_width = max(min_w, info_browser.width() - h_pad)
     info_browser.document().setTextWidth(text_width)
     doc_height = info_browser.document().size().height()
     layout_height = info_browser.document().documentLayout().documentSize().height()
@@ -154,7 +156,8 @@ def _apply_task_info_html_to_browser(
         content_h = line_h * blocks
     min_h = 28 if job_queue_cell else 48
     extra = 6 if job_queue_cell else 16
-    fixed_h = int(min(max(content_h, min_h) + extra, 420))
+    raw_h = int(max(content_h, min_h) + extra)
+    fixed_h = raw_h if max_height is None else min(raw_h, max_height)
     info_browser.setFixedHeight(fixed_h)
     info_browser.setMinimumHeight(fixed_h)
     return fixed_h

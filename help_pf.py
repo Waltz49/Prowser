@@ -35,6 +35,7 @@ def format_pf_keys_html() -> str:
 <tr><td class="pf-key">F1</td><td class="pf-desc">Keyboard Shortcuts (busy, but comprehensive)</td></tr>
 <tr><td class="pf-key">F2</td><td class="pf-desc">Quick Rename</td></tr>
 <tr><td class="pf-key">F3</td><td class="pf-desc">Image History</td></tr>
+<tr><td class="pf-key">F4</td><td class="pf-desc">Toggle Chrome (hide/show all sidebars and status bar)</td></tr>
 <tr><td class="pf-key">F10</td><td class="pf-desc">Clear forward and backward history stacks (thumbnail view)</td></tr>
 <tr><td class="pf-key">F12</td><td class="pf-desc">List View Toggle (experimental)</td></tr>
 </tbody>

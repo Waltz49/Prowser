@@ -15,7 +15,57 @@ from typing import List, Optional
 from PySide6.QtCore import Qt, QTimer, QByteArray, QRect
 from PySide6.QtGui import QColor, QIcon, QPainter, QPainterPath, QPixmap
 from ctypes import CDLL, c_uint
-from PySide6.QtWidgets import QApplication, QDialog, QProgressBar, QProgressDialog, QMessageBox
+from PySide6.QtWidgets import QApplication, QDialog, QLabel, QProgressBar, QProgressDialog, QMessageBox
+
+PROGRESS_LABEL_MAX_WIDTH_PX = 400
+PROGRESS_LINE_MAX_CHARS = 64
+PROGRESS_FILENAME_MAX_CHARS = 44
+
+
+def elide_middle(text: str, max_len: int) -> str:
+    """Elide a string with a middle ellipsis when longer than max_len."""
+    if max_len <= 0:
+        return ""
+    if len(text) <= max_len:
+        return text
+    if max_len <= 3:
+        return text[:max_len]
+    keep = max_len - 3
+    front = (keep + 1) // 2
+    back = keep // 2
+    return f"{text[:front]}...{text[-back:]}"
+
+
+def elide_progress_filename(filename: str, max_len: int = PROGRESS_FILENAME_MAX_CHARS) -> str:
+    """Elide a filename for display in a progress dialog label."""
+    return elide_middle(filename, max_len)
+
+
+def format_progress_label(text: str, *, line_max: int = PROGRESS_LINE_MAX_CHARS) -> str:
+    """Elide each line of progress dialog label text to limit dialog growth."""
+    lines = text.split("\n")
+    if len(lines) == 1:
+        return elide_middle(text, line_max)
+    return "\n".join(elide_middle(line, line_max) for line in lines)
+
+
+def configure_progress_dialog_label(progress_dialog: QProgressDialog) -> None:
+    """Constrain progress dialog label width so long paths do not widen the dialog."""
+    label = progress_dialog.findChild(QLabel)
+    if label:
+        label.setWordWrap(False)
+        label.setMaximumWidth(PROGRESS_LABEL_MAX_WIDTH_PX)
+
+
+def wrap_progress_dialog_label_elision(progress_dialog: QProgressDialog) -> None:
+    """Wrap setLabelText so all progress messages are elided and width-limited."""
+    configure_progress_dialog_label(progress_dialog)
+    _orig_set_label = progress_dialog.setLabelText
+
+    def _elided_set_label(text: str) -> None:
+        _orig_set_label(format_progress_label(text))
+
+    progress_dialog.setLabelText = _elided_set_label  # type: ignore[method-assign]
 
 # Local imports
 from thumbnail_constants import GREEN, RED, RESET, YELLOW
@@ -748,36 +798,50 @@ def show_styled_critical(parent, title, text):
     msg_box = styled_message_box(parent, QMessageBox.Critical, title, text)
     msg_box.exec()
 
-def create_file_operation_progress_dialog(parent, title: str, total_files: int) -> 'QProgressDialog':
-    """Create a progress dialog for file operations (deletions, moves, copies)
-    
-    Args:
-        parent: Parent widget (usually main window)
-        title: Dialog title
-        total_files: Total number of files to process
-        
-    Returns:
-        QProgressDialog instance configured for file operations
+def create_titled_progress_dialog(
+    parent,
+    title: str,
+    total: int,
+    *,
+    label: Optional[str] = None,
+    cancellable: bool = True,
+    indeterminate: bool = False,
+) -> QProgressDialog:
+    """Create a progress dialog with a visible title bar (macOS-friendly setup).
+
+    Uses the same pattern as file-operation progress dialogs: title on the window,
+    optional detail text in the label, ApplicationModal, and explicit show/raise.
     """
-    
-    progress_dialog = QProgressDialog(title, None, 0, total_files, parent)
+    cancel_text = "Cancel" if cancellable else None
+    label_text = label if label is not None else title
+    maximum = 0 if indeterminate else total
+    progress_dialog = QProgressDialog(label_text, cancel_text, 0, maximum, parent)
     progress_dialog.setWindowTitle(title)
     progress_dialog.setWindowModality(Qt.WindowModality.ApplicationModal)
-    progress_dialog.setCancelButton(None)  # No cancel button
-    progress_dialog.setMinimumDuration(0)  # Show immediately
+    if not cancellable:
+        progress_dialog.setCancelButton(None)
+    progress_dialog.setMinimumDuration(0)
     progress_dialog.setValue(0)
-    
-    # Set format on the internal progress bar to show percentage
+    if indeterminate:
+        progress_dialog.setMaximum(0)
+
     progress_bar = progress_dialog.findChild(QProgressBar)
-    if progress_bar:
-        progress_bar.setFormat("%p%")  # Show percentage
-    
-    # Ensure dialog is shown and raised to front
+    if progress_bar and not indeterminate and total > 0:
+        progress_bar.setFormat("%p%")
+
+    wrap_progress_dialog_label_elision(progress_dialog)
     progress_dialog.show()
     progress_dialog.raise_()
     progress_dialog.activateWindow()
     QApplication.processEvents()
     return progress_dialog
+
+
+def create_file_operation_progress_dialog(parent, title: str, total_files: int) -> QProgressDialog:
+    """Create a progress dialog for file operations (deletions, moves, copies)."""
+    return create_titled_progress_dialog(
+        parent, title, total_files, cancellable=False
+    )
 
 def show_styled_question(parent, title, text, default_no=True):
     """

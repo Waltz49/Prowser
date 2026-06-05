@@ -825,7 +825,6 @@ def delete_usercomment_from_file(file_path: str) -> bool:
                             piexif.insert(new_exif, file_path, temp_path)
                             os.replace(temp_path, file_path)
                             os.utime(file_path, (file_atime, file_mtime))
-                            print(f"DEBUG delete_usercomment_from_file: removed UserComment from {file_path}")
                         success = True
                 else:
                     success = True

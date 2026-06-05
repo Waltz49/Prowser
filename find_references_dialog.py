@@ -16,7 +16,6 @@ from PySide6.QtWidgets import (
     QGridLayout,
     QHBoxLayout,
     QLabel,
-    QProgressDialog,
     QPushButton,
     QScrollArea,
     QSizePolicy,
@@ -29,6 +28,7 @@ from reference_graph import open_reference_graph_for_path, path_is_referenced_in
 from theme_service import get_active_theme
 from utils import (
     _dialog_thumbnail_border_color,
+    create_titled_progress_dialog,
     ensure_dialog_fits_screen,
     load_dialog_thumbnail,
     restore_dialog_geometry_hex,
@@ -380,15 +380,12 @@ def find_and_show_references_dialog(main_window, target_path: str) -> None:
 
     progress = None
     if len(candidates) > 40:
-        progress = QProgressDialog(
-            "Searching EXIF user comments for references…",
-            "Cancel",
-            0,
-            len(candidates),
+        progress = create_titled_progress_dialog(
             main_window,
+            "Find References",
+            len(candidates),
+            label="Searching EXIF user comments for references…",
         )
-        progress.setWindowModality(Qt.WindowModality.WindowModal)
-        progress.setMinimumDuration(0)
 
     referencing: List[str] = []
     for i, cand in enumerate(candidates):

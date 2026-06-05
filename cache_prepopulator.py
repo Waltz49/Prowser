@@ -13,7 +13,7 @@ from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import QProgressDialog, QApplication
 from thumbnail_constants import get_image_extensions, MIN_THUMBNAIL_SIZE
 from image_cache import get_cache_manager
-from utils import is_inside_photos_library_resources_or_scopes
+from utils import is_inside_photos_library_resources_or_scopes, wrap_progress_dialog_label_elision
 from file_tree_handler import _get_excluded_paths, _is_excluded_path
 
 def _is_in_app_cache_directory(path: str) -> bool:
@@ -332,8 +332,8 @@ def prepopulate_cache(main_window, thumbnail_size: Optional[int] = None, suppres
     label = progress_dialog.findChild(QLabel)
     if label:
         label.setAlignment(Qt.AlignLeft | Qt.AlignTop)
-        label.setWordWrap(True)
         label.setMinimumHeight(label.fontMetrics().height() * 2 + 4)
+    wrap_progress_dialog_label_elision(progress_dialog)
 
     # Phase 1: Recursively scan for images, or use caller-supplied paths (tree "show all images" + filter)
     if image_paths is not None:

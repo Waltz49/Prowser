@@ -45,6 +45,48 @@ THEME_BORDER_WIDTH_KEYS = (
 # Splitter handles + status bar top (1–8 px), per preset
 VIEW_CHROME_THEME_KEYS = ("view_border_width_px",)
 
+# Thumbnail grid paint + borders only (no global QSS / settings-dialog chrome refresh needed).
+THEME_THUMBNAIL_ONLY_KEYS = frozenset(
+    (
+        "default_image_color_hex",
+        "default_image_background_color_hex",
+        "current_image_border_color_hex",
+        "current_image_background_color_hex",
+        "multiselect_border_color_hex",
+        "multiselect_background_color_hex",
+        *THEME_BORDER_WIDTH_KEYS,
+    )
+)
+
+# Application-wide QWidget / QSS palette (requires QApplication.setStyleSheet).
+THEME_APP_WIDE_KEYS = frozenset(
+    (
+        "default_background_color_hex",
+        "text_color_hex",
+    )
+)
+
+# Splitters, sidebars, status bar chrome (per-widget stylesheets; no global QSS).
+THEME_CHROME_KEYS = frozenset(
+    (
+        "sidebar_header_bg_hex",
+        "default_border_color_hex",
+        *VIEW_CHROME_THEME_KEYS,
+    )
+)
+
+
+def theme_apply_scope_for_keys(changed_keys: Optional[set]) -> str:
+    """Return the lightest apply path needed: 'thumbnail', 'chrome', or 'full'."""
+    if not changed_keys:
+        return "full"
+    keys = frozenset(changed_keys)
+    if keys.issubset(THEME_THUMBNAIL_ONLY_KEYS):
+        return "thumbnail"
+    if keys.isdisjoint(THEME_APP_WIDE_KEYS):
+        return "chrome"
+    return "full"
+
 _VIEW_CHROME_BORDER_MIN_PX = 0
 _VIEW_CHROME_BORDER_MAX_PX = 8
 
@@ -587,6 +629,7 @@ def apply_theme(
     user_theme_colors: Optional[Dict[str, Any]] = None,
     dark_theme_colors: Optional[Dict[str, Any]] = None,
     light_theme_colors: Optional[Dict[str, Any]] = None,
+    apply_scope: str = "full",
 ) -> str:
     """
     Activate a theme by id, sync legacy constants, optionally set QApplication stylesheet,
@@ -598,8 +641,15 @@ def apply_theme(
     For \"dark\" / \"light\", pass dark_theme_colors / light_theme_colors to preview overrides,
     or None to load persisted preset colors from config.
 
+    apply_scope controls how much UI is restyled after syncing constants:
+      - \"full\": global QApplication stylesheet + refresh_theme_styles (default)
+      - \"chrome\": refresh_theme_styles only (splitters, sidebars, per-widget chrome)
+      - \"thumbnail\": thumbnail canvas repaint only
+
     Returns the stored/normalized theme id (e.g. 'system', 'dark', 'light', 'user').
     """
+    if apply_scope not in ("full", "chrome", "thumbnail"):
+        apply_scope = "full"
     global _active_theme
     stored_tid = normalize_theme_id(theme_id)
     apply_tid = resolve_theme_id_for_apply(stored_tid)
@@ -657,7 +707,7 @@ def apply_theme(
 
     sync_to_thumbnail_constants(_active_theme)
 
-    if app is not None:
+    if apply_scope == "full" and app is not None:
         app.setStyleSheet(_active_theme.global_stylesheet())
 
     if persist and stored_tid != "user":
@@ -670,9 +720,13 @@ def apply_theme(
         except Exception:
             pass
 
-    if main_window is not None and hasattr(main_window, "refresh_theme_styles"):
+    if main_window is not None:
         try:
-            main_window.refresh_theme_styles()
+            if apply_scope == "thumbnail":
+                if hasattr(main_window, "refresh_thumbnail_theme_styles"):
+                    main_window.refresh_thumbnail_theme_styles()
+            elif hasattr(main_window, "refresh_theme_styles"):
+                main_window.refresh_theme_styles()
         except Exception:
             pass
 
