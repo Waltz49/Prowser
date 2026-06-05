@@ -19,6 +19,19 @@ def clamp_outpaint_dims(width: int, height: int, *, max_side: int = 1024) -> Tup
     return w, h
 
 
+def fit_infill_paint_dims(width: int, height: int) -> Tuple[int, int]:
+    """Working size for infill-by-painting canvas and exports (aspect-preserving)."""
+    from imagegen_plugins.pipelines.mflux_schnell import FLUX_LOCAL_IMAGE_DIM_MAX
+
+    return fit_edit_output_dims(
+        width,
+        height,
+        max_side=FLUX_LOCAL_IMAGE_DIM_MAX,
+        step=16,
+        min_side=256,
+    )
+
+
 def fit_edit_output_dims(
     width: int,
     height: int,

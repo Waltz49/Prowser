@@ -10,7 +10,8 @@ from PySide6.QtCore import QPoint, QPointF, QRect, QSize, Qt
 from PySide6.QtGui import QBrush, QColor, QImage, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import QApplication, QSizePolicy, QWidget
 
-from exif_image_loader import load_image_with_exif_correction
+from exif_image_loader import load_image_with_exif_correction, pil_to_qpixmap
+from imagegen_plugins.outpaint_mask import fit_infill_paint_dims
 
 WORKAREA_FILL = QColor(0, 0, 0)
 MASK_OVERLAY = QColor(255, 60, 60, 120)
@@ -65,7 +66,7 @@ class InfillPaintCanvas(QWidget):
         self._image_w = 1
         self._image_h = 1
         if source_path:
-            pixmap = load_image_with_exif_correction(source_path, ignore_exif=False)
+            pixmap = self._load_working_pixmap(source_path)
             if pixmap is not None and not pixmap.isNull():
                 self._source_pixmap = pixmap
                 self._image_w = max(1, pixmap.width())
@@ -77,6 +78,38 @@ class InfillPaintCanvas(QWidget):
         self._undo_stack.clear()
         self._redo_stack.clear()
         self.update()
+
+    def _load_working_pixmap(self, source_path: str) -> Optional[QPixmap]:
+        """Load source with EXIF correction, scaled to infill working dimensions."""
+        try:
+            from PIL import Image
+            from pil_image_io import open_pil_with_exif_correction
+
+            pil_img = open_pil_with_exif_correction(
+                source_path, ignore_exif=False, cr2_half_size=False
+            )
+            if pil_img is not None:
+                work_w, work_h = fit_infill_paint_dims(pil_img.width, pil_img.height)
+                if (work_w, work_h) != (pil_img.width, pil_img.height):
+                    pil_img = pil_img.resize((work_w, work_h), Image.Resampling.LANCZOS)
+                pixmap = pil_to_qpixmap(pil_img, preserve_alpha=True)
+                if pixmap is not None and not pixmap.isNull():
+                    return pixmap
+        except (ImportError, OSError, ValueError):
+            pass
+        pixmap = load_image_with_exif_correction(source_path, ignore_exif=False)
+        if pixmap is None or pixmap.isNull():
+            return None
+        work_w, work_h = fit_infill_paint_dims(pixmap.width(), pixmap.height())
+        if (work_w, work_h) == (pixmap.width(), pixmap.height()):
+            return pixmap
+        scaled = pixmap.scaled(
+            work_w,
+            work_h,
+            Qt.AspectRatioMode.IgnoreAspectRatio,
+            Qt.TransformationMode.SmoothTransformation,
+        )
+        return scaled if not scaled.isNull() else pixmap
 
     def set_source_path(self, source_path: str) -> None:
         if source_path == self._source_path:

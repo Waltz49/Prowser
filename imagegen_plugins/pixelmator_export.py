@@ -13,6 +13,9 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from PIL import Image
 
+from imagegen_plugins.outpaint_mask import fit_infill_paint_dims
+from pil_image_io import open_pil_with_exif_correction
+
 _IMAGE_REFERENCE_EXTS = frozenset(
     {".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".tiff", ".tif"}
 )
@@ -189,17 +192,38 @@ def persist_pixelmator_exports(meta: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def persist_paint_infill_exports(source_path: str, mask_image) -> Dict[str, Any]:
-    """Copy source + painted mask into a temp batch dir for infill runs."""
+    """Write working-size base + painted mask into a temp batch dir for infill runs."""
     source_path = os.path.normpath(os.path.abspath(source_path))
     if not os.path.isfile(source_path):
         raise ValueError(f"Source image not found: {source_path}")
+
+    if hasattr(mask_image, "width") and hasattr(mask_image, "height"):
+        mask_w, mask_h = int(mask_image.width()), int(mask_image.height())
+    else:
+        mask_w, mask_h = mask_image.size
 
     job_dir = tempfile.mkdtemp(prefix="imagegen-infill-")
     _, src_ext = os.path.splitext(source_path)
     ext = src_ext if src_ext else ".png"
     base_dest = os.path.join(job_dir, f"base{ext}")
     mask_dest = os.path.join(job_dir, "mask.png")
-    shutil.copy2(source_path, base_dest)
+
+    pil_img = open_pil_with_exif_correction(
+        source_path, ignore_exif=False, cr2_half_size=False
+    )
+    if pil_img is None:
+        with Image.open(source_path) as fallback:
+            pil_img = fallback.convert("RGB")
+    work_w, work_h = fit_infill_paint_dims(pil_img.width, pil_img.height)
+    if (work_w, work_h) != (pil_img.width, pil_img.height):
+        pil_img = pil_img.resize((work_w, work_h), Image.Resampling.LANCZOS)
+    if (mask_w, mask_h) != (work_w, work_h):
+        pil_img = pil_img.resize((mask_w, mask_h), Image.Resampling.LANCZOS)
+    try:
+        pil_img.save(base_dest)
+    finally:
+        if hasattr(pil_img, "close"):
+            pil_img.close()
 
     if hasattr(mask_image, "save"):
         if not mask_image.save(mask_dest, "PNG"):
