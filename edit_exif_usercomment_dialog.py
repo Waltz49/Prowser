@@ -574,6 +574,22 @@ class EditExifUserCommentDialog(QDialog):
                 self,
                 "Wait for the job queue to finish or cancel queued jobs "
                 "before starting AI caption.",
+                on_run_foreground=lambda: self._start_ai_caption(foreground=True),
+            )
+            return
+        self._start_ai_caption(foreground=False)
+
+    def _start_ai_caption(self, *, foreground: bool = False):
+        if self.ai_btn is None:
+            return
+        controller = self._imagegen_controller()
+        if controller is None:
+            return
+        if foreground and controller.is_foreground_caption_running():
+            from lmstudio_launcher import show_ai_caption_error_dialog
+            show_ai_caption_error_dialog(
+                self,
+                "A foreground AI caption is already running.",
             )
             return
         self.ai_btn.setEnabled(False)
@@ -591,7 +607,13 @@ class EditExifUserCommentDialog(QDialog):
             controller.caption_finished.connect(self._on_caption_finished)
             self._caption_connected = True
         self._streaming_started = False
-        if not controller.start_caption(self.file_path, user_override):
+        if foreground:
+            started = controller.start_caption_foreground(
+                self.file_path, user_override
+            )
+        else:
+            started = controller.start_caption(self.file_path, user_override)
+        if not started:
             self._on_caption_finished()
             from lmstudio_launcher import show_ai_caption_error_dialog
             show_ai_caption_error_dialog(

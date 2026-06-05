@@ -53,7 +53,7 @@ from imagegen_plugins.model_task_status_info import (
     strip_cooldown_from_status_html,
     update_status_html_steps_progress,
 )
-from model_tasks_controller import get_model_tasks_controller
+from model_tasks_controller import ModelTasksController, get_model_tasks_controller
 from imagegen_plugins.image_gen_dialog import prompt_enable_random_seed_for_copies
 from utils import show_styled_critical, show_styled_question
 
@@ -96,6 +96,13 @@ class ImageGenController(QObject):
         self._tasks.task_started.connect(self._on_task_started)
         self._tasks.job_processing_started.connect(self._on_job_processing_started)
         self._tasks.task_finished.connect(self._on_task_finished)
+
+        # Separate worker for captioning while image generation is active.
+        self._foreground_tasks = ModelTasksController(self)
+        self._foreground_tasks.caption_chunk.connect(self.caption_chunk.emit)
+        self._foreground_tasks.caption_ready.connect(self.caption_ready.emit)
+        self._foreground_tasks.caption_error.connect(self._on_caption_error)
+        self._foreground_tasks.task_finished.connect(self._on_foreground_task_finished)
 
         self._queue: List[QueuedGenerateJob] = []
         self._active_queue_job_id: str = ""
@@ -865,6 +872,19 @@ class ImageGenController(QObject):
             return False
         return True
 
+    def start_caption_foreground(
+        self, file_path: str, user_prompt_override: str | None = None
+    ) -> bool:
+        """Caption via a second worker while generation may be running."""
+        if self._foreground_tasks.is_running():
+            return False
+        return self._foreground_tasks.start_caption_job(
+            file_path, user_prompt_override
+        )
+
+    def is_foreground_caption_running(self) -> bool:
+        return self._foreground_tasks.is_running()
+
     def start_flux_prompt_refine(self, system_prompt: str, user_prompt: str) -> bool:
         if self.has_pending_work():
             return False
@@ -890,13 +910,15 @@ class ImageGenController(QObject):
             self._suppress_task_failure_ui = True
         self._queue.clear()
         self.cancel_generation()
+        if self._foreground_tasks.is_running():
+            self._foreground_tasks.cancel_task()
 
     def confirm_quit_if_running(self, parent=None) -> bool:
         """Return True if quit may proceed (not running, or user confirmed)."""
         if getattr(self.main_window, "_api_quit_in_progress", False):
             self.prepare_for_shutdown()
             return True
-        if not self.has_pending_work():
+        if not self.has_pending_work() and not self._foreground_tasks.is_running():
             return True
         parent = parent or self.main_window
         answer = show_styled_question(
@@ -915,7 +937,12 @@ class ImageGenController(QObject):
         self._queue.clear()
         self._stop_copy_cooldown_timer()
         self._tasks.cleanup()
+        self._foreground_tasks.cleanup()
         self._finish_copy_batch(cancelled=True)
+
+    def _on_foreground_task_finished(self, kind: str, _success: bool, _err: str) -> None:
+        if kind == "caption":
+            self.caption_finished.emit()
 
     def _on_caption_error(self, error_message: str) -> None:
         if self._suppress_task_failure_ui:

@@ -510,11 +510,8 @@ class ThumbnailDisplayManager:
         mw = self.main_window
         thumbnail_index = mw.find_thumbnail_index_by_path(path)
         if thumbnail_index is not None:
-            if path in mw.image_transformations:
-                transformed_pixmap = mw.apply_transformations_to_pixmap(pixmap, path)
-                mw.thumbnail_container.set_thumbnail_loaded(thumbnail_index, transformed_pixmap)
-            else:
-                mw.thumbnail_container.set_thumbnail_loaded(thumbnail_index, pixmap)
+            # set_thumbnail_loaded applies session transforms; do not pre-transform here
+            mw.thumbnail_container.set_thumbnail_loaded(thumbnail_index, pixmap)
 
     def on_thumbnail_worker_finished(self):
         """Handle thumbnail loading finished signal from background worker"""

@@ -1880,8 +1880,9 @@ class ThumbnailCanvas(QWidget):
                     # This ensures force refresh works correctly - invalidate_thumbnails() marks as loading
                     # Also always update if current pixmap is null/invalid (blank thumbnail)
                     if pixmap_is_valid and not thumbnail.is_loading:
-                        # Thumbnail already loaded and not marked for reload - skip update
-                        return
+                        # Skip redundant loads; always refresh when session transform may differ
+                        if image_path not in self.main_window.image_transformations:
+                            return
                     
                     # Thumbnail is loading or has no pixmap - proceed with update
                     

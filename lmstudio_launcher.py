@@ -34,11 +34,21 @@ def launch_lmstudio() -> bool:
 
 
 def show_ai_caption_error_dialog(
-    parent, error_msg: str, *, window_title: str = "AI Caption Error"
+    parent,
+    error_msg: str,
+    *,
+    window_title: str = "AI Caption Error",
+    on_run_foreground=None,
+    run_foreground_tooltip: str = (
+        "Run AI captioning concurrent with image generation. May be slow."
+    ),
 ) -> None:
     """
     Show an AI / LM Studio error dialog with Ok and LM Studio... buttons.
     LM Studio... verifies installation, launches if installed, and dismisses the dialog.
+
+    When *on_run_foreground* is provided, adds a Run Foreground button that invokes it
+    and dismisses the dialog (for captioning while image generation is active).
     """
     from PySide6.QtWidgets import (
         QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
@@ -100,6 +110,18 @@ def show_ai_caption_error_dialog(
     ok_btn.setFocus()
     ok_btn.clicked.connect(_dismiss)
     button_bar.addWidget(ok_btn)
+
+    if on_run_foreground is not None:
+
+        def _on_run_foreground():
+            on_run_foreground()
+            _dismiss()
+
+        fg_btn = QPushButton("Run Foreground")
+        fg_btn.setStyleSheet(button_style)
+        fg_btn.setToolTip(run_foreground_tooltip)
+        fg_btn.clicked.connect(_on_run_foreground)
+        button_bar.addWidget(fg_btn)
 
     def _on_lmstudio():
         if is_lmstudio_app_installed():

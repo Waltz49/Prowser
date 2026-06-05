@@ -10898,36 +10898,37 @@ class ImageBrowserWindow(QMainWindow):
             self._refresh_canvas_thumbnails_for_transformation()
     
     def _refresh_canvas_thumbnails_for_transformation(self):
-        """Refresh canvas thumbnails to show transformations"""
+        """Refresh canvas thumbnails to show session transforms (same logic as browse view)."""
         canvas = self.thumbnail_container.canvas
-        
-        # Find thumbnails that have transformations and need to be refreshed
-        thumbnails_to_refresh = []
-        for thumbnail in canvas.thumbnails:
-            if thumbnail.image_path in self.image_transformations:
-                thumbnails_to_refresh.append(thumbnail)
-        
+        cache_manager = getattr(self, 'cache_manager', None)
+        if not cache_manager:
+            return
+
+        thumbnails_to_refresh = [
+            t for t in canvas.thumbnails
+            if t.image_path in self.image_transformations
+        ]
         if not thumbnails_to_refresh:
             return
-        
-        # Clear cache for transformed images to force fresh thumbnail generation
-        if getattr(self, 'cache_manager', None):
-            for thumbnail in thumbnails_to_refresh:
-                self.cache_manager.clear_thumbnails_for_file(thumbnail.image_path)
-                
-        # Trigger new thumbnail loads - the canvas will apply transformations automatically
+
+        size = self.current_thumbnail_size
+        updated = False
         for thumbnail in thumbnails_to_refresh:
-            # Reset loading state
-            thumbnail.is_loading = True
-            thumbnail.pixmap = None
-            
-            # Request new thumbnail
-            if getattr(self, 'cache_manager', None):
-                self.cache_manager.get_thumbnail_async(
-                    thumbnail.image_path, 
-                    self.current_thumbnail_size, 
-                    priority=1
-                )
+            base = cache_manager.get_thumbnail_sync(thumbnail.image_path, size)
+            if base is None or base.isNull():
+                thumbnail.is_loading = True
+                thumbnail.pixmap = None
+                cache_manager.get_thumbnail_async(thumbnail.image_path, size, priority=1)
+                continue
+            thumbnail.pixmap = self.apply_transformations_to_pixmap(
+                base, thumbnail.image_path
+            )
+            thumbnail.is_loading = False
+            updated = True
+
+        if updated:
+            canvas.needs_repaint = True
+            canvas.update()
 
     def debug_cache_status(self):
         """Debug cache status"""
