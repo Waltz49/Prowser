@@ -12,6 +12,7 @@ _REPO_ROOT = Path(__file__).resolve().parent
 _ASSETS_DIR = _REPO_ROOT / "assets"
 _SKIP_DIR_PARTS = {
     "venv_image_browser",
+    "venv_pyinstaller",
     "venv",
     "__pycache__",
     ".pyinstaller_face_models",
@@ -29,6 +30,9 @@ _SCAN_RE = re.compile(
     """,
     re.VERBOSE,
 )
+
+# asset_file_url(variable) and similar — literal filename must match a file in assets/.
+_LITERAL_ASSET_RE = re.compile(r"""['"]([a-zA-Z0-9_]+\.(?:png|svg|webp))['"]""")
 
 # Constants not always visible to the scanner.
 _EXTRA_NAMES = frozenset({"expansion_template.webp"})
@@ -52,11 +56,10 @@ def collect_runtime_asset_names() -> list[str]:
         for match in _SCAN_RE.finditer(text):
             name = next(g for g in match.groups() if g)
             names.add(name)
-        if path.name == "image_gen_job_queue_dialog.py":
-            for m in re.finditer(r'["\']([a-z0-9_]+\.(?:png|svg|webp))["\']', text):
-                n = m.group(1)
-                if any(k in n for k in ("icon", "series", "trash", "edit")):
-                    names.add(n)
+        for match in _LITERAL_ASSET_RE.finditer(text):
+            name = match.group(1)
+            if (_ASSETS_DIR / name).is_file():
+                names.add(name)
 
     # _icon_push_button_stylesheet uses <stem>_hover.png for .png icons.
     expanded = set(names)
