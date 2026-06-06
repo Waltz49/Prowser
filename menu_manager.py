@@ -468,7 +468,7 @@ class MenuManager:
         self.main_window.toggle_jobs_action.setChecked(
             getattr(self.main_window, 'jobs_visible', False)
         )
-        self.main_window.toggle_jobs_action.setShortcut(QKeySequence('J'))
+        # J shortcut handled in keyboard_handler (QAction shortcut steals macOS focus in bundled fullscreen)
         self.main_window.toggle_jobs_action.triggered.connect(self.main_window.toggle_jobs)
         view_menu.addAction(self.main_window.toggle_jobs_action)
         

@@ -17,3 +17,8 @@ def model_tasks_worker_program_and_args() -> tuple[str, list[str]]:
     if getattr(sys, "frozen", False):
         return sys.executable, [MODEL_TASKS_WORKER_FLAG]
     return sys.executable, ["-u", model_tasks_worker_script_path()]
+
+
+def use_inline_model_tasks_worker() -> bool:
+    """Bundled macOS: run worker in-process (avoid QProcess re-exec → Space/focus steal)."""
+    return getattr(sys, "frozen", False) and sys.platform == "darwin"

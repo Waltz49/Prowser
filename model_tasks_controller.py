@@ -10,7 +10,10 @@ from typing import Any, Dict, Optional
 
 from PySide6.QtCore import QObject, QProcess, Signal
 
-from model_tasks_launch import model_tasks_worker_program_and_args
+from model_tasks_launch import (
+    model_tasks_worker_program_and_args,
+    use_inline_model_tasks_worker,
+)
 
 
 class ModelTasksController(QObject):
@@ -34,6 +37,7 @@ class ModelTasksController(QObject):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._process: Optional[QProcess] = None
+        self._inline_thread: Optional[Any] = None
         self._worker_ready = False
         self._stdout_buffer = ""
         self._stderr_buffer: list[str] = []
@@ -52,7 +56,13 @@ class ModelTasksController(QObject):
     def active_kind(self) -> str:
         return self._active_kind
 
-    def _is_process_alive(self) -> bool:
+    def _use_inline_worker(self) -> bool:
+        return use_inline_model_tasks_worker()
+
+    def _is_worker_alive(self) -> bool:
+        if self._use_inline_worker():
+            thread = self._inline_thread
+            return thread is not None and thread.isRunning()
         proc = self._process
         if proc is None:
             return False
@@ -126,9 +136,21 @@ class ModelTasksController(QObject):
         return True
 
     def _ensure_worker(self) -> bool:
-        if self._is_process_alive() and self._worker_ready:
+        if self._is_worker_alive() and self._worker_ready:
             return True
         self._terminate_worker()
+        if self._use_inline_worker():
+            from frozen_model_tasks_thread import FrozenModelTasksWorkerThread
+
+            thread = FrozenModelTasksWorkerThread(self)
+            thread.json_line.connect(self._handle_worker_line)
+            thread.finished.connect(self._on_inline_thread_finished)
+            self._inline_thread = thread
+            self._worker_ready = False
+            self._stdout_buffer = ""
+            thread.start()
+            return True
+
         proc = QProcess(self)
         proc.setProcessChannelMode(QProcess.ProcessChannelMode.SeparateChannels)
         proc.readyReadStandardOutput.connect(self._on_stdout)
@@ -149,6 +171,18 @@ class ModelTasksController(QObject):
         return True
 
     def _send_command(self, cmd: Dict[str, Any]) -> bool:
+        if self._use_inline_worker():
+            thread = self._inline_thread
+            if thread is None:
+                return False
+            if not self._worker_ready:
+                self._pending_command = cmd
+                return True
+            line = json.dumps(cmd)
+            thread.send_command_json(line)
+            self._pending_command = None
+            return True
+
         proc = self._process
         if proc is None:
             return False
@@ -310,6 +344,14 @@ class ModelTasksController(QObject):
         if self._process and self._process.state() == QProcess.ProcessState.NotRunning:
             self._on_process_finished(self._process.exitCode(), self._process.exitStatus())
 
+    def _on_inline_thread_finished(self) -> None:
+        self._worker_ready = False
+        self._inline_thread = None
+        if not self._active_job_id or self._cancelling:
+            return
+        kind = self._active_kind
+        self._finish_job(kind, False, "Worker thread exited.")
+
     def _on_process_finished(self, exit_code: int, exit_status) -> None:
         if not self._active_job_id or self._cancelling:
             self._worker_ready = False
@@ -332,6 +374,18 @@ class ModelTasksController(QObject):
         self._finish_job(kind, False, err)
 
     def _terminate_worker(self) -> None:
+        thread = self._inline_thread
+        if thread is not None and thread.isRunning():
+            try:
+                thread.send_command_json('{"command":"shutdown"}')
+                thread.wait(5000)
+            except Exception:
+                pass
+            if thread.isRunning():
+                thread.request_stop()
+                thread.wait(3000)
+        self._inline_thread = None
+
         proc = self._process
         if proc is not None and proc.state() != QProcess.ProcessState.NotRunning:
             try:

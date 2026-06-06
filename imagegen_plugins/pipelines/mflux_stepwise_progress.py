@@ -30,7 +30,9 @@ def emit_mflux_progress(
         msg["step"] = int(step)
     if step_total is not None:
         msg["step_total"] = int(step_total)
-    print(json.dumps(msg), flush=True)
+    from model_tasks_worker import emit_worker_message
+
+    emit_worker_message(msg)
 
 
 def atomic_copy2(src: str, dst: str) -> None:

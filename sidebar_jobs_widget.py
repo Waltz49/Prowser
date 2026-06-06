@@ -71,6 +71,8 @@ class _FlowReferenceThumbs(QWidget):
         self._last_reflow_width = 0
         self._reflow_guard = False
         self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setAttribute(Qt.WidgetAttribute.WA_DontCreateNativeAncestors, True)
+        self.setAttribute(Qt.WidgetAttribute.WA_NativeWindow, False)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self._outer = QVBoxLayout(self)
         self._outer.setContentsMargins(0, 2, 0, 0)
@@ -78,10 +80,11 @@ class _FlowReferenceThumbs(QWidget):
         for path in self._paths:
             thumb = create_dialog_thumbnail_label(path, _THUMB_SIZE)
             thumb.setCursor(Qt.CursorShape.PointingHandCursor)
+            thumb.setAttribute(Qt.WidgetAttribute.WA_DontCreateNativeAncestors, True)
+            thumb.setAttribute(Qt.WidgetAttribute.WA_NativeWindow, False)
             thumb.setToolTip(os.path.basename(path))
             self._cells.append(thumb)
         if self._paths:
-            self.show()
             self.reflow_to_width(max(_THUMB_SIZE * 2, 120))
         else:
             self.hide()
@@ -300,7 +303,6 @@ class _JobCard(QFrame):
             self._refs, 0, Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignRight
         )
         if self._refs._paths:
-            self._refs.show()
             self._refs.reflow_to_width(max(_THUMB_SIZE, content_width))
 
     def reflow_refs(self, width: int) -> None:

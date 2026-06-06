@@ -1036,6 +1036,7 @@ class InformationSidebar(QWidget):
             self.info_text_edit.blockSignals(False)
 
     def _stop_gen_timing_updates(self) -> None:
+        """Stop the 500ms poll timer; keep controller signals connected for the next job."""
         timer = self._gen_timing_timer
         self._gen_timing_timer = None
         if timer is not None:
@@ -1047,20 +1048,6 @@ class InformationSidebar(QWidget):
                 timer.deleteLater()
             except (RuntimeError, SystemError):
                 pass
-        if self._gen_timing_signal_connected:
-            try:
-                from imagegen_plugins.image_gen_controller import get_imagegen_controller
-
-                controller = get_imagegen_controller(self.main_window)
-                controller.task_status_info_changed.disconnect(
-                    self._on_gen_timing_task_status_changed
-                )
-                controller.generation_finished.disconnect(
-                    self._stop_gen_timing_updates
-                )
-            except (ImportError, TypeError, RuntimeError, SystemError):
-                pass
-            self._gen_timing_signal_connected = False
         if getattr(self, "_last_overlay_data", None) and self.info_text_edit:
             self._rebuild_overlay_from_cache(
                 hovered_anchor=getattr(self, "_hovered_anchor", None)

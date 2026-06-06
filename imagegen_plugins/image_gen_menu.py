@@ -209,7 +209,10 @@ def open_imagegen_dialog_from_job(
         if not confirm_model_download_if_needed(out_plugin, main_window):
             return
         set_active_plugin_for_function(main_window, function, out_plugin)
-        controller.start_generation(out_plugin, out_values)
+        QTimer.singleShot(
+            0,
+            lambda: controller.start_generation(out_plugin, out_values),
+        )
     finally:
         main_window._imagegen_dialog_open = False
 
@@ -460,7 +463,10 @@ def _open_dialog_for_function(
         if not confirm_model_download_if_needed(plugin, main_window):
             return
         set_active_plugin_for_function(main_window, function, plugin)
-        controller.start_generation(plugin, values)
+        QTimer.singleShot(
+            0,
+            lambda: controller.start_generation(plugin, values),
+        )
     finally:
         main_window._imagegen_dialog_open = False
 

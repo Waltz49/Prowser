@@ -245,25 +245,13 @@ class BaseKeyboardHandler(QObject):
             import traceback
             logger.error(traceback.format_exc())
 
-    def _handle_j_imagegen_activity_menu(
-        self, event: QKeyEvent, context_data: Dict[str, Any]
-    ) -> bool:
-        """J — imagegen status-bar dot menu while a model background task is active."""
-        mgr = getattr(self.main_window, "status_bar_manager", None)
-        if mgr is None:
-            return False
-        if mgr.show_imagegen_task_menu_from_keyboard():
-            event.accept()
-            return True
-        return False
-
     def _handle_j_key(self, event: QKeyEvent, context_data: Dict[str, Any]) -> bool:
-        """J in thumbnail/list: imagegen task menu when active, else View menu toggle."""
+        """J in thumbnail/list: toggle right-sidebar jobs pane only."""
         if event.isAutoRepeat():
             return True
-        if self._handle_j_imagegen_activity_menu(event, context_data):
-            return True
-        return False
+        self.main_window.toggle_jobs()
+        event.accept()
+        return True
 
 
 class ThumbnailKeyboardHandler(BaseKeyboardHandler):
@@ -373,7 +361,7 @@ class ThumbnailKeyboardHandler(BaseKeyboardHandler):
         self.add_key_binding("o_key", KeyBinding(Qt.Key_O, description="Organize sidebar toggle"), self._handle_o_key_sidebar)
         self.add_key_binding(
             "j_key",
-            KeyBinding(Qt.Key_J, description="Jobs pane toggle / imagegen task menu"),
+            KeyBinding(Qt.Key_J, description="Jobs pane toggle"),
             self._handle_j_key,
         )
         self.add_key_binding("ctrl_i", KeyBinding(Qt.Key_I, CMD, description="Cycle filename display"), self._handle_ctrl_i_filename)
@@ -1764,7 +1752,7 @@ class BrowseViewKeyboardHandler(BaseKeyboardHandler):
         self.add_key_binding("p_key", KeyBinding(Qt.Key_P, description="Double-tap: switch to thumbnails and show preview"), self._handle_p_key)
         self.add_key_binding(
             "j_key",
-            KeyBinding(Qt.Key_J, description="Jobs pane toggle / imagegen task menu"),
+            KeyBinding(Qt.Key_J, description="Jobs pane toggle"),
             self._handle_j_key_browse,
         )
 
@@ -1817,10 +1805,8 @@ class BrowseViewKeyboardHandler(BaseKeyboardHandler):
         return True
 
     def _handle_j_key_browse(self, event: QKeyEvent, context_data: Dict[str, Any]) -> bool:
-        """J in browse: imagegen task menu when active, else toggle jobs pane on right sidebar."""
+        """J in browse: toggle right-sidebar jobs pane only."""
         if event.isAutoRepeat():
-            return True
-        if self._handle_j_imagegen_activity_menu(event, context_data):
             return True
         self.main_window.toggle_jobs()
         event.accept()
@@ -3171,8 +3157,7 @@ class KeyboardHandlerManager:
             result = handler.handle_key_event(event, context_data)
             if result:
                 return True
-            else:
-                return False
+            return False
         return False
 
     def _determine_current_mode(self) -> str:

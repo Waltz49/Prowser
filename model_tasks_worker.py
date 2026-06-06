@@ -12,13 +12,42 @@ import gc
 import json
 import sys
 import traceback
-from typing import Any, Dict, Optional
+from typing import Any, Callable, Dict, Optional
 
 _LOADED_KIND: Optional[str] = None  # None | "image" | "lmstudio"
+_SHUTDOWN = object()
+_active_emit: Optional[Callable[[Dict[str, Any]], None]] = None
+
+
+def _stdout_emit(msg: Dict[str, Any]) -> None:
+    print(json.dumps(msg), flush=True)
+
+
+def emit_worker_message(msg: Dict[str, Any]) -> None:
+    """Send a worker JSON message to stdout (subprocess) or the inline-worker callback."""
+    if _active_emit is not None:
+        _active_emit(msg)
+    else:
+        _stdout_emit(msg)
 
 
 def _emit(msg: Dict[str, Any]) -> None:
-    print(json.dumps(msg), flush=True)
+    emit_worker_message(msg)
+
+
+def _worker_setup() -> None:
+    try:
+        from print_log_redirect import setup_stdout_print_log
+
+        setup_stdout_print_log(truncate=False)
+    except Exception:
+        pass
+    try:
+        from imagegen_plugins.mflux_macos_shim import apply_mflux_macos_subprocess_shim
+
+        apply_mflux_macos_subprocess_shim()
+    except ImportError:
+        pass
 
 
 def _unload_lmstudio_models() -> None:
@@ -68,6 +97,13 @@ def _log_worker_error(context: str, exc: BaseException) -> None:
 def _run_generate(payload: Dict[str, Any], job_id: str) -> None:
     global _LOADED_KIND
     import time
+
+    try:
+        from imagegen_plugins.mflux_macos_shim import apply_mflux_macos_subprocess_shim
+
+        apply_mflux_macos_subprocess_shim()
+    except ImportError:
+        pass
 
     from imagegen_plugins.imagegen_perf_log import PerfTimer, set_perf_debug
 
@@ -225,7 +261,7 @@ def _run_caption(
         pass
 
 
-def _handle_command(cmd: Dict[str, Any]) -> None:
+def _handle_command(cmd: Dict[str, Any]) -> Any:
     command = cmd.get("command")
     job_id = str(cmd.get("job_id") or "")
 
@@ -236,7 +272,7 @@ def _handle_command(cmd: Dict[str, Any]) -> None:
     if command == "shutdown":
         _unload_image_model(reason="shutdown")
         _unload_lmstudio_models()
-        raise SystemExit(0)
+        return _SHUTDOWN
 
     if command == "generate":
         payload = cmd.get("payload")
@@ -264,34 +300,52 @@ def _handle_command(cmd: Dict[str, Any]) -> None:
     raise ValueError(f"Unknown command: {command!r}")
 
 
-def main() -> int:
+def run_worker_event_loop(
+    read_line: Callable[[], str | None],
+    emit: Callable[[Dict[str, Any]], None],
+) -> None:
+    """Run the worker command loop (stdin subprocess or in-process queue)."""
+    global _active_emit
+    # emit must be a leaf writer (_stdout_emit or inline bridge), never _emit.
+    if emit is _emit:
+        raise RuntimeError("run_worker_event_loop: pass _stdout_emit, not _emit")
+    _worker_setup()
+    _active_emit = emit
     try:
-        from print_log_redirect import setup_stdout_print_log
+        emit_worker_message({"type": "ready"})
+        while True:
+            line = read_line()
+            if line is None:
+                break
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                cmd = json.loads(line)
+            except json.JSONDecodeError as e:
+                emit_worker_message({"type": "error", "message": f"Invalid JSON command: {e}"})
+                continue
+            job_id = str(cmd.get("job_id") or "")
+            try:
+                if _handle_command(cmd) is _SHUTDOWN:
+                    break
+            except Exception as e:
+                _log_worker_error(f"command {cmd.get('command')!r} failed", e)
+                emit_worker_message({"type": "error", "job_id": job_id, "message": str(e)})
+    finally:
+        _active_emit = None
+        _unload_image_model()
+        _unload_lmstudio_models()
 
-        setup_stdout_print_log(truncate=False)
-    except Exception:
-        pass
 
-    _emit({"type": "ready"})
-    for line in sys.stdin:
-        line = line.strip()
+def main() -> int:
+    def _read_stdin() -> str | None:
+        line = sys.stdin.readline()
         if not line:
-            continue
-        try:
-            cmd = json.loads(line)
-        except json.JSONDecodeError as e:
-            _emit({"type": "error", "message": f"Invalid JSON command: {e}"})
-            continue
-        job_id = str(cmd.get("job_id") or "")
-        try:
-            _handle_command(cmd)
-        except SystemExit:
-            raise
-        except Exception as e:
-            _log_worker_error(f"command {cmd.get('command')!r} failed", e)
-            _emit({"type": "error", "job_id": job_id, "message": str(e)})
-    _unload_image_model()
-    _unload_lmstudio_models()
+            return None
+        return line
+
+    run_worker_event_loop(_read_stdin, _stdout_emit)
     return 0
 
 

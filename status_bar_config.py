@@ -1546,29 +1546,6 @@ class StatusBarManager:
         """Deprecated: use hide_model_task_indicator()."""
         self.hide_model_task_indicator()
 
-    def show_imagegen_task_menu_from_keyboard(self) -> bool:
-        """Show the model-task status-bar menu when background work is active (J key)."""
-        if not self.main_window:
-            return False
-        try:
-            from imagegen_plugins.image_gen_controller import get_imagegen_controller
-
-            if not get_imagegen_controller(self.main_window).has_pending_work():
-                return False
-        except ImportError:
-            return False
-
-        indicator = self._imagegen_indicator_widget
-        if not isinstance(indicator, ClickableImageGenIndicatorLabel):
-            return False
-
-        if not self.status_bar.isVisible():
-            self.status_bar.setMaximumHeight(24)
-            self.status_bar.show()
-
-        indicator._show_imagegen_menu()
-        return True
-
     def update_status_bar_sections(self, main_window):
         """Update all status bar sections with current data from main window.
         
