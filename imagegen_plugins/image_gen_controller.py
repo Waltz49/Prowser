@@ -24,6 +24,7 @@ from imagegen_plugins.image_gen_naming import (
     apply_refinement_source_for_next_copy,
     reference_entries_for_source_paths,
     resolve_source_image_paths,
+    source_paths_for_generation_exif,
     resolve_generation_elapsed_seconds,
     write_exif_user_comment,
 )
@@ -37,6 +38,7 @@ from imagegen_plugins.image_gen_seed_persistence import (
 from imagegen_plugins.model_task_queue import (
     QueuedGenerateJob,
     QueueRowSnapshot,
+    apply_payload_model_fields_to_values,
     make_queued_generate_job,
     refresh_queued_job_status,
     thumbnail_paths_for_values,
@@ -60,6 +62,8 @@ from utils import show_styled_critical, show_styled_question
 _COPY_COOLDOWN_MS = 60_000
 _COPIES_MIN = 1
 _COPIES_MAX = 200
+_CANCEL_PROCEED_NOTE = "Canceling..."
+_REMOVE_PROCEED_NOTE = "Removing..."
 
 
 class ImageGenController(QObject):
@@ -250,6 +254,44 @@ class ImageGenController(QObject):
         else:
             self.cancel_queued_job(entry.job_id)
 
+    def confirm_cancel_job_at_row(self, parent=None, row: int = -1) -> bool:
+        """Confirm cancel/remove for a queue row; runs the action if user chooses Yes."""
+        rows = self.queue_snapshot()
+        if row < 0 or row >= len(rows):
+            return False
+        entry = rows[row]
+        if entry.is_active:
+            prompt = "Cancel the running job?"
+            proceed_note = _CANCEL_PROCEED_NOTE
+        else:
+            prompt = "Remove this job from the queue?"
+            proceed_note = _REMOVE_PROCEED_NOTE
+        parent = parent or self.main_window
+        answer = show_styled_question(
+            parent,
+            "Cancel job?",
+            prompt,
+            default_no=True,
+            proceed_note=proceed_note,
+            on_proceed=lambda r=row: self.cancel_job_at_row(r),
+        )
+        return answer == QMessageBox.StandardButton.Yes
+
+    def confirm_cancel_generation(self, parent=None) -> bool:
+        """Confirm cancel of the active generation/caption; runs cancel if user chooses Yes."""
+        if not self.is_running():
+            return False
+        parent = parent or self.main_window
+        answer = show_styled_question(
+            parent,
+            "Cancel job?",
+            "Cancel the running job?",
+            default_no=True,
+            proceed_note=_CANCEL_PROCEED_NOTE,
+            on_proceed=self.cancel_generation,
+        )
+        return answer == QMessageBox.StandardButton.Yes
+
     def cancel_active_job(self) -> None:
         self.cancel_generation()
 
@@ -308,20 +350,27 @@ class ImageGenController(QObject):
             pad_temps = payload.pop("_aspect_pad_temp_paths", None)
             if isinstance(pad_temps, list) and pad_temps:
                 self._aspect_pad_temp_paths.extend(str(p) for p in pad_temps)
+            self._expand_base_path = ""
             if plugin.pipeline_id == "mflux_fill_expand":
                 base_path = prepare_and_save_expand_base(values, output_path)
                 payload["prepared_fill_image_path"] = base_path
-                self._expand_source_path = str(values.get("source_image_path") or "")
                 self._expand_base_path = base_path
-            elif get_pipeline(plugin.pipeline_id).requires_source_image:
-                from imagegen_plugins.image_gen_naming import resolve_source_image_paths
-
-                self._expand_source_path = str(values.get("source_image_path") or "")
-                self._expand_base_path = ""
-                self._task_reference_paths = resolve_source_image_paths(values)
+            if get_pipeline(plugin.pipeline_id).requires_source_image:
+                source_paths = source_paths_for_generation_exif(
+                    payload,
+                    extra_paths=source_paths_for_generation_exif(values),
+                )
+                if source_paths:
+                    self._pending_values["source_image_path"] = source_paths[0]
+                    self._pending_values["source_image_paths"] = list(source_paths)
+                    self._expand_source_path = source_paths[0]
+                    self._task_reference_paths = list(source_paths)
+                else:
+                    self._expand_source_path = ""
+                    self._task_reference_paths = []
             else:
                 self._expand_source_path = ""
-                self._expand_base_path = ""
+                self._task_reference_paths = []
         except Exception as e:
             show_styled_critical(
                 self.main_window,
@@ -334,6 +383,7 @@ class ImageGenController(QObject):
         self._output_path = output_path
         if isinstance(payload.get("steps"), (int, float)):
             self._pending_values["steps"] = int(payload["steps"])
+        apply_payload_model_fields_to_values(self._pending_values, payload)
         if self._copies_done == 0:
             self._task_status_info_html = format_image_generation_status_html(
                 plugin, values, payload
@@ -943,11 +993,10 @@ class ImageGenController(QObject):
             "AI task running",
             "Image generation, an AI caption, or queued jobs are active. Quit anyway?",
             default_no=True,
+            proceed_note=_CANCEL_PROCEED_NOTE,
+            on_proceed=self.prepare_for_shutdown,
         )
-        if answer != QMessageBox.StandardButton.Yes:
-            return False
-        self.prepare_for_shutdown()
-        return True
+        return answer == QMessageBox.StandardButton.Yes
 
     def cleanup(self) -> None:
         self._copy_batch_cancelled = True
@@ -1059,7 +1108,10 @@ class ImageGenController(QObject):
                     guidance=values.get("guidance_scale"),
                 )
                 ref_entries, allow_cross_dir = self._exif_reference_entries_for_output(
-                    plugin, values, output_path
+                    plugin,
+                    values,
+                    output_path,
+                    fallback_source_paths=self._exif_fallback_source_paths(),
                 )
                 if get_pipeline(plugin.pipeline_id).requires_source_image:
                     source_paths = resolve_source_image_paths(values)
@@ -1132,11 +1184,24 @@ class ImageGenController(QObject):
     def _open_in_browse(self, output_path: str) -> None:
         self._refresh_progressive_image(output_path, force_fullscreen=True)
 
+    def _exif_fallback_source_paths(self) -> List[str]:
+        """Source paths captured at job launch when dialog values omit them."""
+        paths: List[str] = []
+        seen: set[str] = set()
+        for raw in (*self._task_reference_paths, self._expand_source_path):
+            ap = os.path.normpath(os.path.abspath(str(raw or "")))
+            if ap and os.path.isfile(ap) and ap not in seen:
+                seen.add(ap)
+                paths.append(ap)
+        return paths
+
     def _exif_reference_entries_for_output(
         self,
         plugin: ImageGenModelPlugin,
         values: Dict[str, Any],
         output_path: str,
+        *,
+        fallback_source_paths: Optional[List[str]] = None,
     ) -> tuple[Optional[list], bool]:
         ref_entries = None
         allow_cross_dir = False
@@ -1147,12 +1212,15 @@ class ImageGenController(QObject):
                 output_path,
                 values.get("pixelmator_doc_name"),
                 pixelmator_file_path=values.get("pixelmator_doc_path"),
+                fallback_paths=fallback_source_paths,
             )
             if resolved is not None:
                 ref_entries = [resolved]
                 allow_cross_dir = True
         elif get_pipeline(plugin.pipeline_id).requires_source_image:
-            source_paths = resolve_source_image_paths(values)
+            source_paths = source_paths_for_generation_exif(
+                values, extra_paths=fallback_source_paths
+            )
             ref_entries = reference_entries_for_source_paths(
                 source_paths, output_path
             )
@@ -1225,7 +1293,10 @@ class ImageGenController(QObject):
                 try:
                     ref_entries, allow_cross_dir = (
                         self._exif_reference_entries_for_output(
-                            plugin, values, output_path
+                            plugin,
+                            values,
+                            output_path,
+                            fallback_source_paths=self._exif_fallback_source_paths(),
                         )
                     )
                     elapsed = self._live_generation_elapsed_seconds()

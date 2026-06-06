@@ -10,8 +10,8 @@ from html import escape, unescape
 from typing import Any, Dict, List, Optional, Tuple
 
 from PIL.ExifTags import GPSTAGS
-from PySide6.QtCore import QEvent, QObject, Qt, QTimer
-from PySide6.QtWidgets import QApplication, QLabel, QPushButton, QTextBrowser, QVBoxLayout, QWidget
+from PySide6.QtCore import QEvent, Qt, QTimer
+from PySide6.QtWidgets import QLabel, QTextBrowser, QVBoxLayout, QWidget
 
 from combined_sidebar_widget import HeaderWidget
 from theme_base import asset_file_url
@@ -21,7 +21,6 @@ from utils import (
     get_file_extension,
     normalize_path_for_display,
     show_styled_question,
-    styled_message_box,
 )
 from speech_utils import speak_or_stop
 from tooltip_popup_utils import ensure_tooltip_label, position_tooltip_near_cursor
@@ -58,69 +57,6 @@ def _information_ai_icon_html() -> str:
         f'<img src="{url}" width="{_INFO_AI_ICON_SIZE}" height="{_INFO_AI_ICON_SIZE}" '
         f'style="display:block;margin:0 auto;padding:0;border:none;vertical-align:bottom;">'
     )
-
-
-class _DeleteUserCommentYesNoTabFilter(QObject):
-    """Tab/arrow between Yes/No on the delete-user-comment confirm dialog only."""
-
-    def __init__(self, buttons: List[QPushButton], dialog: QWidget):
-        super().__init__(dialog)
-        self._buttons = buttons
-        self._dialog = dialog
-
-    def eventFilter(self, obj, event):
-        if obj is not self._dialog and obj not in self._buttons:
-            return False
-        if event.type() != QEvent.Type.KeyPress:
-            return False
-        key = event.key()
-        if key == Qt.Key.Key_Tab:
-            direction = -1 if event.modifiers() & Qt.KeyboardModifier.ShiftModifier else 1
-        elif key == Qt.Key.Key_Backtab:
-            direction = -1
-        elif key in (Qt.Key.Key_Left, Qt.Key.Key_Right):
-            direction = -1 if key == Qt.Key.Key_Left else 1
-        else:
-            return False
-        focused = QApplication.focusWidget()
-        if focused in self._buttons:
-            idx = self._buttons.index(focused)
-        else:
-            idx = -1 if direction > 0 else 0
-        self._buttons[(idx + direction) % len(self._buttons)].setFocus(Qt.FocusReason.TabFocusReason)
-        return True
-
-
-def _confirm_delete_user_comment(main_window):
-    """Show delete-user-comment confirm; Tab works when opened from the info-panel link."""
-    from PySide6.QtWidgets import QMessageBox
-
-    dialog = styled_message_box(
-        main_window,
-        QMessageBox.Question,
-        "Delete User Comment",
-        "Delete the EXIF user comment from this image?",
-        buttons=QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-        default_button=QMessageBox.StandardButton.No,
-    )
-    buttons = sorted(dialog.findChildren(QPushButton), key=lambda b: b.x())
-    if len(buttons) >= 2:
-        tab_filter = _DeleteUserCommentYesNoTabFilter(buttons, dialog)
-        dialog._delete_user_comment_tab_filter = tab_filter
-        dialog.installEventFilter(tab_filter)
-        for btn in buttons:
-            btn.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
-            btn.installEventFilter(tab_filter)
-
-    dialog.activateWindow()
-    dialog.raise_()
-    for btn in buttons:
-        if btn.isDefault():
-            btn.setFocus(Qt.FocusReason.TabFocusReason)
-            break
-
-    dialog.exec()
-    return dialog.result_data.get("button")
 
 
 class InformationSidebar(QWidget):
@@ -567,20 +503,12 @@ class InformationSidebar(QWidget):
 
     def _on_cancel_generation(self) -> None:
         """Cancel the active generation job after confirmation (same as job pane)."""
-        from PySide6.QtWidgets import QMessageBox
-
-        answer = show_styled_question(
-            self.main_window,
-            "Cancel job?",
-            "Cancel the running job?",
-            default_no=True,
-        )
-        if answer != QMessageBox.StandardButton.Yes:
-            return
         try:
             from imagegen_plugins.image_gen_controller import get_imagegen_controller
 
-            get_imagegen_controller(self.main_window).cancel_generation()
+            get_imagegen_controller(self.main_window).confirm_cancel_generation(
+                self.main_window
+            )
         except ImportError:
             pass
 
@@ -597,7 +525,7 @@ class InformationSidebar(QWidget):
         )
 
     def _on_edit_with_ai(self):
-        """Open AI image edit dialog, primed from the current user comment."""
+        """Open AI image edit dialog with Import Available applied automatically."""
         try:
             from imagegen_plugins.image_gen_menu import open_imagegen_edit_dialog
         except ImportError:
@@ -646,7 +574,12 @@ class InformationSidebar(QWidget):
 
         from PySide6.QtWidgets import QMessageBox
 
-        reply = _confirm_delete_user_comment(self.main_window)
+        reply = show_styled_question(
+            self.main_window,
+            "Delete User Comment",
+            "Delete the EXIF user comment from this image?",
+            default_no=True,
+        )
         if reply != QMessageBox.StandardButton.Yes:
             return
 

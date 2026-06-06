@@ -9,13 +9,22 @@ import re
 import traceback
 import urllib.parse
 import fnmatch
-from typing import List, Optional
+from typing import Callable, Dict, List, Optional, Tuple
 
 # Third-party imports
-from PySide6.QtCore import Qt, QTimer, QByteArray, QRect
+from PySide6.QtCore import QEvent, QObject, Qt, QTimer, QByteArray, QRect
 from PySide6.QtGui import QColor, QIcon, QPainter, QPainterPath, QPixmap
 from ctypes import CDLL, c_uint
-from PySide6.QtWidgets import QApplication, QDialog, QLabel, QProgressBar, QProgressDialog, QMessageBox
+from PySide6.QtWidgets import (
+    QApplication,
+    QDialog,
+    QLabel,
+    QProgressBar,
+    QProgressDialog,
+    QMessageBox,
+    QPushButton,
+    QWidget,
+)
 
 PROGRESS_LABEL_MAX_WIDTH_PX = 400
 PROGRESS_LINE_MAX_CHARS = 64
@@ -511,6 +520,56 @@ def save_dialog_geometry_hex(dialog) -> str:
     return dialog.saveGeometry().data().hex()
 
 
+class _StyledMessageButtonKeyFilter(QObject):
+    """Tab/arrow navigation between styled message box buttons."""
+
+    def __init__(self, buttons: List[QPushButton], dialog: QWidget):
+        super().__init__(dialog)
+        self._buttons = buttons
+        self._dialog = dialog
+
+    def eventFilter(self, obj, event):
+        if obj is not self._dialog and obj not in self._buttons:
+            return False
+        if event.type() != QEvent.Type.KeyPress:
+            return False
+        key = event.key()
+        if key == Qt.Key.Key_Tab:
+            direction = -1 if event.modifiers() & Qt.KeyboardModifier.ShiftModifier else 1
+        elif key == Qt.Key.Key_Backtab:
+            direction = -1
+        elif key in (Qt.Key.Key_Left, Qt.Key.Key_Right):
+            direction = -1 if key == Qt.Key.Key_Left else 1
+        else:
+            return False
+        focused = QApplication.focusWidget()
+        if focused in self._buttons:
+            idx = self._buttons.index(focused)
+        else:
+            idx = -1 if direction > 0 else 0
+        self._buttons[(idx + direction) % len(self._buttons)].setFocus(
+            Qt.FocusReason.TabFocusReason
+        )
+        return True
+
+
+def _install_styled_message_button_navigation(dialog: QDialog, button_widgets: List[QPushButton]) -> None:
+    """Enable Tab/arrow keyboard navigation between dialog action buttons."""
+    if not button_widgets:
+        return
+    for btn in button_widgets:
+        btn.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+    if len(button_widgets) >= 2:
+        for idx in range(len(button_widgets) - 1):
+            QWidget.setTabOrder(button_widgets[idx], button_widgets[idx + 1])
+        QWidget.setTabOrder(button_widgets[-1], button_widgets[0])
+        key_filter = _StyledMessageButtonKeyFilter(button_widgets, dialog)
+        dialog._button_key_filter = key_filter
+        dialog.installEventFilter(key_filter)
+        for btn in button_widgets:
+            btn.installEventFilter(key_filter)
+
+
 class _StyledMessageDialog(QDialog):
     """QDialog that centers on screen when shown; parent may be unmapped (e.g. warning during __init__)."""
 
@@ -526,7 +585,50 @@ class _StyledMessageDialog(QDialog):
         _center_styled_dialog_on_screen(self, self._parent_for_screen)
 
 
-def styled_message_box(parent, icon, title, text, buttons=None, default_button=None, button_label_overrides=None):
+def _apply_styled_message_proceed_note(
+    dialog: QDialog,
+    text_label: QLabel,
+    button_widgets: List[QPushButton],
+    note: str,
+    *,
+    has_icon: bool,
+) -> None:
+    """Show in-dialog status after the user chooses a proceed action (before dialog closes)."""
+    from PySide6.QtGui import QTextDocument
+
+    text_label.setText(note)
+    font_metrics = text_label.fontMetrics()
+    available_width = 240 if has_icon else 296
+    doc = QTextDocument()
+    doc.setDefaultFont(text_label.font())
+    doc.setTextWidth(available_width)
+    doc.setPlainText(note)
+    ideal_height = doc.size().height()
+    descent = font_metrics.descent()
+    leading = font_metrics.leading()
+    padding = max(14, descent + leading + 10)
+    calculated_height = max(int(ideal_height) + padding, font_metrics.height() + padding)
+    text_label.setMinimumHeight(calculated_height)
+    for btn in button_widgets:
+        btn.setEnabled(False)
+        btn.hide()
+    dialog.adjustSize()
+    _center_styled_dialog_on_screen(dialog, dialog.parentWidget())
+    dialog.activateWindow()
+    dialog.raise_()
+    QApplication.processEvents()
+
+
+def styled_message_box(
+    parent,
+    icon,
+    title,
+    text,
+    buttons=None,
+    default_button=None,
+    button_label_overrides=None,
+    proceed_handlers: Optional[Dict[int, Tuple[str, Callable[[], None]]]] = None,
+):
     """
     Create a QMessageBox-like dialog using QDialog.
 
@@ -538,6 +640,8 @@ def styled_message_box(parent, icon, title, text, buttons=None, default_button=N
         buttons: OR-ed QMessageBox.StandardButton enum values (e.g., QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
         default_button: Default button (QMessageBox.StandardButton), or None
         button_label_overrides: optional dict mapping QMessageBox.StandardButton to label text
+        proceed_handlers: optional map of QMessageBox.StandardButton to (proceed_note, action)
+            called after the user clicks that button, before the dialog closes
 
     Returns:
         Dialog object (call .exec()/.exec_() on it, and check dialog.result_data['button'] for result)
@@ -646,11 +750,27 @@ def styled_message_box(parent, icon, title, text, buttons=None, default_button=N
     button_bar.addStretch()
 
     dialog.result_data = {'button': None}
+    dialog.message_label = text_label
+    dialog.button_widgets = []
 
     # Helper: for PyQt compatibility with exec_(), set 'done' to code
     def _set_dialog_result(value):
         dialog.result_data['button'] = value
         dialog.done(value)
+
+    def _on_button_clicked(button_value):
+        handler = (proceed_handlers or {}).get(button_value)
+        if handler is not None:
+            note, action = handler
+            _apply_styled_message_proceed_note(
+                dialog,
+                text_label,
+                button_widgets,
+                note,
+                has_icon=icon_label is not None,
+            )
+            action()
+        _set_dialog_result(button_value)
 
     button_widgets = []
     default_btn_widget = None
@@ -664,16 +784,21 @@ def styled_message_box(parent, icon, title, text, buttons=None, default_button=N
         if is_default:
             btn.setDefault(True)
             default_btn_widget = btn
-        btn.clicked.connect(lambda chk, v=b_val: _set_dialog_result(v))
+        btn.clicked.connect(lambda _checked=False, v=b_val: _on_button_clicked(v))
         button_bar.addWidget(btn)
         button_widgets.append(btn)
+    dialog.button_widgets = button_widgets
 
     button_bar.addStretch()
     main_layout.addLayout(button_bar)
 
+    _install_styled_message_button_navigation(dialog, button_widgets)
+
     if default_btn_widget is not None:
         def _focus_default():
-            default_btn_widget.setFocus(Qt.OtherFocusReason)
+            dialog.activateWindow()
+            dialog.raise_()
+            default_btn_widget.setFocus(Qt.FocusReason.TabFocusReason)
         QTimer.singleShot(0, _focus_default)
 
     # Add ESC key = Cancel or Close button, or No for Yes/No dialogs, or Ok if exists
@@ -712,6 +837,15 @@ def _dialog_thumbnail_border_color() -> str:
     return color if color else "#808080"
 
 
+def job_status_thumbnail_stylesheet() -> str:
+    """Hover-only border for clickable job-status thumbnails (transparent keeps box size)."""
+    color = _dialog_thumbnail_border_color()
+    return (
+        "QLabel { border: 1px solid transparent; }"
+        f"QLabel:hover {{ border: 1px solid {color}; }}"
+    )
+
+
 def create_dialog_thumbnail_label(file_path: str, size: int, ignore_exif: bool = False):
     """Create a QLabel for a dialog thumbnail with square frame (1px solid border).
 
@@ -723,6 +857,23 @@ def create_dialog_thumbnail_label(file_path: str, size: int, ignore_exif: bool =
     thumb.setFixedSize(size, size)
     thumb.setAlignment(Qt.AlignmentFlag.AlignCenter)
     thumb.setStyleSheet(f"border: 1px solid {_dialog_thumbnail_border_color()};")
+    px = load_dialog_thumbnail(file_path, size, ignore_exif)
+    if px and not px.isNull():
+        thumb.setPixmap(px)
+    return thumb
+
+
+def create_job_status_thumbnail_label(
+    file_path: str, size: int, ignore_exif: bool = False
+):
+    """Job queue / sidebar thumbnail: 1px border on hover only (transparent otherwise)."""
+    from PySide6.QtWidgets import QLabel
+
+    thumb = QLabel()
+    thumb.setFixedSize(size, size)
+    thumb.setAlignment(Qt.AlignmentFlag.AlignCenter)
+    thumb.setStyleSheet(job_status_thumbnail_stylesheet())
+    thumb.setAttribute(Qt.WidgetAttribute.WA_Hover, True)
     px = load_dialog_thumbnail(file_path, size, ignore_exif)
     if px and not px.isNull():
         thumb.setPixmap(px)
@@ -843,7 +994,15 @@ def create_file_operation_progress_dialog(parent, title: str, total_files: int) 
         parent, title, total_files, cancellable=False
     )
 
-def show_styled_question(parent, title, text, default_no=True):
+def show_styled_question(
+    parent,
+    title,
+    text,
+    default_no=True,
+    *,
+    proceed_note: Optional[str] = None,
+    on_proceed: Optional[Callable[[], None]] = None,
+):
     """
     Show a styled question message box with Yes/No buttons
     
@@ -852,19 +1011,25 @@ def show_styled_question(parent, title, text, default_no=True):
         title: Dialog window title
         text: Message body text
         default_no: If True, No button is default; if False, Yes button is default
+        proceed_note: If set with on_proceed, shown after Yes before on_proceed runs
+        on_proceed: Callable run after proceed_note is shown (e.g. slow cancel)
     
     Returns:
         QMessageBox.StandardButton.Yes or QMessageBox.StandardButton.No
     """
     from PySide6.QtWidgets import QMessageBox
     default_button = QMessageBox.StandardButton.No if default_no else QMessageBox.StandardButton.Yes
+    proceed_handlers = None
+    if proceed_note and on_proceed is not None:
+        proceed_handlers = {QMessageBox.StandardButton.Yes: (proceed_note, on_proceed)}
     msg_box = styled_message_box(
         parent,
         QMessageBox.Question,
         title,
         text,
         buttons=QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-        default_button=default_button
+        default_button=default_button,
+        proceed_handlers=proceed_handlers,
     )
     msg_box.exec()
     return msg_box.result_data['button']

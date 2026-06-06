@@ -57,9 +57,20 @@ def thumbnail_paths_for_values(
     return paths
 
 
+def apply_payload_model_fields_to_values(
+    values: dict[str, Any], payload: dict[str, Any]
+) -> None:
+    """Persist the model identity the worker will run (display + dequeue)."""
+    for key in ("hf_model_id", "mflux_model_name"):
+        val = payload.get(key)
+        if val:
+            values[key] = val
+
+
 def refresh_queued_job_status(job: QueuedGenerateJob) -> None:
     """Rebuild status HTML after queue-row series edits (copies / refinement)."""
     payload = job.plugin.build_payload(job.values, _preview_output_path())
+    apply_payload_model_fields_to_values(job.values, payload)
     job.status_html = format_image_generation_queue_status_html(
         job.plugin,
         job.values,

@@ -50,6 +50,11 @@ def model_display_name(pipeline_id: str, hf_model_id: str) -> str:
             return hf_model_id.split("/")[-1].replace(".", " ").replace("-", " ")
         return "FLUX.1 Fill"
     if pipeline_id == "mflux_flux2_klein_edit":
+        text = (hf_model_id or "").strip().lower()
+        if "9b" in text:
+            return "FLUX 2 klein 9B"
+        if "4b" in text:
+            return "FLUX 2 klein 4B"
         if hf_model_id and "/" in hf_model_id:
             return hf_model_id.split("/")[-1].replace(".", " ").replace("-", " ")
         return "FLUX.2 Klein 4B"

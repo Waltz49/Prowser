@@ -310,7 +310,7 @@ def open_imagegen_create_from_text_dialog(
 def open_imagegen_edit_dialog(
     main_window, *, user_comment: Optional[str] = None
 ) -> None:
-    """Open the AI image edit dialog, optionally primed from user comment."""
+    """Open the AI image edit dialog (File Information pane entry)."""
     if not imagegen_edit_plugins_available():
         return
     controller = get_imagegen_controller(main_window)
@@ -319,6 +319,7 @@ def open_imagegen_edit_dialog(
         main_window,
         controller,
         initial_prompt=initial_prompt_from_usercomment(user_comment),
+        auto_import_available=True,
     )
 
 
@@ -344,6 +345,7 @@ def _open_dialog_for_function(
     controller,
     *,
     initial_prompt: Optional[str] = None,
+    auto_import_available: bool = False,
 ) -> None:
     if getattr(main_window, "_imagegen_dialog_open", False):
         return
@@ -445,6 +447,7 @@ def _open_dialog_for_function(
                 main_window,
                 source_paths=source_paths,
                 initial_prompt=initial_prompt,
+                auto_import_available=auto_import_available,
             )
         else:
             dlg = ImageGenDialog(
@@ -477,12 +480,17 @@ def _schedule_open_dialog_for_function(
     controller,
     *,
     initial_prompt: Optional[str] = None,
+    auto_import_available: bool = False,
 ) -> None:
     """Open the function dialog on the next event-loop turn (after menu handlers)."""
     QTimer.singleShot(
         0,
         lambda: _open_dialog_for_function(
-            function, main_window, controller, initial_prompt=initial_prompt
+            function,
+            main_window,
+            controller,
+            initial_prompt=initial_prompt,
+            auto_import_available=auto_import_available,
         ),
     )
 
@@ -572,7 +580,9 @@ def setup_create_menu(menubar, main_window) -> None:
 
     cancel_action = QAction("Cancel Generation / Caption", main_window)
     cancel_action.setEnabled(False)
-    cancel_action.triggered.connect(controller.cancel_generation)
+    cancel_action.triggered.connect(
+        lambda: controller.confirm_cancel_generation(main_window)
+    )
     create_menu.addAction(cancel_action)
     main_window.imagegen_cancel_action = cancel_action
 

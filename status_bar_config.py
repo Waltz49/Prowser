@@ -815,7 +815,9 @@ class ClickableImageGenIndicatorLabel(QLabel):
             return
         try:
             from imagegen_plugins.image_gen_controller import get_imagegen_controller
-            get_imagegen_controller(self.main_window).cancel_generation()
+            get_imagegen_controller(self.main_window).confirm_cancel_generation(
+                self.main_window
+            )
         except ImportError:
             pass
 

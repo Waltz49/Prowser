@@ -342,6 +342,27 @@ def resolve_source_image_paths(values: Dict[str, Any]) -> List[str]:
     return paths
 
 
+def source_paths_for_generation_exif(
+    values: Dict[str, Any],
+    *,
+    extra_paths: Optional[List[str]] = None,
+) -> List[str]:
+    """Source paths for EXIF References: values first, then optional fallbacks."""
+    paths = resolve_source_image_paths(values)
+    if paths:
+        return paths
+    if not extra_paths:
+        return []
+    out: List[str] = []
+    seen: set[str] = set()
+    for raw in extra_paths:
+        ap = os.path.normpath(os.path.abspath(str(raw or "")))
+        if ap and os.path.isfile(ap) and ap not in seen:
+            seen.add(ap)
+            out.append(ap)
+    return out
+
+
 def reference_entry_for_source(
     source_path: str, output_path: str
 ) -> Optional[Tuple[str, str]]:

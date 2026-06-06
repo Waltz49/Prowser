@@ -323,6 +323,14 @@ Examples:
                         help='Enable debug mode (hide key popup)')
     parser.add_argument('-p', '--profile', type=str, metavar='DIR',
                         help='Use a custom profile directory instead of ~/.prowser')
+    parser.add_argument(
+        '--background',
+        choices=['default', 'thread', 'process'],
+        default='default',
+        metavar='MODE',
+        help='Testing: force model-tasks jobs in a thread, separate process, or default '
+             '(thread when bundled on macOS, process when run from source)',
+    )
     
     args = parser.parse_args()
     # ---- CUSTOM REWRITE for prompt: if the user adds a limit parm of zero (0), set it to 99999
@@ -531,6 +539,10 @@ def main():
     
     # Parse command line arguments early to get profile directory
     args = parse_arguments()
+
+    from model_tasks_launch import set_background_mode
+
+    set_background_mode(args.background)
     
     # Handle custom profile directory if specified
     profile_dir = None

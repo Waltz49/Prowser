@@ -38,15 +38,11 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from exif_utils import (
-    decode_usercomment,
-    get_usercomment_from_path,
-    truncate_usercomment_before_prompt,
-)
 from imagegen_plugins.image_gen_dialog import (
     ImageGenPreviewSplitter,
     apply_image_gen_dialog_shell,
     apply_import_extras_from_image_path,
+    load_import_prompt_from_path,
     build_seed_and_random_seed_row,
     create_image_gen_side_button_column,
     field_specs_share_seed_row,
@@ -764,6 +760,7 @@ class ImageGenEditDialog(QDialog):
         initial_prompt: Optional[str] = None,
         initial_values: Optional[Dict[str, Any]] = None,
         window_title: str = EDIT_IMAGE_DIALOG_TITLE,
+        auto_import_available: bool = False,
     ):
         super().__init__(parent)
         self._plugins = list(plugins)
@@ -793,6 +790,7 @@ class ImageGenEditDialog(QDialog):
         self._flux_prompt_ai: Optional[ImageGenFluxPromptAi] = None
         self._side_btn_host: Optional[QWidget] = None
         self._side_btn_col: Optional[QVBoxLayout] = None
+        self._auto_import_available = auto_import_available
 
         initial = resolve_initial_plugin(
             self._plugins,
@@ -847,6 +845,8 @@ class ImageGenEditDialog(QDialog):
         if not self._geometry_was_restored:
             QTimer.singleShot(0, lambda: _center_styled_dialog_on_screen(self, self.parent()))
         QTimer.singleShot(0, self._raise_and_activate)
+        if self._auto_import_available:
+            QTimer.singleShot(0, self._on_import_all)
 
     def _raise_and_activate(self) -> None:
         self.raise_()
@@ -939,6 +939,7 @@ class ImageGenEditDialog(QDialog):
                 self._preview_host,
             )
             layout.addWidget(self._multi_source_preview, 1)
+            install_source_nav_keyboard_shortcuts(self, None)
         else:
             self._source_preview = _SourceImagePreview(
                 self.source_path,
@@ -1138,22 +1139,10 @@ class ImageGenEditDialog(QDialog):
         if not self.source_path:
             show_styled_warning(self, "Import Text", "No image selected.")
             return False
-        raw_bytes = get_usercomment_from_path(self.source_path)
-        if raw_bytes is None:
-            show_styled_warning(
-                self,
-                "Import Text",
-                "No EXIF user comment was found for this image.",
-            )
-            return False
-        full_text = decode_usercomment(raw_bytes)
-        prompt_text = truncate_usercomment_before_prompt(full_text).strip()
-        if not prompt_text:
-            show_styled_warning(
-                self,
-                "Import Text",
-                "The EXIF user comment is empty.",
-            )
+        prompt_text = load_import_prompt_from_path(
+            self, self.source_path, warning_title="Import Text"
+        )
+        if prompt_text is None:
             return False
         self.set_prompt_text(prompt_text)
         return True

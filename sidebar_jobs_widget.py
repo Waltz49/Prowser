@@ -33,7 +33,7 @@ from status_bar_config import (
     configure_task_info_text_browser,
 )
 from theme_service import get_active_theme
-from utils import create_dialog_thumbnail_label
+from utils import create_job_status_thumbnail_label
 
 _THUMB_SIZE = 55
 _THUMB_GAP = 14
@@ -78,7 +78,7 @@ class _FlowReferenceThumbs(QWidget):
         self._outer.setContentsMargins(0, 2, 0, 0)
         self._outer.setSpacing(_THUMB_GAP)
         for path in self._paths:
-            thumb = create_dialog_thumbnail_label(path, _THUMB_SIZE)
+            thumb = create_job_status_thumbnail_label(path, _THUMB_SIZE)
             thumb.setCursor(Qt.CursorShape.PointingHandCursor)
             thumb.setAttribute(Qt.WidgetAttribute.WA_DontCreateNativeAncestors, True)
             thumb.setAttribute(Qt.WidgetAttribute.WA_NativeWindow, False)
@@ -221,7 +221,6 @@ class _JobCard(QFrame):
             controller,
             row_idx,
             is_active=is_active,
-            parent=self,
         )
         row_layout.addWidget(self._actions, 0, Qt.AlignmentFlag.AlignTop)
 

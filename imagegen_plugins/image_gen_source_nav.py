@@ -11,6 +11,17 @@ from PySide6.QtWidgets import QHBoxLayout, QPushButton, QSizePolicy, QWidget
 from theme_service import get_active_theme
 
 
+def _qobject_alive(obj) -> bool:
+    if obj is None:
+        return False
+    try:
+        from shiboken6 import isValid
+
+        return isValid(obj)
+    except ImportError:
+        return True
+
+
 def resolve_image_gen_main_window(dialog: QWidget):
     """Parent main window when the dialog was opened with main_window as parent."""
     parent = dialog.parent() if dialog is not None else None
@@ -202,6 +213,8 @@ class ImageGenSourceNavRow(QWidget):
         self._center_layout.addWidget(widget, 1)
 
     def refresh_arrows(self) -> None:
+        if not _qobject_alive(self) or not _qobject_alive(self._prev_btn):
+            return
         mw = self._main_window
         if mw is None or mw.current_view_mode not in ("browse", "thumbnail"):
             self._prev_btn.setVisible(False)
@@ -238,12 +251,16 @@ class ImageGenSourceNavRow(QWidget):
 class _SourceNavKeyFilter(QObject):
     """Option+Left/Right (Alt+arrows in Qt on macOS) — same as < > nav buttons."""
 
-    def __init__(self, source_nav: ImageGenSourceNavRow, parent: QObject | None = None):
+    def __init__(
+        self, source_nav: ImageGenSourceNavRow | None, parent: QObject | None = None
+    ):
         super().__init__(parent)
         self._source_nav = source_nav
 
     def eventFilter(self, watched: QObject, event: QEvent) -> bool:
         if event.type() != QEvent.Type.KeyPress:
+            return False
+        if not _qobject_alive(self._source_nav):
             return False
         key = event.key()
         if key not in (Qt.Key.Key_Left, Qt.Key.Key_Right):
@@ -272,13 +289,15 @@ def _attach_source_nav_key_filter(host: QWidget) -> None:
 
 
 def install_source_nav_keyboard_shortcuts(
-    host: QWidget, source_nav: ImageGenSourceNavRow
+    host: QWidget, source_nav: ImageGenSourceNavRow | None
 ) -> None:
     """Option+Left / Option+Right — prev/next source image (all dialog focus targets)."""
     filt = getattr(host, "_image_gen_source_nav_key_filter", None)
     if filt is None:
         filt = _SourceNavKeyFilter(source_nav, parent=host)
         setattr(host, "_image_gen_source_nav_key_filter", filt)
+    else:
+        filt._source_nav = source_nav
     _attach_source_nav_key_filter(host)
 
 

@@ -523,10 +523,24 @@ def build_worker_payload(
             merged,
             for_fill=(pipeline_id in ("mflux_fill_expand", "mflux_fill_infill")),
         )
+    if pipeline_id == "mflux_fill_expand":
+        from imagegen_plugins.image_gen_naming import resolve_source_image_paths
+
+        source_paths = resolve_source_image_paths(merged)
+        if source_paths:
+            merged["source_image_paths"] = source_paths
+            merged["source_image_path"] = source_paths[0]
     if pipeline_id == "mflux_flux2_klein_edit":
         from imagegen_plugins.image_gen_naming import resolve_source_image_paths
+        from imagegen_plugins.lora_catalog import klein_variant_from_model_name
         from imagegen_plugins.mflux_lora_presets import apply_lora_to_mflux_payload
 
+        if not merged.get("mflux_model_name"):
+            variant = klein_variant_from_model_name(hf_model_id)
+            if variant == "9b":
+                merged["mflux_model_name"] = "flux2-klein-9b"
+            elif variant == "4b":
+                merged["mflux_model_name"] = "flux2-klein-4b"
         apply_lora_to_mflux_payload(merged, for_fill=False, for_klein=True)
         source_paths = resolve_source_image_paths(merged)
         if source_paths:

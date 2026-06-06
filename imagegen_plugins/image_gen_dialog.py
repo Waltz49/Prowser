@@ -304,27 +304,24 @@ def _image_pixel_size(image_path: str) -> Optional[tuple[int, int]]:
         return None
 
 
-def load_import_prompt_from_path(parent: QWidget, image_path: str) -> Optional[str]:
-    """EXIF user comment prompt for Import; warns and returns None on failure."""
+def load_import_prompt_from_path(
+    parent: QWidget,
+    image_path: str,
+    *,
+    warning_title: str = "Import",
+) -> Optional[str]:
+    """EXIF user comment prompt for Import; warns and returns None if no user comment."""
     raw_bytes = get_usercomment_from_path(image_path)
     if raw_bytes is None:
         show_styled_warning(
             parent,
-            "Import",
+            warning_title,
             "No EXIF user comment was found for this image.",
         )
         return None
 
     text = decode_usercomment(raw_bytes)
-    prompt_text = truncate_usercomment_before_prompt(text).strip()
-    if not prompt_text:
-        show_styled_warning(
-            parent,
-            "Import",
-            "The EXIF user comment is empty.",
-        )
-        return None
-    return prompt_text
+    return truncate_usercomment_before_prompt(text).strip()
 
 
 IMAGE_GEN_SIDE_BUTTON_WIDTH = 112

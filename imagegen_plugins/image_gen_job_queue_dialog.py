@@ -12,7 +12,6 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QHeaderView,
     QLabel,
-    QMessageBox,
     QPushButton,
     QSizePolicy,
     QTableWidget,
@@ -38,11 +37,10 @@ from theme_base import asset_path
 from theme_service import get_active_theme
 from utils import (
     _center_styled_dialog_on_screen,
-    create_dialog_thumbnail_label,
+    create_job_status_thumbnail_label,
     restore_dialog_geometry_hex,
     save_dialog_geometry_hex,
     show_styled_critical,
-    show_styled_question,
     show_styled_warning,
 )
 
@@ -158,7 +156,7 @@ def _build_preview_cell(main_window, paths: list[str]) -> tuple[QWidget, int]:
 
 
 def _make_clickable_thumbnail(main_window, file_path: str, size: int) -> QLabel:
-    thumb = create_dialog_thumbnail_label(file_path, size)
+    thumb = create_job_status_thumbnail_label(file_path, size)
     thumb.setCursor(Qt.CursorShape.PointingHandCursor)
     thumb.setToolTip("Click to open in browse mode")
 
@@ -251,24 +249,8 @@ def job_queue_edit_row(main_window, controller, row: int) -> None:
     open_imagegen_dialog_from_job(main_window, plugin, values)
 
 
-def job_queue_cancel_row(main_window, controller, row: int, *, parent: QWidget) -> None:
-    rows = controller.queue_snapshot()
-    if row < 0 or row >= len(rows):
-        return
-    entry = rows[row]
-    if entry.is_active:
-        prompt = "Cancel the running job?"
-    else:
-        prompt = "Remove this job from the queue?"
-    answer = show_styled_question(
-        parent,
-        "Cancel job?",
-        prompt,
-        default_no=True,
-    )
-    if answer != QMessageBox.StandardButton.Yes:
-        return
-    controller.cancel_job_at_row(row)
+def job_queue_cancel_row(main_window, controller, row: int) -> None:
+    controller.confirm_cancel_job_at_row(main_window, row)
 
 
 def build_job_queue_action_widget(
@@ -277,7 +259,6 @@ def build_job_queue_action_widget(
     row_idx: int,
     *,
     is_active: bool,
-    parent: QWidget,
 ) -> QWidget:
     """Action column: series controls, edit, cancel (active and queued rows)."""
     _ = is_active
@@ -291,9 +272,7 @@ def build_job_queue_action_widget(
     cancel_btn.setToolTip("Cancel job")
     cancel_btn.setStyleSheet(_trash_button_stylesheet())
     cancel_btn.clicked.connect(
-        lambda _checked=False, r=row_idx: job_queue_cancel_row(
-            main_window, controller, r, parent=parent
-        )
+        lambda _checked=False, r=row_idx: job_queue_cancel_row(main_window, controller, r)
     )
     action_wrap = QWidget()
     _apply_job_queue_cell_background(action_wrap)
@@ -666,7 +645,6 @@ class ImageGenJobQueueDialog(QDialog):
                 self._controller,
                 row_idx,
                 is_active=row.is_active,
-                parent=self,
             )
             self._table.setCellWidget(row_idx, 0, action_wrap)
 

@@ -57,7 +57,13 @@ class ImageGenModelPlugin:
     def merged_values(
         self, saved: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
-        return merge_defaults(self.pipeline_id, self.model_defaults, saved)
+        out = merge_defaults(self.pipeline_id, self.model_defaults, saved)
+        if self.hf_model_id:
+            out["hf_model_id"] = self.hf_model_id
+        mflux_name = (self.model_defaults or {}).get("mflux_model_name")
+        if mflux_name:
+            out["mflux_model_name"] = mflux_name
+        return out
 
     def field_specs(self, saved: Optional[Dict[str, Any]] = None) -> List[FieldSpec]:
         values = self.merged_values(saved)

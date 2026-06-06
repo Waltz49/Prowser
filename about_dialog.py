@@ -380,6 +380,15 @@ class AboutDialog(QDialog):
         self.build_date_label.setAlignment(Qt.AlignCenter)
         self.build_date_label.setFont(version_font)
         layout.addWidget(self.build_date_label)
+
+        from model_tasks_launch import effective_background_job_mode
+
+        background_jobs_label = QLabel(
+            f"Background jobs: {effective_background_job_mode()}"
+        )
+        background_jobs_label.setAlignment(Qt.AlignCenter)
+        background_jobs_label.setFont(version_font)
+        layout.addWidget(background_jobs_label)
         
         # Description
         desc_label = QLabel("A native image browser for macOS")

@@ -18,6 +18,7 @@ def _escape(text: str) -> str:
 
 
 PROMPT_DISPLAY_MAX_LEN = 100
+TASK_STATUS_PROMPT_MARGIN_PX = 4
 _QUANT_STATUS_LABEL = "Q:"
 
 
@@ -70,6 +71,17 @@ def _table_row(label: str, value: str) -> str:
     return (
         f"<tr><td><b>{_escape(label)}</b></td>"
         f"<td>{_escape(value)}</td></tr>"
+    )
+
+
+def _table_row_prompt(label: str, value: str) -> str:
+    """Prompt row with vertical spacing above and below (TASK_STATUS_PROMPT_MARGIN_PX)."""
+    m = TASK_STATUS_PROMPT_MARGIN_PX
+    pad = f"padding-top:{m}px;padding-bottom:{m}px;"
+    return (
+        f"<tr>"
+        f'<td style="{pad}"><b>{_escape(label)}</b></td>'
+        f'<td style="{pad}">{_escape(value)}</td></tr>'
     )
 
 
@@ -236,7 +248,7 @@ def _generation_status_table_rows(
     if fields.get("quant"):
         rows.append(_table_row(_QUANT_STATUS_LABEL, fields["quant"]))
     if fields.get("prompt"):
-        rows.append(_table_row(fields["prompt_label"], fields["prompt"]))
+        rows.append(_table_row_prompt(fields["prompt_label"], fields["prompt"]))
     if fields.get("neg"):
         rows.append(_table_row("Neg:", fields["neg"]))
     return rows
@@ -367,7 +379,7 @@ def _generation_status_queue_table_rows(
         rows.append(_table_row(_QUANT_STATUS_LABEL, quant))
 
     if fields.get("prompt"):
-        rows.append(_table_row(fields["prompt_label"], fields["prompt"]))
+        rows.append(_table_row_prompt(fields["prompt_label"], fields["prompt"]))
     if fields.get("neg"):
         rows.append(_table_row("Neg:", fields["neg"]))
     return rows
@@ -446,6 +458,28 @@ def _table_html(
     return "<table cellspacing=\"0\" cellpadding=\"0\">" + "".join(parts) + "</table>"
 
 
+def _generation_model_id_for_status(
+    plugin: ImageGenModelPlugin,
+    effective: Dict[str, Any],
+) -> str:
+    """Model id for status display — matches worker payload resolution."""
+    from imagegen_plugins.lora_catalog import klein_variant_from_model_name
+
+    pipeline_id = plugin.pipeline_id
+    if pipeline_id == "mflux_flux2_klein_edit":
+        mflux = str(effective.get("mflux_model_name") or "").strip()
+        if mflux:
+            return mflux
+        hf = str(effective.get("hf_model_id") or "").strip()
+        if hf and klein_variant_from_model_name(hf):
+            return hf
+        return str(plugin.hf_model_id or hf).strip()
+    raw = str(effective.get("hf_model_id") or plugin.hf_model_id or "").strip()
+    if pipeline_id == "flux_schnell_mflux_play" and raw in ("", "schnell"):
+        return str(plugin.hf_model_id or raw).strip()
+    return raw
+
+
 def _collect_generation_status_fields(
     plugin: ImageGenModelPlugin,
     values: Dict[str, Any],
@@ -457,7 +491,7 @@ def _collect_generation_status_fields(
     if payload:
         effective.update(payload)
     fields: dict[str, str] = {}
-    raw_hf_id = str(effective.get("hf_model_id") or plugin.hf_model_id or "").strip()
+    raw_hf_id = _generation_model_id_for_status(plugin, effective)
     if raw_hf_id:
         fields["model"] = model_display_name(pipeline_id, raw_hf_id)
 
@@ -943,7 +977,7 @@ def format_caption_status_html(user_prompt_override: Optional[str] = None) -> st
 
     prompt = _truncate(_caption_prompt_text(user_prompt_override))
     if prompt:
-        rows.append(_table_row("Prompt:", prompt))
+        rows.append(_table_row_prompt("Prompt:", prompt))
 
     return _table_html(rows, title="Text Generation")
 
