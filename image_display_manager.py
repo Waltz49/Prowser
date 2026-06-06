@@ -161,6 +161,8 @@ class ImageDisplayManager:
             # Switch to main image view
             self.main_window.stacked_widget.setCurrentIndex(1)
             self.main_window.current_view_mode = 'browse'
+            if hasattr(self.main_window, 'view_manager'):
+                self.main_window.view_manager._setup_cursor_manager()
             
             # Prime and enable menu keys for view change
             if hasattr(self.main_window, 'menu_manager'):

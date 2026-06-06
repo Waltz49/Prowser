@@ -882,6 +882,7 @@ class ViewManager:
             if hasattr(self.main_window, 'image_container'):
                 available_size = self.main_window.get_effective_display_size()
                 self.main_window.image_container.resize(available_size)
+            self._setup_cursor_manager()
             self.main_window.show_image(self.main_window.current_image_path, self.main_window.current_index)
             self.main_window.start_background_thumbnail_loading_if_needed() # DGN Trying preloading thunbs in background
 
@@ -1058,12 +1059,6 @@ class ViewManager:
             if self.main_window.cursor_manager:
                 self.main_window.cursor_manager.disable()
                 self.main_window.cursor_manager = None
-                
-            # Ensure cursor is visible and restored to default when exiting fullscreen
-            self.main_window.setCursor(Qt.ArrowCursor)
-            app = QApplication.instance()
-            if app:
-                app.restoreOverrideCursor()
             
             # Update status bar sections for thumbnail mode
             self.main_window.update_status_bar_sections()
@@ -1174,9 +1169,13 @@ class ViewManager:
         if self.main_window.cursor_manager:
             self.main_window.cursor_manager.cleanup()
         
-        # Create new cursor manager for the main window (which receives mouse events)
-        # The cursor manager will handle cursor visibility on the application level
-        self.main_window.cursor_manager = CursorManager(self.main_window, hide_delay_ms=2000, parent=self.main_window)
+        # Hide cursor only over the browse canvas, not sidebars/dialogs/status bar
+        hide_widget = (
+            getattr(self.main_window, '_browse_view_root_widget', None)
+            or getattr(self.main_window, 'image_container', None)
+            or self.main_window
+        )
+        self.main_window.cursor_manager = CursorManager(hide_widget, hide_delay_ms=2000, parent=self.main_window)
         # Start the cursor manager (starts the hide timer)
         self.main_window.cursor_manager.start()
 

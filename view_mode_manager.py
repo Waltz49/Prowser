@@ -132,19 +132,6 @@ class ViewModeManager:
             return
         self.open_browse_view(self.main_window.highlight_index)
     
-    def _ensure_cursor_manager_inactive_in_thumbnail(self):
-        """Ensure cursor manager is inactive when in thumbnail view"""
-        if (self.main_window.cursor_manager and 
-            self.main_window.current_view_mode not in ['browse', 'slideshow', 'slideshow2', 'slideshow3'] and 
-            self.main_window.cursor_manager.is_active()):
-            self.main_window.cursor_manager.hide_cursor()
-    
-    def _ensure_fullscreen_focus(self):
-        """Ensure proper focus in fullscreen mode"""
-        if self.main_window.current_view_mode == 'browse':
-            if hasattr(self.main_window, 'image_container'):
-                self.main_window.image_container.setFocus()
-    
     def _ensure_fullscreen_focus(self):
         """Ensure proper focus in fullscreen mode"""
         if self.main_window.current_view_mode == 'browse':

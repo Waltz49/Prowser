@@ -570,11 +570,6 @@ class ImageBrowserWindow(QMainWindow):
         
         # Note: immediate_fullscreen handling moved to showEvent to ensure window is visible first
         
-        # Set up a timer to ensure cursor manager is inactive in thumbnail view
-        self.cursor_manager_check_timer = QTimer()
-        self.cursor_manager_check_timer.timeout.connect(self._ensure_cursor_manager_inactive_in_thumbnail)
-        self.cursor_manager_check_timer.start(1000)  # Check every second
-        
         # Enable pinch gesture support for trackpad zoom
         self.grabGesture(Qt.PinchGesture)
         
@@ -1020,10 +1015,7 @@ class ImageBrowserWindow(QMainWindow):
                             except ValueError:
                                 idx = self.current_index if self.current_index is not None else 0
                             self.set_current_image_by_path(target_file, fallback_index=idx)
-                            if self.current_view_mode != 'browse':
-                                self.view_mode_manager.open_browse_view(idx)
-                            elif self.current_image_path:
-                                self.show_image(self.current_image_path, self.current_index)
+                            self.view_mode_manager.open_browse_view(idx)
 
                         QTimer.singleShot(200, ensure_single_file_browse_view)
                     elif from_api and len(valid_files) > 1:
@@ -1299,9 +1291,6 @@ class ImageBrowserWindow(QMainWindow):
         
         if self.cursor_manager:
             self.cursor_manager.cleanup()
-        
-        if self.cursor_manager_check_timer:
-            self.cursor_manager_check_timer.stop()
         
         if self.wallpaper_manager:
             self.wallpaper_manager.cleanup_temp_files()
@@ -3579,6 +3568,8 @@ class ImageBrowserWindow(QMainWindow):
             if hasattr(self, 'image_container'):
                 available_size = self.get_effective_display_size()
                 self.image_container.resize(available_size)
+            if hasattr(self, 'view_manager'):
+                self.view_manager._setup_cursor_manager()
             
             # Prime and enable menu keys for view change
             if hasattr(self, 'menu_manager'):
@@ -4914,14 +4905,6 @@ class ImageBrowserWindow(QMainWindow):
             QTimer.singleShot(300, self.sequential_refresh_after_browse) 
 
 
-
-    def _ensure_cursor_manager_inactive_in_thumbnail(self):
-        """Ensure cursor manager is inactive when in thumbnail view"""
-        if (self.cursor_manager and 
-            self.current_view_mode not in ['browse', 'slideshow', 'slideshow2'] and 
-            self.cursor_manager.is_active()):
-            self.cursor_manager.disable()
-            self.cursor_manager = None
 
     def _ensure_fullscreen_focus(self):
         """Ensure proper focus for browse keyboard event handling"""
@@ -9928,10 +9911,6 @@ class ImageBrowserWindow(QMainWindow):
     
     def mouseMoveEvent(self, event):
         """Handle mouse movement for dragging panned images"""
-        # Notify cursor manager of mouse activity
-        if self.cursor_manager:
-            self.cursor_manager.on_mouse_activity()
-        
         # Handle browse mode panning/dragging
         if getattr(self, 'browse_view_handler', None):
             if self.browse_view_handler.handle_mouse_move(event):
@@ -9951,23 +9930,10 @@ class ImageBrowserWindow(QMainWindow):
                     self.cursor_manager.set_cursor(Qt.ArrowCursor)
                 else:
                     self.setCursor(Qt.ArrowCursor)
-        # For slideshow modes, don't set cursor on every mouse move - let cursor manager handle it
-        # The cursor manager will show/hide the cursor automatically based on inactivity
-        elif self.current_view_mode not in ['slideshow', 'slideshow2', 'slideshow3']:
-            # Only set cursor for non-slideshow, non-browse modes
-            if self.cursor_manager:
-                self.cursor_manager.set_cursor(Qt.ArrowCursor)
-            else:
-                self.setCursor(Qt.ArrowCursor)
-                
         super().mouseMoveEvent(event)
     
     def mouseReleaseEvent(self, event):
         """Handle mouse release to stop dragging"""
-        # Notify cursor manager of mouse activity
-        if self.cursor_manager:
-            self.cursor_manager.on_mouse_activity()
-        
         # Handle browse mode mouse release
         if getattr(self, 'browse_view_handler', None):
             if self.browse_view_handler.handle_mouse_release(event):
@@ -10604,10 +10570,6 @@ class ImageBrowserWindow(QMainWindow):
     
     def wheelEvent(self, event):
         """Handle mouse wheel events with cursor-aware zoom and trackpad panning"""
-        # Notify cursor manager of mouse activity only in fullscreen mode
-        if self.cursor_manager and self.current_view_mode == 'browse':
-            self.cursor_manager.on_mouse_activity()
-        
         if self.current_view_mode == 'browse':
             # Check if Control key is held (Cmd on macOS)
             modifiers = event.modifiers()

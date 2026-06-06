@@ -615,6 +615,8 @@ class DirectoryLoader:
             if hasattr(self.main_window, 'image_container'):
                 available_size = self.main_window.get_effective_display_size()
                 self.main_window.image_container.resize(available_size)
+            if hasattr(self.main_window, 'view_manager'):
+                self.main_window.view_manager._setup_cursor_manager()
             
             # Prime and enable menu keys for view change
             if hasattr(self.main_window, 'menu_manager'):

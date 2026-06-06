@@ -5,9 +5,9 @@ A generalized cursor management system that hides the cursor after inactivity
 and shows it on movement. Designed to be reusable across different view modes.
 """
 
-from PySide6.QtCore import QTimer, QObject, QPoint, QEvent
+from PySide6.QtCore import QTimer, QObject, QEvent
 from PySide6.QtWidgets import QWidget, QApplication
-from PySide6.QtGui import Qt
+from PySide6.QtGui import Qt, QCursor
 
 
 class CursorManager(QObject):
@@ -33,7 +33,7 @@ class CursorManager(QObject):
         self.widget = widget
         self.hide_delay_ms = hide_delay_ms
         self.is_cursor_hidden = False
-        self.last_mouse_position = None
+        self._over_hide_zone = False
         self._paused = False
         
         # Timer for hiding cursor after inactivity
@@ -49,6 +49,34 @@ class CursorManager(QObject):
         if app:
             app.installEventFilter(self)
     
+    def _is_over_hide_zone(self) -> bool:
+        """True when the cursor is over the browse canvas (self.widget) or its children."""
+        widget = self.widget
+        if widget is None or not widget.isVisible():
+            return False
+        app = QApplication.instance()
+        if app is None:
+            return False
+        w = app.widgetAt(QCursor.pos())
+        while w is not None:
+            if w is widget:
+                return True
+            w = w.parentWidget()
+        return False
+
+    def _update_hide_zone_state(self):
+        """Track enter/leave of the hide zone; show cursor and stop timer on leave."""
+        over = self._is_over_hide_zone()
+        if over == self._over_hide_zone:
+            return
+        self._over_hide_zone = over
+        if over:
+            self.hide_timer.start(self.hide_delay_ms)
+        else:
+            self.hide_timer.stop()
+            if self.is_cursor_hidden:
+                self._show_cursor()
+
     def eventFilter(self, obj, event):
         """
         Event filter to catch mouse events and manage cursor visibility.
@@ -66,23 +94,32 @@ class CursorManager(QObject):
             
         # Listen for mouse movement and button events globally
         if event.type() in (QEvent.MouseMove, QEvent.MouseButtonPress, QEvent.MouseButtonRelease, QEvent.Wheel):
-            self.on_mouse_activity()
+            self._update_hide_zone_state()
+            if self._over_hide_zone:
+                self._on_activity_in_zone()
         return super().eventFilter(obj, event)
     
+    def _on_activity_in_zone(self):
+        """Restart hide timer while the cursor is over the browse canvas."""
+        if self.is_cursor_hidden:
+            self._show_cursor()
+        self.hide_timer.start(self.hide_delay_ms)
+
     def on_mouse_activity(self):
         """
         Manual method to trigger mouse activity (for use without event filter).
         Call this from mouse event handlers.
         """
-        # Show cursor if it was hidden
-        if self.is_cursor_hidden:
-            self._show_cursor()
-        
-        # Restart the hide timer
-        self.hide_timer.start(self.hide_delay_ms)
+        if self._paused:
+            return
+        self._update_hide_zone_state()
+        if self._over_hide_zone:
+            self._on_activity_in_zone()
     
     def _hide_cursor(self):
-        """Hide the cursor."""
+        """Hide the cursor only while it remains over the browse canvas."""
+        if not self._is_over_hide_zone():
+            return
         if not self.is_cursor_hidden:
             # Set cursor on both widget and application level for better visibility
             self.widget.setCursor(Qt.BlankCursor)
@@ -123,28 +160,16 @@ class CursorManager(QObject):
             self.is_cursor_hidden = False
     
     def start(self):
-        """Start cursor management (starts the initial hide timer)."""
-        self.hide_timer.start(self.hide_delay_ms)
+        """Start cursor management (starts the hide timer when over the browse canvas)."""
+        self._over_hide_zone = self._is_over_hide_zone()
+        if self._over_hide_zone:
+            self.hide_timer.start(self.hide_delay_ms)
     
     def stop(self):
         """Stop cursor management and ensure cursor is visible."""
         self.hide_timer.stop()
         if self.is_cursor_hidden:
             self._show_cursor()
-    
-    def pause(self):
-        """Pause cursor management (stops timer and ensures cursor is visible)."""
-        self.hide_timer.stop()
-        # Ensure cursor is visible when pausing (important for dialogs)
-        if self.is_cursor_hidden:
-            self._show_cursor()
-        # Store pause state
-        self._paused = True
-    
-    def is_active(self):
-        """Check if cursor management is currently active."""
-        return self.hide_timer.isActive()
-    
     
     def cleanup(self):
         """Clean up resources and restore original cursor."""

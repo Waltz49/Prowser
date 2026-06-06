@@ -350,8 +350,6 @@ class BrowseViewHandler:
         
         cursor_manager = mw.cursor_manager
         btn = event.button()
-        if cursor_manager and cursor_manager.is_active():
-            cursor_manager.on_mouse_activity()
 
         if btn == Qt.LeftButton and self.can_pan_image():
             mw.is_dragging = True
@@ -371,10 +369,6 @@ class BrowseViewHandler:
         mw = self.main_window
         if mw.current_view_mode != 'browse':
             return False
-        
-        # Notify cursor manager of mouse activity
-        if mw.cursor_manager:
-            mw.cursor_manager.on_mouse_activity()
         
         if mw.is_dragging:
             if mw.drag_start_pos is not None:
@@ -407,10 +401,6 @@ class BrowseViewHandler:
         if mw.current_view_mode != 'browse':
             return False
         
-        # Notify cursor manager of mouse activity
-        if mw.cursor_manager:
-            mw.cursor_manager.on_mouse_activity()
-        
         if event.button() == Qt.LeftButton:
             if mw.is_dragging:
                 mw.is_dragging = False
@@ -433,10 +423,8 @@ class BrowseViewHandler:
     def handle_gesture_event(self, event: QGestureEvent):
         """Handle gesture events, particularly pinch gestures for trackpad zoom"""
         mw = self.main_window
-        # Notify cursor manager of mouse activity only in browse mode
-        if (mw.cursor_manager and 
-            mw.current_view_mode == 'browse' and 
-            mw.cursor_manager.is_active()):
+        # Pinch gestures are not caught by CursorManager's mouse/wheel filter
+        if mw.cursor_manager and mw.current_view_mode == 'browse':
             mw.cursor_manager.on_mouse_activity()
         
         pinch = event.gesture(Qt.PinchGesture)
