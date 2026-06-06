@@ -538,7 +538,7 @@ class ImageGenController(QObject):
         return self._adjust_active_series_remaining_after(-1)
 
     def active_series_refinement_enabled(self) -> bool:
-        return bool(self._pending_values.get("use_last_generated_image", False))
+        return bool(self._pending_values.get("series_refinement", False))
 
     def set_active_series_refinement(self, enabled: bool) -> bool:
         """Toggle whether remaining copies replace the first source with each result."""
@@ -547,7 +547,7 @@ class ImageGenController(QObject):
         enabled = bool(enabled)
         if self.active_series_refinement_enabled() == enabled:
             return False
-        self._pending_values["use_last_generated_image"] = enabled
+        self._pending_values["series_refinement"] = enabled
         self.task_status_info_changed.emit()
         self.queue_changed.emit()
         return True
@@ -601,7 +601,7 @@ class ImageGenController(QObject):
         if record is None:
             return False
         _, values = record
-        return bool(values.get("use_last_generated_image", False))
+        return bool(values.get("series_refinement", False))
 
     def set_series_refinement_for_row(self, row: int, enabled: bool) -> bool:
         rows = self.queue_snapshot()
@@ -615,9 +615,9 @@ class ImageGenController(QObject):
         if job is None:
             return False
         enabled = bool(enabled)
-        if bool(job.values.get("use_last_generated_image", False)) == enabled:
+        if bool(job.values.get("series_refinement", False)) == enabled:
             return False
-        job.values["use_last_generated_image"] = enabled
+        job.values["series_refinement"] = enabled
         refresh_queued_job_status(job)
         self.queue_changed.emit()
         return True
@@ -1066,7 +1066,7 @@ class ImageGenController(QObject):
                     will_refine_next = (
                         self._copy_batch_active
                         and not self._copy_batch_cancelled
-                        and bool(values.get("use_last_generated_image"))
+                        and bool(values.get("series_refinement"))
                         and (self._copies_done + 1 < self._copies_total)
                     )
                     if ref_entries and not will_refine_next:
@@ -1096,7 +1096,7 @@ class ImageGenController(QObject):
                 and self._copy_batch_active
                 and not self._copy_batch_cancelled
             ):
-                if values.get("use_last_generated_image"):
+                if values.get("series_refinement"):
                     if output_path and os.path.isfile(output_path):
                         self._pending_values = apply_refinement_source_for_next_copy(
                             self._pending_values, output_path

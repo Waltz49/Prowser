@@ -192,7 +192,7 @@ def _series_queued_value(count: int) -> str:
 
 def _series_refinement_suffix(values: Dict[str, Any]) -> str:
     """Suffix when refinement is enabled."""
-    if not values.get("use_last_generated_image"):
+    if not values.get("series_refinement"):
         return ""
     return "\u00A0\u00A0\u00A0\u00A0(Refinement)"
 

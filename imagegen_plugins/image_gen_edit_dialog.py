@@ -789,7 +789,7 @@ class ImageGenEditDialog(QDialog):
         self._multi_source_preview: Optional[_MultiSourceImagePreview] = None
         self._preview_host: Optional[QFrame] = None
         self._preview_layout: Optional[QVBoxLayout] = None
-        self._use_last_generated_cb: Optional[QCheckBox] = None
+        self._series_refinement_cb: Optional[QCheckBox] = None
         self._flux_prompt_ai: Optional[ImageGenFluxPromptAi] = None
         self._side_btn_host: Optional[QWidget] = None
         self._side_btn_col: Optional[QVBoxLayout] = None
@@ -1039,7 +1039,7 @@ class ImageGenEditDialog(QDialog):
             return
         self._fields_panel.clear(keep=1)
         self._widgets.clear()
-        self._use_last_generated_cb = None
+        self._series_refinement_cb = None
 
     def _edit_field_hook(self, spec, widget, extra, panel) -> bool:
         if spec.key == "copies" and widget is not None:
@@ -1050,16 +1050,16 @@ class ImageGenEditDialog(QDialog):
             col.addWidget(widget)
             check_row = QHBoxLayout()
             check_row.setContentsMargins(0, 0, 0, 0)
-            self._use_last_generated_cb = QCheckBox("Refinement")
-            self._use_last_generated_cb.setChecked(
-                bool(self._values.get("use_last_generated_image", False))
+            self._series_refinement_cb = QCheckBox("Refinement")
+            self._series_refinement_cb.setChecked(
+                bool(self._values.get("series_refinement", False))
             )
-            self._use_last_generated_cb.setToolTip(
+            self._series_refinement_cb.setToolTip(
                 "For a series of copies, replace the first source image with "
                 "each new result before the next copy. Other source images "
                 "stay in the same order."
             )
-            check_row.addWidget(self._use_last_generated_cb, 0)
+            check_row.addWidget(self._series_refinement_cb, 0)
             check_row.addStretch(1)
             col.addLayout(check_row)
             panel.add_labeled_field(spec.label, row_w)
@@ -1340,8 +1340,8 @@ class ImageGenEditDialog(QDialog):
                 out[key] = getattr(widget, "text", lambda: "")()
         out["source_image_path"] = self.source_path
         out["source_image_paths"] = list(self._source_paths)
-        if self._use_last_generated_cb is not None:
-            out["use_last_generated_image"] = self._use_last_generated_cb.isChecked()
+        if self._series_refinement_cb is not None:
+            out["series_refinement"] = self._series_refinement_cb.isChecked()
         return out
 
     def _on_generate(self) -> None:
