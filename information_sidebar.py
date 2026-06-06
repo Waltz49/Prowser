@@ -986,7 +986,16 @@ class InformationSidebar(QWidget):
         except ImportError:
             return None
 
-    def _apply_info_html_to_browser(self, info_text: str) -> None:
+    def _restore_info_scroll_position(self, scroll_pos: int) -> None:
+        """Restore vertical scroll after HTML relayout (scrollbar is hidden but still drives viewport)."""
+        if not self.info_text_edit:
+            return
+        sb = self.info_text_edit.verticalScrollBar()
+        sb.setValue(min(scroll_pos, sb.maximum()))
+
+    def _apply_info_html_to_browser(
+        self, info_text: str, *, preserve_scroll: bool = False, scroll_pos: int = 0
+    ) -> None:
         if not self.info_text_edit or not info_text:
             return
         info_text = info_text.rstrip("\x00")
@@ -1006,6 +1015,8 @@ class InformationSidebar(QWidget):
             elif hasattr(self.main_window, "right_sidebar_width"):
                 doc.setTextWidth(self.main_window.right_sidebar_width - 36)
             self.info_text_edit.update()
+            if preserve_scroll:
+                self._restore_info_scroll_position(scroll_pos)
 
         QTimer.singleShot(0, update_text_width)
         if self.isVisible():
@@ -1015,10 +1026,13 @@ class InformationSidebar(QWidget):
         elif hasattr(self.main_window, "right_sidebar_width"):
             doc.setTextWidth(self.main_window.right_sidebar_width - 36)
         self.info_text_edit.update()
+        if preserve_scroll:
+            self._restore_info_scroll_position(scroll_pos)
 
     def _rebuild_overlay_from_cache(self, *, hovered_anchor: str | None = None) -> None:
         if not getattr(self, "_last_overlay_data", None) or not self.info_text_edit:
             return
+        scroll_pos = self.info_text_edit.verticalScrollBar().value()
         data = self._last_overlay_data
         gen_timing_cell = self._build_generation_timing_cell_html()
         info_text = self._build_info_overlay_html(
@@ -1032,7 +1046,9 @@ class InformationSidebar(QWidget):
         if info_text:
             self.info_text_edit.blockSignals(True)
             self.info_text_edit.clear()
-            self._apply_info_html_to_browser(info_text)
+            self._apply_info_html_to_browser(
+                info_text, preserve_scroll=True, scroll_pos=scroll_pos
+            )
             self.info_text_edit.blockSignals(False)
 
     def _stop_gen_timing_updates(self) -> None:
