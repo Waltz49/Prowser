@@ -541,7 +541,7 @@ class ImageGenController(QObject):
         return bool(self._pending_values.get("use_last_generated_image", False))
 
     def set_active_series_refinement(self, enabled: bool) -> bool:
-        """Toggle whether remaining copies reuse the last generated image."""
+        """Toggle whether remaining copies replace the first source with each result."""
         if not self._active_queue_job_id or self.active_series_remaining_after() <= 0:
             return False
         enabled = bool(enabled)

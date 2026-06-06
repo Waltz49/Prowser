@@ -125,7 +125,7 @@ def _sync_random_seed_widget(parent, value: bool) -> None:
 def validate_copies_require_random_seed(parent, values: Dict[str, Any]) -> bool:
     """Return False when copies > 1, random seed is off, and user cancels."""
     copies = int(values.get("copies", 1) or 1)
-    if copies <= 1 or values.get("random_seed"):
+    if copies <= 1 or values.get("random_seed") or values.get("use_last_generated_image"):
         return True
     if not prompt_enable_random_seed_for_copies(parent):
         return False

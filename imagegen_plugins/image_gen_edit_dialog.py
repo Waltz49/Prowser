@@ -1050,13 +1050,14 @@ class ImageGenEditDialog(QDialog):
             col.addWidget(widget)
             check_row = QHBoxLayout()
             check_row.setContentsMargins(0, 0, 0, 0)
-            self._use_last_generated_cb = QCheckBox("Use last generated image")
+            self._use_last_generated_cb = QCheckBox("Refinement")
             self._use_last_generated_cb.setChecked(
                 bool(self._values.get("use_last_generated_image", False))
             )
             self._use_last_generated_cb.setToolTip(
-                "When generating multiple copies, use each finished image "
-                "as the input for the next copy."
+                "For a series of copies, replace the first source image with "
+                "each new result before the next copy. Other source images "
+                "stay in the same order."
             )
             check_row.addWidget(self._use_last_generated_cb, 0)
             check_row.addStretch(1)

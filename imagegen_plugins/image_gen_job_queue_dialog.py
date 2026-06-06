@@ -318,7 +318,8 @@ def build_job_queue_action_widget(
     refine_btn = QPushButton()
     refine_btn.setCheckable(True)
     refine_btn.setToolTip(
-        "Refinement (toggle): use each finished image as input for later copies"
+        "Refinement: replace the first source image with each new result "
+        "for later copies; other source images keep their order."
     )
     refine_btn.setStyleSheet(_series_refinement_button_stylesheet())
     refine_btn.setEnabled(controller.series_remaining_after_for_row(row_idx) > 0)
