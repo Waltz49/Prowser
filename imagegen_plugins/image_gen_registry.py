@@ -26,7 +26,7 @@ class ImageGenModelPlugin:
         pipeline_id: str,
         display_name: str,
         model_defaults: Optional[Dict[str, Any]] = None,
-        hf_model_id: str = "schnell",
+        hf_model_id: str = "",
         *,
         function: str = "create",
         model_comment: str = "",
@@ -60,9 +60,6 @@ class ImageGenModelPlugin:
         out = merge_defaults(self.pipeline_id, self.model_defaults, saved)
         if self.hf_model_id:
             out["hf_model_id"] = self.hf_model_id
-        mflux_name = (self.model_defaults or {}).get("mflux_model_name")
-        if mflux_name:
-            out["mflux_model_name"] = mflux_name
         return out
 
     def field_specs(self, saved: Optional[Dict[str, Any]] = None) -> List[FieldSpec]:

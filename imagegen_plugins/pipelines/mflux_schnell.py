@@ -15,7 +15,9 @@ from prowser_temp_files import prowser_mkstemp_path
 import time
 from typing import Any, Dict, Final, Optional, Tuple
 
+from imagegen_plugins.hf_model_ids import FLUX1_SCHNELL
 from imagegen_plugins.image_gen_pipeline_modes import MFLUX_FLOW_MATCH_MIN_STEPS
+from imagegen_plugins.imagegen_perf_log import PerfTimer
 from imagegen_plugins.pipelines.mflux_stepwise_progress import (
     atomic_copy2,
     cleanup_stepwise_dir,
@@ -99,11 +101,10 @@ def run_mflux_flux_schnell_generate(
     def _run_inprocess() -> None:
         from imagegen_plugins.mflux_flux1_session import generate_flux1
 
-        base_model = "schnell" if "/" in str(model) else None
         image = generate_flux1(
             model_name=str(model),
             quantize=q,
-            base_model=base_model,
+            base_model=None,
             lora_paths=lora_paths,
             lora_scales=lora_scales,
             prompt=prompt,
@@ -180,8 +181,6 @@ def _build_mflux_cli_args(
     lora_scales: list[float] | None = None,
 ) -> list[str]:
     args: list[str] = ["--model", str(model)]
-    if "/" in str(model):
-        args.extend(["--base-model", "schnell"])
     args.extend(
         [
             "-q",
@@ -269,7 +268,7 @@ def run_from_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     )
     guidance = max(0.0, min(10.0, float(payload.get("guidance_scale", 3.5))))
     quantize = int(payload.get("mflux_quantize", 3))
-    model = str(payload.get("hf_model_id") or "schnell")
+    model = str(payload.get("hf_model_id") or FLUX1_SCHNELL)
     low_ram = bool(payload.get("low_ram", False))
     output_path = str(payload["output_path"])
     lora_paths = payload.get("mflux_lora_paths")
@@ -312,8 +311,6 @@ def run_from_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
             lora_scales=lora_scales,
         )
         generation_time_seconds = time.perf_counter() - t0
-        from imagegen_plugins.imagegen_perf_log import PerfTimer
-
         with PerfTimer("save_output", pipeline="flux_schnell"):
             atomic_copy2(mflux_output_path, output_path)
         finalize_stepwise_progress(output_path, steps)

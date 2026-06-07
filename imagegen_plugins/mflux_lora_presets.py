@@ -238,29 +238,18 @@ def apply_lora_to_mflux_payload(
         raise ValueError(f"Unknown mflux LoRA preset: {preset_id}")
 
     from config import get_config
+    from imagegen_plugins.hf_model_ids import FLUX1_DEV, FLUX1_FILL_DEV
     from imagegen_plugins.lora_catalog import (
+        klein_lora_mismatch_message,
         lora_model_key_from_values,
         lora_probe_passed_for_model,
     )
 
     model_key = lora_model_key_from_values(dict(merged))
     if for_fill:
-        from imagegen_plugins.lora_host_registry import PROBE_FILL
-
-        model_key = model_key or PROBE_FILL
-    elif for_klein:
-        from imagegen_plugins.lora_catalog import klein_variant_from_values
-        from imagegen_plugins.lora_host_registry import PROBE_KLEIN_4B, PROBE_KLEIN_9B
-
-        variant = klein_variant_from_values(dict(merged))
-        if variant == "9b":
-            model_key = PROBE_KLEIN_9B
-        elif variant == "4b":
-            model_key = PROBE_KLEIN_4B
+        model_key = model_key or FLUX1_FILL_DEV
     elif not model_key:
-        from imagegen_plugins.lora_host_registry import PROBE_DEV
-
-        model_key = PROBE_DEV
+        model_key = FLUX1_DEV
 
     settings = get_config().load_settings()
     if model_key and not lora_probe_passed_for_model(
@@ -271,31 +260,26 @@ def apply_lora_to_mflux_payload(
             "Run Tools → Debug → Check LoRAs, or enable a passing LoRA in Settings → LoRA."
         )
 
-    if for_klein and entry.klein_variant:
-        from imagegen_plugins.lora_catalog import (
-            klein_lora_mismatch_message,
-            klein_variant_from_values,
-        )
-
-        active = klein_variant_from_values(dict(merged))
-        if active and entry.klein_variant != active:
+    if for_klein and entry.base_hf_model_id:
+        active = str(merged.get("hf_model_id") or "").strip()
+        if active and entry.base_hf_model_id != active:
             raise ValueError(klein_lora_mismatch_message(entry, active))
 
     path = resolve_lora_path(preset_id)
     merged["mflux_lora_paths"] = [path]
     merged["mflux_lora_scales"] = [entry.scale]
     if not for_fill and not for_klein:
-        required = (entry.mflux_model or "dev").strip().lower()
-        active = str(merged.get("hf_model_id") or "").strip().lower()
-        if required == "dev" and active not in ("", "dev"):
+        required = (entry.base_hf_model_id or FLUX1_DEV).strip()
+        active = str(merged.get("hf_model_id") or "").strip()
+        if required and active and required != active:
+            from imagegen_plugins.image_gen_model_availability import model_display_name
+
+            req_name = model_display_name("flux_schnell_mflux_play", required)
+            act_name = model_display_name("flux_schnell_mflux_play", active)
             raise ValueError(
-                f"LoRA «{entry.display_name}» requires FLUX.1 Dev. "
-                "Select the Dev model in the Create dialog, then choose this LoRA."
-            )
-        if required == "schnell" and active != "schnell":
-            raise ValueError(
-                f"LoRA «{entry.display_name}» requires FLUX.1 Schnell. "
-                "Select the Schnell model in the Create dialog, then choose this LoRA."
+                f"LoRA «{entry.display_name}» requires {req_name}. "
+                f"Select {req_name} in the Create dialog, then choose this LoRA "
+                f"(active model: {act_name})."
             )
         merged["steps"] = effective_steps_for_lora(
             int(merged.get("steps") or entry.min_steps),

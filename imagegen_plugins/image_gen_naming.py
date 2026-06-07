@@ -313,12 +313,20 @@ def apply_refinement_source_for_next_copy(
     if not output_path or not os.path.isfile(output_path):
         return out
     ap = os.path.normpath(os.path.abspath(output_path))
-    paths = resolve_source_image_paths(out)
+    multi = out.get("source_image_paths")
+    if isinstance(multi, list) and multi:
+        paths = [
+            os.path.normpath(os.path.abspath(str(raw or "")))
+            for raw in multi
+            if raw
+        ]
+    else:
+        paths = resolve_source_image_paths(out)
     if paths:
         paths[0] = ap
     else:
         paths = [ap]
-    out["source_image_path"] = paths[0]
+    out["source_image_path"] = ap
     out["source_image_paths"] = list(paths)
     return out
 
@@ -473,11 +481,11 @@ def parse_mflux_metadata_json(text: str) -> Optional[Dict[str, Any]]:
     return None
 
 
-def menu_label_for_mflux_model_id(
+def menu_label_for_hf_model_id(
     model_id: str,
     values: Optional[Dict[str, Any]] = None,
 ) -> str:
-    """Human-facing model label from mflux JSON ``model`` / ``model_config``."""
+    """Human-facing model label from generation metadata or hf_model_id."""
     model_id = str(model_id or "").strip()
     if not model_id or model_id.lower() == "none":
         return ""
@@ -505,7 +513,7 @@ def format_exif_comment_from_mflux_metadata(
     """Build Image Model / Prompt EXIF body from mflux JSON metadata."""
     values = dict(values or {})
     if not model_name:
-        model_name = menu_label_for_mflux_model_id(
+        model_name = menu_label_for_hf_model_id(
             str(meta.get("model_config") or meta.get("model") or ""),
             values,
         )

@@ -53,7 +53,6 @@ _LEGACY_MODELS_KEY = "models"
 # Not shared across models in a function dialog (come from plugin model_defaults).
 _PLUGIN_SPECIFIC_DIALOG_KEYS = frozenset(
     {
-        "mflux_model_name",
         "hf_model_id",
         "source_image_path",
         "source_image_paths",

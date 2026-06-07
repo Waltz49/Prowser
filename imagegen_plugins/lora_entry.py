@@ -7,6 +7,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
+from imagegen_plugins.hf_model_ids import FLUX1_DEV
+
 PAPER_CUTOUT_LORA_PATH = (
     Path.home()
     / ".cache"
@@ -45,9 +47,7 @@ class FluxLoraEntry:
     filename: str = ""
     scale: float = 1.0
     local_path: Optional[str] = None
-    mflux_model: str = "dev"
+    base_hf_model_id: str = FLUX1_DEV
     min_steps: int = LORA_MIN_STEPS
     # True = verified MFLUX; False = known incompatible; None = untested HF entry.
     mflux_compatible: Optional[bool] = None
-    # flux2_klein only: "4b" | "9b" — LoRA weights must match active Klein edit model.
-    klein_variant: Optional[str] = None

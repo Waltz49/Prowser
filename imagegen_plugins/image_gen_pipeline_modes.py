@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from imagegen_plugins.hf_model_ids import FLUX1_SCHNELL
 from imagegen_plugins.image_gen_fields import FieldSpec
 from imagegen_plugins.mflux_lora_presets import (
     coerce_lora_preset_id,
@@ -237,7 +238,6 @@ def merge_defaults(
         "copies": 1,
         "low_ram": False,
         "show_progressive_images": False,
-        "hf_model_id": "schnell",
         "mflux_lora": "none",
     }
     if mode.includes_output_dimensions:
@@ -274,7 +274,7 @@ def field_specs_for_pipeline(
     pipeline_id: str,
     values: Dict[str, Any],
     *,
-    plugin_hf_model_id: str = "schnell",
+    plugin_hf_model_id: str = FLUX1_SCHNELL,
     lora_host_id: Optional[str] = None,
 ) -> List[FieldSpec]:
     mode = get_pipeline(pipeline_id)
@@ -358,14 +358,11 @@ def field_specs_for_pipeline(
     if lora_host_id:
         from config import get_config
 
-        from imagegen_plugins.lora_catalog import klein_variant_from_values
-
         lora_choices = lora_choices_for_pipeline(
             pipeline_id,
             plugin_hf_model_id,
             get_config().load_settings(),
             lora_host_id=lora_host_id,
-            klein_variant=klein_variant_from_values(values),
         )
         if len(lora_choices) > 1:
             current_lora = coerce_lora_preset_id(values.get("mflux_lora", "none"))
@@ -532,15 +529,8 @@ def build_worker_payload(
             merged["source_image_path"] = source_paths[0]
     if pipeline_id == "mflux_flux2_klein_edit":
         from imagegen_plugins.image_gen_naming import resolve_source_image_paths
-        from imagegen_plugins.lora_catalog import klein_variant_from_model_name
         from imagegen_plugins.mflux_lora_presets import apply_lora_to_mflux_payload
 
-        if not merged.get("mflux_model_name"):
-            variant = klein_variant_from_model_name(hf_model_id)
-            if variant == "9b":
-                merged["mflux_model_name"] = "flux2-klein-9b"
-            elif variant == "4b":
-                merged["mflux_model_name"] = "flux2-klein-4b"
         apply_lora_to_mflux_payload(merged, for_fill=False, for_klein=True)
         source_paths = resolve_source_image_paths(merged)
         if source_paths:

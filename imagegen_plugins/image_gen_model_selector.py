@@ -163,12 +163,8 @@ def values_after_plugin_switch(
         "mflux_lora_paths",
         "mflux_lora_scales",
         "hf_model_id",
-        "mflux_model_name",
     ):
         out.pop(key, None)
-    defaults = getattr(new_plugin, "model_defaults", None) or {}
-    if defaults.get("mflux_model_name"):
-        out["mflux_model_name"] = defaults["mflux_model_name"]
     if new_plugin.hf_model_id:
         out["hf_model_id"] = new_plugin.hf_model_id
     return out

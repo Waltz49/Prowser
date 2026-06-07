@@ -21,12 +21,6 @@ if TYPE_CHECKING:
     from imagegen_plugins.image_gen_registry import ImageGenModelPlugin
 
 # Common MFLUX aliases -> Hugging Face repo id (avoid importing mflux in the GUI process).
-_MFLUX_REPO_ALIASES: dict[str, str] = {
-    "schnell": "black-forest-labs/FLUX.1-schnell",
-    "dev": "black-forest-labs/FLUX.1-dev",
-}
-
-# Subdirs that must contain weights in a cached FLUX.1 snapshot (matches mflux flux patterns).
 _FLUX_REQUIRED_WEIGHT_SUBDIRS = ("vae", "transformer", "text_encoder", "text_encoder_2")
 # FLUX.2 Klein layout (Qwen3 text encoder, no second TE).
 _FLUX2_KLEIN_WEIGHT_SUBDIRS = ("vae", "transformer", "text_encoder")
@@ -154,8 +148,6 @@ def ensure_hf_repo_downloaded(
 
 
 def _resolve_mflux_repo_id(hf_model_id: str) -> str:
-    if hf_model_id in _MFLUX_REPO_ALIASES:
-        return _MFLUX_REPO_ALIASES[hf_model_id]
     if "/" in hf_model_id and not hf_model_id.startswith(("./", "../", "~/")):
         return hf_model_id
     return hf_model_id

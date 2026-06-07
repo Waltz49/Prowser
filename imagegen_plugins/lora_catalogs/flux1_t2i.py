@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from typing import Dict
 
+from imagegen_plugins.hf_model_ids import FLUX1_DEV
 from imagegen_plugins.lora_catalogs._common import t2i_entry
 from imagegen_plugins.lora_entry import FluxLoraEntry, PAPER_CUTOUT_LORA_PATH
 
@@ -43,7 +44,7 @@ FLUX1_T2I_LORAS: Dict[str, FluxLoraEntry] = {
         display_name="Paper cutout (local)",
         local_path=str(PAPER_CUTOUT_LORA_PATH),
         scale=1.0,
-        mflux_model="dev",
+        base_hf_model_id=FLUX1_DEV,
         mflux_compatible=True,
     ),
     "flux_uncensored": t2i_entry(

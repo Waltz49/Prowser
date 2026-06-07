@@ -10,9 +10,9 @@ from PySide6.QtCore import QThread, Signal, Qt
 from PySide6.QtWidgets import QApplication, QLabel, QProgressDialog
 
 from config import get_config
+from imagegen_plugins.hf_model_ids import FLUX1_DEV, lora_model_display_name
 from imagegen_plugins.lora_catalog import (
     LORA_CATALOG,
-    LORA_MODEL_ABBREV,
     catalog_entries_for_settings,
     probe_models_for_lora_entry,
 )
@@ -48,7 +48,7 @@ def _progress_html(
     if phase == "download":
         line2 = f"Downloading / resolving weights for <b>{html.escape(lora_label)}</b>"
     else:
-        model_label = LORA_MODEL_ABBREV.get(model_key, model_key)
+        model_label = lora_model_display_name(model_key)
         line2 = (
             f"Testing <b>{html.escape(lora_label)}</b> on "
             f"<b>{html.escape(model_label)}</b>"
@@ -205,7 +205,7 @@ def run_check_loras_dialog(parent) -> None:
             model_key = (
                 sd._current_lora_model_key()
                 if hasattr(sd, "_current_lora_model_key")
-                else "dev"
+                else FLUX1_DEV
             )
             if hasattr(sd, "_lora_hidden_ids"):
                 sd._lora_hidden_ids = set(hidden_lora_ids_for_model(model_key, settings))

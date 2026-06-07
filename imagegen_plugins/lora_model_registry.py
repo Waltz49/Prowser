@@ -1,33 +1,31 @@
 #!/usr/bin/env python3
-"""Per-base-model LoRA settings (Schnell, Dev, Fill, Klein 4B/9B)."""
+"""Per-base-model LoRA settings (full Hugging Face model ids)."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Optional, Tuple
 
+from imagegen_plugins.hf_model_ids import (
+    FLUX1_DEV,
+    FLUX1_FILL_DEV,
+    FLUX1_SCHNELL,
+    FLUX2_KLEIN_4B,
+    FLUX2_KLEIN_9B,
+    LORA_PROBE_MODEL_ORDER,
+    lora_model_display_name,
+)
 from imagegen_plugins.lora_entry import FluxLoraEntry
 from imagegen_plugins.lora_host_registry import (
     HOST_FLUX1_FILL,
     HOST_FLUX1_T2I,
     HOST_FLUX2_KLEIN,
-    PROBE_DEV,
-    PROBE_FILL,
-    PROBE_KLEIN_4B,
-    PROBE_KLEIN_9B,
-    PROBE_SCHNELL,
 )
 
 if TYPE_CHECKING:
     from imagegen_plugins.image_gen_registry import ImageGenModelPlugin
 
-LORA_SETTINGS_MODEL_ORDER: Tuple[str, ...] = (
-    PROBE_SCHNELL,
-    PROBE_DEV,
-    PROBE_FILL,
-    PROBE_KLEIN_4B,
-    PROBE_KLEIN_9B,
-)
+LORA_SETTINGS_MODEL_ORDER: Tuple[str, ...] = LORA_PROBE_MODEL_ORDER
 
 
 @dataclass(frozen=True)
@@ -39,28 +37,28 @@ class LoraSettingsModel:
 
 LORA_SETTINGS_MODELS: Tuple[LoraSettingsModel, ...] = (
     LoraSettingsModel(
-        PROBE_SCHNELL,
-        "FLUX.1 Schnell",
-        "Create image dialog when Schnell MFLUX is selected",
+        FLUX1_SCHNELL,
+        lora_model_display_name(FLUX1_SCHNELL),
+        "Create image dialog when FLUX.1 Schnell is selected",
     ),
     LoraSettingsModel(
-        PROBE_DEV,
-        "FLUX.1 Dev",
-        "Create image dialog when Dev MFLUX is selected",
+        FLUX1_DEV,
+        lora_model_display_name(FLUX1_DEV),
+        "Create image dialog when FLUX.1 Dev is selected",
     ),
     LoraSettingsModel(
-        PROBE_FILL,
-        "FLUX.1 Fill",
+        FLUX1_FILL_DEV,
+        lora_model_display_name(FLUX1_FILL_DEV),
         "Expand and Infill dialogs",
     ),
     LoraSettingsModel(
-        PROBE_KLEIN_4B,
-        "FLUX.2 Klein 4B",
+        FLUX2_KLEIN_4B,
+        lora_model_display_name(FLUX2_KLEIN_4B),
         "Edit image dialog (4B model)",
     ),
     LoraSettingsModel(
-        PROBE_KLEIN_9B,
-        "FLUX.2 Klein 9B",
+        FLUX2_KLEIN_9B,
+        lora_model_display_name(FLUX2_KLEIN_9B),
         "Edit image dialog (9B model)",
     ),
 )
@@ -72,20 +70,11 @@ def lora_models_for_settings() -> Tuple[LoraSettingsModel, ...]:
 
 
 def lora_models_for_entry(entry: FluxLoraEntry) -> Tuple[str, ...]:
-    """Base model keys this LoRA is intended for (probe / settings keys)."""
-    if entry.host_id == HOST_FLUX1_T2I:
-        mm = (entry.mflux_model or "dev").strip().lower()
-        if mm == "schnell":
-            return (PROBE_SCHNELL,)
-        return (PROBE_DEV,)
+    """Base model keys this LoRA is intended for (full hf_model_id)."""
+    if entry.base_hf_model_id:
+        return (entry.base_hf_model_id,)
     if entry.host_id == HOST_FLUX1_FILL:
-        return (PROBE_FILL,)
-    if entry.host_id == HOST_FLUX2_KLEIN:
-        if entry.klein_variant == "4b":
-            return (PROBE_KLEIN_4B,)
-        if entry.klein_variant == "9b":
-            return (PROBE_KLEIN_9B,)
-        return (PROBE_KLEIN_4B, PROBE_KLEIN_9B)
+        return (FLUX1_FILL_DEV,)
     return ()
 
 
@@ -94,58 +83,21 @@ def entry_matches_lora_model(entry: FluxLoraEntry, model_key: str) -> bool:
 
 
 def lora_model_key_for_plugin(plugin: "ImageGenModelPlugin") -> Optional[str]:
-    host_id = getattr(plugin, "lora_host_id", None)
-    if host_id == HOST_FLUX1_T2I:
-        hf = (getattr(plugin, "hf_model_id", None) or "").strip().lower()
-        if hf == "schnell":
-            return PROBE_SCHNELL
-        return PROBE_DEV
-    if host_id == HOST_FLUX1_FILL:
-        return PROBE_FILL
-    if host_id == HOST_FLUX2_KLEIN:
-        from imagegen_plugins.lora_catalog import klein_variant_for_plugin
-
-        variant = klein_variant_for_plugin(plugin)
-        if variant == "9b":
-            return PROBE_KLEIN_9B
-        if variant == "4b":
-            return PROBE_KLEIN_4B
-        return None
-    return None
+    hf = (getattr(plugin, "hf_model_id", None) or "").strip()
+    return hf or None
 
 
 def lora_model_key_from_values(values: dict) -> Optional[str]:
-    from imagegen_plugins.lora_catalog import klein_variant_from_values
-    from imagegen_plugins.lora_host_registry import lora_host_for_pipeline
-
-    pipeline_id = str(values.get("pipeline_id") or "")
-    host_id = lora_host_for_pipeline(pipeline_id)
-    if host_id == HOST_FLUX1_T2I:
-        hf = str(
-            values.get("hf_model_id")
-            or values.get("mflux_model_name")
-            or ""
-        ).lower()
-        if hf == "schnell":
-            return PROBE_SCHNELL
-        return PROBE_DEV
-    if host_id == HOST_FLUX1_FILL:
-        return PROBE_FILL
-    if host_id == HOST_FLUX2_KLEIN:
-        variant = klein_variant_from_values(values)
-        if variant == "9b":
-            return PROBE_KLEIN_9B
-        if variant == "4b":
-            return PROBE_KLEIN_4B
-    return None
+    hf = str(values.get("hf_model_id") or "").strip()
+    return hf or None
 
 
 def host_id_for_lora_model(model_key: str) -> Optional[str]:
-    if model_key in (PROBE_SCHNELL, PROBE_DEV):
+    if model_key in (FLUX1_SCHNELL, FLUX1_DEV):
         return HOST_FLUX1_T2I
-    if model_key == PROBE_FILL:
+    if model_key == FLUX1_FILL_DEV:
         return HOST_FLUX1_FILL
-    if model_key in (PROBE_KLEIN_4B, PROBE_KLEIN_9B):
+    if model_key in (FLUX2_KLEIN_4B, FLUX2_KLEIN_9B):
         return HOST_FLUX2_KLEIN
     return None
 
@@ -153,7 +105,7 @@ def host_id_for_lora_model(model_key: str) -> Optional[str]:
 def legacy_host_id_to_model_key(host_id: str) -> str:
     """Map old Settings → LoRA host dropdown to a default model key."""
     if host_id == HOST_FLUX1_FILL:
-        return PROBE_FILL
+        return FLUX1_FILL_DEV
     if host_id == HOST_FLUX2_KLEIN:
-        return PROBE_KLEIN_4B
-    return PROBE_DEV
+        return FLUX2_KLEIN_4B
+    return FLUX1_DEV

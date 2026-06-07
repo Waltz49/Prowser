@@ -61,10 +61,9 @@ def apply_payload_model_fields_to_values(
     values: dict[str, Any], payload: dict[str, Any]
 ) -> None:
     """Persist the model identity the worker will run (display + dequeue)."""
-    for key in ("hf_model_id", "mflux_model_name"):
-        val = payload.get(key)
-        if val:
-            values[key] = val
+    hf = payload.get("hf_model_id")
+    if hf:
+        values["hf_model_id"] = hf
 
 
 def refresh_queued_job_status(job: QueuedGenerateJob) -> None:

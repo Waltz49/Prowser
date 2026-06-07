@@ -784,8 +784,8 @@ IMAGEGEN_DEFAULTS = {
         "last_function": "create",
         "lora_catalog": {
             "by_model": {
-                "schnell": {"enabled_ids": [], "hidden_ids": []},
-                "dev": {
+                "black-forest-labs/FLUX.1-schnell": {"enabled_ids": [], "hidden_ids": []},
+                "black-forest-labs/FLUX.1-dev": {
                     "enabled_ids": [
                         "mspaint1",
                         "super_realism",
@@ -795,9 +795,9 @@ IMAGEGEN_DEFAULTS = {
                     ],
                     "hidden_ids": [],
                 },
-                "fill": {"enabled_ids": [], "hidden_ids": []},
-                "klein_4b": {"enabled_ids": [], "hidden_ids": []},
-                "klein_9b": {"enabled_ids": [], "hidden_ids": []},
+                "black-forest-labs/FLUX.1-Fill-dev": {"enabled_ids": [], "hidden_ids": []},
+                "black-forest-labs/FLUX.2-klein-4B": {"enabled_ids": [], "hidden_ids": []},
+                "black-forest-labs/FLUX.2-klein-9B": {"enabled_ids": [], "hidden_ids": []},
             },
             "model_support": {},
         },

@@ -462,22 +462,12 @@ def _generation_model_id_for_status(
     plugin: ImageGenModelPlugin,
     effective: Dict[str, Any],
 ) -> str:
-    """Model id for status display — matches worker payload resolution."""
-    from imagegen_plugins.lora_catalog import klein_variant_from_model_name
-
-    pipeline_id = plugin.pipeline_id
-    if pipeline_id == "mflux_flux2_klein_edit":
-        mflux = str(effective.get("mflux_model_name") or "").strip()
-        if mflux:
-            return mflux
-        hf = str(effective.get("hf_model_id") or "").strip()
-        if hf and klein_variant_from_model_name(hf):
-            return hf
-        return str(plugin.hf_model_id or hf).strip()
-    raw = str(effective.get("hf_model_id") or plugin.hf_model_id or "").strip()
-    if pipeline_id == "flux_schnell_mflux_play" and raw in ("", "schnell"):
-        return str(plugin.hf_model_id or raw).strip()
-    return raw
+    """Model id for status display (full Hugging Face repo id)."""
+    raw = str(effective.get("hf_model_id") or "").strip()
+    plugin_id = str(getattr(plugin, "hf_model_id", "") or "").strip()
+    if raw and "/" in raw:
+        return raw
+    return plugin_id or raw
 
 
 def _collect_generation_status_fields(

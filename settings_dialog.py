@@ -4305,7 +4305,7 @@ class SettingsDialog(QDialog):
         """LoRA catalog tab: per base model dropdown, enable / install / hide."""
         from config import get_config
         from imagegen_plugins.lora_catalog_settings import hidden_lora_ids_for_model
-        from imagegen_plugins.lora_host_registry import PROBE_DEV
+        from imagegen_plugins.hf_model_ids import FLUX1_DEV
         from imagegen_plugins.lora_model_registry import lora_models_for_settings
 
         layout = QVBoxLayout(self.lora_settings_tab)
@@ -4329,7 +4329,7 @@ class SettingsDialog(QDialog):
         layout.addWidget(self._lora_intro_label)
 
         cfg_settings = get_config().load_settings()
-        self._lora_model_key: str = PROBE_DEV
+        self._lora_model_key: str = FLUX1_DEV
         self._lora_catalog_loaded = False
         self._lora_hidden_ids: set = set(
             hidden_lora_ids_for_model(self._lora_model_key, cfg_settings)
@@ -4372,7 +4372,8 @@ class SettingsDialog(QDialog):
             mk = self._lora_model_combo.currentData()
             if mk:
                 return str(mk)
-        return getattr(self, "_lora_model_key", "dev")
+        from imagegen_plugins.hf_model_ids import FLUX1_DEV
+        return getattr(self, "_lora_model_key", FLUX1_DEV)
 
     def _current_lora_host_id(self) -> str:
         """Legacy alias; prefer _current_lora_model_key."""

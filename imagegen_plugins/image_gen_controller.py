@@ -356,15 +356,19 @@ class ImageGenController(QObject):
                 payload["prepared_fill_image_path"] = base_path
                 self._expand_base_path = base_path
             if get_pipeline(plugin.pipeline_id).requires_source_image:
-                source_paths = source_paths_for_generation_exif(
-                    payload,
-                    extra_paths=source_paths_for_generation_exif(values),
-                )
-                if source_paths:
-                    self._pending_values["source_image_path"] = source_paths[0]
-                    self._pending_values["source_image_paths"] = list(source_paths)
-                    self._expand_source_path = source_paths[0]
-                    self._task_reference_paths = list(source_paths)
+                worker_source_paths = source_paths_for_generation_exif(payload)
+                canonical_source_paths = source_paths_for_generation_exif(values)
+                display_paths = worker_source_paths or canonical_source_paths
+                if canonical_source_paths:
+                    self._pending_values["source_image_path"] = (
+                        canonical_source_paths[0]
+                    )
+                    self._pending_values["source_image_paths"] = list(
+                        canonical_source_paths
+                    )
+                if display_paths:
+                    self._expand_source_path = display_paths[0]
+                    self._task_reference_paths = list(display_paths)
                 else:
                     self._expand_source_path = ""
                     self._task_reference_paths = []

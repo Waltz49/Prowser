@@ -21,7 +21,7 @@ def image_model_key(payload: Dict[str, Any]) -> tuple[Any, ...]:
     """Identity for whether the in-memory MFLUX weights match this payload."""
     pipeline_id = str(payload.get("pipeline_id") or "")
     quantize = int(payload.get("mflux_quantize", 0))
-    model = str(payload.get("mflux_model_name") or payload.get("hf_model_id") or "")
+    model = str(payload.get("hf_model_id") or "")
     lora_paths = payload.get("mflux_lora_paths") or []
     lora_scales = payload.get("mflux_lora_scales") or []
     if not isinstance(lora_paths, list):

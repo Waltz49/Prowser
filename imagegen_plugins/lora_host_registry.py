@@ -6,32 +6,18 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Dict, Tuple
 
+from imagegen_plugins.hf_model_ids import (
+    FLUX1_DEV,
+    FLUX1_FILL_DEV,
+    FLUX1_SCHNELL,
+    FLUX2_KLEIN_4B,
+    FLUX2_KLEIN_9B,
+    LORA_PROBE_MODEL_ORDER,
+)
+
 HOST_FLUX1_T2I = "flux1_t2i"
 HOST_FLUX1_FILL = "flux1_fill"
 HOST_FLUX2_KLEIN = "flux2_klein"
-
-# Probe keys used by compatibility checker and settings display suffixes.
-PROBE_SCHNELL = "schnell"
-PROBE_DEV = "dev"
-PROBE_FILL = "fill"
-PROBE_KLEIN_4B = "klein_4b"
-PROBE_KLEIN_9B = "klein_9b"
-
-LORA_PROBE_MODEL_ORDER: Tuple[str, ...] = (
-    PROBE_SCHNELL,
-    PROBE_DEV,
-    PROBE_FILL,
-    PROBE_KLEIN_4B,
-    PROBE_KLEIN_9B,
-)
-
-LORA_MODEL_ABBREV: Dict[str, str] = {
-    PROBE_SCHNELL: "Schnell",
-    PROBE_DEV: "Dev",
-    PROBE_FILL: "Fill",
-    PROBE_KLEIN_4B: "Klein 4B",
-    PROBE_KLEIN_9B: "Klein 9B",
-}
 
 
 @dataclass(frozen=True)
@@ -47,19 +33,19 @@ LORA_HOSTS: Dict[str, LoraHost] = {
         host_id=HOST_FLUX1_T2I,
         display_name="FLUX.1 Create (Schnell / Dev)",
         pipeline_ids=("flux_schnell_mflux_play",),
-        probe_targets=(PROBE_SCHNELL, PROBE_DEV),
+        probe_targets=(FLUX1_SCHNELL, FLUX1_DEV),
     ),
     HOST_FLUX1_FILL: LoraHost(
         host_id=HOST_FLUX1_FILL,
         display_name="FLUX.1 Fill (Expand / Infill)",
         pipeline_ids=("mflux_fill_expand", "mflux_fill_infill"),
-        probe_targets=(PROBE_FILL,),
+        probe_targets=(FLUX1_FILL_DEV,),
     ),
     HOST_FLUX2_KLEIN: LoraHost(
         host_id=HOST_FLUX2_KLEIN,
         display_name="FLUX.2 Klein (Edit)",
         pipeline_ids=("mflux_flux2_klein_edit",),
-        probe_targets=(PROBE_KLEIN_4B, PROBE_KLEIN_9B),
+        probe_targets=(FLUX2_KLEIN_4B, FLUX2_KLEIN_9B),
     ),
 }
 

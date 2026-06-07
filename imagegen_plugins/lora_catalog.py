@@ -33,11 +33,18 @@ from imagegen_plugins.lora_entry import (
     PAPER_CUTOUT_LORA_PATH,
     _ALT_CACHE,
 )
+from imagegen_plugins.hf_model_ids import (
+    FLUX1_DEV,
+    FLUX1_FILL_DEV,
+    FLUX1_SCHNELL,
+    FLUX2_KLEIN_4B,
+    FLUX2_KLEIN_9B,
+    LORA_PROBE_MODEL_ORDER,
+    lora_model_display_name,
+)
 from imagegen_plugins.lora_host_registry import (
     HOST_FLUX2_KLEIN,
     LORA_HOST_ORDER,
-    LORA_MODEL_ABBREV,
-    LORA_PROBE_MODEL_ORDER,
     get_lora_host,
     lora_hosts_for_settings,
 )
@@ -61,46 +68,15 @@ MFLUX_LORA_T2I_AND_FILL: Tuple[str, ...] = (
 )
 
 
-def klein_variant_from_model_name(model_name: str) -> Optional[str]:
-    """Return '4b' or '9b' from mflux_model_name / hf_model_id, else None."""
-    text = (model_name or "").strip().lower()
-    if "9b" in text:
-        return "9b"
-    if "4b" in text:
-        return "4b"
-    return None
+def klein_lora_mismatch_message(entry: FluxLoraEntry, active_hf_model_id: str) -> str:
+    from imagegen_plugins.image_gen_model_availability import model_display_name
 
-
-def klein_variant_for_plugin(plugin: "ImageGenModelPlugin") -> Optional[str]:
-    if getattr(plugin, "lora_host_id", None) != HOST_FLUX2_KLEIN:
-        return None
-    defaults = getattr(plugin, "model_defaults", None) or {}
-    name = str(defaults.get("mflux_model_name") or getattr(plugin, "hf_model_id", "") or "")
-    return klein_variant_from_model_name(name)
-
-
-def klein_variant_from_values(values: Dict[str, Any]) -> Optional[str]:
-    name = str(
-        values.get("mflux_model_name")
-        or values.get("hf_model_id")
-        or ""
-    )
-    return klein_variant_from_model_name(name)
-
-
-def entry_matches_klein_variant(entry: FluxLoraEntry, variant: Optional[str]) -> bool:
-    if not entry.klein_variant or not variant:
-        return True
-    return entry.klein_variant == variant
-
-
-def klein_lora_mismatch_message(entry: FluxLoraEntry, variant: str) -> str:
-    want = (entry.klein_variant or "?").upper()
-    have = variant.upper()
+    want = model_display_name("mflux_flux2_klein_edit", entry.base_hf_model_id)
+    have = model_display_name("mflux_flux2_klein_edit", active_hf_model_id)
     return (
-        f"LoRA «{entry.display_name}» is trained for FLUX.2 Klein {want} only. "
-        f"You are using Klein {have} edit — switch the model in the edit dialog "
-        f"or pick a {have} LoRA."
+        f"LoRA «{entry.display_name}» is trained for {want} only. "
+        f"You are using {have} — switch the model in the edit dialog "
+        f"or pick a LoRA for {have}."
     )
 
 
@@ -176,7 +152,7 @@ def format_lora_model_support_suffix(supported_models: Tuple[str, ...]) -> str:
     if not supported_models:
         return ""
     labels = [
-        LORA_MODEL_ABBREV[m]
+        lora_model_display_name(m)
         for m in LORA_PROBE_MODEL_ORDER
         if m in supported_models
     ]
@@ -224,19 +200,8 @@ def lora_settings_display_name(
 
 
 def probe_models_for_lora_entry(entry: FluxLoraEntry) -> Tuple[str, ...]:
-    """Probe keys for Check LoRAs (per host; Klein uses entry.klein_variant)."""
-    from imagegen_plugins.lora_host_registry import PROBE_KLEIN_4B, PROBE_KLEIN_9B
-
-    host = get_lora_host(entry.host_id)
-    if host is None:
-        return ()
-    if entry.host_id == HOST_FLUX2_KLEIN:
-        if entry.klein_variant == "4b":
-            return (PROBE_KLEIN_4B,)
-        if entry.klein_variant == "9b":
-            return (PROBE_KLEIN_9B,)
-        return (PROBE_KLEIN_4B, PROBE_KLEIN_9B)
-    return host.probe_targets
+    """Probe keys for Check LoRAs (full hf_model_id per base model)."""
+    return lora_models_for_entry(entry)
 
 
 def deleted_lora_ids(settings: Optional[Dict[str, Any]] = None) -> FrozenSet[str]:
@@ -294,13 +259,11 @@ def lora_visible_for_run(
     model_key: str,
     settings: Optional[Dict[str, Any]] = None,
     host_id: Optional[str] = None,
-    klein_variant: Optional[str] = None,
 ) -> bool:
+    _ = host_id
     if entry.mflux_compatible is False:
         return False
     if not entry_matches_lora_model(entry, model_key):
-        return False
-    if host_id == HOST_FLUX2_KLEIN and not entry_matches_klein_variant(entry, klein_variant):
         return False
     if not lora_probe_passed_for_model(lora_id, model_key, settings):
         return False
@@ -320,7 +283,6 @@ def lora_choices_for_plugin(
     model_key = lora_model_key_for_plugin(plugin)
     if not host_id or not model_key:
         return (("None", "none"),)
-    kv = klein_variant_for_plugin(plugin)
     choices: List[Tuple[str, str]] = [("None", "none")]
     for entry in entries_for_host(host_id):
         if lora_visible_for_run(
@@ -329,7 +291,6 @@ def lora_choices_for_plugin(
             model_key=model_key,
             host_id=host_id,
             settings=settings,
-            klein_variant=kv,
         ):
             choices.append((entry.display_name, entry.lora_id))
     return tuple(choices)
@@ -341,7 +302,6 @@ def lora_choices_for_pipeline(
     settings: Optional[Dict[str, Any]] = None,
     *,
     lora_host_id: Optional[str] = None,
-    klein_variant: Optional[str] = None,
 ) -> Tuple[Tuple[str, str], ...]:
     """Back-compat: resolve host from pipeline or explicit lora_host_id."""
     from imagegen_plugins.lora_host_registry import lora_host_for_pipeline
@@ -349,17 +309,10 @@ def lora_choices_for_pipeline(
     host_id = lora_host_id or lora_host_for_pipeline(pipeline_id)
     if not host_id:
         return (("None", "none"),)
-    if host_id == HOST_FLUX2_KLEIN and klein_variant is None:
-        klein_variant = klein_variant_from_model_name(plugin_hf_model_id)
     values = {
         "hf_model_id": plugin_hf_model_id,
         "pipeline_id": pipeline_id,
-        "mflux_model_name": plugin_hf_model_id,
     }
-    if klein_variant:
-        values["mflux_model_name"] = (
-            "flux2-klein-9b" if klein_variant == "9b" else "flux2-klein-4b"
-        )
     model_key = lora_model_key_from_values(values)
     if not model_key:
         return (("None", "none"),)
@@ -371,7 +324,6 @@ def lora_choices_for_pipeline(
             model_key=model_key,
             host_id=host_id,
             settings=settings,
-            klein_variant=klein_variant,
         ):
             choices.append((entry.display_name, entry.lora_id))
     return tuple(choices)
@@ -379,14 +331,12 @@ def lora_choices_for_pipeline(
 
 def resolve_plugin_base_model(hf_model_id: str, pipeline_id: str) -> str:
     """Deprecated: use lora_host_id on plugins. Kept for legacy callers."""
-    hf = (hf_model_id or "").strip().lower()
-    if pipeline_id in MFLUX_LORA_FILL_PIPELINES or "fill" in hf:
-        return "fill"
-    if hf in ("schnell",):
-        return "schnell"
-    if hf in ("dev",):
-        return "dev"
-    return "dev"
+    hf = (hf_model_id or "").strip()
+    if pipeline_id in MFLUX_LORA_FILL_PIPELINES or FLUX1_FILL_DEV in hf:
+        return FLUX1_FILL_DEV
+    if FLUX1_SCHNELL in hf.lower() or hf == FLUX1_SCHNELL:
+        return FLUX1_SCHNELL
+    return FLUX1_DEV
 
 
 def lora_entry_min_steps(lora_id: str) -> Optional[int]:

@@ -15,7 +15,11 @@ from imagegen_plugins.lora_entry import (
     PAPER_CUTOUT_LORA_PATH,
     _ALT_CACHE,
 )
-from imagegen_plugins.lora_host_registry import (
-    LORA_MODEL_ABBREV,
+from imagegen_plugins.hf_model_ids import (
+    LORA_MODEL_DISPLAY_NAMES,
     LORA_PROBE_MODEL_ORDER,
+    lora_model_display_name,
 )
+
+# Back-compat alias.
+LORA_MODEL_ABBREV = LORA_MODEL_DISPLAY_NAMES

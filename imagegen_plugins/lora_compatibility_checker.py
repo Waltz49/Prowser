@@ -9,6 +9,13 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
+from imagegen_plugins.hf_model_ids import (
+    FLUX1_DEV,
+    FLUX1_FILL_DEV,
+    FLUX1_SCHNELL,
+    FLUX2_KLEIN_4B,
+    FLUX2_KLEIN_9B,
+)
 from imagegen_plugins.lora_catalog import (
     FluxLoraEntry,
     catalog_entries_for_settings,
@@ -16,8 +23,6 @@ from imagegen_plugins.lora_catalog import (
 )
 from imagegen_plugins.lora_host_registry import (
     HOST_FLUX2_KLEIN,
-    PROBE_KLEIN_4B,
-    PROBE_KLEIN_9B,
     lora_hosts_for_settings,
 )
 
@@ -193,7 +198,7 @@ def _probe_fill(
 
 def _probe_klein_edit(
     *,
-    model_name: str,
+    hf_model_id: str,
     lora_path: str,
     lora_scale: float,
     cancel_check: Callable[[], bool],
@@ -214,7 +219,7 @@ def _probe_klein_edit(
         except OSError:
             pass
         image = generate_flux2_klein_edit(
-            model_name=model_name,
+            model_name=hf_model_id,
             quantize=4,
             lora_paths=[lora_path],
             lora_scales=[lora_scale],
@@ -250,36 +255,36 @@ def probe_lora_on_model(
     cancel_check: Callable[[], bool],
 ) -> bool:
     """Return True if a minimal generation succeeds with this LoRA on model_key."""
-    if model_key == "schnell":
+    if model_key == FLUX1_SCHNELL:
         return _probe_t2i(
-            hf_model="schnell",
+            hf_model=FLUX1_SCHNELL,
             lora_path=lora_path,
             lora_scale=lora_scale,
             cancel_check=cancel_check,
         )
-    if model_key == "dev":
+    if model_key == FLUX1_DEV:
         return _probe_t2i(
-            hf_model="dev",
+            hf_model=FLUX1_DEV,
             lora_path=lora_path,
             lora_scale=lora_scale,
             cancel_check=cancel_check,
         )
-    if model_key == "fill":
+    if model_key == FLUX1_FILL_DEV:
         return _probe_fill(
             lora_path=lora_path,
             lora_scale=lora_scale,
             cancel_check=cancel_check,
         )
-    if model_key == PROBE_KLEIN_4B:
+    if model_key == FLUX2_KLEIN_4B:
         return _probe_klein_edit(
-            model_name="flux2-klein-4b",
+            hf_model_id=FLUX2_KLEIN_4B,
             lora_path=lora_path,
             lora_scale=lora_scale,
             cancel_check=cancel_check,
         )
-    if model_key == PROBE_KLEIN_9B:
+    if model_key == FLUX2_KLEIN_9B:
         return _probe_klein_edit(
-            model_name="flux2-klein-9b",
+            hf_model_id=FLUX2_KLEIN_9B,
             lora_path=lora_path,
             lora_scale=lora_scale,
             cancel_check=cancel_check,
