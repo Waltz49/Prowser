@@ -966,7 +966,7 @@ def apply_image_gen_dialog_shell(
         | Qt.WindowCloseButtonHint
         | Qt.WindowStaysOnTopHint
     )
-    dlg.setWindowModality(Qt.WindowModality.ApplicationModal)
+    dlg.setWindowModality(Qt.WindowModality.NonModal)
     dlg.setStyleSheet(dlg.styleSheet() + _text_input_stylesheet())
 
 

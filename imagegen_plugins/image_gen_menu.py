@@ -8,7 +8,7 @@ from typing import Any, Dict, Optional
 
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QAction, QKeySequence
-from PySide6.QtWidgets import QMenu, QWidgetAction
+from PySide6.QtWidgets import QDialog, QMenu, QWidgetAction
 
 from imagegen_plugins import (
     create_menu_plugins,
@@ -77,6 +77,75 @@ def _is_paint_infill_job_values(values: Dict[str, Any]) -> bool:
     return ext.lower() in _PAINT_INFILL_SOURCE_EXTS
 
 
+def _raise_imagegen_function_dialog(dlg: QDialog) -> None:
+    dlg.show()
+    dlg.raise_()
+    dlg.activateWindow()
+
+
+def _start_generation_from_function_dialog(
+    main_window,
+    controller,
+    function: str,
+    dlg,
+) -> None:
+    values = dlg.accepted_values()
+    plugin = dlg.accepted_plugin()
+    if not values or plugin is None:
+        return
+    if not confirm_model_download_if_needed(plugin, main_window):
+        return
+    set_active_plugin_for_function(main_window, function, plugin)
+    QTimer.singleShot(
+        0,
+        lambda: controller.start_generation(plugin, values),
+    )
+
+
+def _on_imagegen_function_dialog_finished(
+    main_window,
+    controller,
+    function: str,
+    dlg,
+    result: int,
+) -> None:
+    if getattr(main_window, "_imagegen_function_dialog", None) is dlg:
+        main_window._imagegen_function_dialog = None
+    main_window._imagegen_dialog_open = False
+    if result != QDialog.DialogCode.Accepted:
+        return
+    if isinstance(dlg, ImageGenInfillPaintDialog):
+        return
+    _start_generation_from_function_dialog(main_window, controller, function, dlg)
+
+
+def _show_imagegen_function_dialog(
+    main_window,
+    controller,
+    function: str,
+    dlg: QDialog,
+    *,
+    keep_open_on_generate: bool = False,
+) -> None:
+    """Show one function dialog at a time (non-modal)."""
+    existing = getattr(main_window, "_imagegen_function_dialog", None)
+    if existing is not None and existing.isVisible():
+        if keep_open_on_generate and type(existing) is type(dlg):
+            dlg.deleteLater()
+            _raise_imagegen_function_dialog(existing)
+            return
+        existing.close()
+
+    main_window._imagegen_function_dialog = dlg
+    main_window._imagegen_dialog_open = True
+    dlg.finished.connect(
+        lambda result, d=dlg: _on_imagegen_function_dialog_finished(
+            main_window, controller, function, d, result
+        )
+    )
+    _raise_imagegen_function_dialog(dlg)
+
+
 def _warn_missing_job_paths(main_window, missing: list[str]) -> None:
     if not missing:
         return
@@ -96,9 +165,6 @@ def open_imagegen_dialog_from_job(
     values: Dict[str, Any],
 ) -> None:
     """Reopen the function dialog prefilled from a queue job (active or pending)."""
-    if getattr(main_window, "_imagegen_dialog_open", False):
-        return
-
     controller = get_imagegen_controller(main_window)
     job_values = dict(values)
     function = plugin.function
@@ -107,114 +173,103 @@ def open_imagegen_dialog_from_job(
 
     missing: list[str] = []
 
-    main_window._imagegen_dialog_open = True
-    try:
-        if function == FUNCTION_EDIT:
-            source_paths = resolve_source_image_paths(job_values)
-            source_paths = [p for p in source_paths if p and os.path.isfile(p)]
-            for raw in resolve_source_image_paths(job_values):
-                if raw and not os.path.isfile(raw):
-                    missing.append(raw)
-            if not source_paths:
-                show_styled_warning(
-                    main_window,
-                    "Edit",
-                    "Source image files for this job are no longer available.",
-                )
-                return
-            plugins = plugins_for_function(function)
-            dlg = ImageGenEditDialog(
-                plugins,
-                function,
-                source_paths[0],
+    if function == FUNCTION_EDIT:
+        source_paths = resolve_source_image_paths(job_values)
+        source_paths = [p for p in source_paths if p and os.path.isfile(p)]
+        for raw in resolve_source_image_paths(job_values):
+            if raw and not os.path.isfile(raw):
+                missing.append(raw)
+        if not source_paths:
+            show_styled_warning(
                 main_window,
-                source_paths=source_paths,
-                initial_plugin_id=initial_plugin_id,
-                initial_prompt=initial_prompt,
-                initial_values=job_values,
+                "Edit",
+                "Source image files for this job are no longer available.",
             )
-        elif function == FUNCTION_EXPAND:
-            source_path = str(job_values.get("source_image_path") or "").strip()
-            if not source_path or not os.path.isfile(source_path):
-                missing.append(source_path or "(source image)")
-                show_styled_warning(
-                    main_window,
-                    "Expand",
-                    "Source image for this job is no longer available.",
-                )
-                return
-            plugins = plugins_for_function(function)
-            dlg = ImageGenExpandDialog(
-                plugins,
-                function,
-                source_path,
-                main_window,
-                initial_plugin_id=initial_plugin_id,
-                initial_prompt=initial_prompt,
-                initial_values=job_values,
-            )
-        elif function == FUNCTION_INFILL:
-            if _is_paint_infill_job_values(job_values):
-                source_path = str(job_values.get("pixelmator_doc_path") or "").strip()
-                mask_path = str(job_values.get("pixelmator_mask_path") or "")
-                if mask_path and not os.path.isfile(mask_path):
-                    missing.append(mask_path)
-                plugins = plugins_for_function(FUNCTION_INFILL_PAINT)
-                dlg = ImageGenInfillPaintDialog(
-                    plugins,
-                    source_path,
-                    controller,
-                    main_window,
-                    main_window,
-                    initial_plugin_id=initial_plugin_id,
-                    initial_prompt=initial_prompt,
-                    initial_values=job_values,
-                )
-                _warn_missing_job_paths(main_window, missing)
-                dlg.exec()
-                return
-            base_path = str(job_values.get("pixelmator_base_path") or "")
-            mask_path = str(job_values.get("pixelmator_mask_path") or "")
-            for path in (base_path, mask_path):
-                if path and not os.path.isfile(path):
-                    missing.append(path)
-            plugins = plugins_for_function(function)
-            dlg = ImageGenInfillDialog(
-                plugins,
-                function,
-                main_window,
-                initial_plugin_id=initial_plugin_id,
-                initial_prompt=initial_prompt,
-                initial_values=job_values,
-            )
-        else:
-            plugins = plugins_for_function(function)
-            dlg = ImageGenDialog(
-                plugins,
-                function,
-                main_window,
-                initial_plugin_id=initial_plugin_id,
-                initial_prompt=initial_prompt,
-                initial_values=job_values,
-            )
-
-        _warn_missing_job_paths(main_window, missing)
-
-        if dlg.exec() != ImageGenDialog.DialogCode.Accepted:
             return
-        out_values = dlg.accepted_values()
-        out_plugin = dlg.accepted_plugin()
-        if not out_values or out_plugin is None:
-            return
-        if not confirm_model_download_if_needed(out_plugin, main_window):
-            return
-        set_active_plugin_for_function(main_window, function, out_plugin)
-        QTimer.singleShot(
-            0,
-            lambda: controller.start_generation(out_plugin, out_values),
+        plugins = plugins_for_function(function)
+        dlg = ImageGenEditDialog(
+            plugins,
+            function,
+            source_paths[0],
+            main_window,
+            source_paths=source_paths,
+            initial_plugin_id=initial_plugin_id,
+            initial_prompt=initial_prompt,
+            initial_values=job_values,
         )
-    finally:
-        main_window._imagegen_dialog_open = False
+    elif function == FUNCTION_EXPAND:
+        source_path = str(job_values.get("source_image_path") or "").strip()
+        if not source_path or not os.path.isfile(source_path):
+            missing.append(source_path or "(source image)")
+            show_styled_warning(
+                main_window,
+                "Expand",
+                "Source image for this job is no longer available.",
+            )
+            return
+        plugins = plugins_for_function(function)
+        dlg = ImageGenExpandDialog(
+            plugins,
+            function,
+            source_path,
+            main_window,
+            initial_plugin_id=initial_plugin_id,
+            initial_prompt=initial_prompt,
+            initial_values=job_values,
+        )
+    elif function == FUNCTION_INFILL:
+        if _is_paint_infill_job_values(job_values):
+            source_path = str(job_values.get("pixelmator_doc_path") or "").strip()
+            mask_path = str(job_values.get("pixelmator_mask_path") or "")
+            if mask_path and not os.path.isfile(mask_path):
+                missing.append(mask_path)
+            plugins = plugins_for_function(FUNCTION_INFILL_PAINT)
+            dlg = ImageGenInfillPaintDialog(
+                plugins,
+                source_path,
+                controller,
+                main_window,
+                main_window,
+                initial_plugin_id=initial_plugin_id,
+                initial_prompt=initial_prompt,
+                initial_values=job_values,
+            )
+            _warn_missing_job_paths(main_window, missing)
+            _show_imagegen_function_dialog(
+                main_window,
+                controller,
+                FUNCTION_INFILL_PAINT,
+                dlg,
+                keep_open_on_generate=True,
+            )
+            return
+        base_path = str(job_values.get("pixelmator_base_path") or "")
+        mask_path = str(job_values.get("pixelmator_mask_path") or "")
+        for path in (base_path, mask_path):
+            if path and not os.path.isfile(path):
+                missing.append(path)
+        plugins = plugins_for_function(function)
+        dlg = ImageGenInfillDialog(
+            plugins,
+            function,
+            main_window,
+            initial_plugin_id=initial_plugin_id,
+            initial_prompt=initial_prompt,
+            initial_values=job_values,
+        )
+    else:
+        plugins = plugins_for_function(function)
+        dlg = ImageGenDialog(
+            plugins,
+            function,
+            main_window,
+            initial_plugin_id=initial_plugin_id,
+            initial_prompt=initial_prompt,
+            initial_values=job_values,
+        )
+
+    _warn_missing_job_paths(main_window, missing)
+    _show_imagegen_function_dialog(main_window, controller, function, dlg)
 
 
 def _menu_function_actions():
@@ -347,9 +402,6 @@ def _open_dialog_for_function(
     initial_prompt: Optional[str] = None,
     auto_import_available: bool = False,
 ) -> None:
-    if getattr(main_window, "_imagegen_dialog_open", False):
-        return
-
     plugins = plugins_for_function(function)
     if not plugins:
         show_styled_information(
@@ -370,108 +422,99 @@ def _open_dialog_for_function(
 
     save_last_function(function)
     _sync_function_menu_shortcuts(main_window)
-    main_window._imagegen_dialog_open = True
-    try:
-        if function == FUNCTION_INFILL_PAINT:
-            source_path = active_image_path_for_infill(main_window)
-            if not source_path:
-                show_styled_warning(
-                    main_window,
-                    "Infill",
-                    "Select an image in browse view, or select a single thumbnail, "
-                    "before using infill by painting.",
-                )
-                return
-            dlg = ImageGenInfillPaintDialog(
-                plugins,
-                source_path,
-                controller,
-                main_window,
-                main_window,
-                initial_prompt=initial_prompt,
-            )
-            dlg.exec()
-            return
-        if function == FUNCTION_INFILL:
-            dlg = ImageGenInfillDialog(
-                plugins,
-                function,
-                main_window,
-                initial_prompt=initial_prompt,
-            )
-        elif function == FUNCTION_EXPAND:
-            source_path = active_image_path_for_expand(main_window)
-            if not source_path:
-                show_styled_warning(
-                    main_window,
-                    "Expand",
-                    "Select an image in browse view, or select a single thumbnail, "
-                    "before using expand.",
-                )
-                return
-            dlg = ImageGenExpandDialog(
-                plugins,
-                function,
-                source_path,
-                main_window,
-                initial_prompt=initial_prompt,
-            )
-        elif function == FUNCTION_EDIT:
-            if (
-                main_window.current_view_mode == "thumbnail"
-                and hasattr(main_window, "selection_manager")
-                and main_window.selection_manager
-                and getattr(main_window, "selected_files", None)
-                and len(main_window.selection_manager.get_selected_files())
-                > MAX_EDIT_SOURCE_IMAGES
-            ):
-                show_styled_warning(
-                    main_window,
-                    "Edit",
-                    f"Select at most {MAX_EDIT_SOURCE_IMAGES} images before using edit.",
-                )
-                return
-            source_paths = active_image_paths_for_edit(main_window)
-            if not source_paths:
-                show_styled_warning(
-                    main_window,
-                    "Edit",
-                    "Select an image in browse view, or select up to "
-                    f"{MAX_EDIT_SOURCE_IMAGES} thumbnails, before using edit.",
-                )
-                return
-            dlg = ImageGenEditDialog(
-                plugins,
-                function,
-                source_paths[0],
-                main_window,
-                source_paths=source_paths,
-                initial_prompt=initial_prompt,
-                auto_import_available=auto_import_available,
-            )
-        else:
-            dlg = ImageGenDialog(
-                plugins,
-                function,
-                main_window,
-                initial_prompt=initial_prompt,
-            )
 
-        if dlg.exec() != ImageGenDialog.DialogCode.Accepted:
+    if function == FUNCTION_INFILL_PAINT:
+        source_path = active_image_path_for_infill(main_window)
+        if not source_path:
+            show_styled_warning(
+                main_window,
+                "Infill",
+                "Select an image in browse view, or select a single thumbnail, "
+                "before using infill by painting.",
+            )
             return
-        values = dlg.accepted_values()
-        plugin = dlg.accepted_plugin()
-        if not values or plugin is None:
-            return
-        if not confirm_model_download_if_needed(plugin, main_window):
-            return
-        set_active_plugin_for_function(main_window, function, plugin)
-        QTimer.singleShot(
-            0,
-            lambda: controller.start_generation(plugin, values),
+        dlg = ImageGenInfillPaintDialog(
+            plugins,
+            source_path,
+            controller,
+            main_window,
+            main_window,
+            initial_prompt=initial_prompt,
         )
-    finally:
-        main_window._imagegen_dialog_open = False
+        _show_imagegen_function_dialog(
+            main_window,
+            controller,
+            function,
+            dlg,
+            keep_open_on_generate=True,
+        )
+        return
+    if function == FUNCTION_INFILL:
+        dlg = ImageGenInfillDialog(
+            plugins,
+            function,
+            main_window,
+            initial_prompt=initial_prompt,
+        )
+    elif function == FUNCTION_EXPAND:
+        source_path = active_image_path_for_expand(main_window)
+        if not source_path:
+            show_styled_warning(
+                main_window,
+                "Expand",
+                "Select an image in browse view, or select a single thumbnail, "
+                "before using expand.",
+            )
+            return
+        dlg = ImageGenExpandDialog(
+            plugins,
+            function,
+            source_path,
+            main_window,
+            initial_prompt=initial_prompt,
+        )
+    elif function == FUNCTION_EDIT:
+        if (
+            main_window.current_view_mode == "thumbnail"
+            and hasattr(main_window, "selection_manager")
+            and main_window.selection_manager
+            and getattr(main_window, "selected_files", None)
+            and len(main_window.selection_manager.get_selected_files())
+            > MAX_EDIT_SOURCE_IMAGES
+        ):
+            show_styled_warning(
+                main_window,
+                "Edit",
+                f"Select at most {MAX_EDIT_SOURCE_IMAGES} images before using edit.",
+            )
+            return
+        source_paths = active_image_paths_for_edit(main_window)
+        if not source_paths:
+            show_styled_warning(
+                main_window,
+                "Edit",
+                "Select an image in browse view, or select up to "
+                f"{MAX_EDIT_SOURCE_IMAGES} thumbnails, before using edit.",
+            )
+            return
+        dlg = ImageGenEditDialog(
+            plugins,
+            function,
+            source_paths[0],
+            main_window,
+            source_paths=source_paths,
+            initial_prompt=initial_prompt,
+            auto_import_available=auto_import_available,
+        )
+    else:
+        dlg = ImageGenDialog(
+            plugins,
+            function,
+            main_window,
+            initial_prompt=initial_prompt,
+        )
+
+    _show_imagegen_function_dialog(main_window, controller, function, dlg)
 
 
 def _schedule_open_dialog_for_function(

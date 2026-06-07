@@ -181,7 +181,9 @@ def _merge_external_edit_source_paths(
             insert_index += 1
         new_paths = new_paths[:max_total]
 
-    if added:
+    # Only show 'added' message if there are other warnings (i.e., there were problems)
+    has_problems = bool(skipped_capacity or invalid_names or duplicate_names)
+    if added and has_problems:
         warnings.append(
             f"Added {len(added)} image{'s' if len(added) != 1 else ''}."
         )
