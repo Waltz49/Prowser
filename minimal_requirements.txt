@@ -1,0 +1,32 @@
+# Minimal requirements.txt generated from actual code imports and current venv versions
+# This file contains only packages actually imported and includes exact versions from your environment.
+# Generated automatically - do not edit manually
+
+lmstudio
+numpy
+piexif
+pillow
+exifread
+rawpy
+pillow_heif
+psutil
+pyobjc-core
+pyobjc-framework-Cocoa
+pyobjc-framework-CoreServices
+pyobjc-framework-LaunchServices
+PySide6
+torch
+torchvision
+transformers
+face_recognition
+mflux
+diffusers
+accelerate
+sdnq
+requests
+
+# Note: This is a minimal set based on current code and venv packages.
+# exifread + rawpy: Canon CR2 (RAW) support (cr2_raw_loader, exif_utils).
+# mflux: Create menu local FLUX Schnell image generation (MLX; large install).
+# diffusers + accelerate: Create menu local SANA Sprint 0.6B (PyTorch/diffusers).
+# sdnq: Z-Image Turbo 8-bit quantized weights (PyTorch/diffusers).

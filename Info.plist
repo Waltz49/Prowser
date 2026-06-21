@@ -1,0 +1,166 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- App Metadata -->
+    <key>CFBundleName</key>
+    <string>Prowser</string>
+    <key>CFBundleDisplayName</key>
+    <string>Prowser</string>
+    <key>CFBundleIdentifier</key>
+    <string>com.prowser.app</string>
+    <key>CFBundleVersion</key>
+    <string>1.0.0</string>
+    <key>CFBundleShortVersionString</key>
+    <string>1.0.0</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleSignature</key>
+    <string>????</string>
+    <key>CFBundleExecutable</key>
+    <string>prowser_launcher</string>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon.icns</string>
+    
+    <!-- System Requirements -->
+    <key>LSMinimumSystemVersion</key>
+    <string>10.15</string>
+    <key>LSArchitecturePriority</key>
+    <array>
+        <string>x86_64</string>
+        <string>arm64</string>
+    </array>
+    
+    <!-- Platform -->
+    <key>CFBundleSupportedPlatforms</key>
+    <array>
+        <string>MacOSX</string>
+    </array>
+    
+    <!-- App Category -->
+    <key>LSApplicationCategoryType</key>
+    <string>public.app-category.graphics-design</string>
+    
+    <!-- Document Types -->
+    <key>CFBundleDocumentTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleTypeName</key>
+            <string>Image Document</string>
+            <key>CFBundleTypeExtensions</key>
+            <array>
+                <string>jpg</string>
+                <string>jpeg</string>
+                <string>png</string>
+                <string>gif</string>
+                <string>bmp</string>
+                <string>tiff</string>
+                <string>tif</string>
+                <string>webp</string>
+                <string>cr2</string>
+            </array>
+            <key>CFBundleTypeIconFile</key>
+            <string>document.icns</string>
+            <key>CFBundleTypeRole</key>
+            <string>Viewer</string>
+            <key>CFBundleTypeOSTypes</key>
+            <array>
+                <string>JPEG</string>
+                <string>PNGf</string>
+                <string>GIFf</string>
+                <string>BMPf</string>
+                <string>TIFF</string>
+                <string>8BPS</string>
+            </array>
+            <key>LSItemContentTypes</key>
+            <array>
+                <string>public.jpeg</string>
+                <string>public.png</string>
+                <string>com.compuserve.gif</string>
+                <string>com.microsoft.bmp</string>
+                <string>public.tiff</string>
+                <string>com.google.webp</string>
+                <string>public.camera-raw-image</string>
+            </array>
+        </dict>
+    </array>
+    
+    <!-- UTExportedTypeDeclarations -->
+    <key>UTExportedTypeDeclarations</key>
+    <array>
+        <dict>
+            <key>UTTypeIdentifier</key>
+            <string>com.prowser.image</string>
+            <key>UTTypeDescription</key>
+            <string>Prowser Image Document</string>
+            <key>UTTypeConformsTo</key>
+            <array>
+                <string>public.image</string>
+                <string>public.data</string>
+            </array>
+            <key>UTTypeTagSpecification</key>
+            <dict>
+                <key>public.filename-extension</key>
+                <array>
+                    <string>jpg</string>
+                    <string>jpeg</string>
+                    <string>png</string>
+                    <string>gif</string>
+                    <string>bmp</string>
+                    <string>tiff</string>
+                    <string>tif</string>
+                    <string>webp</string>
+                </array>
+                <key>public.mime-type</key>
+                <array>
+                    <string>image/jpeg</string>
+                    <string>image/png</string>
+                    <string>image/gif</string>
+                    <string>image/bmp</string>
+                    <string>image/tiff</string>
+                    <string>image/webp</string>
+                </array>
+            </dict>
+        </dict>
+    </array>
+    
+    <!-- Launch Services -->
+    <key>LSUIElement</key>
+    <false/>
+    <key>LSBackgroundOnly</key>
+    <false/>
+    <key>LSMultipleInstancesProhibited</key>
+    <false/>
+    
+    <!-- Disable automatic menu item injection -->
+    <key>NSSupportsAutomaticTermination</key>
+    <true/>
+    <key>NSSupportsSuddenTermination</key>
+    <true/>
+    
+    <!-- Security and Permissions -->
+    <key>NSAppleEventsUsageDescription</key>
+    <string>Prowser needs to access files to display images.</string>
+    
+    <!-- High DPI Support -->
+    <key>NSHighResolutionCapable</key>
+    <true/>
+    
+    <!-- App Transport Security -->
+    <key>NSAppTransportSecurity</key>
+    <dict>
+        <key>NSAllowsArbitraryLoads</key>
+        <false/>
+    </dict>
+    
+    <!-- Info.plist version -->
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+    
+    <!-- Development Team (for code signing) -->
+    <!-- Uncomment and set your team ID when code signing
+    <key>DEVELOPMENT_TEAM</key>
+    <string>YOUR_TEAM_ID</string>
+    -->
+</dict>
+</plist> 

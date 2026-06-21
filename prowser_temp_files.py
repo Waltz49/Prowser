@@ -1,0 +1,196 @@
+#!/usr/bin/env python3
+"""Resolve and create Prowser temporary work directories from settings."""
+
+from __future__ import annotations
+
+import getpass
+import os
+import tempfile
+import threading
+from typing import Optional
+
+_CACHE_UNSET = object()
+_cache_lock = threading.Lock()
+_cached_raw: object = _CACHE_UNSET
+_cached_resolved: Optional[str] = None
+_verified_dirs: set[str] = set()
+
+
+class TemporaryFilesDirError(OSError):
+    """Raised when the configured temporary files directory cannot be created or used."""
+
+
+def invalidate_temporary_files_directory_cache() -> None:
+    """Clear cached resolved path (call after settings change)."""
+    global _cached_raw, _cached_resolved
+    with _cache_lock:
+        _cached_raw = _CACHE_UNSET
+        _cached_resolved = None
+        _verified_dirs.clear()
+
+
+def default_temporary_files_directory(user_id: Optional[str] = None) -> str:
+    uid = user_id or getpass.getuser()
+    return os.path.abspath(f"/tmp/prowser_{uid}")
+
+
+def _normalize_path(path: str) -> str:
+    return os.path.abspath(os.path.expanduser(path))
+
+
+def _path_from_raw(raw: object, user_id: str) -> str:
+    if raw and str(raw).strip():
+        return _normalize_path(str(raw).strip())
+    return default_temporary_files_directory(user_id)
+
+
+def resolve_temporary_files_directory(settings: Optional[dict] = None) -> str:
+    """Configured temp work dir, or default /tmp/prowser_{user}/ when unset."""
+    global _cached_raw, _cached_resolved
+
+    if settings is not None:
+        from config import get_config
+
+        return _path_from_raw(
+            settings.get("temporary_files_directory"),
+            get_config().user_id,
+        )
+
+    from config import get_config
+
+    config = get_config()
+    loaded = config.load_settings()
+    raw = loaded.get("temporary_files_directory")
+    with _cache_lock:
+        if _cached_raw == raw and _cached_resolved is not None:
+            return _cached_resolved
+
+    path = _path_from_raw(raw, config.user_id)
+    with _cache_lock:
+        _cached_raw = raw
+        _cached_resolved = path
+    return path
+
+
+def _verify_writable_dir(path: str) -> None:
+    if os.path.isfile(path):
+        raise TemporaryFilesDirError(
+            f"Temporary files path is a file, not a directory: {path}"
+        )
+    if not os.path.isdir(path):
+        raise TemporaryFilesDirError(
+            f"Temporary files directory does not exist: {path}"
+        )
+    probe = os.path.join(path, f".prowser_write_test_{os.getpid()}")
+    try:
+        fd = os.open(probe, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+    except FileExistsError:
+        return
+    except PermissionError as exc:
+        raise TemporaryFilesDirError(
+            f"Cannot write to temporary files directory (permission denied): {path}"
+        ) from exc
+    except OSError as exc:
+        raise TemporaryFilesDirError(
+            f"Cannot write to temporary files directory: {path} ({exc})"
+        ) from exc
+    try:
+        os.close(fd)
+        os.unlink(probe)
+    except OSError:
+        try:
+            os.close(fd)
+        except OSError:
+            pass
+        try:
+            os.unlink(probe)
+        except OSError:
+            pass
+
+
+def _prepare_dir(path: str) -> str:
+    """Create path if needed and verify writable once per process per path."""
+    with _cache_lock:
+        if path in _verified_dirs:
+            return path
+    try:
+        os.makedirs(path, mode=0o700, exist_ok=True)
+    except PermissionError as exc:
+        raise TemporaryFilesDirError(
+            f"Cannot create temporary files directory (permission denied): {path}"
+        ) from exc
+    except OSError as exc:
+        if not os.path.isdir(path):
+            raise TemporaryFilesDirError(
+                f"Cannot create temporary files directory: {path} ({exc})"
+            ) from exc
+    _verify_writable_dir(path)
+    with _cache_lock:
+        _verified_dirs.add(path)
+    return path
+
+
+def ensure_temporary_files_directory(settings: Optional[dict] = None) -> str:
+    """mkdir -p the temp work directory once per process step; raise on permission errors."""
+    return _prepare_dir(resolve_temporary_files_directory(settings))
+
+
+def validate_temporary_files_directory_for_settings(
+    raw: Optional[str],
+    user_id: Optional[str] = None,
+) -> Optional[str]:
+    """Return a user-facing error message, or None when the path is usable."""
+    uid = user_id or getpass.getuser()
+    try:
+        path = _path_from_raw(raw, uid)
+        if os.path.exists(path) and not os.path.isdir(path):
+            return f"Temporary files path is not a directory: {path}"
+        os.makedirs(path, mode=0o700, exist_ok=True)
+        _verify_writable_dir(path)
+        return None
+    except TemporaryFilesDirError as exc:
+        return str(exc)
+    except OSError as exc:
+        return f"Cannot use temporary files directory: {exc}"
+
+
+def prowser_mkstemp_path(prefix: str = "", suffix: str = "") -> str:
+    """Create a private temp file under the configured Prowser temp directory."""
+    temp_dir = ensure_temporary_files_directory()
+    try:
+        fd, path = tempfile.mkstemp(prefix=prefix, suffix=suffix, dir=temp_dir)
+    except PermissionError as exc:
+        raise TemporaryFilesDirError(
+            f"Cannot create temporary file (permission denied): {temp_dir}"
+        ) from exc
+    except OSError as exc:
+        raise TemporaryFilesDirError(
+            f"Cannot create temporary file in {temp_dir}: {exc}"
+        ) from exc
+    os.close(fd)
+    try:
+        os.chmod(path, 0o600)
+    except OSError:
+        pass
+    return path
+
+
+def prowser_mkdtemp(prefix: str = "") -> str:
+    """Create a private temp directory under the configured Prowser temp directory."""
+    temp_dir = ensure_temporary_files_directory()
+    try:
+        return tempfile.mkdtemp(prefix=prefix, dir=temp_dir)
+    except PermissionError as exc:
+        raise TemporaryFilesDirError(
+            f"Cannot create temporary directory (permission denied): {temp_dir}"
+        ) from exc
+    except OSError as exc:
+        raise TemporaryFilesDirError(
+            f"Cannot create temporary directory in {temp_dir}: {exc}"
+        ) from exc
+
+
+def prowser_temp_subdir(name: str) -> str:
+    """Return (and create) a named subdirectory under the configured temp directory."""
+    base = ensure_temporary_files_directory()
+    return _prepare_dir(os.path.join(base, name))

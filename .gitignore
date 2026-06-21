@@ -1,0 +1,86 @@
+# Ignore Python cache
+.cache/
+.DS_Store
+.git-orig/
+.prsort
+.vscode/
+__pycache__/
+build/
+dist/
+*.backup
+*.bak
+*.heic
+*.heif
+*.jpeg
+*.jpg
+*.pdf
+*.png
+!assets/*.png
+!background.png
+*.pxd
+*.pyc
+*.spec
+block_test.py
+debug*
+generate*
+known bugs
+prowser.entitlements
+pyinstaller_dependencies.py
+pyinstaller_directives.json
+test*
+!tests/
+!tests/**
+*.fix
+*.cmdhfix
+venv/
+venv_image_browser/
+venv_pyinstaller/
+.pyinstaller_reuse_flag
+.pyinstaller_face_models/
+.pyinstaller_whisper_models/
+defsize.py
+background.png.good
+assets/padlock copy.png
+Untitled.txt
+profile.stats
+ROKU Control.icns
+
+# Web / hosting (not native app)
+prowser.php
+
+# Dev-only utilities
+offsite.sh
+create_sample_images.py
+fast_test.py
+jit_test.py
+send_one_file.py
+random_images_launcher.py
+register-prowser
+replace_main_with_multigen.sh
+scripts/
+
+# Backup / dead fragments
+*.fix
+*.cmdhfix
+imagegen_plugins/image_gen_worker_launch.py
+
+# Internal developer notes
+BACKGROUND_CLIP_EXTRACTION.md
+EXTRACTION_TRANSFER_VIA_MD5.md
+FILE_DATA_MODEL_MIGRATION.md
+GIL_DEADLOCK_FIX.md
+GIL_SLEEP_EXPLANATION.md
+GIT_RESET_MAIN.md
+LOCKING.md
+SEGFALT_FIX_DESCRIPTION.md
+TIMER_ANALYSIS.md
+keyboard_hierarchy.md
+
+# Editor
+.cursorignore
+
+# Unused assets
+background.png.black
+assets/engraved-button.png
+hfmodels.py
+.cursor/rules/build-files-validity.mdc

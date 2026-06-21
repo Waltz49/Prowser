@@ -1,0 +1,634 @@
+#!/usr/bin/env python3
+"""Image-gen settings in ~/.prowser/data/settings.json (per dialog/function)."""
+
+from __future__ import annotations
+
+import threading
+from typing import Any, Callable, Dict, Optional, Tuple
+
+from config import get_config
+
+# Serialize imagegen settings writes (model params, LoRA catalog, active plugin, …).
+_imagegen_settings_lock = threading.Lock()
+
+
+def _ensure_imagegen_dict(settings: dict) -> dict:
+    """Ensure settings['imagegen'] is a dict without dropping existing keys (e.g. lora_catalog)."""
+    imagegen = settings.get("imagegen")
+    if not isinstance(imagegen, dict):
+        imagegen = {}
+        settings["imagegen"] = imagegen
+    return imagegen
+
+
+def _mutate_imagegen_settings(mutator: Callable[[dict], None]) -> None:
+    """Load settings, mutate imagegen under lock, save (avoids lost LoRA catalog updates)."""
+    import copy
+    import shutil
+
+    config = get_config()
+    with _imagegen_settings_lock:
+        settings = config.load_settings()
+        imagegen = _ensure_imagegen_dict(settings)
+        mutator(imagegen)
+        settings_path = config.settings_file
+        if settings_path.exists():
+            try:
+                backup = settings_path.with_suffix(".json.pre_imagegen_write")
+                shutil.copy2(settings_path, backup)
+            except OSError:
+                pass
+        config.save_settings(copy.deepcopy(settings))
+
+
+def _normalize_plugin_id(plugin_id: str) -> str:
+    if plugin_id == "flux_fill_infil":
+        return "flux_fill_infill"
+    return plugin_id
+
+
+_DIALOGS_KEY = "dialogs"
+_LEGACY_MODELS_KEY = "models"
+
+# Not shared across models in a function dialog (come from plugin model_defaults).
+_PLUGIN_SPECIFIC_DIALOG_KEYS = frozenset(
+    {
+        "hf_model_id",
+        "source_image_path",
+        "source_image_paths",
+    }
+)
+
+# Shared across all models in a function dialog (e.g. create).
+_SHARED_FUNCTION_KEYS = frozenset({"prompt"})
+
+# Global image-gen prefs (not per function, model, or dialog field values).
+_GLOBAL_DIALOG_PREF_KEYS = frozenset({"pass_image_to_ai_with_prompt"})
+_PASS_IMAGE_TO_AI_KEY = "pass_image_to_ai_with_prompt"
+
+
+def _sanitize_dialog_values(values: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        k: v
+        for k, v in dict(values).items()
+        if k not in _PLUGIN_SPECIFIC_DIALOG_KEYS
+        and k not in _GLOBAL_DIALOG_PREF_KEYS
+    }
+
+
+def _shared_function_values(values: Dict[str, Any]) -> Dict[str, Any]:
+    return {k: values[k] for k in _SHARED_FUNCTION_KEYS if k in values}
+
+
+def _per_plugin_dialog_values(values: Dict[str, Any]) -> Dict[str, Any]:
+    return {k: v for k, v in values.items() if k not in _SHARED_FUNCTION_KEYS}
+
+
+def _merge_prompt_from_shared(
+    shared: Dict[str, Any], per_plugin: Dict[str, Any]
+) -> Optional[str]:
+    shared_p = (shared.get("prompt") or "").strip()
+    if shared_p:
+        return shared["prompt"]
+    per = (per_plugin.get("prompt") or "").strip()
+    if per:
+        return per_plugin["prompt"]
+    return None
+
+
+def _legacy_settings_for_function(function: str) -> Dict[str, Any]:
+    """Merge legacy per-plugin settings into one function-level dict (shared prompt)."""
+    from imagegen_plugins import plugins_for_function
+
+    merged: Dict[str, Any] = {}
+    for plugin in plugins_for_function(function):
+        legacy = _sanitize_dialog_values(load_model_settings(plugin.plugin_id))
+        if not legacy:
+            continue
+        prompt = (legacy.get("prompt") or "").strip()
+        if prompt:
+            merged["prompt"] = legacy["prompt"]
+        for key, value in legacy.items():
+            if key == "prompt":
+                continue
+            merged.setdefault(key, value)
+    return merged
+
+
+def _merge_shared_prompt_from_legacy(
+    saved: Dict[str, Any],
+    function: str,
+    *,
+    fallback_plugin_id: Optional[str],
+) -> Dict[str, Any]:
+    if (saved.get("prompt") or "").strip():
+        return saved
+    legacy = _legacy_settings_for_function(function)
+    prompt = (legacy.get("prompt") or "").strip()
+    if not prompt and fallback_plugin_id:
+        single = _sanitize_dialog_values(load_model_settings(fallback_plugin_id))
+        prompt = (single.get("prompt") or "").strip()
+    if prompt:
+        return {**saved, "prompt": prompt}
+    return saved
+
+
+def load_dialog_settings(
+    function: str,
+    *,
+    fallback_plugin_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Saved field values for a function dialog (create, edit, expand, …)."""
+    settings = get_config().load_settings()
+    imagegen = settings.get("imagegen") or {}
+    dialogs = imagegen.get(_DIALOGS_KEY) or {}
+    saved = dict(dialogs.get(function) or {})
+    if not saved:
+        saved = _legacy_settings_for_function(function)
+        if not saved and fallback_plugin_id:
+            saved = _sanitize_dialog_values(load_model_settings(fallback_plugin_id))
+    else:
+        saved = _merge_shared_prompt_from_legacy(
+            saved, function, fallback_plugin_id=fallback_plugin_id
+        )
+    return _sanitize_dialog_values(saved)
+
+
+def load_plugin_dialog_settings(function: str, plugin_id: str) -> Dict[str, Any]:
+    """Per-plugin field values merged with function-level shared keys (prompt)."""
+    plugin_id = _normalize_plugin_id(plugin_id)
+    shared = load_dialog_settings(function, fallback_plugin_id=plugin_id)
+    per_plugin = _sanitize_dialog_values(load_model_settings(plugin_id))
+
+    if per_plugin:
+        out = dict(per_plugin)
+    elif shared:
+        out = dict(shared)
+    else:
+        out = {}
+
+    prompt = _merge_prompt_from_shared(shared, per_plugin)
+    if prompt is not None:
+        out["prompt"] = prompt
+    return _sanitize_dialog_values(out)
+
+
+def save_plugin_dialog_settings(
+    function: str,
+    plugin_id: str,
+    values: Dict[str, Any],
+    *,
+    active_plugin_id: Optional[str] = None,
+) -> None:
+    """Persist model-specific settings per plugin; prompt stays function-level."""
+    plugin_id = _normalize_plugin_id(plugin_id)
+    sanitized = _sanitize_dialog_values(dict(values))
+
+    def mutate(imagegen: dict) -> None:
+        from imagegen_plugins.image_gen_active_model import (
+            apply_active_plugin_to_imagegen,
+        )
+
+        dialogs = imagegen.get(_DIALOGS_KEY)
+        if not isinstance(dialogs, dict):
+            dialogs = {}
+            imagegen[_DIALOGS_KEY] = dialogs
+        prev_shared = dict(dialogs.get(function) or {})
+        prev_shared.update(_shared_function_values(sanitized))
+        dialogs[function] = prev_shared
+
+        models = imagegen.get(_LEGACY_MODELS_KEY)
+        if not isinstance(models, dict):
+            models = {}
+            imagegen[_LEGACY_MODELS_KEY] = models
+        models[plugin_id] = _per_plugin_dialog_values(sanitized)
+
+        aid = active_plugin_id or plugin_id
+        apply_active_plugin_to_imagegen(imagegen, function, aid)
+
+    _mutate_imagegen_settings(mutate)
+
+
+def switch_plugin_persisted_settings(
+    function: str,
+    outgoing_plugin_id: str,
+    outgoing_values: Dict[str, Any],
+    incoming_plugin_id: str,
+    *,
+    active_plugin_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Save outgoing plugin state; return persisted settings for the incoming plugin."""
+    save_plugin_dialog_settings(
+        function,
+        outgoing_plugin_id,
+        outgoing_values,
+        active_plugin_id=active_plugin_id or incoming_plugin_id,
+    )
+    return load_plugin_dialog_settings(function, incoming_plugin_id)
+
+
+def save_dialog_settings(
+    function: str,
+    values: Dict[str, Any],
+    *,
+    active_plugin_id: Optional[str] = None,
+) -> None:
+    values = _sanitize_dialog_values(values)
+
+    def mutate(imagegen: dict) -> None:
+        dialogs = imagegen.get(_DIALOGS_KEY)
+        if not isinstance(dialogs, dict):
+            dialogs = {}
+            imagegen[_DIALOGS_KEY] = dialogs
+        dialogs[function] = values
+        if active_plugin_id is not None:
+            from imagegen_plugins.image_gen_active_model import (
+                apply_active_plugin_to_imagegen,
+            )
+
+            apply_active_plugin_to_imagegen(imagegen, function, active_plugin_id)
+
+    _mutate_imagegen_settings(mutate)
+
+
+def save_dialog_sessions_batch(
+    sessions: Dict[str, Tuple[Dict[str, Any], Optional[str]]],
+) -> None:
+    """Persist multiple function dialog values (+ optional plugin ids) in one write."""
+    if not sessions:
+        return
+
+    cleaned: Dict[str, Tuple[Dict[str, Any], Optional[str]]] = {}
+    for function, (values, plugin_id) in sessions.items():
+        cleaned[function] = (_sanitize_dialog_values(values), plugin_id)
+
+    def mutate(imagegen: dict) -> None:
+        from imagegen_plugins.image_gen_active_model import (
+            apply_active_plugin_to_imagegen,
+        )
+
+        dialogs = imagegen.get(_DIALOGS_KEY)
+        if not isinstance(dialogs, dict):
+            dialogs = {}
+            imagegen[_DIALOGS_KEY] = dialogs
+        models = imagegen.get(_LEGACY_MODELS_KEY)
+        if not isinstance(models, dict):
+            models = {}
+            imagegen[_LEGACY_MODELS_KEY] = models
+        for function, (values, plugin_id) in cleaned.items():
+            prev_shared = dict(dialogs.get(function) or {})
+            prev_shared.update(_shared_function_values(values))
+            dialogs[function] = prev_shared
+            if plugin_id is not None:
+                models[_normalize_plugin_id(plugin_id)] = _per_plugin_dialog_values(
+                    values
+                )
+                apply_active_plugin_to_imagegen(imagegen, function, plugin_id)
+
+    _mutate_imagegen_settings(mutate)
+
+
+def load_model_settings(plugin_id: str) -> Dict[str, Any]:
+    """Per-plugin dialog field values (steps, LoRA, dimensions, …)."""
+    plugin_id = _normalize_plugin_id(plugin_id)
+    settings = get_config().load_settings()
+    imagegen = settings.get("imagegen") or {}
+    models = imagegen.get(_LEGACY_MODELS_KEY) or {}
+    saved = dict(models.get(plugin_id) or {})
+    if not saved and plugin_id == "flux_fill_infill":
+        saved = dict(models.get("flux_fill_infil") or {})
+    return saved
+
+
+def save_model_settings(plugin_id: str, values: Dict[str, Any]) -> None:
+    """Per-plugin dialog field values — prefer :func:`save_plugin_dialog_settings`."""
+    plugin_id = _normalize_plugin_id(plugin_id)
+    values = _sanitize_dialog_values(values)
+
+    def mutate(imagegen: dict) -> None:
+        models = imagegen.get(_LEGACY_MODELS_KEY)
+        if not isinstance(models, dict):
+            models = {}
+            imagegen[_LEGACY_MODELS_KEY] = models
+        models[plugin_id] = values
+
+    _mutate_imagegen_settings(mutate)
+
+
+def load_imagegen_dialog_geometry_hex() -> Optional[str]:
+    """Saved image-generation dialog geometry (hex QByteArray), shared by all types."""
+    settings = get_config().load_settings()
+    imagegen = settings.get("imagegen") or {}
+    geom = imagegen.get("dialog_geometry")
+    if isinstance(geom, str) and geom:
+        return geom
+    geoms = imagegen.get("dialog_geometries")
+    if isinstance(geoms, dict):
+        for value in geoms.values():
+            if isinstance(value, str) and value:
+                return value
+    legacy_paint = imagegen.get("infill_paint_dialog_geometry")
+    return legacy_paint if isinstance(legacy_paint, str) and legacy_paint else None
+
+
+def save_imagegen_dialog_geometry_hex(geom_hex: str) -> None:
+    def mutate(imagegen: dict) -> None:
+        imagegen["dialog_geometry"] = geom_hex
+
+    _mutate_imagegen_settings(mutate)
+
+
+def load_close_dialog_on_generate() -> bool:
+    """Whether the unified image-gen dialog closes after a successful generate."""
+    settings = get_config().load_settings()
+    imagegen = settings.get("imagegen") or {}
+    return bool(imagegen.get("close_dialog_on_generate"))
+
+
+def save_close_dialog_on_generate(enabled: bool) -> None:
+    def mutate(imagegen: dict) -> None:
+        imagegen["close_dialog_on_generate"] = bool(enabled)
+
+    _mutate_imagegen_settings(mutate)
+
+
+def _legacy_pass_image_to_ai_from_imagegen(imagegen: dict) -> Optional[bool]:
+    dialogs = imagegen.get(_DIALOGS_KEY) or {}
+    for func_saved in dialogs.values():
+        if isinstance(func_saved, dict) and _PASS_IMAGE_TO_AI_KEY in func_saved:
+            return bool(func_saved[_PASS_IMAGE_TO_AI_KEY])
+    models = imagegen.get(_LEGACY_MODELS_KEY) or {}
+    for model_saved in models.values():
+        if isinstance(model_saved, dict) and _PASS_IMAGE_TO_AI_KEY in model_saved:
+            return bool(model_saved[_PASS_IMAGE_TO_AI_KEY])
+    return None
+
+
+def _strip_legacy_pass_image_to_ai_from_imagegen(imagegen: dict) -> None:
+    dialogs = imagegen.get(_DIALOGS_KEY)
+    if isinstance(dialogs, dict):
+        for func_saved in dialogs.values():
+            if isinstance(func_saved, dict):
+                func_saved.pop(_PASS_IMAGE_TO_AI_KEY, None)
+    models = imagegen.get(_LEGACY_MODELS_KEY)
+    if isinstance(models, dict):
+        for model_saved in models.values():
+            if isinstance(model_saved, dict):
+                model_saved.pop(_PASS_IMAGE_TO_AI_KEY, None)
+
+
+def load_pass_image_to_ai_with_prompt() -> bool:
+    """Whether AI prompt refinement should include the source image (all gen dialogs)."""
+    settings = get_config().load_settings()
+    imagegen = settings.get("imagegen") or {}
+    if _PASS_IMAGE_TO_AI_KEY in imagegen:
+        return bool(imagegen[_PASS_IMAGE_TO_AI_KEY])
+    legacy = _legacy_pass_image_to_ai_from_imagegen(imagegen)
+    if legacy is not None:
+        save_pass_image_to_ai_with_prompt(legacy)
+        return legacy
+    return False
+
+
+def save_pass_image_to_ai_with_prompt(enabled: bool) -> None:
+    def mutate(imagegen: dict) -> None:
+        imagegen[_PASS_IMAGE_TO_AI_KEY] = bool(enabled)
+        _strip_legacy_pass_image_to_ai_from_imagegen(imagegen)
+
+    _mutate_imagegen_settings(mutate)
+
+
+def reset_all_gen_dialog_settings() -> None:
+    """Clear persisted field values for all image-gen function dialogs (create, edit, …).
+
+    Active model choices, dialog geometry, LoRA catalog, and other non-field prefs are kept.
+    """
+    from imagegen_plugins.image_gen_active_model import (
+        FUNCTION_INFILL,
+        FUNCTION_INFILL_PAINT,
+        IMAGEGEN_FUNCTIONS,
+    )
+
+    persist_functions = set()
+    for function in IMAGEGEN_FUNCTIONS:
+        if function == FUNCTION_INFILL_PAINT:
+            persist_functions.add(FUNCTION_INFILL)
+        else:
+            persist_functions.add(function)
+
+    def mutate(imagegen: dict) -> None:
+        dialogs = imagegen.get(_DIALOGS_KEY)
+        if isinstance(dialogs, dict):
+            for function in persist_functions:
+                dialogs.pop(function, None)
+
+        models = imagegen.get(_LEGACY_MODELS_KEY)
+        if isinstance(models, dict):
+            models.clear()
+
+    _mutate_imagegen_settings(mutate)
+
+
+def load_job_queue_geometry_hex() -> Optional[str]:
+    """Saved job queue dialog geometry (hex QByteArray), if any."""
+    settings = get_config().load_settings()
+    imagegen = settings.get("imagegen") or {}
+    geom = imagegen.get("job_queue_geometry")
+    return geom if isinstance(geom, str) and geom else None
+
+
+def save_job_queue_geometry_hex(geom_hex: str) -> None:
+    def mutate(imagegen: dict) -> None:
+        imagegen["job_queue_geometry"] = geom_hex
+
+    _mutate_imagegen_settings(mutate)
+
+
+def load_infill_paint_dialog_geometry_hex() -> Optional[str]:
+    """Deprecated alias — infill paint shares dialog_geometry with other image-gen dialogs."""
+    return load_imagegen_dialog_geometry_hex()
+
+
+def save_infill_paint_dialog_geometry_hex(geom_hex: str) -> None:
+    """Deprecated alias — infill paint shares dialog_geometry with other image-gen dialogs."""
+    save_imagegen_dialog_geometry_hex(geom_hex)
+
+
+def load_lora_catalog_enabled_ids(host_id: str = "flux1_t2i") -> list:
+    from imagegen_plugins.lora_catalog_settings import enabled_lora_ids_for_host
+
+    return list(enabled_lora_ids_for_host(host_id))
+
+
+def load_lora_catalog_hidden_ids(host_id: str) -> list:
+    from imagegen_plugins.lora_catalog_settings import hidden_lora_ids_for_host
+
+    return sorted(hidden_lora_ids_for_host(host_id))
+
+
+def load_lora_catalog_deleted_ids() -> list:
+    """All hidden LoRA ids (any host). Back-compat name."""
+    from imagegen_plugins.lora_catalog import deleted_lora_ids
+
+    return sorted(deleted_lora_ids(get_config().load_settings()))
+
+
+def save_lora_catalog_enabled_ids(enabled_ids: list, *, host_id: str = "flux1_t2i") -> None:
+    save_lora_catalog_state(host_id=host_id, enabled_ids=enabled_ids)
+
+
+def load_lora_catalog_model_support() -> dict:
+    from imagegen_plugins.lora_catalog import lora_model_support
+
+    return {
+        lid: list(models)
+        for lid, models in lora_model_support(get_config().load_settings()).items()
+    }
+
+
+def save_lora_catalog_state(
+    *,
+    host_id: Optional[str] = None,
+    model_id: Optional[str] = None,
+    enabled_ids: Optional[list] = None,
+    hidden_ids: Optional[list] = None,
+    deleted_ids: Optional[list] = None,
+    by_host: Optional[Dict[str, Dict[str, list]]] = None,
+    by_model: Optional[Dict[str, Dict[str, list]]] = None,
+    model_support: Optional[dict] = None,
+) -> None:
+    from imagegen_plugins.lora_catalog import LORA_CATALOG
+    from imagegen_plugins.lora_catalog_settings import migrate_lora_catalog
+    from imagegen_plugins.lora_host_registry import LORA_PROBE_MODEL_ORDER
+    from imagegen_plugins.lora_model_registry import entry_matches_lora_model
+
+    hidden = hidden_ids if hidden_ids is not None else deleted_ids
+
+    def mutate(imagegen: dict) -> None:
+        lc = imagegen.get("lora_catalog")
+        if not isinstance(lc, dict):
+            lc = {}
+            imagegen["lora_catalog"] = lc
+        lc = migrate_lora_catalog(lc)
+
+        if by_host is not None:
+            bh = dict(lc.get("by_host") or {})
+            for hid, slice_ in by_host.items():
+                if not isinstance(slice_, dict):
+                    continue
+                prev = dict(bh.get(hid) or {"enabled_ids": [], "hidden_ids": []})
+                if "enabled_ids" in slice_:
+                    prev["enabled_ids"] = [
+                        str(x)
+                        for x in slice_["enabled_ids"]
+                        if str(x) in LORA_CATALOG and LORA_CATALOG[str(x)].host_id == hid
+                    ]
+                if "hidden_ids" in slice_:
+                    prev["hidden_ids"] = [
+                        str(x)
+                        for x in slice_["hidden_ids"]
+                        if str(x) in LORA_CATALOG and LORA_CATALOG[str(x)].host_id == hid
+                    ]
+                bh[hid] = prev
+            lc["by_host"] = bh
+
+        if host_id and (enabled_ids is not None or hidden is not None):
+            bh = dict(lc.get("by_host") or {})
+            prev = dict(bh.get(host_id) or {"enabled_ids": [], "hidden_ids": []})
+            if enabled_ids is not None:
+                prev["enabled_ids"] = [
+                    str(x)
+                    for x in enabled_ids
+                    if str(x) in LORA_CATALOG and LORA_CATALOG[str(x)].host_id == host_id
+                ]
+            if hidden is not None:
+                prev["hidden_ids"] = [
+                    str(x)
+                    for x in hidden
+                    if str(x) in LORA_CATALOG and LORA_CATALOG[str(x)].host_id == host_id
+                ]
+            bh[host_id] = prev
+            lc["by_host"] = bh
+
+        if by_model is not None:
+            bm = dict(lc.get("by_model") or {})
+            for mid, slice_ in by_model.items():
+                if not isinstance(slice_, dict):
+                    continue
+                prev = dict(bm.get(mid) or {"enabled_ids": [], "hidden_ids": []})
+                if "enabled_ids" in slice_:
+                    prev["enabled_ids"] = [
+                        str(x)
+                        for x in slice_["enabled_ids"]
+                        if str(x) in LORA_CATALOG
+                        and entry_matches_lora_model(LORA_CATALOG[str(x)], mid)
+                    ]
+                if "hidden_ids" in slice_:
+                    prev["hidden_ids"] = [
+                        str(x)
+                        for x in slice_["hidden_ids"]
+                        if str(x) in LORA_CATALOG
+                        and entry_matches_lora_model(LORA_CATALOG[str(x)], mid)
+                    ]
+                bm[mid] = prev
+            lc["by_model"] = bm
+
+        if model_id and (enabled_ids is not None or hidden is not None):
+            bm = dict(lc.get("by_model") or {})
+            prev = dict(bm.get(model_id) or {"enabled_ids": [], "hidden_ids": []})
+            if enabled_ids is not None:
+                prev["enabled_ids"] = [
+                    str(x)
+                    for x in enabled_ids
+                    if str(x) in LORA_CATALOG
+                    and entry_matches_lora_model(LORA_CATALOG[str(x)], model_id)
+                ]
+            if hidden is not None:
+                prev["hidden_ids"] = [
+                    str(x)
+                    for x in hidden
+                    if str(x) in LORA_CATALOG
+                    and entry_matches_lora_model(LORA_CATALOG[str(x)], model_id)
+                ]
+            bm[model_id] = prev
+            lc["by_model"] = bm
+
+        # Legacy flat keys (flux1_t2i only) for older readers.
+        if enabled_ids is not None and host_id in (None, "flux1_t2i"):
+            lc["enabled_ids"] = [
+                str(x)
+                for x in (enabled_ids if host_id else lc.get("by_host", {}).get("flux1_t2i", {}).get("enabled_ids", []))
+                if str(x) in LORA_CATALOG
+            ]
+        if hidden is not None and host_id is None:
+            lc["deleted_ids"] = sorted(
+                {
+                    str(x)
+                    for hid, slice_ in (lc.get("by_host") or {}).items()
+                    for x in (slice_.get("hidden_ids") or [])
+                    if str(x) in LORA_CATALOG
+                }
+            )
+
+        if model_support is not None:
+            prev_ms = lc.get("model_support")
+            cleaned: dict = {}
+            if isinstance(prev_ms, dict):
+                cleaned = {
+                    str(k): list(v)
+                    for k, v in prev_ms.items()
+                    if str(k) in LORA_CATALOG and isinstance(v, (list, tuple))
+                }
+            allowed = set(LORA_PROBE_MODEL_ORDER)
+            for lid, models in model_support.items():
+                lid_s = str(lid)
+                if lid_s not in LORA_CATALOG:
+                    continue
+                if not isinstance(models, (list, tuple)):
+                    continue
+                cleaned[lid_s] = [str(m) for m in models if str(m) in allowed]
+            lc["model_support"] = cleaned
+
+        imagegen["lora_catalog"] = lc
+
+    _mutate_imagegen_settings(mutate)

@@ -1,0 +1,224 @@
+#!/usr/bin/env python3
+"""Optional PyInstaller bundle packages (--min builds omit these)."""
+
+from __future__ import annotations
+
+import os
+
+MIN_BUILD_ENV = "PYINSTALLER_MIN_BUILD"
+
+# Unused in application code — never bundle (all builds).
+ALWAYS_EXCLUDE_IMPORT_ROOTS: frozenset[str] = frozenset(
+    {
+        "skimage",
+        "imagehash",
+    }
+)
+
+# Dev / demo modules excluded from import-tree analysis.
+ANALYZER_SKIP_FILENAMES: frozenset[str] = frozenset(
+    {
+        "gemma4_voice_vision_demo.py",
+        "list_models.py",
+        "hfmodels.py",
+        "generate_minimal_requirements.py",
+        "generate_minimal_requirements_questionable.py",
+        "block_test.py",
+        "fast_test.py",
+        "jit_test.py",
+    }
+)
+
+# Omitted from --min bundles (AI generation, LM Studio SDK, audio in/out).
+MIN_EXCLUDE_IMPORT_ROOTS: frozenset[str] = frozenset(
+    {
+        "mflux",
+        "mlx",
+        "diffusers",
+        "accelerate",
+        "sdnq",
+        "lmstudio",
+        "faster_whisper",
+        "ctranslate2",
+        "sounddevice",
+        "_sounddevice",
+        "pocket_tts",
+        "pyinstaller_whisper_models",
+        "whisper_voice_input",
+    }
+)
+
+# PyInstaller --exclude-module names for --min (top-level modules).
+MIN_EXCLUDE_MODULES: tuple[str, ...] = (
+    "mflux",
+    "mlx",
+    "diffusers",
+    "accelerate",
+    "sdnq",
+    "lmstudio",
+    "faster_whisper",
+    "ctranslate2",
+    "sounddevice",
+    "pocket_tts",
+    "skimage",
+    "imagehash",
+)
+
+# collect_all targets for full (non-min) builds beyond analyzer output.
+FULL_BUILD_COLLECT_ALL: tuple[str, ...] = (
+    "face_recognition_models",
+    "mflux",
+    "mlx",
+    "diffusers",
+    "accelerate",
+    "sdnq",
+    "transformers",
+    "requests",
+    "huggingface_hub",
+    "safetensors",
+    "regex",
+    "tokenizers",
+    "faster_whisper",
+    "ctranslate2",
+)
+
+# collect_all targets for --min (similarity / CLIP / faces; no imagegen or audio).
+MIN_BUILD_COLLECT_ALL: tuple[str, ...] = (
+    "face_recognition_models",
+    "transformers",
+    "requests",
+    "huggingface_hub",
+    "safetensors",
+    "regex",
+    "tokenizers",
+)
+
+# Packages passed to collect_all() inside the generated .spec Analysis preamble.
+FULL_SPEC_COLLECT_PACKAGES: tuple[str, ...] = (
+    "diffusers",
+    "accelerate",
+    "mflux",
+    "mlx",
+    "face_recognition_models",
+    "transformers",
+    "requests",
+    "huggingface_hub",
+    "safetensors",
+    "regex",
+    "tokenizers",
+    "faster_whisper",
+    "ctranslate2",
+)
+
+MIN_SPEC_COLLECT_PACKAGES: tuple[str, ...] = (
+    "face_recognition_models",
+    "transformers",
+    "requests",
+    "huggingface_hub",
+    "safetensors",
+    "regex",
+    "tokenizers",
+)
+
+FULL_SPEC_COPY_METADATA: tuple[str, ...] = (
+    "transformers",
+    "requests",
+    "diffusers",
+    "huggingface_hub",
+    "accelerate",
+    "tokenizers",
+)
+
+MIN_SPEC_COPY_METADATA: tuple[str, ...] = (
+    "transformers",
+    "requests",
+    "huggingface_hub",
+    "tokenizers",
+)
+
+# Similarity / CLIP / faces — included in all bundles (including --min).
+SIMILARITY_EXTRA_HIDDEN: tuple[str, ...] = (
+    "torch",
+    "torchvision",
+    "transformers",
+)
+
+# Extra hidden imports merged into the spec (full builds only).
+FULL_BUILD_EXTRA_HIDDEN: tuple[str, ...] = SIMILARITY_EXTRA_HIDDEN + (
+    "mflux",
+    "mlx",
+    "mlx._reprlib_fix",
+    "diffusers",
+    "diffusers.pipelines",
+    "diffusers.pipelines.sana",
+    "diffusers.pipelines.z_image",
+    "sdnq",
+    "accelerate",
+    "requests",
+    "faster_whisper",
+    "ctranslate2",
+    "sounddevice",
+    "_sounddevice",
+    "whisper_voice_input",
+    "pyinstaller_whisper_models",
+)
+
+# Similarity / CLIP / faces — always bundled (--min keeps these, drops imagegen/audio).
+MIN_BUILD_EXTRA_HIDDEN: tuple[str, ...] = SIMILARITY_EXTRA_HIDDEN + (
+    "face_recognition",
+    "face_recognition_models",
+)
+
+MANDATORY_PYOBJC_HIDDEN: tuple[str, ...] = (
+    "AppKit",
+    "LaunchServices",
+    "CoreServices",
+    "Foundation",
+)
+
+MANDATORY_HIDDEN: tuple[str, ...] = (
+    "face_recognition",
+    "face_recognition_models",
+    "pyinstaller_frozen_support",
+)
+
+# --collect-submodules CLI args (after feature packages) for the initial pyinstaller run.
+FULL_EXTRA_COLLECT_SUBMODULES: tuple[str, ...] = (
+    "imagegen_plugins",
+    "mflux",
+    "mlx",
+    "diffusers",
+    "accelerate",
+)
+
+MIN_EXTRA_COLLECT_SUBMODULES: tuple[str, ...] = ("imagegen_plugins",)
+
+
+def is_min_build() -> bool:
+    return os.environ.get(MIN_BUILD_ENV, "").strip() in ("1", "true", "yes")
+
+
+def import_root_is_excluded(import_root: str, *, min_build: bool | None = None) -> bool:
+    root = (import_root or "").replace("-", "_").split(".")[0]
+    if root in ALWAYS_EXCLUDE_IMPORT_ROOTS:
+        return True
+    if min_build if min_build is not None else is_min_build():
+        return root in MIN_EXCLUDE_IMPORT_ROOTS
+    return False
+
+
+def package_name_is_excluded(package_name: str, *, min_build: bool | None = None) -> bool:
+    return import_root_is_excluded(package_name.replace("-", "_"), min_build=min_build)
+
+
+def filter_hidden_imports(names: list[str] | set[str], *, min_build: bool | None = None) -> list[str]:
+    min_flag = min_build if min_build is not None else is_min_build()
+    out: set[str] = set()
+    for name in names:
+        root = name.split(".")[0]
+        if import_root_is_excluded(root, min_build=min_flag):
+            continue
+        if root in ALWAYS_EXCLUDE_IMPORT_ROOTS:
+            continue
+        out.add(name)
+    return sorted(out)
