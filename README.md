@@ -1,82 +1,47 @@
 # Prowser — Image Browser
 
-Prowser is a native macOS image browser for Apple Silicon, built with Python, PySide6, and Qt. Browse folders of images in a thumbnail grid or fullscreen, manage files, search and sort, run slideshows, and optionally generate images locally from the **Create** menu.
+Prowser is a native macOS image browser for Apple Silicon, built with Python, PySide6, and Qt. It is a general purpose image browser that can be used to browse images, and it contains some very simple features for creating and modifying images. 
 
-The latest DMG is at the [website](https://waltzremote.com/).
+While it is primarily designed as an image viewer and organizer, it is also a simple way of experimenting with local AI generation and manipulation.
 
-The first time you use AI-based features (similarity sort, text search, or Create) the app downloads and caches models; that pass can be slow, later use is much faster.
+The latest installable file DMG is at the [website](https://waltzremote.com/).
 
-## What you can do
+The first time you use AI-based features (similarity sort, text search, or Create) the app downloads and caches models; that pass can be slow, later use is much faster. Some models will require a [huggingface](https://huggingface.co/) account and token to download. 
+
+## Features (partial list)
 
 - Browse images in a grid or fullscreen with keyboard and mouse
 - Move, copy, rename, delete (to Trash), lock files, and undo deletes
-- Sort, filter, find similar images, text search, and find duplicates
+- Search by image similarity, image description, duplicates,and face recognition
 - Slideshows, EXIF tools, external editor integration, set desktop wallpaper
-- Optional local image generation (**Create** menu) when dependencies are installed
+- Local AI image generation and manipulation (**Image** menu) when dependencies are installed
+- Models for similarity sort, text search, and face recognition and AI image manipulation are downloaded automatically the first time you use them.
 
 Press **F1** or **/** in the app for keyboard shortcuts for the current view. See [KEYBOARD.md](KEYBOARD.md) for a full list.
 
 ## Requirements (running from source)
 
-- **macOS** on Apple Silicon
-- **Python 3.14** (`python3.14` on your PATH — see `setup.sh` and `.python-version`)
-- Dependencies listed in `minimal_requirements.txt` (installed by `setup.sh`)
+- **macOS** on Apple Silicon. This was written to run on a 16GB M2 MacBook Air.
+- **Python 3.14** if run from source (DMG files include all dependencies)
+- Dependencies listed in `minimal_requirements.txt` (installed by `setup.sh` if run from source)
 
-## macOS folder access (Desktop, Documents, etc.)
+## Permissions
 
-Prowser must **list files** in the folder you open. macOS protects some locations (especially **Desktop**, **Documents**, and **Downloads**) unless the process that launches Python has permission.
+The first time you run the app, MacOS will ask for a bunch of permissions to allow the app to list and read images.
+If you install the app from the DMG, you can make Prowser the default image viewer through normal MacOS settings.
+It is best to close and reopen the app after granting permissions.  If the app seems to hang on startup from another program like VS Code, you may need to grant permissions to that program as well (like full disk access if you trust it).
 
-| How you launch | What to grant Full Disk Access to |
-|----------------|-----------------------------------|
-| **Prowser.app** (from DMG) | **Prowser** |
-| **`./run.sh` in Terminal** | **Terminal** (or iTerm, etc.) |
-| **VS Code / Cursor** integrated terminal or **Run/Debug** | **Code** / **Cursor** (the editor app, not Prowser) |
+Due to MacOS restrictions, the "View Copy of Trash" feature is unavailable when running from the bundled app.
 
-Without that access, protected folders may show as empty (“No images available”) or log permission errors when reading `.prsort` lock files. The app will show a **Folder Access Denied** warning when listing is blocked.
+## Starting Prowser
 
-**To fix:** System Settings → **Privacy & Security** → **Full Disk Access** → enable the app in the table above → quit and restart that app, then open the folder again.
+From the installed app: Any normal app launch method (Finder, Spotlight, Dock, etc.)
 
-Most folders outside the protected set (for example a project directory under `~/dev`) work without extra steps.
-
-## Install and run — app from the DMG
-
-1. Open the DMG and drag **Prowser.app** to **Applications** (or another location).
-2. Launch **Prowser** like any Mac app, or set it as your default image viewer.
-
-To run the bundled app from Terminal:
-
-```bash
-~/Applications/Prowser.app/Contents/MacOS/Prowser <options>
-```
+From source (GitHub or a copy of the source folder in the DMG): ./setup.sh (once) and ./run.sh <with parameters>
 
 Use `-h` or `--help` for command-line options.
 
 ## Install and run — from source
-
-The DMG includes a **source** folder with the project files. Use this if you want to run or hack on the code without rebuilding the app bundle.
-
-1. Copy the **source** folder from the DMG to somewhere on your Mac (for example `~/Prowser-source`).
-2. Open **Terminal** (or your editor’s terminal — see [macOS folder access](#macos-folder-access-desktop-documents-etc) above).
-3. Go to that folder:
-
-   ```bash
-   cd ~/Prowser-source
-   ```
-
-4. Run setup **once** (creates `venv_image_browser` and installs dependencies):
-
-   ```bash
-   ./setup.sh
-   ```
-
-   This can take a while the first time (PySide6, optional Create-menu packages, etc.).
-
-5. Start Prowser:
-
-   ```bash
-   ./run.sh
-   ```
-
    You can pass a folder or other arguments, for example:
 
    ```bash
@@ -84,27 +49,34 @@ The DMG includes a **source** folder with the project files. Use this if you wan
    ./run.sh -l 0 ~/Downloads/
    ```
 
-If you change the code in an editor, run `./run.sh` again after saving. You only need `./setup.sh` again when dependencies change.
+If you change the code, `./run.sh` again after saving. You only need to run `./setup.sh` when dependencies change.
 
-## Build your own app bundle
+## To Build your own app bundle
 
 From a source directory that already has a venv from `setup.sh`:
 
 ```bash
-./pyInstallerBuild.sh
+./pyInstallerBuild.sh [--min]
+```
+ 
+`--min` excludes image generation or AI manipulation dependencies so only basic browser and search features are included.
+
+To create an installation DMG file after creating the app bundle:
+
+```bash
+./build_dmg.sh
 ```
 
-The app bundle appears under `dist/` (for example `dist/Prowser.app`).
-
-## Settings
+## Settings (Profiles)
 
 Settings and caches live under `~/.prowser/` by default. Open the settings dialog with **⌘.** (Command–period).
-
 To use a different profile directory:
 
 ```bash
 ./run.sh -p ~/.prowser-test
 ```
+
+New files created by AI go to ~/Downloads by default but that can be changed in the settings dialog.
 
 ## Supported formats
 
@@ -114,53 +86,16 @@ Common formats include JPEG, PNG, GIF, BMP, TIFF, WebP, SVG, HEIC, and HEIF. Not
 
 ### Entry and layout
 
-- **Entry:** `main.py` → `ImageBrowserWindow` (`image_browser_window.py`)
-- **Flat modules:** most features live as `*_manager.py` files at the repo root (navigation, files, thumbnails, slideshow, etc.)
-- **Subpackages:**
-  - `imagegen_plugins/` — **Create** menu (registry, worker subprocess, dialogs)
-  - `settings/widgets/` — settings UI pieces (e.g. `multi_row_tab_widget.py`)
-  - `file_ops/`, `prowser/window/` — placeholders for incremental splits of very large modules
+- **Entry:** `main.py` 
 
-Heavy ML runs in separate processes (`--model-tasks-worker`, `--imagegen-worker` from `main.py`), not on the UI thread.
-
-### Core state (where to look when debugging)
-
-| Piece | Role |
-|-------|------|
-| `file_data_model.py` | Single source of truth for displayed files, current image path, index, directory, view mode |
-| `event_bus.py` | Cross-module events |
-| `window_model_bridge.py` | Model Qt signals → EventBus |
-| `window_sync.py` | Window updates that write the model (including status bar on path change) |
-| `directory_loader.py` | Directory scan and load |
-| `configuration_sync_manager.py` | Legacy API/pipe message handling; model writes go through `window_sync` |
-
-Navigation and refresh rules are documented in comments in `file_data_model.py` and `refresh_manager.py`.
-
-### Shared helpers
-
-- `prsort_io.py` — custom sort / lock files (`.prsort`)
-- `screen_geometry.py` — screen size for wallpaper / fit
-- `path_exclusions.py` — ignored paths and directory-walk pruning
-- `pil_image_io.py` → `exif_image_loader.py` / `worker_image_loader.py` — image loading
-- `beachball_fix.py` — guards against concurrent refresh/thumbnail work
-
-### Tests
-
-```bash
-source venv_image_browser/bin/activate
-pip install pytest   # if not already installed
-python -m pytest tests/ -q
-```
-
-Tests cover `FileDataModel`, `.prsort` parsing, and path exclusions (no GUI).
-
-More detail: [ARCHITECTURE.md](ARCHITECTURE.md).
+AI related tasks run in separate processes, not on the UI thread.  you can force processes vs threads with the --background [process|thread] flag.
+By default, the app will use threads when bundled into an app, and processes when run from source.
 
 ## More documentation
 
 - [KEYBOARD.md](KEYBOARD.md) — shortcuts
 - [API.md](API.md) — pipe API for controlling a running instance
-- [IMAGE_CREATE_PLUGINS.md](IMAGE_CREATE_PLUGINS.md) — **Create** menu and local generation
+- [IMAGE_CREATE_PLUGINS.md](IMAGE_CREATE_PLUGINS.md) — **Image** menu and local generation
 - [ARCHITECTURE.md](ARCHITECTURE.md) — code structure and module map (for contributors)
 
 ## License
