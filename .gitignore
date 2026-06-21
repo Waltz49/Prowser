@@ -84,3 +84,4 @@ background.png.black
 assets/engraved-button.png
 hfmodels.py
 .cursor/rules/build-files-validity.mdc
+build-and-upload-both.sh

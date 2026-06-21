@@ -40,7 +40,8 @@ a { color: __LINK_COLOR__; text-decoration: none; }
 <p>Doug Nadel, and a myriad of AI zombies who wrote some code in exchange for brains.<br>
 <span style="font-size: 10px; color: __SUBNOTE_COLOR__;">I've said too much.</span><br>
 Contact: <a href="mailto:sillysotsoftware@yahoo.com">sillysotsoftware@yahoo.com</a>
-<br>Github:  <a href="https://github.com/dnadel">GitHub: dnadel</a> (not populated yet)
+<br>GitHub: <a href="https://github.com/waltz49/Prowser">waltz49/Prowser</a>
+<br>Website: <a href="https://waltzremote.com">waltzremote.com</a>
 </p>
 <h3>License</h3>
 <p>Business Source License 1.1 (BSL 1.1)</p>
@@ -408,6 +409,17 @@ class AboutDialog(QDialog):
         tech_label.setAlignment(Qt.AlignCenter)
         tech_label.setFont(version_font)
         layout.addWidget(tech_label)
+
+        links_label = QLabel(
+            '<a href="https://github.com/waltz49/Prowser">GitHub</a>'
+            ' &nbsp;|&nbsp; '
+            '<a href="https://waltzremote.com">Website</a>'
+        )
+        links_label.setAlignment(Qt.AlignCenter)
+        links_label.setTextFormat(Qt.TextFormat.RichText)
+        links_label.setOpenExternalLinks(True)
+        links_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextBrowserInteraction)
+        layout.addWidget(links_label)
                 
         # Add stretch to push button to bottom
         layout.addStretch()

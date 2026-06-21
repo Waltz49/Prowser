@@ -43,6 +43,7 @@ MIN_EXCLUDE_IMPORT_ROOTS: frozenset[str] = frozenset(
         "sounddevice",
         "_sounddevice",
         "pocket_tts",
+        "openai",
         "pyinstaller_whisper_models",
         "whisper_voice_input",
     }
@@ -60,6 +61,7 @@ MIN_EXCLUDE_MODULES: tuple[str, ...] = (
     "ctranslate2",
     "sounddevice",
     "pocket_tts",
+    "openai",
     "skimage",
     "imagehash",
 )
