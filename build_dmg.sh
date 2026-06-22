@@ -35,6 +35,7 @@ BG_IMAGE="$SCRIPT_DIR/background.png"
 
 # Pre-blessed source folder (custom icon applied once in Finder); override via env if needed
 SOURCE_FOLDER="${SOURCE_FOLDER:-$HOME/dev/testchat/source_preblessed}"
+mkdir -p "$SOURCE_FOLDER"
 
 #######################################
 # Clean previous runs
@@ -164,6 +165,29 @@ tell application "Finder"
         update without registering applications
         delay 2
         close containerWindow
+
+        -- Source folder: icon view sized to background.png (640x480)
+        if exists folder "source" then
+            tell folder "source"
+                open
+                delay 1
+
+                set sourceWindow to container window
+                set current view of sourceWindow to icon view
+                set toolbar visible of sourceWindow to false
+                set statusbar visible of sourceWindow to false
+                set bounds of sourceWindow to {100, 100, 740, 580}
+
+                set sourceViewOptions to the icon view options of sourceWindow
+                set arrangement of sourceViewOptions to not arranged
+                set icon size of sourceViewOptions to 64
+                set background picture of sourceViewOptions to file "background.png"
+
+                close sourceWindow
+            end tell
+            update without registering applications
+            delay 1
+        end if
     end tell
 end tell
 EOF

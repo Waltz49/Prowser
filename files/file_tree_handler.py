@@ -312,7 +312,29 @@ class CustomTreeView(QTreeView):
                 self.main_window.file_tree_handler.collapse_file_tree()
             event.accept()
             return
-        if key in [Qt.Key_Return, Qt.Key_Enter, Qt.Key_Space] and not modifiers:
+        if key in [Qt.Key_Return, Qt.Key_Enter] and not modifiers:
+            index = self.currentIndex()
+            if not index.isValid():
+                selection = self.selectionModel().selectedIndexes()
+                if selection:
+                    index = selection[0]
+            if index.isValid():
+                model = self.model()
+                if model:
+                    source_index = model.mapToSource(index) if hasattr(model, 'mapToSource') else index
+                    file_path = model.sourceModel().filePath(source_index) if hasattr(model, 'sourceModel') else ""
+                    if os.path.isdir(file_path):
+                        if not self.isExpanded(index):
+                            self.expand(index)
+                        if self.main_window and hasattr(self.main_window, 'file_tree_handler'):
+                            # DON'T set current_highlighted_directory here - let request_directory_opening handle it
+                            # Setting it here causes a race condition where the tree selection doesn't match
+                            self.main_window.file_tree_handler.request_directory_opening(
+                                file_path, preserve_tree_focus=True)
+            event.accept()
+            return
+
+        if key == Qt.Key_Space and not modifiers:
             selection = self.selectionModel().selectedIndexes()
             if selection:
                 index = selection[0]
@@ -325,10 +347,6 @@ class CustomTreeView(QTreeView):
                             self.collapse(index)
                         else:
                             self.expand(index)
-                            if self.main_window and hasattr(self.main_window, 'file_tree_handler'):
-                                # DON'T set current_highlighted_directory here - let request_directory_opening handle it
-                                # Setting it here causes a race condition where the tree selection doesn't match
-                                self.main_window.file_tree_handler.request_directory_opening(file_path)
             event.accept()
             return
 
@@ -425,7 +443,8 @@ class CustomTreeView(QTreeView):
                     # Handle directories - populate thumbnail view
                     if os.path.isdir(file_path):
                         if self.main_window and hasattr(self.main_window, 'file_tree_handler'):
-                            self.main_window.file_tree_handler.request_directory_opening(file_path)
+                            self.main_window.file_tree_handler.request_directory_opening(
+                                file_path, preserve_tree_focus=True)
                         event.accept()
                         return
 
@@ -2948,6 +2967,9 @@ class FileTreeHandler(QObject):
         self._restore_tree_focus_timer = QTimer(self)
         self._restore_tree_focus_timer.setSingleShot(True)
         self._restore_tree_focus_timer.timeout.connect(self._restore_tree_focus)
+        self._restore_tree_focus_delayed_timer = QTimer(self)
+        self._restore_tree_focus_delayed_timer.setSingleShot(True)
+        self._restore_tree_focus_delayed_timer.timeout.connect(self._restore_tree_focus)
         self._image_discovery_service: Optional[TreeImageDiscoveryService] = None
         # Don't initialize tree immediately - wait for first access
         if hasattr(main_window, 'event_bus') and main_window.event_bus:
@@ -4919,13 +4941,24 @@ class FileTreeHandler(QObject):
             self._expand_to_path(file_directory, force_expand=force_expand)
         self._update_dir_label(file_directory)
 
-    def request_directory_opening(self, directory_path: str) -> None:
+    def request_directory_opening(self, directory_path: str, preserve_tree_focus: Optional[bool] = None) -> None:
         # Track that this is a user-requested directory
         # Clear any previous flag immediately to avoid GIL deadlock from multiple QTimer.singleShot calls
         # We only need the flag for the current directory being loaded
         self.user_requested_directory = directory_path
         # CRITICAL: Set current_highlighted_directory here so _is_user_selection() works correctly
         self.current_highlighted_directory = directory_path
+
+        if preserve_tree_focus is None:
+            if self.main_window and hasattr(self.main_window, '_tree_has_focus'):
+                preserve_tree_focus = self.main_window._tree_has_focus()
+            else:
+                current_focus = QApplication.focusWidget()
+                tree_container = getattr(self.main_window, 'tree_container', None) if self.main_window else None
+                preserve_tree_focus = (
+                    current_focus == self.file_tree
+                    or (tree_container is not None and current_focus == tree_container)
+                )
 
         # CRITICAL: Select the directory IMMEDIATELY before calling load_directory
         # This ensures ONLY this directory is highlighted and prevents any other selection logic from interfering
@@ -4947,8 +4980,6 @@ class FileTreeHandler(QObject):
             pass
         # DON'T call update_root_directory here - load_directory() will call it
         # Calling it here causes the highlight to jump to the new directory, then back to old, then to new again
-        current_focus = QApplication.focusWidget()
-        tree_has_focus = (current_focus == self.file_tree)
         self.main_window.load_directory(directory_path, external_load=True)
         # Clear the flag after load_directory completes to allow normal operations
         # CRITICAL: Use a longer delay (2 seconds) to ensure ALL delayed highlights have completed
@@ -4957,16 +4988,20 @@ class FileTreeHandler(QObject):
         self._clear_user_requested_timer.stop()  # Cancel any pending clear
         # Increased to 2 seconds to ensure all delays complete
         self._clear_user_requested_timer.start(2000)
-        if tree_has_focus:
+        if preserve_tree_focus:
             self._restore_tree_focus_timer.stop()
             self._restore_tree_focus_timer.start(100)
+            self._restore_tree_focus_delayed_timer.stop()
+            self._restore_tree_focus_delayed_timer.start(200)
 
         # DON'T schedule another highlight here - load_directory() already handles highlighting
         # Multiple highlights cause the selection to jump around
 
     def _restore_tree_focus(self) -> None:
         try:
-            if self.file_tree and self.file_tree.isVisible():
+            if self.main_window and hasattr(self.main_window, 'focus_tree'):
+                self.main_window.focus_tree()
+            elif self.file_tree and self.file_tree.isVisible():
                 self.file_tree.setFocus()
         except Exception:
             pass
