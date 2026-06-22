@@ -1,12 +1,28 @@
-# Ignore Python cache
+# Python / tooling
 .cache/
 .DS_Store
 .git-orig/
 .prsort
+.pyinstaller_reuse_flag
+.pyinstaller_face_models/
+.pyinstaller_whisper_models/
+.pytest_cache/
 .vscode/
 __pycache__/
+*.pyc
+venv/
+venv_image_browser/
+venv_pyinstaller/
+
+# Build artifacts
 build/
 dist/
+Prowser.iconset/
+*.spec
+pyinstaller_dependencies.py
+pyinstaller_directives.json
+
+# Local media (app assets are whitelisted below)
 *.backup
 *.bak
 *.heic
@@ -18,51 +34,47 @@ dist/
 !assets/*.png
 !background.png
 *.pxd
-*.pyc
-*.spec
-block_test.py
-debug*
-generate*
-known bugs
-prowser.entitlements
-pyinstaller_dependencies.py
-pyinstaller_directives.json
-test*
-!tests/
-!tests/**
-*.fix
-*.cmdhfix
-venv/
-venv_image_browser/
-venv_pyinstaller/
-.pyinstaller_reuse_flag
-.pyinstaller_face_models/
-.pyinstaller_whisper_models/
-defsize.py
-background.png.good
-assets/padlock copy.png
-Untitled.txt
-profile.stats
-ROKU Control.icns
+*.webp
+!assets/*.webp
 
 # Web / hosting (not native app)
 prowser.php
 
-# Dev-only utilities
-offsite.sh
+# Root-level dev scripts and scratch
+/debug_*.py
+/generate_*.py
+/test_*.py
+!tests/
+!tests/**
+block_test.py
 create_sample_images.py
+defsize.py
 fast_test.py
+hfmodels.py
 jit_test.py
-send_one_file.py
+known bugs
+offsite.sh
+profile.stats
 random_images_launcher.py
 register-prowser
 replace_main_with_multigen.sh
+send_one_file.py
+imagegen_plugins/image_gen_worker_launch.py
 scripts/
 
-# Backup / dead fragments
+# Backup / patch fragments
 *.fix
 *.cmdhfix
-imagegen_plugins/image_gen_worker_launch.py
+
+# Local-only assets and icons
+ROKU Control.icns
+background.png.black
+background.png.good
+assets/padlock copy.png
+
+# Personal deploy / setup
+build-and-upload-both.sh
+setup_source_preblessed.sh
 
 # Internal developer notes
 BACKGROUND_CLIP_EXTRACTION.md
@@ -77,12 +89,10 @@ TIMER_ANALYSIS.md
 keyboard_hierarchy.md
 
 # Editor
+.cursor/debug*.log
 .cursorignore
-
-# Unused assets
-background.png.black
-assets/engraved-button.png
-hfmodels.py
 .cursor/rules/build-files-validity.mdc
-build-and-upload-both.sh
-setup_source_preblessed.sh
+.cursor/rules/debugging-and-testing.mdc
+imagegen_plugins/debug_download_models_dialog.py
+imagegen_plugins/debug_download_script_dialog.py
+imagegen_plugins/debug_download_scripts.py

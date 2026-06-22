@@ -9776,11 +9776,11 @@ class ImageBrowserWindow(QMainWindow):
             chrome_vis = self._is_any_chrome_visible()
             self.toggle_chrome_action.setChecked(chrome_vis)
             self.toggle_chrome_action.setText(
-                'Hide Chrome' if chrome_vis else 'Show Chrome'
+                'Hide Panes' if chrome_vis else 'Show Panes'
             )
 
     def toggle_chrome(self):
-        """F4: save and hide all chrome, or restore saved/default layout."""
+        """F4: save and hide all panes, or restore saved/default layout."""
         if self._is_any_chrome_visible():
             self._chrome_saved_layout = self._capture_chrome_layout()
             self._hide_all_chrome()

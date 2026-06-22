@@ -707,7 +707,7 @@ class MenuManager:
         view_menu.addAction(self.main_window.toggle_status_bar_action)
 
         # Toggle Chrome (F4 also handled by ChromeToggleShortcutFilter when child widgets have focus)
-        self.main_window.toggle_chrome_action = QAction('Show Chrome', self.main_window)
+        self.main_window.toggle_chrome_action = QAction('Show Panes', self.main_window)
         self.main_window.toggle_chrome_action.setCheckable(True)
         chrome_visible = (
             self.main_window._is_any_chrome_visible()
@@ -716,7 +716,7 @@ class MenuManager:
         )
         self.main_window.toggle_chrome_action.setChecked(chrome_visible)
         self.main_window.toggle_chrome_action.setText(
-            'Hide Chrome' if chrome_visible else 'Show Chrome'
+            'Hide Panes' if chrome_visible else 'Show Panes'
         )
         self.main_window.toggle_chrome_action.setShortcut(QKeySequence('F4'))
         self.main_window.toggle_chrome_action.triggered.connect(self.main_window.toggle_chrome)
