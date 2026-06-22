@@ -1102,9 +1102,9 @@ create_spec_file() {
     COLLECT_ALL=$(echo "$DIRECTIVES" | grep "COLLECT_ALL=" | cut -d'=' -f2)
     EXCLUDES=$(echo "$DIRECTIVES" | grep "EXCLUDES=" | cut -d'=' -f2)
     
-    print_status "Using hidden imports: $HIDDEN_IMPORTS"
-    print_status "Using collect all: $COLLECT_ALL"
-    print_status "Using excludes: $EXCLUDES"
+    # print_status "Using hidden imports: $HIDDEN_IMPORTS"
+    # print_status "Using collect all: $COLLECT_ALL"
+    # print_status "Using excludes: $EXCLUDES"
     
     # Build PyInstaller command with proper argument handling
     # Use onedir mode instead of onefile for macOS compatibility
@@ -1145,7 +1145,7 @@ create_spec_file() {
     # Add the main script
     PYINSTALLER_CMD="$PYINSTALLER_CMD \"$MAIN_SCRIPT\""
     
-    print_status "Running: $PYINSTALLER_CMD"
+    # print_status "Running: $PYINSTALLER_CMD"
     
     # Execute the command
     eval $PYINSTALLER_CMD
@@ -1532,7 +1532,7 @@ verify_build() {
 
 # Install to Applications folder
 install_to_applications() {
-    print_status "Installing Prowser to /Applications..."
+    print_status "\nInstalling Prowser to /Applications..."
     
     # Check if app already exists in Applications
     if [ -d "/Applications/${APP_NAME}.app" ]; then
@@ -1593,7 +1593,7 @@ install_to_applications() {
         print_status "2. Click 'Open with' → Select Prowser → 'Change All'"
     fi
     
-    print_success "Prowser successfully installed to /Applications!"
+    print_success "\nProwser successfully installed to /Applications!"
     print_status "You can now launch Prowser from Applications folder or Spotlight"
     print_status "Prowser is now the default app for opening image files"
 }
