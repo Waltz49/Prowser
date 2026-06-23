@@ -3473,9 +3473,80 @@ class SettingsDialog(QDialog):
         layout.addWidget(warning_label)
         layout.addStretch()
 
+    def _cache_tab_show_source_directories(self) -> bool:
+        """Source Directories group is debug-only on the Caches tab."""
+        if hasattr(self, 'debug_checkbox') and self.debug_checkbox.isChecked():
+            return True
+        parent_window = self.parent()
+        if parent_window is not None and getattr(parent_window, 'debug_mode', False):
+            return True
+        return bool(get_config().load_settings().get('debug_mode', False))
+
+    def _build_cache_source_directories_group(self) -> QGroupBox:
+        """Create the Source Directories group (debug-only)."""
+        dirs_group = QGroupBox("Source Directories")
+        dirs_layout = QVBoxLayout(dirs_group)
+
+        self.cache_dirs_text = QTextEdit()
+        self.cache_dirs_text.setToolTip(
+            "Folders whose images are represented in the thumbnail and recognition caches (read-only)."
+        )
+        self.cache_dirs_text.setReadOnly(True)
+        self.cache_dirs_text.setMaximumHeight(100)
+        self.cache_dirs_text.setStyleSheet(f"""
+            QTextEdit {{
+                color: {DIALOG_TEXT_COLOR_HEX};
+                border: 1px solid {BORDER_DEFAULT_HEX};
+                border-radius: 4px;
+                font-family: Menlo, Monaco;
+                font-size: 10pt;
+            }}
+        """)
+        dirs_layout.addWidget(self.cache_dirs_text)
+
+        dirs_info_label = QLabel("Directories from which cached images were loaded.")
+        dirs_info_label.setWordWrap(True)
+        dirs_info_label.setStyleSheet(f"color: {DIALOG_TEXT_COLOR_HEX}; font-size: 10pt;")
+        dirs_layout.addWidget(dirs_info_label)
+
+        return dirs_group
+
+    def _update_cache_source_directories_visibility(self):
+        """Build/show or hide Source Directories based on current debug mode."""
+        layout = getattr(self, '_cache_management_layout', None)
+        controls_group = getattr(self, '_cache_controls_group', None)
+        if layout is None or controls_group is None:
+            return
+
+        show = self._cache_tab_show_source_directories()
+        if show:
+            if self._cache_source_dirs_group is None:
+                self._cache_source_dirs_group = self._build_cache_source_directories_group()
+                insert_at = layout.indexOf(controls_group)
+                if insert_at >= 0:
+                    layout.insertWidget(insert_at, self._cache_source_dirs_group)
+                else:
+                    layout.insertWidget(0, self._cache_source_dirs_group)
+            self._cache_source_dirs_group.setVisible(True)
+            if hasattr(self, 'cache_dirs_text'):
+                self.cache_dirs_text.setText("Loading cache directories...")
+                QTimer.singleShot(100, self.load_cache_directories_deferred)
+        elif self._cache_source_dirs_group is not None:
+            self._cache_source_dirs_group.setVisible(False)
+
+        if (
+            show
+            and getattr(self, 'tab_widget', None)
+            and self.tab_widget.currentIndex() == self.tab_widget.indexOf(self.cache_management_tab)
+            and not getattr(self, "_settings_dialog_initializing", False)
+        ):
+            QTimer.singleShot(50, self._adjust_size_and_persist_geometry)
+
     def setup_cache_management_tab(self):
         """Setup the cache management tab"""
         layout = QVBoxLayout(self.cache_management_tab)
+        self._cache_management_layout = layout
+        self._cache_source_dirs_group = None
         WANT_CACHE_STATS = False
         
         # Cache Statistics group (conditionally shown)
@@ -3518,38 +3589,9 @@ class SettingsDialog(QDialog):
             
             layout.addWidget(stats_group)
             
-        # Cache Directories group
-        dirs_group = QGroupBox("Source Directories")
-        dirs_layout = QVBoxLayout(dirs_group)
-        
-        # Directory list
-        self.cache_dirs_text = QTextEdit()
-        self.cache_dirs_text.setToolTip(
-            "Folders whose images are represented in the thumbnail and recognition caches (read-only)."
-        )
-        self.cache_dirs_text.setReadOnly(True)
-        self.cache_dirs_text.setMaximumHeight(100)
-        self.cache_dirs_text.setStyleSheet(f"""
-            QTextEdit {{
-                color: {DIALOG_TEXT_COLOR_HEX};
-                border: 1px solid {BORDER_DEFAULT_HEX};
-                border-radius: 4px;
-                font-family: Menlo, Monaco;
-                font-size: 10pt;
-            }}
-        """)
-        dirs_layout.addWidget(self.cache_dirs_text)
-        
-        # Add description
-        dirs_info_label = QLabel("Directories from which cached images were loaded.")
-        dirs_info_label.setWordWrap(True)
-        dirs_info_label.setStyleSheet(f"color: {DIALOG_TEXT_COLOR_HEX}; font-size: 10pt;")
-        dirs_layout.addWidget(dirs_info_label)
-        
-        layout.addWidget(dirs_group)
-        
         # Cache Management group
         cache_group = QGroupBox("Cache Controls")
+        self._cache_controls_group = cache_group
         cache_layout = QVBoxLayout(cache_group)
         
         # Cache totals label with refresh button (above buttons)
@@ -3699,10 +3741,12 @@ class SettingsDialog(QDialog):
         background_layout.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
         background_layout.setVerticalSpacing(12)
 
-        self.background_clip_enabled_checkbox = QCheckBox("Enable background CLIP extraction (may cause battery drain, use sparingly)")
+        self.background_clip_enabled_checkbox = QCheckBox("Enable idle search-data collection (use sparingly)")
         self.background_clip_enabled_checkbox.setToolTip(
-            "Extract CLIP features for Favorites and Recently Used directories when idle.\n"
-            "This runs in a separate process and does not interfere with normal operations."
+            "Analyzes images to populate cache with data needed for similarity\n"
+            "and text searches for files in the Favorites and recently used directories.\n"
+            "This runs while the application is idle and does not interfere\n"
+            "with normal operations, but may cause battery drain."
         )
         self.background_clip_enabled_checkbox.setStyleSheet(self.SMALL_CHECKBOX_STYLE)
         background_layout.addRow("", self.background_clip_enabled_checkbox)
@@ -3757,12 +3801,14 @@ class SettingsDialog(QDialog):
             except Exception as e:
                 print(f"Error loading initial cache statistics: {e}")
                 self.cache_stats_label.setText("Loading cache statistics...")
-                self.cache_dirs_text.setText("Loading cache directories...")
-        else:
-            # Just load cache directories when stats are disabled - defer to avoid beachball
-            self.cache_dirs_text.setText("Loading cache directories...")
-            # Use QTimer to defer the loading to avoid blocking the UI
-            QTimer.singleShot(100, self.load_cache_directories_deferred)
+                if hasattr(self, 'cache_dirs_text'):
+                    self.cache_dirs_text.setText("Loading cache directories...")
+
+        if hasattr(self, 'debug_checkbox'):
+            self.debug_checkbox.toggled.connect(
+                lambda _checked: self._update_cache_source_directories_visibility()
+            )
+        self._update_cache_source_directories_visibility()
 
     def setup_move_destinations_tab(self):
         """Setup the move destinations tab"""
@@ -5897,6 +5943,8 @@ class SettingsDialog(QDialog):
     
     def load_cache_directories_deferred(self):
         """Load cache directories in a deferred manner to avoid blocking the UI"""
+        if not hasattr(self, 'cache_dirs_text'):
+            return
         try:
              # Force sync multiprocessing cache to ensure metadata is available
             
@@ -6387,6 +6435,8 @@ class SettingsDialog(QDialog):
 
             # Update match count
             self.update_match_count(self.filter_pattern_input.text())
+
+            self._update_cache_source_directories_visibility()
             
         except Exception as e:
             print(f"Failed to load settings: {e}")
@@ -7532,6 +7582,7 @@ class SettingsDialog(QDialog):
             QTimer.singleShot(50, lambda: self.tab_widget.button_container.setFocus())
         # Check Option key state when dialog is shown
         self._update_reset_button_text()
+        self._update_cache_source_directories_visibility()
         
         # Refresh cache directories if cache management tab is currently selected
         if getattr(self, 'tab_widget', None):
@@ -7696,6 +7747,7 @@ class SettingsDialog(QDialog):
         
         # Update cache totals label and source directories when cache management tab is shown
         if is_cache_tab:
+            self._update_cache_source_directories_visibility()
             if hasattr(self, 'cache_totals_label'):
                 QTimer.singleShot(100, self._update_cache_totals_label)
             # Update source directories list
@@ -7709,11 +7761,12 @@ class SettingsDialog(QDialog):
             if self.parent() and hasattr(self.parent(), 'cache_manager') and self.parent().cache_manager:
                 stats = self.parent().cache_manager.get_cache_statistics()
                 
-                # Update directory list (always available)
-                dirs_text = "\n".join(stats['cache_directories'])
-                if not dirs_text:
-                    dirs_text = "No cache directories found"
-                self.cache_dirs_text.setText(dirs_text)
+                # Update directory list (debug mode only)
+                if hasattr(self, 'cache_dirs_text'):
+                    dirs_text = "\n".join(stats['cache_directories'])
+                    if not dirs_text:
+                        dirs_text = "No cache directories found"
+                    self.cache_dirs_text.setText(dirs_text)
                 
                 # Update statistics display (only if stats are enabled)
                 if hasattr(self, 'cache_stats_label'):
@@ -7739,12 +7792,14 @@ Total Requests:
             else:
                 if hasattr(self, 'cache_stats_label'):
                     self.cache_stats_label.setText("Cache manager not available")
-                self.cache_dirs_text.setText("Cache manager not available")
+                if hasattr(self, 'cache_dirs_text'):
+                    self.cache_dirs_text.setText("Cache manager not available")
                 
         except Exception as e:
             if hasattr(self, 'cache_stats_label'):
                 self.cache_stats_label.setText("Error loading cache statistics")
-            self.cache_dirs_text.setText("Error loading cache directories")
+            if hasattr(self, 'cache_dirs_text'):
+                self.cache_dirs_text.setText("Error loading cache directories")
 
     def clear_all_caches(self):
         """Clear all caches and force rebuild"""
@@ -7797,7 +7852,7 @@ Total Requests:
                 # Refresh cache statistics (only if stats are enabled)
                 if hasattr(self, 'cache_stats_label'):
                     self.refresh_cache_statistics()
-                else:
+                elif hasattr(self, 'cache_dirs_text'):
                     # Just refresh directories when stats are disabled
                     try:
                         if self.parent() and hasattr(self.parent(), 'cache_manager') and self.parent().cache_manager:
@@ -7858,7 +7913,7 @@ Total Requests:
                 # Refresh cache statistics (only if stats are enabled)
                 if hasattr(self, 'cache_stats_label'):
                     self.refresh_cache_statistics()
-                else:
+                elif hasattr(self, 'cache_dirs_text'):
                     # Just refresh directories when stats are disabled
                     try:
                         if self.parent() and hasattr(self.parent(), 'cache_manager') and self.parent().cache_manager:
@@ -8674,18 +8729,19 @@ Total Requests:
             QApplication.processEvents()
             
             # Update source directories display
-            try:
-                if parent_window and hasattr(parent_window, 'cache_manager') and parent_window.cache_manager:
-                    stats = parent_window.cache_manager.get_cache_statistics()
-                    dirs_text = "\n".join(stats['cache_directories'])
-                    if not dirs_text:
-                        dirs_text = "No cache directories found"
-                    self.cache_dirs_text.setText(dirs_text)
-                else:
-                    self.cache_dirs_text.setText("Cache manager not available")
-            except Exception as e:
-                print(f"Error updating cache directories: {e}")
-                self.cache_dirs_text.setText("Error loading cache directories")
+            if hasattr(self, 'cache_dirs_text'):
+                try:
+                    if parent_window and hasattr(parent_window, 'cache_manager') and parent_window.cache_manager:
+                        stats = parent_window.cache_manager.get_cache_statistics()
+                        dirs_text = "\n".join(stats['cache_directories'])
+                        if not dirs_text:
+                            dirs_text = "No cache directories found"
+                        self.cache_dirs_text.setText(dirs_text)
+                    else:
+                        self.cache_dirs_text.setText("Cache manager not available")
+                except Exception as e:
+                    print(f"Error updating cache directories: {e}")
+                    self.cache_dirs_text.setText("Error loading cache directories")
             
             progress_dialog.close()
             
