@@ -499,7 +499,7 @@ def save_lora_catalog_state(
 ) -> None:
     from imagegen_plugins.lora_catalog import LORA_CATALOG
     from imagegen_plugins.lora_catalog_settings import migrate_lora_catalog
-    from imagegen_plugins.lora_host_registry import LORA_PROBE_MODEL_ORDER
+    from imagegen_plugins.hf_model_ids import LORA_PROBE_MODEL_ORDER
     from imagegen_plugins.lora_model_registry import entry_matches_lora_model
 
     hidden = hidden_ids if hidden_ids is not None else deleted_ids
