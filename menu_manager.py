@@ -1346,25 +1346,26 @@ class MenuManager:
         self.main_window.prepopulate_cache_action.triggered.connect(self._prepopulate_cache)
         tools_menu.addAction(self.main_window.prepopulate_cache_action)
 
-        # Scan for faces (Cmd+=)
-        self.main_window.scan_faces_action = QAction("Scan for Faces", self.main_window)
-        self.main_window.scan_faces_action.setShortcut(QKeySequence("Ctrl+="))
-        self.main_window.scan_faces_action.setShortcutContext(Qt.ShortcutContext.WindowShortcut)
-        def _scan_for_faces_with_focus():
+        # Cache Faces (Cmd+=)
+        self.main_window.cache_faces_action = QAction("Cache Subdirectories' Faces", self.main_window)
+        self.main_window.cache_faces_action.setShortcut(QKeySequence("Ctrl+="))
+        self.main_window.cache_faces_action.setShortcutContext(Qt.ShortcutContext.WindowShortcut)
+        def _cache_faces_with_focus():
             tree_had_focus = self.main_window._tree_has_focus() if hasattr(self.main_window, '_tree_has_focus') else False
             self.main_window._tree_had_focus_when_invoked = tree_had_focus
             try:
-                self.main_window.scan_for_faces()
+                self.main_window.cache_faces()
             finally:
                 self.main_window._tree_had_focus_when_invoked = False
-        self.main_window.scan_faces_action.triggered.connect(_scan_for_faces_with_focus)
-        tools_menu.addAction(self.main_window.scan_faces_action)
+        self.main_window.cache_faces_action.triggered.connect(_cache_faces_with_focus)
+        tools_menu.addAction(self.main_window.cache_faces_action)
 
         # Save Custom Sort Order
+        # Developer note: This action is disabled for now but should remain in the codebase.
         self.main_window.save_custom_action = QAction("Save Custom Sort Order", self.main_window)
         self.main_window.save_custom_action.setShortcut(QKeySequence("Ctrl+S"))
         self.main_window.save_custom_action.triggered.connect(lambda: self.main_window.sorting_manager.save_custom_sort(show_message=True))
-        tools_menu.addAction(self.main_window.save_custom_action)
+        # tools_menu.addAction(self.main_window.save_custom_action)
         
         # Exclude Thumbs from View
         self.main_window.exclude_files_action = QAction("Exclude Thumbs from View", self.main_window)
@@ -1374,7 +1375,7 @@ class MenuManager:
         tools_menu.addAction(self.main_window.exclude_files_action)
 
         # Show Rename Status in Tree    
-        self.main_window.show_rename_status_action = QAction("Show Rename Status in Tree", self.main_window)
+        self.main_window.show_rename_status_action = QAction("Show Naming Consistency in Tree", self.main_window)
         self.main_window.show_rename_status_action.setCheckable(True)
         self.main_window.show_rename_status_action.setChecked(False)
         self.main_window.show_rename_status_action.setShortcut(QKeySequence("Ctrl+Shift+N"))
@@ -2519,13 +2520,13 @@ class MenuManager:
         if hasattr(mw, "debug_save_canvas_action"):
             mw.debug_save_canvas_action.setEnabled(self._debug_save_canvas_available(mw))
 
-        # Scan for faces: enable only when face_engine is available
-        if hasattr(mw, 'scan_faces_action'):
+        # Cache Faces: enable only when face_engine is available
+        if hasattr(mw, 'cache_faces_action'):
             try:
                 from faces.face_engine import is_available as face_available
-                mw.scan_faces_action.setEnabled(face_available())
+                mw.cache_faces_action.setEnabled(face_available())
             except ImportError:
-                mw.scan_faces_action.setEnabled(False)
+                mw.cache_faces_action.setEnabled(False)
         
         # Update Reset Date to EXIF action enabled state and text
         if hasattr(mw, 'reset_date_to_exif_action'):

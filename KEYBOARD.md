@@ -79,7 +79,6 @@ Press **F1** or **/** in the app for context-sensitive help. Menu items also sho
 | Cmd+N | Rename with custom prefix |
 | Cmd+M | Convert selected images |
 | Cmd+Shift+Z | Resize images |
-| Cmd+S | Save custom sort order |
 | Cmd+L | Lock files (when locking enabled) |
 | Cmd+Shift+L | Unlock files |
 
@@ -148,7 +147,7 @@ Press **F1** or **/** in the app for context-sensitive help. Menu items also sho
 | Shift+F | Find duplicate images (recursive) |
 | Cmd+P | Search by person |
 | ⌃⌘P | Quick person search |
-| Cmd+= | Scan for faces |
+| Cmd+= | Cache Faces |
 
 ## Browse View (Fullscreen)
 

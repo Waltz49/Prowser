@@ -4071,7 +4071,7 @@ class SettingsDialog(QDialog):
             msg = QLabel(
                 "Face recognition is not available. Install the optional package:\n\n"
                 "  pip install face_recognition\n\n"
-                "Then restart the application. The Faces tab and Scan for faces (Cmd+=) will then work."
+                "Then restart the application. The Faces tab and Cache Faces (Cmd+=) will then work."
             )
             msg.setWordWrap(True)
             msg.setStyleSheet(self.NOTE_TEXT_STYLE)
@@ -4613,7 +4613,7 @@ class SettingsDialog(QDialog):
         self.search_depth_spinbox.setValue(4)
         self.search_depth_spinbox.setToolTip(
             "Maximum depth for recursive directory scans (1-10). Used by:\n"
-            "• Ctrl+= (scan for faces)\n"
+            "• Ctrl+= (Cache Faces)\n"
             "• Shift+Cmd+C (cache subdirectories' thumbnails)\n"
             "• Recursive image search and tree \"has images\" checks\n"
             "• Similarity / background indexing over folders"
@@ -8055,7 +8055,7 @@ Total Requests:
             self,
             "Clear Face Cache",
             "This will delete cached face encodings and face sample thumbnails under the face cache directory.\n\n"
-            "After clearing, you may need to run 'Scan for faces' again (or re-run searches).\n\n"
+            "After clearing, you may need to run Cache Faces again (or re-run searches).\n\n"
             "Are you sure you want to continue?",
             default_no=True,
         )
@@ -8083,7 +8083,7 @@ Total Requests:
                 except Exception:
                     pass
 
-            # Clear in-memory directory scan cache so cmd-= will rescan (not skip) after clear
+            # Clear in-memory directory scan cache so cmd-= will re-cache (not skip) after clear
             try:
                 from faces.face_scan_runner import clear_scanned_dir_cache
                 clear_scanned_dir_cache()

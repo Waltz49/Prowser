@@ -676,12 +676,6 @@ def setup_create_menu(menubar, main_window) -> None:
     controller = get_imagegen_controller(main_window)
     main_window.imagegen_function_actions = {}
 
-    experimental_note = QWidgetAction(main_window)
-    experimental_note.setDefaultWidget(
-        TextSeparator("Image generation is rudimentary")
-    )
-    create_menu.addAction(experimental_note)
-
     main_window._imagegen_last_function = effective_last_function(main_window)
     primary_action = QAction(
         _primary_imagegen_menu_label(_resolved_last_function(main_window)),

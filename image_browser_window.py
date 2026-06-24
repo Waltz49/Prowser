@@ -2126,7 +2126,11 @@ class ImageBrowserWindow(QMainWindow):
     def update_rename_status_for_directory(self, directory: str):
         """Update rename status for a specific directory and refresh its checkmark without rebuilding tree."""
         return self.sidebar_manager.update_rename_status_for_directory(directory)
-    
+
+    def schedule_rename_status_check_after_rename(self, *directories):
+        """Schedule naming-consistency tree check after rename(s) complete (debounced)."""
+        return self.sidebar_manager.schedule_rename_status_check_after_rename(*directories)
+
     def update_rename_status(self, full_scan=False):
         """Update rename status for visible directories in tree. full_scan=True scans all relevant dirs."""
         return self.sidebar_manager.update_rename_status(full_scan=full_scan)
@@ -3838,9 +3842,9 @@ class ImageBrowserWindow(QMainWindow):
         # Regenerate thumbnails
         self.generate_thumbnails(force_refresh=True)
 
-    def scan_for_faces(self, recursive: bool = True, max_depth: Optional[int] = None, after_scan=None, paths_to_scan: Optional[list] = None, directory_override: Optional[str] = None):
-        """Scan current directory (optionally recursively) for faces and fill face cache. Runs in background thread.
-        When recursive=False and paths_to_scan is provided, scans only those paths (ensures displayed images get cache).
+    def cache_faces(self, recursive: bool = True, max_depth: Optional[int] = None, after_scan=None, paths_to_scan: Optional[list] = None, directory_override: Optional[str] = None):
+        """Cache faces for the current directory (optionally recursively). Runs in background thread.
+        When recursive=False and paths_to_scan is provided, caches only those paths (ensures displayed images get cache).
         directory_override: when set (e.g. from tree), use this dir instead of get_current_search_directory.
         Uses same directory resolution and get_image_list as cmd-P (filter_by_person) for identical cache scope."""
         try:
@@ -3859,7 +3863,7 @@ class ImageBrowserWindow(QMainWindow):
                             (os.path.dirname(self.get_displayed_images()[0]) if self.get_displayed_images() else None))
         if not current_directory or not os.path.exists(current_directory):
             from utils import show_styled_warning
-            show_styled_warning(self, "No directory", "No current directory to scan.")
+            show_styled_warning(self, "No directory", "No current directory to cache faces in.")
             return
         settings = self.config.load_settings()
         if max_depth is None:
@@ -3882,7 +3886,7 @@ class ImageBrowserWindow(QMainWindow):
         total = len(image_paths)
         if total == 0:
             from utils import show_styled_information
-            show_styled_information(self, "Scan for faces", "No images found in this directory (and subdirs to depth {}).".format(max_depth))
+            show_styled_information(self, "Cache Faces", "No images found in this directory (and subdirs to depth {}).".format(max_depth))
             return
 
         # Derive unique directories in order of first appearance (for "x of y" dir indicator)
@@ -3957,7 +3961,7 @@ class ImageBrowserWindow(QMainWindow):
         progress_label.setTextFormat(Qt.TextFormat.RichText)
         progress = QProgressDialog("", "Cancel", 0, total, self)
         progress.setLabel(progress_label)
-        progress.setWindowTitle("Scan for faces")
+        progress.setWindowTitle("Cache Faces")
         progress.setWindowModality(Qt.WindowModality.WindowModal)
         progress.setMinimumDuration(0)
         progress.setValue(0)
@@ -3992,7 +3996,7 @@ class ImageBrowserWindow(QMainWindow):
             if not callable(after_scan):
                 from utils import show_styled_information
                 show_styled_information(
-                    self, "Scan for faces",
+                    self, "Cache Faces",
                     f"All {total} images already have face data in the cache (including images with no faces found).",
                 )
             return
@@ -4028,7 +4032,7 @@ class ImageBrowserWindow(QMainWindow):
                     if idx > 0:
                         dir_line = f"Directory: {dir_part} ({idx} of {_total_dirs})"
             lines = [
-                "Scanning for faces...",
+                "Caching faces...",
                 dir_line,
                 f"Face detection: {work_done} of {work_tot} (not in cache)",
                 f"Visited: {visited_i} of {visited_tot} files",
@@ -4096,11 +4100,11 @@ class ImageBrowserWindow(QMainWindow):
             had_after_scan = callable(after_scan)
             if not had_after_scan:
                 if count >= 0:
-                    show_styled_information(self, "Scan for faces", "Checked for new images. {} newly scanned images had at least one face.".format(count))
+                    show_styled_information(self, "Cache Faces", "Checked for new images. {} newly cached images had at least one face.".format(count))
                 elif count == -2:
-                    show_styled_information(self, "Scan for faces", "Scan encountered an error.")
+                    show_styled_information(self, "Cache Faces", "Face caching encountered an error.")
 
-        class FaceScanWorkerWithProgress(QThread):
+        class FaceCacheWorkerWithProgress(QThread):
             progress_signal = Signal(int, int, str, bool)
             finished_with_count = Signal(int)
 
@@ -4141,7 +4145,7 @@ class ImageBrowserWindow(QMainWindow):
                 QApplication.processEvents()
 
         set_foreground_face_scan_active(True)  # Foreground has priority; blocks background face extraction
-        worker = FaceScanWorkerWithProgress(self)
+        worker = FaceCacheWorkerWithProgress(self)
         worker.progress_signal.connect(on_scan_progress)
         worker.finished_with_count.connect(on_finished)
         worker.start()
@@ -4448,7 +4452,7 @@ class ImageBrowserWindow(QMainWindow):
                             pass
                         self._person_face_search_progress = None
                     displayed_copy = list(displayed)
-                    self.scan_for_faces(
+                    self.cache_faces(
                         recursive=False,
                         after_scan=lambda: self.filter_by_person(
                             subject_id,
@@ -4463,8 +4467,8 @@ class ImageBrowserWindow(QMainWindow):
             except Exception:
                 pass
 
-        # After autoscan: same coordination as scan_for_faces — pause background CLIP before heavy face_cache reads.
-        # (Do not flush before autoscan's scan_for_faces branch, or we would return without resuming the worker.)
+        # After autoscan: same coordination as cache_faces — pause background CLIP before heavy face_cache reads.
+        # (Do not flush before autoscan's cache_faces branch, or we would return without resuming the worker.)
         self._person_search_paused_background_clip = False
         try:
             if getattr(self, 'background_clip_controller', None) and self.background_clip_controller.enabled:

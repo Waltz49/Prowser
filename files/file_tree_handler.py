@@ -223,7 +223,7 @@ class CustomTreeView(QTreeView):
         # Get the set of keys that should be handled locally
         keys_handled_locally = self._get_keys_handled_locally()
 
-        # Handle cmd-P (search by person) and cmd-= (scan for faces) when tree has focus
+        # Handle cmd-P (search by person) and cmd-= (Cache Faces) when tree has focus
         # Both must start with the directory represented by the highlighted tree node
         cmd_mod = modifiers & (Qt.ControlModifier | Qt.MetaModifier)
         if cmd_mod and not (modifiers & Qt.ShiftModifier) and not (modifiers & Qt.AltModifier):
@@ -261,7 +261,7 @@ class CustomTreeView(QTreeView):
                 dir_to_scan = tree_dir if tree_dir and os.path.isdir(tree_dir) else None
                 self.main_window._tree_had_focus_when_invoked = True
                 try:
-                    self.main_window.scan_for_faces(directory_override=dir_to_scan)
+                    self.main_window.cache_faces(directory_override=dir_to_scan)
                 finally:
                     self.main_window._tree_had_focus_when_invoked = False
                 event.accept()

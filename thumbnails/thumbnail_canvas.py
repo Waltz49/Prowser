@@ -4216,10 +4216,10 @@ class ThumbnailCanvas(QWidget):
             # Store old path for updating selected_files
             self.main_window.pending_rename_old_path = original_path
             
-            # Update rename status checkmark for this directory (without rebuilding tree)
+            # Schedule naming-consistency check after rename completes
             directory = _path_dirname(new_path)
-            if hasattr(self.main_window, 'update_rename_status_for_directory'):
-                self.main_window.update_rename_status_for_directory(directory)
+            if hasattr(self.main_window, 'schedule_rename_status_check_after_rename'):
+                self.main_window.schedule_rename_status_check_after_rename(directory)
             
             # Refresh directory display
             if hasattr(self.main_window, 'debounce_refresh_directory'):

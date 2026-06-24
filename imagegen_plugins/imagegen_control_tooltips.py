@@ -13,54 +13,84 @@ from thumbnails.thumbnail_constants import CMD_SYMBOL
 _FIELD_TOOLTIPS: dict[str, str] = {
     "width": "Output image width in pixels.",
     "height": "Output image height in pixels.",
-    "steps": "Diffusion steps. More steps can improve quality but take longer.",
-    "guidance_scale": "How strongly the model follows the prompt.",
-    "use_resolution_binning": "Snap dimensions to resolution bins supported by this model.",
-    "max_sequence_length": "Maximum text length (tokens) for the prompt encoder.",
+    "steps": (
+        "How many drawing steps to use.\n"
+        "More steps can look better\n"
+        "but take more time."
+    ),
+    "guidance_scale": "How closely the image\nfollows your prompt.",
+    "use_resolution_binning": (
+        "Round width and height to sizes\n"
+        "this model works best with."
+    ),
+    "max_sequence_length": "Maximum length (tokens) of your prompt text.",
     "clean_caption": "Clean up the prompt text before generation.",
-    "random_seed": "Pick a new random seed each time you generate.",
-    "copies": "Images to generate in one run. Values above 1 require Random seed.",
-    "low_ram": "Use less memory during generation (may be slower).",
+    "random_seed": (
+        "Use a new random number\n"
+        "each time you generate."
+    ),
+    "copies": (
+        "How many images to make at once.\n"
+        "Turn on Random seed if you want\n"
+        "more than one."
+    ),
+    "low_ram": (
+        "Use less computer memory.\n"
+        "May run slower."
+    ),
     "overlap_percentage": "Overlap between expand tiles when blending (percent).",
-    "show_progressive_images": "Show partial previews while generation is running.",
+    "show_progressive_images": (
+        "View intermediate previews while the image\n"
+        "is being generated. Turn off to avoid interruptions.\n"
+        "Progress may still be seen in job status or File Information\n"
+        "pane for images used as source for the current generation."
+    ),
     "aspect_ratio_test": (
-        "When using multiple source images, all images to\n"
-        "the exact pixel size of the first image.\n"
-        "(Scale down if needed, white borders, centered.)"
+        "When you use several images,\n"
+        "use copies to preserve the aspect ratio.\n"
+        "May introduce borders in result, but not\n"
+        "checking this may produce stretched or squashed\n"
+        "results."
+
     ),
     "use_custom_size": (
-        "Fit the first source image to the custom width and height (contain, "
-        "white borders) via a temp file for generation; EXIF references keep "
-        "the original first image. Unchecked uses the first image at its "
-        "current size."
+        "Use custom width and height for the resulting image.\n"
+        "May introduce borders in result."
+        "If unchecked, the resulting image is the same size\n"
+        "as the first source image."
     ),
     "mflux_lora": (
-        "Optional LoRA style adapter for this model. "
-        "Some LoRAs need a trigger word in the prompt; when required, it is shown in the menu."
+        "Optional style add-on for this model.\n"
+        "Some styles need a trigger word\n"
+        "within your prompt."
     ),
 }
 
 _DIM_HELPER_TOOLTIPS: dict[str, str] = {
     "import": (
-        "Load prompt text from the EXIF user comment."
+        "Load prompt text saved\n"
+        "in the EXIF user comment."
     ),
     "screen_size": (
-        "Screen Size\nSubject to Aspect Ratio Lock"
+        "Set size to fit your screen.\n"
+        "Limited by aspect ratio lock and\n"
+        "max size from Settings Dialog."
     ),
-    "square": "Square",
-    "reverse": "Orientation",
-    "aspect": (
-        "Keep width and height proportional when either dimension is changed."
-    ),
+    "square": "Square:\nMake width and height equal.",
+    "reverse": "Reverse:\nSwap width and height.",
+    "aspect":"Keep width and height proportional\nwhen either dimension is changed.",
 }
 
 _DIALOG_BUTTON_TOOLTIPS: dict[str, str] = {
-    "generate": "Start generation with the current settings.",
-    "cancel": "Discard changes and close.",
+    "generate": (
+        "Start making the image\nwith these settings.\n"
+        "Also saves settings to the EXIF user comment."
+    ),
+    "cancel": "Close dialog without saving changes.",
     "close": f"Close this dialog ({CMD_SYMBOL}W).",
 }
 
-_MODEL_COMBO_TOOLTIP = "Image generation model and backend for this action."
+_MODEL_COMBO_TOOLTIP = "Choose which model\nmakes the image."
 
 
 def field_tooltip(spec: FieldSpec) -> str:
@@ -70,9 +100,9 @@ def field_tooltip(spec: FieldSpec) -> str:
         return ""
     if spec.kind in ("int_slider", "float_slider"):
         if spec.min_value is not None and spec.max_value is not None:
-            tip = f"{tip} Allowed range: {spec.min_value}–{spec.max_value}."
+            tip = f"{tip}\nRange: {spec.min_value}–{spec.max_value}."
         if spec.kind == "int_slider" and spec.step:
-            tip = f"{tip} Step: {spec.step}."
+            tip = f"{tip}\nStep: {spec.step}."
     return tip
 
 
@@ -119,18 +149,20 @@ def apply_dim_helper_tooltips(
 
 
 _EDIT_IMPORT_TEXT_TOOLTIP = (
-    "Load prompt text from the EXIF user\n"
-    "comment of the selected image."
+    "Load the prompt text saved\n"
+    "in the EXIF user comment\n"
+    "of the selected image."
 )
 
 _EDIT_IMPORT_ALL_TOOLTIP = (
-    "Load prompt text and other available settings\n"
-    "from the EXIF user comment of the selected image."
+    "Load all settings except prompt text\n"
+    "saved in the EXIF user comment\n"
+    "of the selected image."
 )
 
 _EDIT_IMPORT_ALL_SETTINGS_TOOLTIP = (
-    "Load available generation settings and reference\n"
-    "images from the EXIF user comment of the selected image."
+    "Load settings and reference images\n"
+    "saved with the selected image's\nEXIF user comment."
 )
 
 

@@ -32,6 +32,13 @@ class SidebarManager:
         # Track sidebar width for detecting significant resize changes
         self._last_sidebar_width = None
 
+        # Debounce naming-consistency checks after rename operations (batch + F2)
+        self._pending_rename_status_directories: set = set()
+        self._rename_status_after_rename_timer = QTimer()
+        self._rename_status_after_rename_timer.setSingleShot(True)
+        self._rename_status_after_rename_timer.timeout.connect(self._flush_scheduled_rename_status_check)
+        self._rename_status_after_rename_delay_ms = 400
+
     def _on_view_mode_changed(self, mode: str):
         """Handle VIEW_MODE_CHANGED - sidebar state may need refresh (manage_sidebar_visibility called by view switch)"""
         pass  # manage_sidebar_visibility_for_view_mode is called by view switch code
@@ -203,6 +210,33 @@ class SidebarManager:
                 if self.main_window.file_tree_handler.is_tree_initialized():
                     self.main_window.file_tree_handler.rebuild_tree()
     
+    def schedule_rename_status_check_after_rename(self, *directories):
+        """Schedule a naming-consistency tree check after rename(s) finish.
+
+        Debounced so rapid or batched renames trigger one check after the last one.
+        No-op when Show Naming Consistency in Tree is off.
+        """
+        if not hasattr(self.main_window, 'rename_status_manager'):
+            return
+        if not self.main_window.rename_status_manager.is_enabled():
+            return
+        for directory in directories:
+            if directory:
+                self._pending_rename_status_directories.add(os.path.normpath(directory))
+        if not self._pending_rename_status_directories:
+            return
+        self._rename_status_after_rename_timer.start(self._rename_status_after_rename_delay_ms)
+
+    def _flush_scheduled_rename_status_check(self):
+        """Run pending naming-consistency checks for directories affected by renames."""
+        directories = list(self._pending_rename_status_directories)
+        self._pending_rename_status_directories.clear()
+        for directory in directories:
+            try:
+                self.update_rename_status_for_directory(directory)
+            except Exception:
+                pass
+
     def update_rename_status_for_directory(self, directory: str):
         """Update rename status for a specific directory and refresh its checkmark without rebuilding tree."""
         if not hasattr(self.main_window, 'rename_status_manager'):

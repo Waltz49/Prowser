@@ -2177,7 +2177,7 @@ class FileOperationsManager:
         prefix_input_widget = QWidget()
         prefix_input_widget.setLayout(prefix_input_layout)
         
-        prefix_note = QLabel("Add %d for directory")
+        prefix_note = QLabel("Add %d for directory name. Example: 'image-%d'")
         prefix_note.setAlignment(Qt.AlignRight)
         prefix_note.setStyleSheet(
             f"color: {TEXT_DISABLED_HEX}; font-size: 11px; background-color: {DIALOG_BACKGROUND_HEX}; padding: 4px;"
@@ -3246,6 +3246,11 @@ class FileOperationsManager:
                     date_change_mode = 'none'  # Default for quick mass rename
                 if order_direction is None:
                     order_direction = 'top'  # Default for quick mass rename
+                # Blank/whitespace prefix: show rename dialog so user can set it
+                if not str(prefix_template or '').strip():
+                    bypass_dialog = False
+
+            if bypass_dialog:
                 ok = True
             else:
                 saved_prefix = settings.get('rename_custom_prefix', '')
@@ -3291,11 +3296,16 @@ class FileOperationsManager:
             prefix = prefix_template.replace('%d', dirname).replace('%D', dirname)
             is_valid, error_msg = self._validate_unix_filename(prefix)
             if not is_valid:
-                show_styled_warning(
-                    mw,
-                    "Invalid Prefix",
-                    f"Invalid prefix: {error_msg}\n\nPlease enter a valid Unix filename prefix."
+                detail = (
+                    f"Invalid prefix: {error_msg}\n\n"
+                    "Please enter a valid Unix filename prefix."
                 )
+                if not str(prefix or '').strip():
+                    detail += (
+                        "\n\nSet a prefix via Edit → Rename with Custom Prefix (Ctrl+N). "
+                        "Quick Mass Rename uses the last prefix saved there."
+                    )
+                show_styled_warning(mw, "Invalid Prefix", detail)
                 restart_background_loading()
                 return
             max_sequence = 10 ** increment_length - 1
@@ -4594,6 +4604,10 @@ class FileOperationsManager:
             progress_dialog.close()
             QApplication.processEvents()
 
+            # Schedule naming-consistency check after all renames in this batch complete
+            if hasattr(mw, 'schedule_rename_status_check_after_rename'):
+                mw.schedule_rename_status_check_after_rename(target_directory)
+
             # ---- CRITICAL: Update active image to its new name after rename ----
             # Do this BEFORE deferred_refresh so it happens immediately, regardless of code path
             rename_map_dict = {old: new for old, new in target_mappings if old != new}
@@ -4963,20 +4977,6 @@ class FileOperationsManager:
                     QTimer.singleShot(600, highlight_after_sort)  # After clear_and_select (500ms) + small delay
                     # Note: Don't call debounce_refresh_directory() here - refresh_directory(force=True) already handles the refresh
                     # Calling debounce would schedule another refresh 260ms later which could interfere with the first refresh
-                    
-                    # Update rename status checkmarks for affected directories (without rebuilding tree)
-                    if hasattr(mw, 'update_rename_status_for_directory'):
-                        affected_directories = set()
-                        for old_path, new_path in target_mappings:
-                            if old_path != new_path:
-                                directory = os.path.dirname(new_path)
-                                if directory:
-                                    affected_directories.add(directory)
-                        for directory in affected_directories:
-                            try:
-                                mw.update_rename_status_for_directory(directory)
-                            except Exception:
-                                traceback.print_exc()
                 except Exception:
                     traceback.print_exc()
                     pass  # Don't fail if refresh has issues

@@ -159,7 +159,7 @@ def _build_dim_helper_icon_buttons(dialog: Any, parent: QWidget) -> Tuple[QWidge
         square_btn=square_btn,
         reverse_btn=reverse_btn,
     )
-    return screen_btn, square_btn, reverse_btn
+    return  square_btn, reverse_btn,screen_btn
 
 
 def _build_custom_size_group_box(
