@@ -2,7 +2,7 @@
 """
 Local SANA Sprint 0.6B 1024px worker (diffusers SanaSprintPipeline).
 
-Isolated from testchat; reads generation parameters from JSON payload on stdin
+Reads generation parameters from JSON payload on stdin
 when run as a standalone script, or via run_from_payload from model_tasks_worker.
 """
 

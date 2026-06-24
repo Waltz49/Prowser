@@ -996,7 +996,7 @@ class ImageBrowserWindow(QMainWindow):
                             skip_filter_pattern=skip_filter_pattern,
                         )
 
-                    # Single-file requests (expand, testchat open, etc.) must land in image viewer (browse view).
+                    # Single-file requests (expand, external open, etc.) must land in image viewer (browse view).
                     # When already in browse view, load_file_with_directory_thumbnails skips show_image; refresh here.
                     if len(valid_files) == 1 and requested_macos_space_mode:
                         target_file = valid_files[0]

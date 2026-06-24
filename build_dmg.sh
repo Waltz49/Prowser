@@ -34,7 +34,7 @@ VOL_ICON_ICNS="$SCRIPT_DIR/Prowser.icns"
 BG_IMAGE="$SCRIPT_DIR/background.png"
 
 # Pre-blessed source folder (custom icon applied once in Finder); override via env if needed
-SOURCE_FOLDER="${SOURCE_FOLDER:-$HOME/dev/testchat/source_preblessed}"
+SOURCE_FOLDER="${SOURCE_FOLDER:-$SCRIPT_DIR/source_preblessed}"
 mkdir -p "$SOURCE_FOLDER"
 
 #######################################

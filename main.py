@@ -515,8 +515,14 @@ Examples:
         choices=['default', 'thread', 'process'],
         default='default',
         metavar='MODE',
-        help='Testing: force model-tasks jobs in a thread, separate process, or default '
-             '(thread when bundled on macOS, process when run from source)',
+        help='Run jobs in a thread, process, or default '
+             '(thread in app, process from source)',
+    )
+    parser.add_argument(
+        '--min',
+        action='store_true',
+        help='Simulate a minimal PyInstaller bundle: '
+             'hide image generation, LM Studio, voice input, and related UI',
     )
     
     return parser.parse_args()
@@ -721,6 +727,9 @@ def main():
     
     # Parse command line arguments early to get profile directory
     args = parse_arguments()
+
+    if args.min:
+        os.environ["PROWSER_MIN_BUNDLE"] = "1"
 
     from workers.model_tasks_launch import set_background_mode
 

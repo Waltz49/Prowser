@@ -25,29 +25,36 @@ class CommandLineHelpDialog(MarkdownDialog):
         ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
         return ansi_escape.sub('', text)
 
+    def _project_root(self):
+        """Repository root (parent of browser_window/)."""
+        return os.path.dirname(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        )
+
     def _get_command_line_help(self):
         """Run main.py -h and capture the output"""
-        # Get the path to main.py (same directory as this file)
-        script_dir = os.path.dirname(os.path.abspath(__file__))
-        main_py = os.path.join(script_dir, 'main.py')
-        
-        # Try to find the Python interpreter
-        # First try the venv if it exists
-        venv_python = os.path.join(script_dir, 'venv_image_browser', 'bin', 'python')
-        if os.path.exists(venv_python):
-            python_exe = venv_python
+        if getattr(sys, 'frozen', False):
+            cmd = [sys.executable, '-h']
+            cwd = os.path.dirname(os.path.abspath(sys.executable))
         else:
-            # Fall back to the current Python interpreter
-            python_exe = sys.executable
-        
+            project_root = self._project_root()
+            main_py = os.path.join(project_root, 'main.py')
+            venv_python = os.path.join(
+                project_root, 'venv_image_browser', 'bin', 'python'
+            )
+            python_exe = (
+                venv_python if os.path.exists(venv_python) else sys.executable
+            )
+            cmd = [python_exe, main_py, '-h']
+            cwd = project_root
+
         try:
-            # Run main.py -h and capture output
             result = subprocess.run(
-                [python_exe, main_py, '-h'],
+                cmd,
                 capture_output=True,
                 text=True,
                 timeout=10,
-                cwd=script_dir
+                cwd=cwd,
             )
             
             if result.returncode == 0:

@@ -374,7 +374,7 @@ def source_paths_for_generation_exif(
 def reference_entry_for_source(
     source_path: str, output_path: str
 ) -> Optional[Tuple[str, str]]:
-    """(exif_line, source_path) for References block; matches testchat expand style."""
+    """(exif_line, source_path) for References block; matches expand-reference style."""
     if not source_path or not os.path.isfile(source_path):
         return None
     ap = os.path.normpath(os.path.abspath(source_path))

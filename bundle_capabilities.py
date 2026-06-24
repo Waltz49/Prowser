@@ -9,7 +9,7 @@ _MIN_BUNDLE_ENV = "PROWSER_MIN_BUNDLE"
 
 
 def is_min_bundle() -> bool:
-    """True when built with pyInstallerBuild.sh --min (optional AI/audio omitted)."""
+    """True for pyInstallerBuild.sh --min bundles or when ``main.py --min`` is used."""
     return os.environ.get(_MIN_BUNDLE_ENV, "").strip() == "1"
 
 

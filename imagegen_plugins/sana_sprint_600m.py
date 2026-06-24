@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Local SANA Sprint 0.6B 1024px (diffusers; matches testchat gm model 19 defaults)."""
+"""Local SANA Sprint 0.6B 1024px (diffusers; default generation parameters)."""
 
 from __future__ import annotations
 

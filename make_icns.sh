@@ -6,7 +6,8 @@
 
 APP_NAME="Prowser"
 # APP_NAME="ShowHideIcons.sh"
-DEFAULT_SRC="/Users/douglasnadel/dev/testchat/image_browser/imagegen-1687.png"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+DEFAULT_SRC="$SCRIPT_DIR/imagegen-1687.png"
 SRC="$DEFAULT_SRC"
 
 # Parse command line arguments

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Message Handler for Image Browser
-Handles named pipe communication between testchat and image browser on macOS
+Handles named pipe communication for external programs controlling the image browser on macOS
 """
 
 # Standard library imports
