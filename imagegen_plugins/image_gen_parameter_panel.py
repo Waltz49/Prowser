@@ -238,9 +238,10 @@ def widget_for_field_spec(
         apply_field_control_tooltips(spec, cb)
         if spec.key == "series_refinement":
             cb.setToolTip(
-                "For a series of copies, replace the first source image with "
-                "each new result before the next copy. Other source images "
-                "stay in the same order."
+                "For a series of generations, replace the first source image with\n"
+                "the new result of the previous generation before the next copy.\n"
+                "Other source images, if any, stay in the same order for subsequent\n"
+                "generations."
             )
         return cb, None
 

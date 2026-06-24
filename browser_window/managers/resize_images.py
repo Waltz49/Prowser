@@ -13,6 +13,7 @@ from typing import List, Optional, Sequence, Tuple
 from PIL import Image
 
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -25,6 +26,9 @@ from PySide6.QtWidgets import (
     QSpinBox,
     QVBoxLayout,
 )
+
+from imagegen_plugins.image_gen_form_layout import create_image_gen_dim_helper_icon_button
+from imagegen_plugins.imagegen_control_tooltips import apply_dim_helper_tooltips
 
 from config import get_config
 from exif.exif_utils import (
@@ -338,6 +342,37 @@ class ResizeImagesDialog(QDialog):
         row_h.addWidget(self.height_spin, 1)
         layout.addLayout(row_h)
 
+        dim_btn_layout = QHBoxLayout()
+        dim_btn_layout.setContentsMargins(0, 0, 0, 0)
+        dim_btn_layout.setSpacing(4)
+        dim_btn_layout.addStretch(1)
+        square_btn = create_image_gen_dim_helper_icon_button(
+            "dim_square_icon.png",
+            hover_icon_name="dim_square_icon_hover.png",
+            parent=self,
+        )
+        square_btn.clicked.connect(self._on_square_dims)
+        reverse_btn = create_image_gen_dim_helper_icon_button(
+            "dim_reverse_icon.png",
+            hover_icon_name="dim_reverse_icon_hover.png",
+            parent=self,
+        )
+        reverse_btn.clicked.connect(self._on_reverse_dims)
+        screen_btn = create_image_gen_dim_helper_icon_button(
+            "dim_screen_icon.png",
+            hover_icon_name="dim_screen_icon_hover.png",
+            parent=self,
+        )
+        screen_btn.clicked.connect(self._on_screen_size_dims)
+        apply_dim_helper_tooltips(
+            screen_btn=screen_btn,
+            square_btn=square_btn,
+            reverse_btn=reverse_btn,
+        )
+        for btn in (square_btn, reverse_btn, screen_btn):
+            dim_btn_layout.addWidget(btn)
+        layout.addLayout(dim_btn_layout)
+
         self.preserve_cb = QCheckBox("Preserve aspect ratio")
         self.preserve_cb.setChecked(self.preserve_aspect)
         layout.addWidget(self.preserve_cb)
@@ -473,6 +508,41 @@ class ResizeImagesDialog(QDialog):
             return
         self._anchor_is_width = False
         self._apply_preserve_from_height()
+
+    @staticmethod
+    def _screen_pixel_size() -> Tuple[int, int]:
+        app = QGuiApplication.instance()
+        if app is None:
+            return 1024, 1024
+        screen = app.primaryScreen()
+        if screen is None:
+            return 1024, 1024
+        geom = screen.geometry()
+        return int(geom.width()), int(geom.height())
+
+    def _set_dim_spins(self, width: int, height: int) -> None:
+        lo, hi = 1, 99999
+        w = max(lo, min(hi, int(width)))
+        h = max(lo, min(hi, int(height)))
+        self._updating = True
+        try:
+            self.width_spin.setValue(w)
+            self.height_spin.setValue(h)
+        finally:
+            self._updating = False
+
+    def _on_screen_size_dims(self) -> None:
+        sw, sh = self._screen_pixel_size()
+        self._set_dim_spins(sw, sh)
+
+    def _on_square_dims(self) -> None:
+        side = max(1, min(99999, int(self.width_spin.value())))
+        self._set_dim_spins(side, side)
+
+    def _on_reverse_dims(self) -> None:
+        w = int(self.width_spin.value())
+        h = int(self.height_spin.value())
+        self._set_dim_spins(h, w)
 
     def accept(self) -> None:
         self.result_width = int(self.width_spin.value())
