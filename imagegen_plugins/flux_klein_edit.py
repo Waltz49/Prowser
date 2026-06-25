@@ -38,6 +38,7 @@ _KLEIN_EDIT_DEFAULTS = {
     "width": 1024,
     "height": 1024,
     "aspect_ratio_lock": False,
+    "aspect_ratio_test": True,
 }
 
 
@@ -76,7 +77,7 @@ def _klein_edit_field_layout(
                 key="aspect_ratio_test",
                 label="Aspect ratio correction for multiple images",
                 kind="bool",
-                default=bool(values.get("aspect_ratio_test", False)),
+                default=bool(values.get("aspect_ratio_test", True)),
             ),
             low_ram_bool(values, default=True),
             progressive_images_bool(values),
