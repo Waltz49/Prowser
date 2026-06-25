@@ -16,6 +16,7 @@ FieldLayoutKind = Literal[
     "labeled",
     "bool_run",
     "seed_row",
+    "steps_quant_row",
     "prompt_block",
 ]
 

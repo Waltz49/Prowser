@@ -444,6 +444,19 @@ IMAGE_GEN_TWO_COLUMN_MIN_ITEM_WIDTH = (
 IMAGE_GEN_TWO_COLUMN_MIN_WIDTH = (
     IMAGE_GEN_TWO_COLUMN_MIN_ITEM_WIDTH * 2 + IMAGE_GEN_COLUMN_ROW_SPACING
 )
+IMAGE_GEN_HALF_COLUMN_ITEM_WIDTH = (
+    IMAGE_GEN_TWO_COLUMN_MIN_ITEM_WIDTH - IMAGE_GEN_COLUMN_ROW_SPACING
+) // 2
+_IMAGE_GEN_HALF_COLUMN_CONTROL_OVERHEAD = (
+    IMAGE_GEN_SLIDER_ROW_SPACING
+    + 72
+    + IMAGE_GEN_SLIDER_ROW_SPACING
+    + IMAGE_GEN_FIELD_RESET_BTN_SIZE
+)
+IMAGE_GEN_HALF_COLUMN_SLIDER_TRACK_WIDTH = max(
+    40,
+    IMAGE_GEN_HALF_COLUMN_ITEM_WIDTH - _IMAGE_GEN_HALF_COLUMN_CONTROL_OVERHEAD,
+)
 
 
 class _ImageGenFieldsReflowFilter(QObject):
@@ -467,9 +480,14 @@ class _ImageGenFieldsReflowFilter(QObject):
         return super().eventFilter(obj, event)
 
 
-def configure_image_gen_slider_track(slider: QWidget) -> None:
+def configure_image_gen_slider_track(
+    slider: QWidget, *, track_width: Optional[int] = None
+) -> None:
     """Fixed-width slider track; value widget sits beside it on the left."""
-    slider.setFixedWidth(IMAGE_GEN_SLIDER_TRACK_WIDTH)
+    width = (
+        track_width if track_width is not None else IMAGE_GEN_SLIDER_TRACK_WIDTH
+    )
+    slider.setFixedWidth(width)
     slider.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
 
 
@@ -816,9 +834,10 @@ def wrap_image_gen_slider_row(
     value_widget: QWidget,
     *,
     reset_button: Optional[QPushButton] = None,
+    track_width: Optional[int] = None,
 ) -> QWidget:
     """Slider + spin/label row aligned left; slider does not stretch with panel width."""
-    configure_image_gen_slider_track(slider)
+    configure_image_gen_slider_track(slider, track_width=track_width)
     value_widget.setSizePolicy(
         QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed
     )
@@ -868,6 +887,73 @@ def make_image_gen_field_label(text: str, parent: Optional[QWidget] = None) -> Q
     label.setWordWrap(True)
     label.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
     return label
+
+
+def _build_image_gen_column_cell(
+    parent: QWidget,
+    label_text: str,
+    control: QWidget,
+    *,
+    half_column: bool = False,
+) -> QWidget:
+    cell = QWidget(parent)
+    cell_layout = QVBoxLayout(cell)
+    cell_layout.setContentsMargins(0, 0, 0, 0)
+    cell_layout.setSpacing(IMAGE_GEN_FIELD_LABEL_SPACING)
+    cell_layout.addWidget(make_image_gen_field_label(label_text, cell), 0)
+    if half_column:
+        cell_layout.addWidget(
+            control,
+            0,
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+        )
+    elif control.sizePolicy().horizontalPolicy() == QSizePolicy.Policy.Maximum:
+        cell_layout.addWidget(
+            wrap_image_gen_field_control_indent(control, cell),
+            0,
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+        )
+    else:
+        control.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
+        )
+        cell_layout.addWidget(
+            wrap_image_gen_field_control_indent(control, cell), 0
+        )
+    if half_column:
+        cell.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+    return cell
+
+
+def build_image_gen_half_column_row(
+    slots: List[Optional[Tuple[str, QWidget]]],
+    *,
+    parent: Optional[QWidget] = None,
+) -> QWidget:
+    """Two equal half-columns on one line; None slots are blank fillers."""
+    row_w = QWidget(parent)
+    row = QHBoxLayout(row_w)
+    row.setContentsMargins(0, 0, 0, 0)
+    row.setSpacing(IMAGE_GEN_COLUMN_ROW_SPACING)
+    normalized = (list(slots) + [None, None])[:2]
+    for slot in normalized:
+        if slot is None:
+            filler = QWidget(row_w)
+            filler.setSizePolicy(
+                QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
+            )
+            row.addWidget(filler, 1)
+        else:
+            label_text, control = slot
+            row.addWidget(
+                _build_image_gen_column_cell(
+                    row_w, label_text, control, half_column=True
+                ),
+                1,
+            )
+    row_w.setFixedWidth(IMAGE_GEN_TWO_COLUMN_MIN_ITEM_WIDTH)
+    row_w.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+    return row_w
 
 
 def wrap_image_gen_field_control_indent(
@@ -1247,26 +1333,27 @@ class ImageGenFieldsPanel:
         row_layout.setContentsMargins(0, 0, 0, 0)
         row_layout.setSpacing(IMAGE_GEN_COLUMN_ROW_SPACING)
         for label_text, control in columns:
-            cell = QWidget(row)
-            cell_layout = QVBoxLayout(cell)
-            cell_layout.setContentsMargins(0, 0, 0, 0)
-            cell_layout.setSpacing(IMAGE_GEN_FIELD_LABEL_SPACING)
-            cell_layout.addWidget(make_image_gen_field_label(label_text, cell), 0)
-            if control.sizePolicy().horizontalPolicy() == QSizePolicy.Policy.Maximum:
-                cell_layout.addWidget(
-                    wrap_image_gen_field_control_indent(control, cell),
-                    0,
-                    Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
-                )
-            else:
-                control.setSizePolicy(
-                    QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
-                )
-                cell_layout.addWidget(
-                    wrap_image_gen_field_control_indent(control, cell), 0
-                )
-            row_layout.addWidget(cell, 1)
+            row_layout.addWidget(
+                _build_image_gen_column_cell(row, label_text, control), 1
+            )
         self.add_group(row)
+
+    def add_half_column_row(
+        self,
+        columns: List[Optional[Tuple[str, QWidget]]],
+    ) -> None:
+        """Steps/quant-style row: two half-width labeled fields, blank filler if absent."""
+        group = QWidget(self._controls_host)
+        col = QVBoxLayout(group)
+        col.setContentsMargins(1, 0, 0, 0)
+        col.setSpacing(0)
+        col.addWidget(
+            build_image_gen_half_column_row(columns, parent=group),
+            0,
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop,
+        )
+        group.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
+        self._append_control_group(group)
 
     def add_checkbox_row(self, checkboxes: List[QWidget]) -> None:
         for checkbox in checkboxes:

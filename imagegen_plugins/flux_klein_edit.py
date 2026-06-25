@@ -14,10 +14,9 @@ from imagegen_plugins.image_gen_field_blocks import (
     bool_run_block,
     klein_edit_copies_group,
     low_ram_bool,
-    mflux_quant_choice_block,
     progressive_images_bool,
     seed_row_block,
-    steps_slider_block,
+    steps_quant_row_block,
 )
 from imagegen_plugins.image_gen_fields import FieldNode, FieldSpec
 from imagegen_plugins.image_gen_pipeline_modes import get_pipeline
@@ -60,16 +59,14 @@ def _klein_edit_field_layout(
             required=mode.prompt_required,
         ),
         seed_row_block(values),
-        steps_slider_block(
+        steps_quant_row_block(
             values,
             steps_min=mode.steps_min,
             steps_max=mode.steps_max,
             steps_default=mode.steps_default,
             pipeline_id=plugin.pipeline_id,
+            default_q=4,
             model_defaults=model_defaults,
-        ),
-        mflux_quant_choice_block(
-            values, default_q=4, model_defaults=model_defaults
         ),
         klein_edit_copies_group(values, model_defaults=model_defaults),
         bool_run_block(

@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Dict, List, Optional, Tuple
 
 from PySide6.QtCore import Qt
@@ -29,6 +29,7 @@ from imagegen_plugins.image_gen_fields import (
     resolve_plugin_field_layout,
 )
 from imagegen_plugins.image_gen_form_layout import (
+    IMAGE_GEN_HALF_COLUMN_SLIDER_TRACK_WIDTH,
     IMAGE_GEN_SEED_SPIN_MAX_WIDTH,
     ImageGenFieldsPanel,
     create_image_gen_field_reset_button,
@@ -46,6 +47,7 @@ class WidgetBuildOptions:
     non_prompt_text_min_height: int = 72
     float_label_precise: bool = False
     show_field_reset_buttons: bool = True
+    slider_track_width: Optional[int] = None
 
 
 def default_widget_build_options(
@@ -288,7 +290,12 @@ def widget_for_field_spec(
         spin.valueChanged.connect(slider.setValue)
         apply_field_control_tooltips(spec, slider, slider=slider, spin=spin)
         reset_btn = _maybe_field_reset_button(spec, options=opts)
-        row = wrap_image_gen_slider_row(slider, spin, reset_button=reset_btn)
+        row = wrap_image_gen_slider_row(
+            slider,
+            spin,
+            reset_button=reset_btn,
+            track_width=opts.slider_track_width,
+        )
         if reset_btn is not None:
             _wire_field_reset_button(spec, row, None, reset_btn)
         return row, None
@@ -478,6 +485,38 @@ def _mount_node(
             build_seed_and_random_seed_row(seed_w, random_w),
             stretch_control=False,
         )
+        return
+
+    if group.layout == "steps_quant_row":
+        steps_spec = quant_spec = None
+        for child in group.children:
+            if isinstance(child, FieldSpec):
+                if child.key == "steps":
+                    steps_spec = child
+                elif child.key == "mflux_quantize":
+                    quant_spec = child
+        if steps_spec is None and quant_spec is None:
+            for child in group.children:
+                _mount_node(panel, child, widgets, options=options)
+            return
+        half_opts = replace(
+            options,
+            slider_track_width=IMAGE_GEN_HALF_COLUMN_SLIDER_TRACK_WIDTH,
+        )
+        columns: List[Optional[Tuple[str, QWidget]]] = [None, None]
+        if steps_spec is not None:
+            steps_w, steps_extra = widget_for_field_spec(
+                steps_spec, options=half_opts
+            )
+            widgets[steps_spec.key] = (steps_w, steps_extra, steps_spec)
+            columns[0] = (steps_spec.label, steps_w)
+        if quant_spec is not None:
+            quant_w, quant_extra = widget_for_field_spec(
+                quant_spec, options=options
+            )
+            widgets[quant_spec.key] = (quant_w, quant_extra, quant_spec)
+            columns[1] = (quant_spec.label, quant_w)
+        panel.add_half_column_row(columns)
         return
 
     if group.layout == "bool_run":

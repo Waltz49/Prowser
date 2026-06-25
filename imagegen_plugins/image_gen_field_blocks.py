@@ -164,6 +164,37 @@ def mflux_quant_choice_block(
     )
 
 
+def steps_quant_row_block(
+    values: dict[str, Any],
+    *,
+    steps_min: int,
+    steps_max: int,
+    steps_default: int,
+    pipeline_id: str,
+    default_q: int,
+    model_defaults: Optional[dict[str, Any]] = None,
+    include_quant: bool = True,
+) -> FieldGroup:
+    """Steps slider and optional MFLUX quantization on one half-column row."""
+    children: list[FieldNode] = [
+        steps_slider_block(
+            values,
+            steps_min=steps_min,
+            steps_max=steps_max,
+            steps_default=steps_default,
+            pipeline_id=pipeline_id,
+            model_defaults=model_defaults,
+        ),
+    ]
+    if include_quant:
+        children.append(
+            mflux_quant_choice_block(
+                values, default_q=default_q, model_defaults=model_defaults
+            )
+        )
+    return FieldGroup(layout="steps_quant_row", children=tuple(children))
+
+
 def copies_slider_block(
     values: dict[str, Any],
     *,
