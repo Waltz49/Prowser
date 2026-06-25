@@ -32,7 +32,7 @@ class StatusBarPeekFilter(QObject):
 
 
 class ChromeToggleShortcutFilter(QObject):
-    """App-level event filter for F4 toggle-chrome (main window only, not dialogs)."""
+    """App-level event filter for F4, . toggle-chrome (main window only, not dialogs)."""
 
     def __init__(self, main_window, parent=None):
         super().__init__(parent)

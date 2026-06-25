@@ -1547,7 +1547,7 @@ class ImageBrowserWindow(QMainWindow):
         self._shortcut_event_filter = ShiftCmdEShortcutFilter(self)
         QApplication.instance().installEventFilter(self._shortcut_event_filter)
 
-        # F4 toggle chrome (sidebars + status bar)
+        # F4, . toggle chrome (sidebars + status bar)
         self._chrome_toggle_filter = ChromeToggleShortcutFilter(self)
         QApplication.instance().installEventFilter(self._chrome_toggle_filter)
         
@@ -9784,7 +9784,7 @@ class ImageBrowserWindow(QMainWindow):
             )
 
     def toggle_chrome(self):
-        """F4: save and hide all panes, or restore saved/default layout."""
+        """F4, .: save and hide all panes, or restore saved/default layout."""
         if self._is_any_chrome_visible():
             self._chrome_saved_layout = self._capture_chrome_layout()
             self._hide_all_chrome()
