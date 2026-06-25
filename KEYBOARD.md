@@ -93,7 +93,7 @@ Press **F1** or **/** in the app for context-sensitive help. Menu items also sho
 | T | Toggle file tree |
 | P | Toggle preview widget |
 | J | Toggle jobs pane (when enabled) |
-| F4 | Toggle chrome (menu bar, etc.) |
+| F4, . | Toggle chrome (menu bar, etc.) |
 | F12 | Toggle list view |
 | Cmd+Return | Collapse file tree |
 | Cmd+Shift+Return | Expand file tree |
@@ -204,7 +204,7 @@ Press **F1** or **/** in the app for context-sensitive help. Menu items also sho
 | B | Toggle status bar |
 | Cmd+I | Toggle number overlay |
 | F3 | Image history |
-| F4 | Toggle chrome |
+| F4, . | Toggle chrome |
 | Cmd+Return / Cmd+Shift+Return | Collapse/expand file tree |
 
 ### Desktop & Maps
