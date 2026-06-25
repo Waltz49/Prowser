@@ -11,7 +11,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, QSize, QTimer, QByteArray, QEvent
 from PySide6.QtGui import QIcon, QPixmap, QPainter, QPen, QColor, QTextCursor
 from thumbnails.thumbnail_constants import (
-    DEFAULT_BACKGROUND_COLOR,
+    DIALOG_BACKGROUND_HEX,
     DIALOG_TEXT_COLOR_HEX,
     DEFAULT_BORDER_COLOR,
     MULTISELECT_BORDER_COLOR_HEX,
@@ -133,7 +133,7 @@ class EditExifUserCommentDialog(QDialog):
         self.generate_btn = None
         self.ai_btn = None
 
-        bg_color = _qtcolor_to_hex(DEFAULT_BACKGROUND_COLOR)
+        bg_color = _qtcolor_to_hex(QColor(DIALOG_BACKGROUND_HEX))
         text_color = DIALOG_TEXT_COLOR_HEX
         border_color = _qtcolor_to_hex(DEFAULT_BORDER_COLOR)
 

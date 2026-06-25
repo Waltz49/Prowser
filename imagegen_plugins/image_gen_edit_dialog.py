@@ -41,6 +41,8 @@ from imagegen_plugins.image_gen_dialog import (
     ImageGenDimensionAspectMixin,
     ImageGenPreviewSplitter,
     apply_image_gen_dialog_shell,
+    apply_image_gen_preview_client_background,
+    image_gen_preview_workarea_fill,
     apply_import_extras_from_image_path,
     load_import_prompt_from_path,
     configure_image_gen_side_checkbox,
@@ -109,6 +111,7 @@ from imagegen_plugins.imagegen_control_tooltips import (
     apply_field_control_tooltips,
     apply_model_combo_tooltip,
 )
+from theme.theme_service import get_active_theme
 from utils import (
     _center_styled_dialog_on_screen,
     restore_dialog_geometry_hex,
@@ -277,20 +280,23 @@ class _SourceImagePreview(QLabel):
         self._on_external_drop = on_external_drop
         self._on_double_click = on_double_click
         self._pixmap = QPixmap(self._source_path)
+        self._scaled_pixmap: Optional[QPixmap] = None
+        self._load_error = False
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.setSizePolicy(
             QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored
         )
-        self.setFrameShape(QFrame.Shape.StyledPanel)
+        self.setFrameShape(QFrame.Shape.NoFrame)
         if on_external_drop is not None:
             self.setAcceptDrops(True)
-            tip = "Drag image files here to add source images (up to 4 total)."
+            tip = "Drag image files here to add source images (up to 4 total).\n\n"
             if on_double_click is not None:
-                tip += " Double-click to open in browse mode."
+                tip += "Double-click to open in browse mode.\n\n"
             self.setToolTip(tip)
         elif on_double_click is not None:
             self.setCursor(Qt.CursorShape.PointingHandCursor)
             self.setToolTip("Double-click to open in browse mode")
+        apply_image_gen_preview_client_background(self)
         self._refresh_scaled_pixmap()
 
     def sizeHint(self) -> QSize:
@@ -310,18 +316,52 @@ class _SourceImagePreview(QLabel):
 
     def _refresh_scaled_pixmap(self) -> None:
         if self._pixmap.isNull():
-            self.setText("Could not load image")
+            self._scaled_pixmap = None
+            self._load_error = True
+            self.clear()
+            self.update()
             return
+        self._load_error = False
+        self.clear()
         w, h = self.width(), self.height()
         if w < 2 or h < 2:
+            self._scaled_pixmap = None
+            self.update()
             return
-        scaled = self._pixmap.scaled(
+        self._scaled_pixmap = self._pixmap.scaled(
             w,
             h,
             Qt.AspectRatioMode.KeepAspectRatio,
             Qt.TransformationMode.SmoothTransformation,
         )
-        self.setPixmap(scaled)
+        self.update()
+
+    def _image_display_rect(self) -> QRect:
+        pix = self._scaled_pixmap
+        if pix is None or pix.isNull():
+            return QRect()
+        pw, ph = pix.width(), pix.height()
+        if pw < 1 or ph < 1:
+            return QRect()
+        x = (self.width() - pw) // 2
+        y = (self.height() - ph) // 2
+        return QRect(x, y, pw, ph)
+
+    def paintEvent(self, event) -> None:
+        painter = QPainter(self)
+        painter.fillRect(self.rect(), image_gen_preview_workarea_fill())
+        if self._scaled_pixmap is not None and not self._scaled_pixmap.isNull():
+            x = (self.width() - self._scaled_pixmap.width()) // 2
+            y = (self.height() - self._scaled_pixmap.height()) // 2
+            painter.drawPixmap(x, y, self._scaled_pixmap)
+            return
+        if self._load_error:
+            painter.setPen(QColor(get_active_theme().dialog_text_color_hex))
+            painter.drawText(
+                self.rect(),
+                int(Qt.AlignmentFlag.AlignCenter),
+                "Could not load image",
+            )
 
     def dragEnterEvent(self, event: QDragEnterEvent) -> None:
         if self._on_external_drop is not None and _is_external_file_drag(
@@ -440,17 +480,6 @@ class _ClickableSourceThumb(_SourceImagePreview):
         painter.drawLine(x_rect.topLeft(), x_rect.bottomRight())
         painter.drawLine(x_rect.topRight(), x_rect.bottomLeft())
 
-    def _image_display_rect(self) -> QRect:
-        pix = self.pixmap()
-        if pix is None or pix.isNull():
-            return QRect()
-        pw, ph = pix.width(), pix.height()
-        if pw < 1 or ph < 1:
-            return QRect()
-        x = (self.width() - pw) // 2
-        y = (self.height() - ph) // 2
-        return QRect(x, y, pw, ph)
-
     def _remove_button_rect(self) -> Optional[QRect]:
         preview = self._multi_preview()
         if preview is None or len(preview.source_paths()) <= 1:
@@ -532,7 +561,7 @@ class _ClickableSourceThumb(_SourceImagePreview):
             self._source_path.encode("utf-8"),
         )
         drag.setMimeData(mime)
-        pixmap = self.pixmap()
+        pixmap = self._scaled_pixmap or self._pixmap
         if pixmap is not None and not pixmap.isNull():
             drag.setPixmap(
                 pixmap.scaled(
@@ -629,6 +658,7 @@ class _MultiSourceImagePreview(QWidget):
         self.setToolTip(
             "Drag thumbnails to reorder. Drop image files to add sources (up to 4 total)."
         )
+        apply_image_gen_preview_client_background(self)
         self._rebuild_thumbs()
 
     def sizeHint(self) -> QSize:
@@ -1053,7 +1083,7 @@ class ImageGenEditDialog(ImageGenDimensionAspectMixin, QDialog):
                 configure_image_gen_embedded_panel_layout,
             )
 
-            configure_image_gen_embedded_panel_layout(layout)
+            configure_image_gen_embedded_panel_layout(layout, self)
         splitter = ImageGenPreviewSplitter(self)
 
         preview_host = QFrame()

@@ -218,6 +218,30 @@ class CursorManager(QObject):
         self.is_cursor_hidden = False
         self._paused = True 
 OVERLAY_HEIGHT = 8  # Height of the overlay band in pixels
+THUMBNAIL_SCROLL_AREA_OBJECT_NAME = "thumbnailScrollArea"
+LIST_SCROLL_AREA_OBJECT_NAME = "listScrollArea"
+
+
+def apply_thumbnail_scroll_area_chrome(
+    scroll_area: QScrollArea,
+    *,
+    object_name: str = THUMBNAIL_SCROLL_AREA_OBJECT_NAME,
+) -> None:
+    """Grid-colored scroll shell; scrollbar track matches grid (no right-edge border strip)."""
+    scroll_area.setObjectName(object_name)
+    scroll_area.setFrameShape(QScrollArea.Shape.NoFrame)
+    scroll_area.setLineWidth(0)
+    scroll_area.setStyleSheet(
+        get_active_theme().thumbnail_scroll_area_chrome_stylesheet(object_name)
+    )
+    vp = scroll_area.viewport()
+    if vp is not None:
+        bg = tc.THUMBNAIL_GRID_BACKGROUND_COLOR
+        pal = vp.palette()
+        pal.setColor(QPalette.ColorRole.Window, bg)
+        pal.setColor(QPalette.ColorRole.Base, bg)
+        vp.setPalette(pal)
+        vp.setAutoFillBackground(True)
 
 
 class CanvasManager(QWidget):
@@ -345,19 +369,12 @@ class CanvasManager(QWidget):
         self._update_auto_rename_button_geometry()
 
     def _sync_thumbnail_chrome_colors(self):
-        """Match top band + scroll viewport to the canvas paintEvent fill (DEFAULT_BACKGROUND_COLOR)."""
-        bg_hex = tc.DEFAULT_BACKGROUND_COLOR_HEX
-        bg = tc.DEFAULT_BACKGROUND_COLOR
+        """Match top band + scroll viewport to the canvas paintEvent fill."""
+        bg_hex = tc.THUMBNAIL_GRID_BACKGROUND_COLOR_HEX
         self.black_overlay.setStyleSheet(
             f"QWidget {{ background-color: {bg_hex}; border: none; }}"
         )
-        vp = self.scroll_area.viewport()
-        if vp is not None:
-            pal = vp.palette()
-            pal.setColor(QPalette.ColorRole.Window, bg)
-            pal.setColor(QPalette.ColorRole.Base, bg)
-            vp.setPalette(pal)
-            vp.setAutoFillBackground(True)
+        apply_thumbnail_scroll_area_chrome(self.scroll_area)
 
     def refresh_theme_styles(self):
         """Reapply top band color and repaint canvas after global theme change."""
@@ -943,6 +960,20 @@ class ListCanvasManager(QWidget):
         
         # Connect scroll area viewport resize to update list view
         self.scroll_area.viewport().installEventFilter(self)
+
+        apply_thumbnail_scroll_area_chrome(
+            self.scroll_area, object_name=LIST_SCROLL_AREA_OBJECT_NAME
+        )
+    
+    def refresh_theme_styles(self):
+        """Reapply list scroll chrome after theme border/grid color changes."""
+        apply_thumbnail_scroll_area_chrome(
+            self.scroll_area, object_name=LIST_SCROLL_AREA_OBJECT_NAME
+        )
+        if getattr(self, "canvas", None):
+            self.canvas.update()
+        if getattr(self, "header_widget", None):
+            self.header_widget.update()
     
     def eventFilter(self, obj, event):
         """Filter events to handle viewport resize"""

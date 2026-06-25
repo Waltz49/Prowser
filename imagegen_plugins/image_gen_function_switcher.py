@@ -197,10 +197,13 @@ def create_image_gen_dialog_footer(
     center_widget: Optional[QWidget] = None,
 ) -> QWidget:
     """Footer row: function switcher (left) and dialog actions (right)."""
+    from imagegen_plugins.image_gen_dialog import apply_image_gen_preview_client_background
+
     footer = QWidget()
     footer.setObjectName("imageGenDialogFooter")
+    apply_image_gen_preview_client_background(footer)
     row = QHBoxLayout(footer)
-    row.setContentsMargins(0, 0, 0, 0)
+    row.setContentsMargins(0, 15, 0, 15)
     row.setSpacing(8)
     add_image_gen_function_switcher_buttons(row, dialog, current_function)
     row.addStretch(1)
@@ -221,9 +224,11 @@ def create_image_gen_action_buttons(
     from imagegen_plugins.imagegen_control_tooltips import (
         apply_image_gen_action_button_tooltips,
     )
+    from imagegen_plugins.image_gen_dialog import apply_image_gen_preview_client_background
 
     widget = QWidget()
     widget.setObjectName("imageGenActionButtons")
+    apply_image_gen_preview_client_background(widget)
     row = QHBoxLayout(widget)
     row.setContentsMargins(0, 0, 0, 0)
     row.setSpacing(8)

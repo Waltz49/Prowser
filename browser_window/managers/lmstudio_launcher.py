@@ -95,7 +95,7 @@ def show_ai_caption_error_dialog(
     )
     from PySide6.QtCore import Qt
     from PySide6.QtGui import QTextDocument
-    from utils import get_button_style
+    from utils import get_button_style, get_dialog_shell_stylesheet
 
     dialog = QDialog(parent)
     dialog.setWindowTitle(window_title)
@@ -105,6 +105,8 @@ def show_ai_caption_error_dialog(
     )
     dialog.setWindowModality(Qt.WindowModality.ApplicationModal)
     dialog.setMinimumWidth(340)
+
+    dialog.setStyleSheet(get_dialog_shell_stylesheet() + get_button_style())
 
     main_layout = QVBoxLayout(dialog)
     main_layout.setSpacing(18)

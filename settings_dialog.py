@@ -131,6 +131,15 @@ def _refresh_theme_constants_from_thumbnail_constants():
             g[name] = getattr(tc, name)
 
 
+from settings.widgets.settings_dialog_theme import (
+    resolve_settings_chrome_from_widget,
+    settings_chrome_for_preset,
+    settings_dialog_stylesheet,
+)
+from settings.widgets.collapsible_theme_group import (
+    CollapsibleThemeGroup,
+    merge_theme_settings_groups_expanded,
+)
 from settings.widgets.multi_row_tab_widget import (
     FlowLayout,
     MultiRowTabWidget,
@@ -138,9 +147,17 @@ from settings.widgets.multi_row_tab_widget import (
 )
 
 THEME_COLOR_SWATCH_TOOLTIPS = {
-    "default_background_color_hex": "Background for the main window, sidebars, and panels.",
+    "default_background_color_hex": "Background for the main application window chrome (not thumbnails or dialogs).",
     "text_color_hex": "Default text color for labels, menus, and general information.",
+    "dialog_background_hex": "Background for modal and modeless dialog windows.",
+    "dialog_text_color_hex": "Text color for dialog labels and general dialog content.",
+    "thumbnail_grid_background_color_hex": "Background behind the thumbnail and list grids (margins and empty areas).",
+    "thumbnail_text_color_hex": "Text on thumbnail overlays, list rows, and in-grid labels.",
+    "status_bar_background_color_hex": "Background fill for the main status bar (defaults match sidebar panes).",
+    "status_bar_text_color_hex": "Text color for status bar labels and sections (defaults match sidebar pane text).",
     "sidebar_header_bg_hex": "Background of view title bars (e.g. Favorites, folder name headers).",
+    "sidebar_background_color_hex": "Background for left and right sidebar panes (file tree, preview, organize, information, jobs).",
+    "sidebar_text_color_hex": "Text color for sidebar content, titlebar labels, and tables; section headings are derived automatically.",
     "default_border_color_hex": "Border color around sidebar sections and other chrome dividers.",
     "default_image_color_hex": "Border color around non-selected thumbnails.",
     "default_image_background_color_hex": "Background fill behind non-selected thumbnail images.",
@@ -344,7 +361,11 @@ class _FaceAssignCanvas(QWidget):
                 font-size: 13px;
                 padding: 2px;
             }
-            """ % (tc.CURRENT_IMAGE_BORDER_COLOR_HEX, tc.DIALOG_BACKGROUND_HEX, TEXT_COLOR_HEX)
+            """ % (
+                tc.CURRENT_IMAGE_BORDER_COLOR_HEX,
+                resolve_settings_chrome_from_widget(self).control_bg_hex,
+                resolve_settings_chrome_from_widget(self).text_hex,
+            )
         )
         self._rename_editor.installEventFilter(self)
         self._rename_editor.show()
@@ -390,7 +411,8 @@ class _FaceAssignCanvas(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing, True)
 
-        painter.fillRect(self.rect(), tc.DEFAULT_BACKGROUND_COLOR)
+        chrome = resolve_settings_chrome_from_widget(self)
+        painter.fillRect(self.rect(), QColor(chrome.bg_hex))
 
         if not self._pixmap or self._pixmap.isNull():
             painter.setPen(tc.TEXT_COLOR)
@@ -425,7 +447,7 @@ class _FaceAssignCanvas(QWidget):
 
             # label bg
             painter.setPen(Qt.NoPen)
-            label_bg = QColor(tc.DIALOG_BACKGROUND_HEX)
+            label_bg = QColor(resolve_settings_chrome_from_widget(self).control_bg_hex)
             label_bg.setAlpha(220)
             painter.setBrush(QBrush(label_bg))
             painter.drawRect(st.label_rect_display)
@@ -647,6 +669,7 @@ class SettingsDialog(QDialog):
     
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.setObjectName("settingsDialog")
         self.setWindowTitle("Prowser Preferences")
         self.setModal(True)
         self.setFocusPolicy(Qt.StrongFocus)
@@ -700,11 +723,24 @@ class SettingsDialog(QDialog):
             self._update_browse_border_color_button()
         self.apply_theme()
 
+    def _settings_chrome_preset_id(self) -> str:
+        """Theme preset driving settings-dialog chrome (not generic app dialog colors)."""
+        if hasattr(self, "theme_preset_combo"):
+            tid = self.theme_preset_combo.currentData()
+            if tid in ("dark", "light", "user"):
+                return tid
+        tid = getattr(get_active_theme(), "theme_id", "dark")
+        return tid if tid in ("dark", "light", "user") else "dark"
+
+    def _settings_chrome(self):
+        return settings_chrome_for_preset(self._settings_chrome_preset_id())
+
     def _sync_theme_context(self):
         """Sync local theme constants and instance styles from active theme."""
         _refresh_theme_constants_from_thumbnail_constants()
+        chrome = self._settings_chrome()
         self.NOTE_TEXT_STYLE = (
-            f"color: {DIALOG_TEXT_COLOR_HEX}; font-size: 12pt; "
+            f"color: {chrome.text_hex}; font-size: 12pt; "
             f"font-style: italic; margin-top: 10px;"
         )
         self._applied_theme_id = getattr(get_active_theme(), "theme_id", "dark")
@@ -2420,9 +2456,10 @@ class SettingsDialog(QDialog):
         self._user_theme_color_buttons: dict = {}
         self._border_width_sliders: dict = {}
         self._border_width_value_labels: dict = {}
+        self._theme_collapse_groups: dict[str, CollapsibleThemeGroup] = {}
 
-        gb_text = QGroupBox("Text & background")
-        v_text = QVBoxLayout(gb_text)
+        gb_text = CollapsibleThemeGroup("Text & background", state_key="text_background")
+        v_text = gb_text.content_layout()
         v_text.setContentsMargins(8, 10, 8, 8)
         v_text.setSpacing(4)
         for label_text, key in (
@@ -2432,20 +2469,35 @@ class SettingsDialog(QDialog):
             self._add_theme_color_swatch_row(v_text, label_text, key)
         outer.addWidget(gb_text)
 
-        gb_chrome = QGroupBox("Sidebar & chrome")
-        v_chrome = QVBoxLayout(gb_chrome)
+        gb_dialogs = CollapsibleThemeGroup("Dialogs", state_key="dialogs")
+        v_dialogs = gb_dialogs.content_layout()
+        v_dialogs.setContentsMargins(8, 10, 8, 8)
+        v_dialogs.setSpacing(4)
+        for label_text, key in (
+            ("Dialog background:", "dialog_background_hex"),
+            ("Dialog text:", "dialog_text_color_hex"),
+        ):
+            self._add_theme_color_swatch_row(v_dialogs, label_text, key)
+        outer.addWidget(gb_dialogs)
+
+        gb_chrome = CollapsibleThemeGroup("Sidebar, panes and status bar", state_key="sidebar_chrome")
+        v_chrome = gb_chrome.content_layout()
         v_chrome.setContentsMargins(8, 10, 8, 8)
         v_chrome.setSpacing(4)
         for label_text, key in (
             ("View titlebars bar:", "sidebar_header_bg_hex"),
+            ("Sidebar background:", "sidebar_background_color_hex"),
+            ("Sidebar text:", "sidebar_text_color_hex"),
+            ("Status bar background:", "status_bar_background_color_hex"),
+            ("Status bar text:", "status_bar_text_color_hex"),
             ("View borders:", "default_border_color_hex"),
         ):
             self._add_theme_color_swatch_row(v_chrome, label_text, key)
         self._add_theme_chrome_border_width_row(v_chrome)
         outer.addWidget(gb_chrome)
 
-        gb_buttons = QGroupBox("Button settings")
-        v_buttons = QVBoxLayout(gb_buttons)
+        gb_buttons = CollapsibleThemeGroup("Button settings", state_key="button_settings")
+        v_buttons = gb_buttons.content_layout()
         v_buttons.setContentsMargins(8, 10, 8, 8)
         v_buttons.setSpacing(4)
         for label_text, key in (
@@ -2459,10 +2511,20 @@ class SettingsDialog(QDialog):
             self._add_theme_color_swatch_row(v_buttons, label_text, key)
         outer.addWidget(gb_buttons)
 
-        gb_thumb = QGroupBox("Thumbnails & selection")
-        v_thumb = QVBoxLayout(gb_thumb)
+        gb_thumb = CollapsibleThemeGroup("Thumbnails and image selection", state_key="thumbnails_selection")
+        v_thumb = gb_thumb.content_layout()
         v_thumb.setContentsMargins(8, 10, 8, 8)
         v_thumb.setSpacing(2)
+        self._add_theme_color_swatch_row(
+            v_thumb,
+            "Thumbnail grid background:",
+            "thumbnail_grid_background_color_hex",
+        )
+        self._add_theme_color_swatch_row(
+            v_thumb,
+            "Thumbnail text:",
+            "thumbnail_text_color_hex",
+        )
         self._add_theme_color_swatch_row(
             v_thumb,
             "Image border:",
@@ -2489,8 +2551,11 @@ class SettingsDialog(QDialog):
         self._add_theme_color_swatch_row(v_thumb, "Multiselect image background:", "multiselect_background_color_hex")
         outer.addWidget(gb_thumb)
 
-        gb_browse = QGroupBox("Browse Colors")
-        browse_form = QFormLayout(gb_browse)
+        gb_browse = CollapsibleThemeGroup("Browse Colors", state_key="browse_colors")
+        browse_form = QFormLayout()
+        browse_content = gb_browse.content_layout()
+        browse_content.setContentsMargins(0, 0, 0, 0)
+        browse_content.addLayout(browse_form)
         browse_form.setContentsMargins(8, 10, 8, 8)
         browse_form.setVerticalSpacing(12)
         browse_form.setHorizontalSpacing(16)
@@ -2553,9 +2618,49 @@ class SettingsDialog(QDialog):
         browse_form.addRow(browse_border_label, border_row)
         outer.addWidget(gb_browse)
 
+        for key, group in (
+            ("text_background", gb_text),
+            ("dialogs", gb_dialogs),
+            ("sidebar_chrome", gb_chrome),
+            ("button_settings", gb_buttons),
+            ("thumbnails_selection", gb_thumb),
+            ("browse_colors", gb_browse),
+        ):
+            self._theme_collapse_groups[key] = group
+            group.expanded_changed.connect(self._on_theme_group_expanded_changed)
+
         outer.addStretch(0)
         scroll.setWidget(inner)
         layout.addWidget(scroll)
+
+    def _apply_theme_collapse_groups_from_settings(self) -> None:
+        if not hasattr(self, "_theme_collapse_groups"):
+            return
+        if hasattr(self, "current_settings"):
+            merged = merge_theme_settings_groups_expanded(
+                self.current_settings.get("theme_settings_groups_expanded")
+            )
+        else:
+            merged = merge_theme_settings_groups_expanded(
+                get_config().load_settings().get("theme_settings_groups_expanded")
+            )
+        for key, group in self._theme_collapse_groups.items():
+            group.blockSignals(True)
+            group.set_expanded(merged.get(key, False))
+            group.blockSignals(False)
+
+    def _on_theme_group_expanded_changed(self, state_key: str, expanded: bool) -> None:
+        merged = merge_theme_settings_groups_expanded(
+            self.current_settings.get("theme_settings_groups_expanded")
+            if hasattr(self, "current_settings") else None
+        )
+        merged[state_key] = expanded
+        merged_copy = copy.deepcopy(merged)
+        if hasattr(self, "current_settings"):
+            self.current_settings["theme_settings_groups_expanded"] = merged_copy
+        if hasattr(self, "original_settings"):
+            self.original_settings["theme_settings_groups_expanded"] = copy.deepcopy(merged_copy)
+        get_config().update_setting("theme_settings_groups_expanded", merged_copy)
 
     def _populate_theme_tab_swatches(self):
         """Fill swatches from saved palette for the selected preset (dark / light / user)."""
@@ -3233,11 +3338,11 @@ class SettingsDialog(QDialog):
             # Gray out the checkbox when disabled
             disabled_style = self.SMALL_CHECKBOX_STYLE + f"""
                 QCheckBox {{
-                    color: {TEXT_DISABLED_HEX};
+                    color: {self._settings_chrome().text_disabled_hex};
                 }}
                 QCheckBox::indicator:disabled {{
-                    background-color: {DIALOG_BACKGROUND_HEX};
-                    border: 1px solid {DEFAULT_BORDER_COLOR_HEX};
+                    background-color: {self._settings_chrome().bg_hex};
+                    border: 1px solid {self._settings_chrome().groupbox_border_hex};
                 }}
             """
             self.show_extensions_checkbox.setStyleSheet(disabled_style)
@@ -4219,9 +4324,10 @@ class SettingsDialog(QDialog):
         _trash_hover_url = f"url({asset_path('trash_icon_hover.png')})"
         delete_btn = QPushButton()
         delete_btn.setToolTip("Delete person")
+        _chrome = self._settings_chrome()
         delete_btn.setStyleSheet(f"""
             QPushButton {{
-                background-color: {DIALOG_BACKGROUND_HEX};
+                background-color: {_chrome.control_bg_hex};
                 border: 1px solid {BORDER_DEFAULT_HEX};
                 border-radius: 3px;
                 padding: 0px 4px 4px 2px;
@@ -4292,7 +4398,7 @@ class SettingsDialog(QDialog):
             rem_btn.setFixedSize(24, 24)
             rem_btn.setStyleSheet(f"""
                 QPushButton {{
-                    background-color: {DIALOG_BACKGROUND_HEX};
+                    background-color: {_chrome.control_bg_hex};
                     border: none;
                     border-radius: 3px;
                     min-width: 24px;
@@ -5154,9 +5260,10 @@ class SettingsDialog(QDialog):
     def _lora_trash_button_style(self) -> str:
         _trash_url = f"url({asset_path('trash_icon.png')})"
         _trash_hover_url = f"url({asset_path('trash_icon_hover.png')})"
+        c = self._settings_chrome()
         return f"""
             QPushButton {{
-                background-color: {DIALOG_BACKGROUND_HEX};
+                background-color: {c.control_bg_hex};
                 border: 1px solid {BORDER_DEFAULT_HEX};
                 border-radius: 3px;
                 padding: 0px 4px 4px 2px;
@@ -6421,6 +6528,10 @@ class SettingsDialog(QDialog):
             self.original_settings['light_theme_colors'] = copy.deepcopy(
                 merge_light_theme_colors(_ts.get('light_theme_colors'))
             )
+            theme_groups_expanded = merge_theme_settings_groups_expanded(
+                _ts.get("theme_settings_groups_expanded")
+            )
+            self.original_settings["theme_settings_groups_expanded"] = copy.deepcopy(theme_groups_expanded)
             if hasattr(self, "current_settings"):
                 self.current_settings['dark_theme_colors'] = copy.deepcopy(
                     merge_dark_theme_colors(_ts.get('dark_theme_colors'))
@@ -6428,10 +6539,13 @@ class SettingsDialog(QDialog):
                 self.current_settings['light_theme_colors'] = copy.deepcopy(
                     merge_light_theme_colors(_ts.get('light_theme_colors'))
                 )
+                self.current_settings["theme_settings_groups_expanded"] = copy.deepcopy(theme_groups_expanded)
             _bts_ts = merge_browse_transparency_settings(_ts.get("browse_transparency_settings"))
             self.original_settings["browse_transparency_settings"] = copy.deepcopy(_bts_ts)
             if hasattr(self, "current_settings"):
                 self.current_settings["browse_transparency_settings"] = copy.deepcopy(_bts_ts)
+
+            self._apply_theme_collapse_groups_from_settings()
 
             # Update match count
             self.update_match_count(self.filter_pattern_input.text())
@@ -7535,15 +7649,9 @@ class SettingsDialog(QDialog):
         return metric_map.get(current_text, 'cosine')  # Default to cosine if unknown
 
     def apply_theme(self):
-        """Apply active theme to dialog-level styles."""
+        """Apply settings-dialog chrome (black + light text for dark/user presets)."""
         self._sync_theme_context()
-        from utils import get_button_style
-
-        # Dialog chrome uses dialog background; buttons use theme button settings.
-        self.setStyleSheet(
-            f"QDialog, QWidget {{ background-color: {DIALOG_BACKGROUND_HEX}; }}\n"
-            + get_button_style()
-        )
+        self.setStyleSheet(settings_dialog_stylesheet(self._settings_chrome()))
         if hasattr(self, "tab_widget") and self.tab_widget:
             self.tab_widget.refresh_theme_styles()
 

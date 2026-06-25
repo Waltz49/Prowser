@@ -496,11 +496,14 @@ def image_gen_field_reset_trash_stylesheet(
     selector: str = "QPushButton",
 ) -> str:
     """Small trash icon button for resetting a field to its plugin default."""
+    from imagegen_plugins.image_gen_dialog import image_gen_preview_client_background_hex
+
     t = get_active_theme()
+    chrome_bg = image_gen_preview_client_background_hex()
     sz = IMAGE_GEN_FIELD_RESET_BTN_SIZE
     return f"""
         {selector} {{
-            background-color: {t.dialog_background_hex};
+            background-color: {chrome_bg};
             border: 1px solid {t.border_default_hex};
             border-radius: 3px;
             padding: 0px;
@@ -591,11 +594,14 @@ def image_gen_prompt_copy_btn_stylesheet(
     selector: str = "QPushButton",
 ) -> str:
     """Small copy button for prompt text fields."""
+    from imagegen_plugins.image_gen_dialog import image_gen_preview_client_background_hex
+
     t = get_active_theme()
+    chrome_bg = image_gen_preview_client_background_hex()
     sz = IMAGE_GEN_FIELD_RESET_BTN_SIZE
     return f"""
         {selector} {{
-            background-color: {t.dialog_background_hex};
+            background-color: {chrome_bg};
             border: 1px solid {t.border_default_hex};
             border-radius: 3px;
             padding: 0px;
@@ -634,11 +640,14 @@ def image_gen_prompt_voice_mic_btn_stylesheet(
     selector: str = "QPushButton",
 ) -> str:
     """Small mic button for prompt text fields (icon set on the widget)."""
+    from imagegen_plugins.image_gen_dialog import image_gen_preview_client_background_hex
+
     t = get_active_theme()
+    chrome_bg = image_gen_preview_client_background_hex()
     sz = IMAGE_GEN_FIELD_RESET_BTN_SIZE
     return f"""
         {selector} {{
-            background-color: {t.dialog_background_hex};
+            background-color: {chrome_bg};
             border: 1px solid {t.border_default_hex};
             border-radius: 3px;
             padding: 0px;
@@ -761,7 +770,10 @@ def image_gen_dim_helper_icon_stylesheet(
     selector: str = "QPushButton",
 ) -> str:
     """Small square icon button for custom-size dimension helpers."""
+    from imagegen_plugins.image_gen_dialog import image_gen_preview_client_background_hex
+
     t = get_active_theme()
+    chrome_bg = image_gen_preview_client_background_hex()
     icon_url = f"url({asset_path(icon_name)})"
     hover_name = hover_icon_name or icon_name.replace(".svg", "_hover.svg").replace(
         ".png", "_hover.png"
@@ -770,7 +782,7 @@ def image_gen_dim_helper_icon_stylesheet(
     sz = IMAGE_GEN_DIM_HELPER_BTN_SIZE
     return f"""
         {selector} {{
-            background-color: {t.dialog_background_hex};
+            background-color: {chrome_bg};
             border: 1px solid {t.border_default_hex};
             border-radius: 3px;
             padding: 0px;
@@ -1013,6 +1025,7 @@ class ImageGenFieldsPanel:
         )
 
         self._controls_host = QWidget(self._below_row)
+        self._controls_host.setObjectName("imageGenControlsHost")
         self._controls_layout = QVBoxLayout(self._controls_host)
         self._controls_layout.setContentsMargins(0, 0, 0, 0)
         self._controls_layout.setSpacing(IMAGE_GEN_FIELD_GROUP_SPACING)
@@ -1033,6 +1046,10 @@ class ImageGenFieldsPanel:
         self._resize_filter = _ImageGenFieldsReflowFilter(self)
         self._controls_host.installEventFilter(self._resize_filter)
         self.widget.installEventFilter(self._resize_filter)
+        from imagegen_plugins.image_gen_dialog import apply_image_gen_preview_client_background
+
+        for chrome in (self.widget, self._below_row, self._controls_host):
+            apply_image_gen_preview_client_background(chrome)
 
     def count(self) -> int:
         return (
@@ -1368,12 +1385,19 @@ def mount_image_gen_fields_in_scroll(
     panel: ImageGenFieldsPanel,
 ) -> None:
     """Mount fields in a scroll area with padding so borders are not clipped."""
+    from imagegen_plugins.image_gen_dialog import apply_image_gen_preview_client_background
+
     scroll.setWidgetResizable(True)
     scroll.setHorizontalScrollBarPolicy(
         Qt.ScrollBarPolicy.ScrollBarAsNeeded
     )
     scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+    apply_image_gen_preview_client_background(scroll)
+    viewport = scroll.viewport()
+    viewport.setAutoFillBackground(True)
+    apply_image_gen_preview_client_background(viewport)
     scroll.setWidget(panel.widget)
+    apply_image_gen_preview_client_background(panel.widget)
     panel.widget.setSizePolicy(
         QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum
     )

@@ -118,6 +118,34 @@ def effective_browse_border_color(settings: dict) -> List[int]:
     return [0, 0, 0]
 
 
+def effective_browse_border_qcolor(settings: Optional[dict] = None):
+    """QColor for browse letterbox / margin fill (Settings > Theme > Browse border)."""
+    from PySide6.QtGui import QColor
+
+    if settings is None:
+        settings = get_config().load_settings()
+    rgb = effective_browse_border_color(settings)
+    return QColor(int(rgb[0]), int(rgb[1]), int(rgb[2]))
+
+
+def job_queue_cell_background_qcolor(settings: Optional[dict] = None):
+    """Job queue / jobs pane cell fill (browse border color)."""
+    return effective_browse_border_qcolor(settings)
+
+
+def job_queue_action_bar_background_qcolor(settings: Optional[dict] = None):
+    """Slightly darker than cell fill for action button columns."""
+    return job_queue_cell_background_qcolor(settings).darker(112)
+
+
+def job_queue_cell_background_hex(settings: Optional[dict] = None) -> str:
+    return job_queue_cell_background_qcolor(settings).name()
+
+
+def job_queue_action_bar_background_hex(settings: Optional[dict] = None) -> str:
+    return job_queue_action_bar_background_qcolor(settings).name()
+
+
 from theme.theme_defaults import (
     default_dark_theme_colors,
     default_light_theme_colors,
@@ -495,6 +523,16 @@ class ImageBrowserConfig:
 
             # Settings dialog window size [width, height] (restored on open; updated after resize / tab fit)
             'settings_dialog_size': [920, 680],
+
+            # Theme tab collapsible section expanded state (False = collapsed)
+            'theme_settings_groups_expanded': {
+                'text_background': False,
+                'dialogs': False,
+                'sidebar_chrome': False,
+                'button_settings': False,
+                'thumbnails_selection': False,
+                'browse_colors': False,
+            },
 
             # AI Captioning (LMStudio) settings
             **CAPTION_DEFAULTS,

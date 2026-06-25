@@ -21,6 +21,7 @@ from imagegen_plugins.image_gen_dialog import (
     DEFAULT_IMAGE_GEN_DIALOG_TITLE,
     ImageGenDialog,
     apply_image_gen_dialog_shell,
+    apply_image_gen_preview_client_background,
 )
 from imagegen_plugins.image_gen_edit_dialog import (
     EDIT_IMAGE_DIALOG_TITLE,
@@ -150,6 +151,7 @@ class ImageGenUnifiedDialog(QDialog):
         root.setContentsMargins(l, t, r, b)
         root.setSpacing(6)
         self._content_host = QWidget()
+        apply_image_gen_preview_client_background(self._content_host)
         self._content_layout = QVBoxLayout(self._content_host)
         self._content_layout.setContentsMargins(0, 0, 0, 0)
         root.addWidget(self._content_host, 1)

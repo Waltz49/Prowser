@@ -9,10 +9,14 @@ from typing import Any, Optional, Tuple
 IMAGE_GEN_UNIFIED_SHELL_MARGINS: Tuple[int, int, int, int] = (4, 2, 4, 4)
 
 
-def configure_image_gen_embedded_panel_layout(layout) -> None:
+def configure_image_gen_embedded_panel_layout(layout, panel=None) -> None:
     """Zero default Qt layout margins on panels hosted in the unified shell."""
     layout.setContentsMargins(0, 0, 0, 0)
     layout.setSpacing(0)
+    if panel is not None:
+        from imagegen_plugins.image_gen_dialog import apply_image_gen_preview_client_background
+
+        apply_image_gen_preview_client_background(panel)
 
 
 def find_image_gen_unified_shell(widget: Any) -> Optional[Any]:

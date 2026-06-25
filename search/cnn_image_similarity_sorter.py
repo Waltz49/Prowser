@@ -652,6 +652,7 @@ class CNNSimilarityUIHelper:
         import thumbnails.thumbnail_constants as tc
         return {
             "dialog_bg": tc.DIALOG_BACKGROUND_HEX,
+            "dialog_text": tc.DIALOG_TEXT_COLOR_HEX,
             "button_bg": tc.BUTTON_BG_DEFAULT_HEX,
             "button_fg": tc.BUTTON_TEXT_DEFAULT_HEX,
             "button_border": tc.BUTTON_BORDER_DEFAULT_HEX,
@@ -668,8 +669,9 @@ class CNNSimilarityUIHelper:
     def _dialog_shell_stylesheet(self, button_box_style: str) -> str:
         t = self._theme_values()
         return f"""
-            QDialog {{
+            QDialog, QDialog QWidget {{
                 background-color: {t["dialog_bg"]};
+                color: {t["dialog_text"]};
             }}
             QCheckBox:disabled {{
                 color: {t["text_disabled"]};

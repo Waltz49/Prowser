@@ -27,7 +27,6 @@ from PySide6.QtCore import Qt, QPoint, QTimer, QUrl, Signal
 from PySide6.QtGui import QMouseEvent, QKeySequence, QAction, QIcon, QFontMetrics
 from config import ImageBrowserConfig
 from thumbnails.thumbnail_constants import (
-    DEFAULT_BACKGROUND_COLOR,
     DIALOG_TEXT_COLOR_HEX,
     DEFAULT_BORDER_COLOR,
     CURRENT_IMAGE_BORDER_COLOR,
@@ -59,7 +58,7 @@ class FilterEntryWidget(QWidget):
         self.error_message = ""
         
         # Convert QColor constants to hex strings
-        bg_color = qtcolor_to_hex(DEFAULT_BACKGROUND_COLOR)
+        bg_color = DIALOG_BACKGROUND_HEX
         text_color = DIALOG_TEXT_COLOR_HEX
         border_color = qtcolor_to_hex(CURRENT_IMAGE_BORDER_COLOR)
         border_focus_color = qtcolor_to_hex(CURRENT_IMAGE_BORDER_COLOR)
@@ -295,7 +294,7 @@ class FilterDialog(QDialog):
             """Convert QColor to hex string"""
             return f"#{color.red():02x}{color.green():02x}{color.blue():02x}"
         
-        bg_color = qtcolor_to_hex(DEFAULT_BACKGROUND_COLOR)
+        bg_color = DIALOG_BACKGROUND_HEX
         border_color = qtcolor_to_hex(DEFAULT_BORDER_COLOR)
         accent_border = qtcolor_to_hex(CURRENT_IMAGE_BORDER_COLOR)
         
@@ -323,7 +322,7 @@ class FilterDialog(QDialog):
                 letter-spacing: 0.5px;
             }}
             QPushButton:focus {{
-                background-color: {qtcolor_to_hex(DEFAULT_BACKGROUND_COLOR)};
+                background-color: {DIALOG_BACKGROUND_HEX};
                 color: {BUTTON_FOCUS_TEXT_HEX};
                 border: 1px solid {CURRENT_IMAGE_BORDER_COLOR_HEX};
                 outline: none;
@@ -648,16 +647,27 @@ def _status_bar_popup_menu_stylesheet() -> str:
     return get_active_theme().status_bar_context_menu_stylesheet()
 
 
+def _status_bar_info_panel_stylesheet() -> str:
+    """Status-bar popup task-info strip — matches sidebar pane chrome."""
+    t = get_active_theme()
+    return f"QWidget {{ background-color: {t.sidebar_background_color_hex}; }}"
+
+
 def _task_info_browser_stylesheet(*, job_queue_cell: bool = False) -> str:
     t = get_active_theme()
-    bg = t.default_background_color_hex if job_queue_cell else "transparent"
     if job_queue_cell:
+        from config import job_queue_cell_background_hex
+
+        bg = job_queue_cell_background_hex()
+        text = t.sidebar_text_color_hex
         padding = "2px 4px 2px 4px"
     else:
+        bg = t.sidebar_background_color_hex
+        text = t.sidebar_text_color_hex
         padding = "6px 18px 8px 18px"
     return f"""
         QTextBrowser {{
-            color: {t.text_color_hex};
+            color: {text};
             background-color: {bg};
             padding: {padding};
             font-size: 12px;
@@ -725,7 +735,7 @@ def _wrap_task_info_html(body_html: str) -> str:
 
     t = get_active_theme()
     return (
-        f'<html><body style="color:{t.text_color_hex}; font-size:12px; '
+        f'<html><body style="color:{t.sidebar_text_color_hex}; font-size:12px; '
         f'margin:0; padding:0;">{body_html}</body></html>'
     )
 
@@ -787,11 +797,11 @@ def _progressive_images_row_widget(main_window, parent: QWidget) -> Optional[QWi
     layout.setContentsMargins(18, 0, 18, 8)
     layout.setSpacing(8)
     label = QLabel("<b>Inter</b>", row)
-    label.setStyleSheet(f"color: {t.text_color_hex}; font-size: 12px;")
+    label.setStyleSheet(f"color: {t.status_bar_label_text_hex}; font-size: 12px;")
     checkbox = QCheckBox("Show intermediate images", row)
     checkbox.setChecked(enabled)
     checkbox.setStyleSheet(
-        f"color: {t.text_color_hex}; font-size: 12px; spacing: 6px;"
+        f"color: {t.status_bar_label_text_hex}; font-size: 12px; spacing: 6px;"
     )
 
     def _on_toggled(checked: bool) -> None:
@@ -1371,6 +1381,7 @@ class ClickableImageGenIndicatorLabel(QLabel):
             pass
         if info_html:
             info_panel = QWidget()
+            info_panel.setStyleSheet(_status_bar_info_panel_stylesheet())
             info_layout = QVBoxLayout(info_panel)
             info_layout.setContentsMargins(0, 0, 0, 0)
             info_layout.setSpacing(0)

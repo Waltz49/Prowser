@@ -352,6 +352,8 @@ class RightSidebarCombinedWidget(QWidget):
             layout = self.jobs_content.layout()
             layout.addWidget(self.jobs_widget)
             self.jobs_widget.show()
+            if hasattr(self.jobs_widget, "refresh_header_status"):
+                self.jobs_widget.refresh_header_status()
 
     def set_jobs_visible(self, visible):
         """Set Jobs visibility programmatically (e.g. from J key)"""
@@ -476,3 +478,5 @@ class RightSidebarCombinedWidget(QWidget):
             self.shortcuts_widget.refresh_theme_styles()
         if self.information_widget:
             self.information_widget.refresh_theme_styles()
+        if self.jobs_widget and hasattr(self.jobs_widget, "refresh_theme_styles"):
+            self.jobs_widget.refresh_theme_styles()

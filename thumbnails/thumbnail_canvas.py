@@ -911,7 +911,7 @@ def draw_message_with_icon(painter: QPainter, message: str, width: int, height: 
     # Set font
     font = QFont("Arial", font_size)
     painter.setFont(font)
-    painter.setPen(tc.TEXT_COLOR)
+    painter.setPen(tc.THUMBNAIL_TEXT_COLOR)
     
     # Calculate text dimensions
     font_metrics = painter.fontMetrics()
@@ -969,7 +969,7 @@ def create_message_pixmap(message: str, width: int, height: int,
         QPixmap with the message and icon drawn on it
     """
     if background_color is None:
-        background_color = tc.DEFAULT_BACKGROUND_COLOR
+        background_color = tc.THUMBNAIL_GRID_BACKGROUND_COLOR
     
     pixmap = QPixmap(width, height)
     pixmap.fill(background_color)
@@ -3123,7 +3123,7 @@ class ThumbnailCanvas(QWidget):
                 painter.fillRect(event.rect(), tc.LOCKED_FILE_BACKGROUND_COLOR)
             else:
                 # Default black background
-                painter.fillRect(event.rect(), tc.DEFAULT_BACKGROUND_COLOR)
+                painter.fillRect(event.rect(), tc.THUMBNAIL_GRID_BACKGROUND_COLOR)
             
             # Get visible area for optimization
             self._visible_rect = event.rect()
@@ -3248,7 +3248,7 @@ class ThumbnailCanvas(QWidget):
         label_width = label_metrics.horizontalAdvance(label_text)
         label_x = (canvas_width - label_width) // 2
         label_y = start_y - 30
-        painter.setPen(tc.TEXT_COLOR)
+        painter.setPen(tc.THUMBNAIL_TEXT_COLOR)
         painter.drawText(label_x, label_y, label_text)
         
         # Draw buttons
@@ -3274,7 +3274,7 @@ class ThumbnailCanvas(QWidget):
             if is_hovered:
                 painter.setPen(tc.THUMBNAIL_EMPTY_FILTER_BTN_TEXT_HOVER)
             else:
-                painter.setPen(tc.TEXT_COLOR)
+                painter.setPen(tc.THUMBNAIL_TEXT_COLOR)
             text_x = current_x + button_padding_h
             text_y = button_y + button_height // 2 + font_metrics.ascent() // 2 - font_metrics.descent() // 2
             painter.drawText(text_x, text_y, label)
@@ -3392,7 +3392,7 @@ class ThumbnailCanvas(QWidget):
                     painter.drawRoundedRect(ir, irad, irad)
         else:
             # Draw loading text or placeholder
-            painter.setPen(tc.TEXT_COLOR)
+            painter.setPen(tc.THUMBNAIL_TEXT_COLOR)
             painter.setFont(QFont("Arial", 8))
             text = f"Loading {thumbnail.index}" if thumbnail.is_loading else f"{thumbnail.index}"
             painter.drawText(rect, Qt.AlignCenter, text)
@@ -3441,7 +3441,7 @@ class ThumbnailCanvas(QWidget):
         
         if is_duplicate_section:
             # For duplicate sections, just draw a line (no text)
-            painter.setPen(QPen(tc.TEXT_COLOR, 1))
+            painter.setPen(QPen(tc.THUMBNAIL_TEXT_COLOR, 1))
             line_y = rect.y() + rect.height() // 2
             painter.drawLine(rect.x() + 10, line_y, rect.x() + rect.width() - 10, line_y)
             return
@@ -3480,7 +3480,7 @@ class ThumbnailCanvas(QWidget):
         painter.setFont(font)
         
         # Draw separator line
-        painter.setPen(QPen(tc.TEXT_COLOR, 1))
+        painter.setPen(QPen(tc.THUMBNAIL_TEXT_COLOR, 1))
         
         # Calculate text width
         font_metrics = painter.fontMetrics()
@@ -3621,7 +3621,7 @@ class ThumbnailCanvas(QWidget):
         painter.setFont(font)
         available_width = rect.width() - 8  # 4px margin on each side
         font_metrics = painter.fontMetrics()
-        main_color = tc.TEXT_COLOR  # Theme-synced (status bar / sidebars)
+        main_color = tc.THUMBNAIL_TEXT_COLOR  # Theme-synced thumbnail grid text
         box_color = tc.THUMBNAIL_FILENAME_OVERLAY_BOX_COLOR
         
         wrapped_lines = []
@@ -3966,7 +3966,7 @@ class ThumbnailCanvas(QWidget):
                 border: 2px solid #87CEEB;
                 border-radius: 0px;
                 background-color: rgba({_ov.red()}, {_ov.green()}, {_ov.blue()}, {_ov.alpha()});
-                color: {tc.TEXT_COLOR_HEX};
+                color: {tc.THUMBNAIL_TEXT_COLOR_HEX};
                 font-family: Arial;
                 font-size: 13px;
                 padding: 2px;
@@ -4032,7 +4032,7 @@ class ThumbnailCanvas(QWidget):
                     border: 2px solid #87CEEB;
                     border-radius: 0px;
                     background-color: rgba({_ov.red()}, {_ov.green()}, {_ov.blue()}, {_ov.alpha()});
-                    color: {tc.TEXT_COLOR_HEX};
+                    color: {tc.THUMBNAIL_TEXT_COLOR_HEX};
                     font-family: Arial;
                     font-size: 13px;
                     padding: 2px;
@@ -4045,7 +4045,7 @@ class ThumbnailCanvas(QWidget):
                     border: 2px solid #FF0000;
                     border-radius: 0px;
                     background-color: rgba({_ov.red()}, {_ov.green()}, {_ov.blue()}, {_ov.alpha()});
-                    color: {tc.TEXT_COLOR_HEX};
+                    color: {tc.THUMBNAIL_TEXT_COLOR_HEX};
                     font-family: Arial;
                     font-size: 13px;
                     padding: 2px;

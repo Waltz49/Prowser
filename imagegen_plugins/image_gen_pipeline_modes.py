@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -292,6 +293,85 @@ def clamp_output_dims_in_values(
     out["width"] = w
     out["height"] = h
     return out
+
+
+def generation_status_display_size(
+    pipeline_id: str,
+    values: Dict[str, Any],
+    payload: Optional[Dict[str, Any]] = None,
+    *,
+    effective_max_side: int,
+) -> Optional[tuple[int, int]]:
+    """Output dimensions shown in job control / queue (matches worker target size)."""
+    merged = dict(values)
+    if payload:
+        merged.update(payload)
+    max_side = int(merged.get("max_generation_dimension") or effective_max_side)
+
+    if pipeline_id == "mflux_flux2_klein_edit":
+        from imagegen_plugins.image_gen_naming import resolve_source_image_paths
+        from imagegen_plugins.outpaint_mask import fit_edit_output_dims
+
+        if merged.get("use_custom_size"):
+            try:
+                w = int(merged.get("width", 0))
+                h = int(merged.get("height", 0))
+            except (TypeError, ValueError):
+                return None
+            if w <= 0 or h <= 0:
+                return None
+            return fit_edit_output_dims(w, h, max_side=max_side)
+        paths = resolve_source_image_paths(merged)
+        if not paths:
+            return None
+        from PIL import Image
+
+        with Image.open(paths[0]) as image:
+            src_w, src_h = image.size
+        return fit_edit_output_dims(src_w, src_h, max_side=max_side)
+
+    if pipeline_id == "mflux_fill_infill":
+        base_path = str(merged.get("pixelmator_base_path") or "")
+        if not base_path or not os.path.isfile(base_path):
+            return None
+        from PIL import Image
+        from imagegen_plugins.pipelines.mflux_schnell import align_mflux_dims
+
+        with Image.open(base_path) as image:
+            src_w, src_h = image.size
+        return align_mflux_dims(src_w, src_h, max_side=max_side)
+
+    mode = get_pipeline(pipeline_id)
+    if not mode.includes_output_dimensions:
+        return None
+
+    w = h = None
+    if payload is not None:
+        try:
+            pw = payload.get("width")
+            ph = payload.get("height")
+            if pw is not None and ph is not None:
+                w, h = int(pw), int(ph)
+        except (TypeError, ValueError):
+            w = h = None
+    if w is None or h is None or w <= 0 or h <= 0:
+        try:
+            w = int(merged.get("width", 0))
+            h = int(merged.get("height", 0))
+        except (TypeError, ValueError):
+            return None
+        if w <= 0 or h <= 0:
+            return None
+        w, h = align_dims_for_pipeline(
+            pipeline_id, w, h, effective_max_side=max_side
+        )
+
+    if pipeline_id == "mflux_fill_expand":
+        from imagegen_plugins.outpaint_mask import clamp_outpaint_dims
+
+        return clamp_outpaint_dims(w, h, max_side=max_side)
+
+    return w, h
 
 
 def pipeline_is_available(pipeline_id: str) -> bool:

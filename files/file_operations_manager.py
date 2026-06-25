@@ -67,6 +67,7 @@ from utils import (
     wrap_progress_dialog_label_elision,
     file_string,
     get_button_style,
+    get_dialog_shell_stylesheet,
     get_file_extension,
     is_inside_photos_library,
 )
@@ -2122,6 +2123,7 @@ class FileOperationsManager:
             BUTTON_BG_HOVER_HEX, BUTTON_TEXT_HOVER_HEX, BUTTON_BORDER_HOVER_HEX,
             BUTTON_BG_PRESSED_HEX, CURRENT_IMAGE_BORDER_COLOR_HEX, TEXT_DISABLED_HEX,
             ERROR_COLOR_HEX, DEFAULT_BORDER_COLOR_HEX, DIALOG_BACKGROUND_HEX,
+            DIALOG_TEXT_COLOR_HEX,
         )
 
         mw = self.main_window
@@ -2234,10 +2236,10 @@ class FileOperationsManager:
         # transparent_style = "background-color: transparent;"
         group_box_style = """
             QGroupBox {
-                background-color: transparent;
+                background-color: """ + DIALOG_BACKGROUND_HEX + """;
                 border: 1.5px solid """ + DEFAULT_BORDER_COLOR_HEX + """;
                 border-radius: 6px;
-                color: """ + BUTTON_TEXT_DEFAULT_HEX + """;
+                color: """ + DIALOG_TEXT_COLOR_HEX + """;
             }
         """
 
@@ -2256,10 +2258,6 @@ class FileOperationsManager:
         radio_order_widget.setLayout(radio_vbox)
         radio_order_widget.setContentsMargins(0, 8, 0, 8)
         radio_order_widget.setStyleSheet(group_box_style)
-
-        # Try to force Qt backgroundRole to transparent as well
-        radio_order_widget.setAttribute(Qt.WA_TranslucentBackground)
-        radio_order_widget.setAutoFillBackground(False)
 
         label_reset_dates = QLabel("Date changing:")
         radio_no_change = QRadioButton("No change")
@@ -2292,8 +2290,6 @@ class FileOperationsManager:
         reset_dates_widget.setLayout(reset_vbox)
         reset_dates_widget.setContentsMargins(0, 8, 0, 8)
         reset_dates_widget.setStyleSheet(group_box_style)
-        reset_dates_widget.setAttribute(Qt.WA_TranslucentBackground)
-        reset_dates_widget.setAutoFillBackground(False)
 
         # --- Order Direction (only enabled when sorting by current order) ---
         label_order_direction = QLabel("Sequence direction:")
@@ -2318,8 +2314,6 @@ class FileOperationsManager:
         order_direction_widget.setLayout(order_direction_vbox)
         order_direction_widget.setContentsMargins(0, 8, 0, 8)
         order_direction_widget.setStyleSheet(group_box_style)
-        order_direction_widget.setAttribute(Qt.WA_TranslucentBackground)
-        order_direction_widget.setAutoFillBackground(False)
 
         horz_box = QHBoxLayout()
         horz_box.setSpacing(18)
@@ -2420,7 +2414,7 @@ class FileOperationsManager:
             border-color: """ + TEXT_DISABLED_HEX + """;
         }
         """
-        combined_style = button_style + "\n" + dialog_style
+        combined_style = get_dialog_shell_stylesheet() + button_style + "\n" + dialog_style
         dialog.setStyleSheet(combined_style)
 
         # Set tab order: top to bottom
@@ -6131,6 +6125,7 @@ class FileOperationsManager:
                     error_dialog.setWindowTitle("Move Operation Failed")
                     error_dialog.setWindowModality(Qt.WindowModality.ApplicationModal)
                     error_dialog.setMinimumWidth(420)
+                    error_dialog.setStyleSheet(get_dialog_shell_stylesheet() + get_button_style())
 
                     layout = QVBoxLayout(error_dialog)
                     layout.setSpacing(15)

@@ -96,8 +96,8 @@ class PreviewWidget(QWidget):
     def refresh_theme_styles(self):
         """Apply active theme colors to preview shell."""
         th = get_active_theme()
-        bg_hex = th.default_background_color_hex
-        text_hex = th.text_color_hex
+        bg_hex = th.sidebar_background_color_hex
+        text_hex = th.sidebar_text_color_hex
         self.scroll_area.setStyleSheet(f"QScrollArea {{ background-color: {bg_hex}; }}")
         self.image_label.setStyleSheet(f"background-color: {bg_hex}; color: {text_hex};")
         

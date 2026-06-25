@@ -1605,6 +1605,7 @@ class ImageBrowserWindow(QMainWindow):
             else:
                 self.right_sidebar.hide()
                 self.right_sidebar.hide_info()
+            self._sync_right_sidebar_chrome()
             
             # Set visibility states (handlers are disconnected so they won't override sizes)
             self.combined_sidebar.set_tree_visible(self.file_tree_visible)
@@ -1664,6 +1665,7 @@ class ImageBrowserWindow(QMainWindow):
         
         # Style the splitter handle to make it more visible
         self.main_splitter.setStyleSheet(get_active_theme().main_splitter_stylesheet())
+        self._sync_right_sidebar_chrome()
         
         # Connect splitter resize to update thumbnail layout
         self.main_splitter.splitterMoved.connect(self._on_splitter_moved)
@@ -2308,6 +2310,7 @@ class ImageBrowserWindow(QMainWindow):
                 self.combined_sidebar.hide()
             if hasattr(self, 'right_sidebar'):
                 self.right_sidebar.hide()
+            self._sync_right_sidebar_chrome()
             return
         if view_mode == 'list':
             # Show sidebars in list view (same as thumbnail view)
@@ -2348,6 +2351,7 @@ class ImageBrowserWindow(QMainWindow):
             # Set splitter sizes
             if total_width > 0:
                 self._set_splitter_sizes_safe([left_width, main_width, right_width])
+            self._sync_right_sidebar_chrome()
             return
         if not hasattr(self, 'combined_sidebar'):
             return
@@ -2370,6 +2374,7 @@ class ImageBrowserWindow(QMainWindow):
                 self.right_sidebar.hide()
             # Set splitter sizes to give full width to list view
             self._set_splitter_sizes_safe([0, total_width, 0])
+            self._sync_right_sidebar_chrome()
             return
         
         if view_mode == 'thumbnail':
@@ -2456,6 +2461,8 @@ class ImageBrowserWindow(QMainWindow):
             main_width = total_width - right_width
             self._set_splitter_sizes_safe([0, main_width, right_width])
         
+        self._sync_right_sidebar_chrome()
+
         # Update menu action states based on view mode
         self.menu_manager.update_sidebar_menu_actions_for_view_mode(view_mode)
 
@@ -3170,6 +3177,9 @@ class ImageBrowserWindow(QMainWindow):
             container.refresh_theme_styles()
         elif canvas:
             canvas.update()
+        list_container = getattr(self, "list_view_container", None)
+        if list_container and hasattr(list_container, "refresh_theme_styles"):
+            list_container.refresh_theme_styles()
 
     def refresh_theme_styles(self):
         """Re-apply theme-dependent widget styles after global palette change."""
@@ -3177,6 +3187,7 @@ class ImageBrowserWindow(QMainWindow):
         if hasattr(self, "main_splitter") and self.main_splitter:
             self.main_splitter.setHandleWidth(theme.view_border_width_px)
             self.main_splitter.setStyleSheet(theme.main_splitter_stylesheet())
+            self._sync_right_sidebar_chrome()
         if hasattr(self, "status_bar") and self.status_bar:
             self.status_bar.setStyleSheet(theme.main_status_bar_chrome_stylesheet())
         if hasattr(self, "progress_bar") and self.progress_bar:
@@ -3210,6 +3221,9 @@ class ImageBrowserWindow(QMainWindow):
                 container.refresh_theme_styles()
             elif canvas:
                 canvas.update()
+        list_container = getattr(self, "list_view_container", None)
+        if list_container and hasattr(list_container, "refresh_theme_styles"):
+            list_container.refresh_theme_styles()
         if getattr(self, "canvas_manager", None) and hasattr(self.canvas_manager, "refresh_theme_styles"):
             self.canvas_manager.refresh_theme_styles()
         if getattr(self, "preview_widget", None) and hasattr(self.preview_widget, "refresh_theme_styles"):
@@ -9818,6 +9832,32 @@ class ImageBrowserWindow(QMainWindow):
         else:
             self._animate_status_bar_show(_after_toggle_anim)
 
+    def _sync_main_splitter_right_handle(self) -> None:
+        """Hide the handle between main content and right sidebar when that pane is collapsed."""
+        splitter = getattr(self, "main_splitter", None)
+        if splitter is None or splitter.count() < 3:
+            return
+        rs = getattr(self, "right_sidebar", None)
+        right_visible = rs.isVisible() if rs is not None else bool(
+            getattr(self, "right_sidebar_visible", False)
+        )
+        handle = splitter.handle(1)
+        if handle is not None:
+            handle.setVisible(right_visible)
+
+    def _sync_right_sidebar_chrome(self) -> None:
+        """Collapse splitter chrome/width constraints when the right sidebar is hidden."""
+        self._sync_main_splitter_right_handle()
+        rs = getattr(self, "right_sidebar", None)
+        if rs is None:
+            return
+        if rs.isVisible():
+            rs.setMinimumWidth(250)
+            rs.setMaximumWidth(800)
+        else:
+            rs.setMinimumWidth(0)
+            rs.setMaximumWidth(0)
+
     def _apply_right_sidebar_visibility(self):
         """Apply right sidebar visibility based on Organize, Information, or Jobs panes."""
         self.jobs_visible = self.right_sidebar.is_jobs_visible()
@@ -9853,6 +9893,8 @@ class ImageBrowserWindow(QMainWindow):
             self._set_splitter_sizes_safe([left_width, main_width, 0])
             self.right_sidebar.hide()
             self.right_sidebar.hide_info()
+
+        self._sync_right_sidebar_chrome()
 
         self.config.update_setting('right_sidebar_visible', self.right_sidebar_visible)
         self.config.update_setting('right_sidebar_width', self.right_sidebar_width)

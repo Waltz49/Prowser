@@ -12,7 +12,6 @@ from PySide6.QtWidgets import (
     QDialogButtonBox, QTextEdit
 )
 from thumbnails.thumbnail_constants import (
-    DEFAULT_BACKGROUND_COLOR,
     DIALOG_TEXT_COLOR_HEX,
     DEFAULT_BORDER_COLOR,
     CURRENT_IMAGE_BORDER_COLOR,
@@ -45,7 +44,7 @@ class DeleteExifDialog(QDialog):
         self.files_to_delete = files_to_delete
         
         # Convert QColor constants to hex strings
-        bg_color = qtcolor_to_hex(DEFAULT_BACKGROUND_COLOR)
+        bg_color = DIALOG_BACKGROUND_HEX
         text_color = DIALOG_TEXT_COLOR_HEX
         border_color = qtcolor_to_hex(DEFAULT_BORDER_COLOR)
         accent_border = qtcolor_to_hex(CURRENT_IMAGE_BORDER_COLOR)
@@ -74,7 +73,7 @@ class DeleteExifDialog(QDialog):
                 letter-spacing: 0.5px;
             }}
             QPushButton:focus {{
-                background-color: {qtcolor_to_hex(DEFAULT_BACKGROUND_COLOR)};
+                background-color: {DIALOG_BACKGROUND_HEX};
                 color: {BUTTON_FOCUS_TEXT_HEX};
                 border: 1px solid {CURRENT_IMAGE_BORDER_COLOR_HEX};
                 outline: none;

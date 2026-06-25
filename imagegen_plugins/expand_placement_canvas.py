@@ -12,6 +12,8 @@ from PySide6.QtWidgets import QSizePolicy, QWidget
 
 from exif.exif_image_loader import load_image_with_exif_correction
 
+from imagegen_plugins.image_gen_dialog import image_gen_preview_workarea_fill
+
 MIN_PLACEMENT_EDGE = 128
 HANDLE_SIZE = 14
 HANDLE_HIT_PAD = 8
@@ -22,7 +24,6 @@ CANVAS_BORDER_OUTER = QColor(255, 255, 255)
 CANVAS_BORDER_INNER = QColor(30, 30, 30)
 PLACEMENT_OUTLINE = QColor(100, 180, 255)
 HANDLE_FILL = QColor(80, 160, 255)
-WORKAREA_FILL = QColor(0, 0, 0)
 
 
 @dataclass
@@ -471,7 +472,7 @@ class ExpandPlacementCanvas(QWidget):
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
-        painter.fillRect(self.rect(), WORKAREA_FILL)
+        painter.fillRect(self.rect(), image_gen_preview_workarea_fill())
         self._update_canvas_geometry()
         r = self._canvas_rect
 

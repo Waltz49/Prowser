@@ -203,9 +203,10 @@ def _show_credits_popup(parent=None):
     dlg.setModal(True)
     dlg.setMinimumSize(640, 420)
     th = get_active_theme()
+    from utils import get_button_style, get_dialog_shell_stylesheet
+
     dlg.setStyleSheet(
-        f"QDialog {{ background-color: {th.dialog_background_hex}; color: {th.dialog_text_color_hex}; }}\n"
-        + get_button_style()
+        get_dialog_shell_stylesheet() + get_button_style()
     )
     layout = QVBoxLayout(dlg)
     layout.setContentsMargins(12, 12, 12, 12)
@@ -236,9 +237,10 @@ def _show_license_popup(parent=None):
     dlg.setModal(True)
     dlg.setMinimumSize(640, 420)
     th = get_active_theme()
+    from utils import get_button_style, get_dialog_shell_stylesheet
+
     dlg.setStyleSheet(
-        f"QDialog {{ background-color: {th.dialog_background_hex}; color: {th.dialog_text_color_hex}; }}\n"
-        + get_button_style()
+        get_dialog_shell_stylesheet() + get_button_style()
     )
     layout = QVBoxLayout(dlg)
     layout.setContentsMargins(12, 12, 12, 12)

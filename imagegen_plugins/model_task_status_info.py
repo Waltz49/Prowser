@@ -682,13 +682,18 @@ def _collect_generation_status_fields(
         if lora_label:
             fields["lora"] = lora_label
 
-    width = effective.get("width")
-    height = effective.get("height")
-    if width is not None and height is not None:
-        try:
-            fields["size"] = f"{int(width)} x {int(height)}"
-        except (TypeError, ValueError):
-            pass
+    from imagegen_plugins.image_gen_dim_limits import effective_max_for_plugin
+    from imagegen_plugins.image_gen_pipeline_modes import generation_status_display_size
+
+    display_size = generation_status_display_size(
+        pipeline_id,
+        values,
+        payload,
+        effective_max_side=effective_max_for_plugin(plugin),
+    )
+    if display_size is not None:
+        w, h = display_size
+        fields["size"] = f"{w} x {h}"
 
     steps = effective.get("steps")
     if steps is not None:

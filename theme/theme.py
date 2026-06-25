@@ -7,6 +7,108 @@ from PySide6.QtGui import QColor
 from theme.theme_base import asset_url
 
 
+def macos_scrollbar_handle_hex(track_hex: str, *, theme_id: str, chrome_handle_hex: str) -> str:
+    """Contrasting oblong handle color for a scrollbar track."""
+    c = QColor(track_hex)
+    if not c.isValid():
+        return chrome_handle_hex
+    lum = (c.red() * 299 + c.green() * 587 + c.blue() * 114) / 1000
+    if lum < 50:
+        return chrome_handle_hex
+    if theme_id == "light":
+        return c.darker(130).name()
+    if lum > 180:
+        return c.darker(115).name()
+    return c.lighter(130).name()
+
+
+def macos_scrollbar_stylesheet(
+    *,
+    track_bg_hex: str,
+    handle_hex: str,
+    handle_hover_hex: str,
+    selector_prefix: str = "",
+) -> str:
+    """macOS-like scrollbars: track matches container; rounded handle contrasts with track."""
+    prefix = selector_prefix.strip()
+    if prefix and not prefix.endswith(" "):
+        prefix = f"{prefix} "
+    return f"""
+    {prefix}QScrollBar:vertical {{
+        background-color: {track_bg_hex};
+        width: 10px;
+        margin: 0px;
+    }}
+    {prefix}QScrollBar:horizontal {{
+        background-color: {track_bg_hex};
+        height: 10px;
+        margin: 0px;
+    }}
+    {prefix}QScrollBar::handle:vertical {{
+        background-color: {handle_hex};
+        min-height: 24px;
+        border-radius: 4px;
+        margin: 1px;
+    }}
+    {prefix}QScrollBar::handle:horizontal {{
+        background-color: {handle_hex};
+        min-width: 24px;
+        border-radius: 4px;
+        margin: 1px;
+    }}
+    {prefix}QScrollBar::handle:vertical:hover,
+    {prefix}QScrollBar::handle:horizontal:hover {{
+        background-color: {handle_hover_hex};
+    }}
+    {prefix}QScrollBar::add-line:vertical,
+    {prefix}QScrollBar::sub-line:vertical,
+    {prefix}QScrollBar::add-line:horizontal,
+    {prefix}QScrollBar::sub-line:horizontal {{
+        background: none;
+        border: none;
+        height: 0px;
+        width: 0px;
+    }}
+    {prefix}QScrollBar::add-page:vertical,
+    {prefix}QScrollBar::sub-page:vertical,
+    {prefix}QScrollBar::add-page:horizontal,
+    {prefix}QScrollBar::sub-page:horizontal {{
+        background-color: {track_bg_hex};
+    }}
+    """
+
+
+def macos_scrollbar_for_surface(t, track_bg_hex: str, *, selector_prefix: str = "") -> str:
+    """Scrollbar rules with handle contrast derived from track (or chrome fallback)."""
+    handle_hex = macos_scrollbar_handle_hex(
+        track_bg_hex,
+        theme_id=t.theme_id,
+        chrome_handle_hex=t.chrome_border_hex,
+    )
+    return macos_scrollbar_stylesheet(
+        track_bg_hex=track_bg_hex,
+        handle_hex=handle_hex,
+        handle_hover_hex=t.splitter_handle_hover_hex,
+        selector_prefix=selector_prefix,
+    )
+
+
+def global_scrollbar_stylesheet(t) -> str:
+    """App-wide scrollbar chrome for common container backgrounds."""
+    text_edit_bg = "#ffffff" if t.theme_id == "light" else t.default_background_color_hex
+    tree_bg = text_edit_bg
+    return (
+        macos_scrollbar_for_surface(t, t.default_background_color_hex)
+        + macos_scrollbar_for_surface(t, t.dialog_background_hex, selector_prefix="QDialog")
+        + macos_scrollbar_for_surface(t, text_edit_bg, selector_prefix="QTextEdit")
+        + macos_scrollbar_for_surface(t, text_edit_bg, selector_prefix="QPlainTextEdit")
+        + macos_scrollbar_for_surface(t, text_edit_bg, selector_prefix="QTextBrowser")
+        + macos_scrollbar_for_surface(t, tree_bg, selector_prefix="QTreeView")
+        + macos_scrollbar_for_surface(t, t.default_background_color_hex, selector_prefix="QListView")
+        + macos_scrollbar_for_surface(t, t.default_background_color_hex, selector_prefix="QListWidget")
+    )
+
+
 def push_button_stylesheet(
     t,
     selector: str = "QPushButton",
@@ -75,6 +177,10 @@ def global_stylesheet_light(t) -> str:
         background-color: {t.dialog_background_hex};
         color: {t.dialog_text_color_hex};
     }}
+    QDialog QWidget {{
+        background-color: {t.dialog_background_hex};
+        color: {t.dialog_text_color_hex};
+    }}
     QScrollArea {{
         background-color: {t.default_background_color_hex};
         border: none;
@@ -118,8 +224,8 @@ def global_stylesheet_light(t) -> str:
     }}
 
     QStatusBar {{
-        background-color: {t.dialog_background_hex};
-        color: {t.dialog_text_color_hex};
+        background-color: {t.main_status_bar_bg_hex};
+        color: {t.status_bar_label_text_hex};
         border-top: {t.view_border_width_px}px solid {t.chrome_border_hex};
     }}
 
@@ -412,6 +518,8 @@ def global_stylesheet_light(t) -> str:
         background-color: {t.accent_color_hex};
         border-radius: 3px;
     }}
+
+    {global_scrollbar_stylesheet(t)}
     """.strip()
 
 def global_stylesheet_dark(t) -> str:
@@ -427,6 +535,10 @@ def global_stylesheet_dark(t) -> str:
         color: {t.dialog_text_color_hex};
     }}
     QDialog {{
+        background-color: {t.dialog_background_hex};
+        color: {t.dialog_text_color_hex};
+    }}
+    QDialog QWidget {{
         background-color: {t.dialog_background_hex};
         color: {t.dialog_text_color_hex};
     }}
@@ -475,8 +587,8 @@ def global_stylesheet_dark(t) -> str:
 
     /* Status Bar */
     QStatusBar {{
-        background-color: {t.dialog_background_hex};
-        color: {t.dialog_text_color_hex};
+        background-color: {t.main_status_bar_bg_hex};
+        color: {t.status_bar_label_text_hex};
         border-top: {t.view_border_width_px}px solid {t.chrome_border_hex};
     }}
 
@@ -784,6 +896,8 @@ def global_stylesheet_dark(t) -> str:
         background-color: {t.accent_color_hex};
         border-radius: 3px;
     }}
+
+    {global_scrollbar_stylesheet(t)}
     """.strip()
 
 class ThemeStylesMixin:
@@ -820,6 +934,11 @@ class ThemeStylesMixin:
         if self.theme_id == "light":
             return QColor(self.text_color_hex).darker(108).name()
         return QColor(self.text_color_hex).lighter(115).name()
+
+    def sidebar_heading_color_hex(self) -> str:
+        if self.theme_id == "light":
+            return QColor(self.sidebar_text_color_hex).darker(108).name()
+        return QColor(self.sidebar_text_color_hex).lighter(115).name()
 
     def global_stylesheet(self) -> str:
         if self.theme_id == "light":
@@ -932,33 +1051,44 @@ class ThemeStylesMixin:
     def browse_filename_document_stylesheet(self) -> str:
         return f"color: {self.browse_filename_doc_color_hex}; font-size: 12pt;"
 
+    def status_bar_menu_item_selected_bg_hex(self) -> str:
+        """Row highlight for status-bar popup menus (derived from status bar fill)."""
+        q = QColor(self.main_status_bar_bg_hex)
+        if not q.isValid():
+            return self.status_menu_selected_hex
+        if self.theme_id == "light":
+            return q.darker(112).name()
+        return q.lighter(130).name()
+
     def status_bar_context_menu_stylesheet(self) -> str:
         t = self
+        selected_bg = t.status_bar_menu_item_selected_bg_hex()
         return f"""
             QMenu {{
-                background-color: {t.context_menu_bg_hex};
-                color: {t.text_color_hex};
-                border-top: 1px solid {t.status_menu_border_hex};
-                border-left: 1px solid {t.status_menu_border_hex};
-                border-right: 1px solid {t.status_menu_border_hex};
-                border-bottom: 0px solid {t.status_menu_border_hex};
+                background-color: {t.main_status_bar_bg_hex};
+                color: {t.status_bar_label_text_hex};
+                border-top: 1px solid {t.chrome_border_hex};
+                border-left: 1px solid {t.chrome_border_hex};
+                border-right: 1px solid {t.chrome_border_hex};
+                border-bottom: 0px solid {t.chrome_border_hex};
                 padding: 2px;
             }}
             QMenu::item {{
                 background-color: transparent;
                 padding: 4px 20px 4px 20px;
                 font-size: 13px;
-                color: {t.text_color_hex};
+                color: {t.status_bar_label_text_hex};
             }}
             QMenu::item:selected {{
-                background-color: {t.status_menu_selected_hex};
+                background-color: {selected_bg};
+                color: {t.status_bar_label_text_hex};
             }}
             QMenu::item:disabled {{
-                color: {t.status_menu_grayed_hex};
+                color: {t.status_bar_label_disabled_hex};
             }}
             QMenu::separator {{
                 height: 1px;
-                background-color: {t.text_disabled_hex};
+                background-color: {t.status_bar_label_disabled_hex};
                 margin-left: 10px;
                 margin-right: 10px;
                 margin-top: 4px;
@@ -970,10 +1100,12 @@ class ThemeStylesMixin:
         """Embedded file tree (left sidebar) — distinct from generic QTreeView in global sheet."""
         t = self
         fw = "normal" if self.theme_id == "light" else "100"
-        tc = t.dialog_text_color_hex
+        body_text = t.sidebar_text_color_hex
+        heading_text = t.sidebar_heading_color_hex()
+        sidebar_bg = t.sidebar_background_color_hex
         return f"""
             QTreeView {{
-                background-color: {t.default_background_color_hex};
+                background-color: {sidebar_bg};
                 border: 1px solid {t.tree_view_border_hex};
                 border-radius: 3px;
                 selection-background-color: {t.tree_view_selection_bg_hex};
@@ -991,20 +1123,20 @@ class ThemeStylesMixin:
                 border: none;
                 height: 15px;
                 min-height: 10px;
-                background-color: {t.default_background_color_hex};
+                background-color: {sidebar_bg};
             }}
             QTreeView::item:selected {{
                 background-color: {t.tree_view_selection_bg_hex};
-                color: {tc};
+                color: {body_text};
             }}
             QTreeView::item[highlighted="true"] {{
                 background-color: {t.file_tree_item_highlighted_bg_hex};
-                color: {tc};
+                color: {body_text};
                 font-weight: bold;
             }}
             QTreeView::item[highlighted="true"]:selected {{
                 background-color: {t.file_tree_item_highlighted_selected_bg_hex};
-                color: {tc};
+                color: {body_text};
                 font-weight: bold;
             }}
             QTreeView::item:hover {{
@@ -1012,16 +1144,43 @@ class ThemeStylesMixin:
             }}
             QHeaderView::section {{
                 background-color: {t.tree_header_section_bg_hex};
-                color: {tc};
+                color: {heading_text};
                 padding: 2px 4px;
                 border: 1px solid {t.tree_view_border_hex};
                 font-weight: bold;
             }}
+            {macos_scrollbar_stylesheet(
+                track_bg_hex=sidebar_bg,
+                handle_hex=t.chrome_border_hex,
+                handle_hover_hex=t.splitter_handle_hover_hex,
+                selector_prefix="QTreeView",
+            )}
         """
+
+    def file_tree_pane_shell_stylesheet(self) -> str:
+        """Outer file-tree pane widgets (shell around nav bar, path label, and tree)."""
+        return f"QWidget {{ background-color: {self.sidebar_background_color_hex}; }}"
+
+    def _file_tree_control_surface_hex(self) -> str:
+        """Nav/filter icon chips: slightly distinct from pane background."""
+        q = QColor(self.sidebar_background_color_hex)
+        if not q.isValid():
+            return self.file_tree_nav_button_bg_hex
+        if self.theme_id == "light":
+            return q.darker(108).name()
+        return q.lighter(110).name()
+
+    def _file_tree_control_surface_hover_hex(self) -> str:
+        q = QColor(self._file_tree_control_surface_hex())
+        if not q.isValid():
+            return self.file_tree_nav_button_hover_hex
+        if self.theme_id == "light":
+            return q.darker(112).name()
+        return q.lighter(125).name()
 
     def file_tree_nav_container_stylesheet(self) -> str:
         return f"""
-            background-color: {self.file_tree_nav_container_bg_hex};
+            background-color: {self.sidebar_background_color_hex};
             border-radius: 4px;
         """
 
@@ -1030,9 +1189,16 @@ class ThemeStylesMixin:
     ) -> str:
         t = self
         fg = t.file_tree_nav_button_text_dim_hex if dim else t.file_tree_nav_button_text_hex
+        btn_bg = t._file_tree_control_surface_hex()
+        btn_hover = t._file_tree_control_surface_hover_hex()
+        btn_pressed = (
+            QColor(btn_bg).darker(112).name()
+            if t.theme_id == "light"
+            else QColor(btn_bg).lighter(108).name()
+        )
         return f"""
             QPushButton {{
-                background-color: {t.file_tree_nav_button_bg_hex};
+                background-color: {btn_bg};
                 color: {fg};
                 border: 1px solid {t.file_tree_nav_button_border_hex};
                 border-radius: 3px;
@@ -1040,8 +1206,8 @@ class ThemeStylesMixin:
                 font-size: 12px;
                 min-width: 0px;
             }}
-            QPushButton:hover {{ background-color: {t.file_tree_nav_button_hover_hex}; }}
-            QPushButton:pressed {{ background-color: {t.file_tree_nav_button_pressed_hex}; }}
+            QPushButton:hover {{ background-color: {btn_hover}; }}
+            QPushButton:pressed {{ background-color: {btn_pressed}; }}
             QPushButton:focus {{
                 background-color: {focus_bg};
                 border: 1px solid {focus_border};
@@ -1053,10 +1219,10 @@ class ThemeStylesMixin:
         t = self
         return f"""
             QLabel {{
-                color: {t.text_color_hex};
+                color: {t.sidebar_text_color_hex};
                 font-size: 12px;
                 padding: 2px 5px;
-                background-color: {t.file_tree_dir_label_bg_hex};
+                background-color: {t.sidebar_background_color_hex};
                 border: 1px solid {t.file_tree_dir_label_border_hex};
                 border-radius: 3px;
             }}
@@ -1066,9 +1232,11 @@ class ThemeStylesMixin:
         t = self
         s = size
         icon_c = "#1a1a1a" if self.theme_id == "light" else "#ffffff"
+        btn_bg = t._file_tree_control_surface_hex()
+        btn_hover = t._file_tree_control_surface_hover_hex()
         return f"""
             QPushButton {{
-                background-color: {t.file_tree_filter_btn_bg_hex};
+                background-color: {btn_bg};
                 color: {icon_c};
                 border-width: 1px;
                 border-style: solid;
@@ -1081,14 +1249,14 @@ class ThemeStylesMixin:
                 padding: 0px;
             }}
             QPushButton:checked {{
-                background-color: {t.file_tree_filter_btn_bg_hex};
+                background-color: {btn_bg};
                 border-color: {t.file_tree_filter_btn_border_hex};
             }}
             QPushButton:hover {{
-                background-color: {t.file_tree_filter_btn_hover_hex};
+                background-color: {btn_hover};
             }}
             QPushButton:checked:hover {{
-                background-color: {t.file_tree_filter_btn_hover_hex};
+                background-color: {btn_hover};
             }}
         """
 
@@ -1099,18 +1267,56 @@ class ThemeStylesMixin:
         return f"QWidget {{ background-color: {self.shortcuts_panel_bg_hex}; }}"
 
     def shortcuts_sidebar_scroll_stylesheet(self) -> str:
+        t = self
+        track = t.shortcuts_scroll_bg_hex
         return f"""
             QScrollArea {{
-                background-color: {self.shortcuts_scroll_bg_hex};
+                background-color: {track};
                 border: none;
             }}
+            {macos_scrollbar_for_surface(t, track)}
+        """
+
+    def sidebar_jobs_scroll_stylesheet(self) -> str:
+        """Jobs pane list scroll area — view-border track with contrasting handle."""
+        t = self
+        pane_bg = t.sidebar_background_color_hex
+        track = t.chrome_border_hex
+        handle_hex = macos_scrollbar_handle_hex(
+            track,
+            theme_id=t.theme_id,
+            chrome_handle_hex=t.splitter_handle_hover_hex,
+        )
+        return f"""
+            QScrollArea {{
+                background-color: {pane_bg};
+                border: none;
+            }}
+            {macos_scrollbar_stylesheet(
+                track_bg_hex=track,
+                handle_hex=handle_hex,
+                handle_hover_hex=t.splitter_handle_pressed_hex,
+            )}
+        """
+
+    def thumbnail_scroll_area_chrome_stylesheet(self, object_name: str = "thumbnailScrollArea") -> str:
+        """Thumbnail grid scroll area: grid fill throughout; scrollbar track matches grid."""
+        t = self
+        grid_hex = t.thumbnail_grid_background_color_hex
+        prefix = f"#{object_name}"
+        return f"""
+            {prefix} {{
+                background-color: {grid_hex};
+                border: none;
+            }}
+            {macos_scrollbar_for_surface(t, grid_hex, selector_prefix=prefix)}
         """
 
     def shortcuts_sidebar_combo_stylesheet(self) -> str:
         t = self
         return f"""
             QComboBox {{
-                color: {t.text_color_hex};
+                color: {t.sidebar_text_color_hex};
                 background-color: {t.shortcuts_combo_bg_hex};
                 border: 1px solid {t.shortcuts_combo_border_hex};
                 border-radius: 2px;
@@ -1150,16 +1356,18 @@ class ThemeStylesMixin:
 
     def information_sidebar_textbrowser_stylesheet(self) -> str:
         t = self
+        track = t.information_textbrowser_bg_hex
         return f"""
             QTextBrowser {{
-                background-color: {t.information_textbrowser_bg_hex};
+                background-color: {track};
                 border: none;
-                color: {t.text_color_hex};
+                color: {t.sidebar_text_color_hex};
                 font-family: "Courier New", "Monaco", "Menlo";
                 font-size: 12pt;
                 font-weight: normal;
                 padding: 15px 18px;
             }}
+            {macos_scrollbar_for_surface(t, track, selector_prefix="QTextBrowser")}
         """
 
     def information_link_tooltip_stylesheet(self) -> str:

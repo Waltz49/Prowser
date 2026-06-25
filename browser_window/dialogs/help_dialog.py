@@ -20,13 +20,13 @@ from config import get_config
 from tooltip_popup_utils import ensure_tooltip_label, position_tooltip_near_cursor
 from thumbnails.thumbnail_constants import (
     DIALOG_BACKGROUND_HEX, DIALOG_TEXT_COLOR_HEX, ERROR_COLOR_HEX,
-    DEFAULT_BORDER_COLOR_HEX, DEFAULT_BACKGROUND_COLOR_HEX, HEADING_COLOR_HEX,
+    DEFAULT_BORDER_COLOR_HEX, HEADING_COLOR_HEX,
     BUTTON_TEXT_HOVER_HEX, BUTTON_BG_DEFAULT_HEX, BUTTON_TEXT_DEFAULT_HEX,
     MODIFIER_SYMBOLS,
 )
 
 # Color constants (help-dialog-specific; base colors from thumbnail_constants)
-COLOR_BACKGROUND = DEFAULT_BACKGROUND_COLOR_HEX
+COLOR_BACKGROUND = DIALOG_BACKGROUND_HEX
 COLOR_KEY_BOX_BG = BUTTON_BG_DEFAULT_HEX
 COLOR_KEY_TEXT = BUTTON_TEXT_DEFAULT_HEX
 COLOR_BORDER = DEFAULT_BORDER_COLOR_HEX
@@ -653,7 +653,9 @@ class HelpDialog:
         dialog.setWindowTitle("Key Bindings Help")
         dialog.setModal(True)
         dialog.setSizeGripEnabled(True)  # Allows resizing
-        dialog.setStyleSheet(f"background-color: {COLOR_BACKGROUND};")
+        from utils import get_dialog_shell_stylesheet
+
+        dialog.setStyleSheet(get_dialog_shell_stylesheet())
         
         # Create layout
         layout = QVBoxLayout(dialog)
@@ -703,7 +705,7 @@ class HelpDialog:
         )
         qmark_tooltip_label = ensure_tooltip_label(dialog, "_qmark_tooltip_label")
         qmark_tooltip_label.setStyleSheet(
-            f"QLabel {{ background-color: {DEFAULT_BACKGROUND_COLOR_HEX}; color: {BUTTON_TEXT_HOVER_HEX}; "
+            f"QLabel {{ background-color: {DIALOG_BACKGROUND_HEX}; color: {BUTTON_TEXT_HOVER_HEX}; "
             f"border: 1px solid {DEFAULT_BORDER_COLOR_HEX}; border-radius: 4px; padding: 4px 8px; font-size: 11pt; }}"
         )
         def qmark_show_tooltip():

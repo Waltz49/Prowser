@@ -36,9 +36,11 @@ class LightTheme(ThemeStylesMixin):
     view_border_width_px: int = 2
 
     default_background_color_hex: str = general_bg_color_hex
+    thumbnail_grid_background_color_hex: str = general_bg_color_hex
     default_border_color_hex: str = "#cfd8dc"
     default_image_background_color_hex: str = general_bg_color_hex
     default_image_color_hex: str = "#222222"
+    thumbnail_text_color_hex: str = general_text_color_hex
     text_color_hex: str = general_text_color_hex
 
     dialog_background_hex: str = "#ececec"
@@ -68,6 +70,8 @@ class LightTheme(ThemeStylesMixin):
     button_default_border_hex: str = "#2a5a8a"
 
     sidebar_header_bg_hex: str = "#212833"
+    sidebar_background_color_hex: str = general_bg_color_hex
+    sidebar_text_color_hex: str = general_text_color_hex
     sidebar_header_border_hex: str = "#424242"
     sidebar_header_text_hex: str = "white"
     sidebar_splitter_handle_hex: str = "#c62828"
@@ -103,8 +107,8 @@ class LightTheme(ThemeStylesMixin):
     splitter_handle_hex: str = "#282c39"
     splitter_handle_hover_hex: str = "#b71c1c"
     splitter_handle_pressed_hex: str = "#8e0000"
-    main_status_bar_bg_hex: str = "#ececec"
-    status_bar_label_text_hex: str = "black"
+    main_status_bar_bg_hex: str = general_bg_color_hex
+    status_bar_label_text_hex: str = general_text_color_hex
     status_bar_label_disabled_hex: str = "#666666"
 
     progress_bar_border_hex: str = "#a0a0a0"
@@ -192,6 +196,10 @@ ThemeType = Union[DarkTheme, LightTheme]
 USER_THEME_COLOR_KEYS = (
     "default_background_color_hex",
     "text_color_hex",
+    "dialog_background_hex",
+    "dialog_text_color_hex",
+    "thumbnail_grid_background_color_hex",
+    "thumbnail_text_color_hex",
     "default_image_color_hex",
     "default_image_background_color_hex",
     "current_image_border_color_hex",
@@ -199,6 +207,10 @@ USER_THEME_COLOR_KEYS = (
     "multiselect_border_color_hex",
     "multiselect_background_color_hex",
     "sidebar_header_bg_hex",
+    "sidebar_background_color_hex",
+    "sidebar_text_color_hex",
+    "status_bar_background_color_hex",
+    "status_bar_text_color_hex",
     "default_border_color_hex",
     "button_bg_default_hex",
     "button_border_default_hex",
@@ -221,6 +233,8 @@ VIEW_CHROME_THEME_KEYS = ("view_border_width_px",)
 # Thumbnail grid paint + borders only (no global QSS / settings-dialog chrome refresh needed).
 THEME_THUMBNAIL_ONLY_KEYS = frozenset(
     (
+        "thumbnail_grid_background_color_hex",
+        "thumbnail_text_color_hex",
         "default_image_color_hex",
         "default_image_background_color_hex",
         "current_image_border_color_hex",
@@ -228,6 +242,13 @@ THEME_THUMBNAIL_ONLY_KEYS = frozenset(
         "multiselect_border_color_hex",
         "multiselect_background_color_hex",
         *THEME_BORDER_WIDTH_KEYS,
+    )
+)
+
+THEME_DIALOG_KEYS = frozenset(
+    (
+        "dialog_background_hex",
+        "dialog_text_color_hex",
     )
 )
 
@@ -249,6 +270,10 @@ THEME_APP_WIDE_KEYS = frozenset(
 THEME_CHROME_KEYS = frozenset(
     (
         "sidebar_header_bg_hex",
+        "sidebar_background_color_hex",
+        "sidebar_text_color_hex",
+        "status_bar_background_color_hex",
+        "status_bar_text_color_hex",
         "default_border_color_hex",
         *VIEW_CHROME_THEME_KEYS,
     )
@@ -262,6 +287,8 @@ def theme_apply_scope_for_keys(changed_keys: Optional[set]) -> str:
     keys = frozenset(changed_keys)
     if keys.issubset(THEME_THUMBNAIL_ONLY_KEYS):
         return "thumbnail"
+    if not keys.isdisjoint(THEME_DIALOG_KEYS):
+        return "full"
     if keys.isdisjoint(THEME_APP_WIDE_KEYS):
         return "chrome"
     return "full"
@@ -515,12 +542,19 @@ def merge_light_theme_colors(stored: Optional[Dict[str, Any]]) -> Dict[str, Any]
 def build_user_theme_from_colors(colors: Dict[str, Any]) -> DarkTheme:
     """
     Build the active user theme from customizable colors (dark stylesheet base).
-    Propagates text_color_hex into main views and status bar label styling.
     """
     c = merge_user_theme_colors(colors)
     text = c["text_color_hex"]
     border = c["default_border_color_hex"]
     bg = c["default_background_color_hex"]
+    dialog_bg = c["dialog_background_hex"]
+    dialog_text = c["dialog_text_color_hex"]
+    thumb_grid_bg = c["thumbnail_grid_background_color_hex"]
+    thumb_text = c["thumbnail_text_color_hex"]
+    sidebar_bg = c["sidebar_background_color_hex"]
+    sidebar_text = c["sidebar_text_color_hex"]
+    status_bg = c["status_bar_background_color_hex"]
+    status_text = c["status_bar_text_color_hex"]
     t0 = DEFAULT_DARK_THEME
     sh, sp = _splitter_hover_pressed_from_chrome(border)
     dbw = int(c["default_image_border_width_index"])
@@ -533,8 +567,11 @@ def build_user_theme_from_colors(colors: Dict[str, Any]) -> DarkTheme:
         general_text_color_hex=text,
         general_bg_color_hex=bg,
         default_background_color_hex=bg,
+        thumbnail_grid_background_color_hex=thumb_grid_bg,
+        thumbnail_text_color_hex=thumb_text,
         text_color_hex=text,
-        dialog_text_color_hex=text,
+        dialog_background_hex=dialog_bg,
+        dialog_text_color_hex=dialog_text,
         default_image_color_hex=c["default_image_color_hex"],
         default_image_background_color_hex=c["default_image_background_color_hex"],
         current_image_border_color_hex=c["current_image_border_color_hex"],
@@ -546,6 +583,8 @@ def build_user_theme_from_colors(colors: Dict[str, Any]) -> DarkTheme:
         multiselect_border_color_hex=c["multiselect_border_color_hex"],
         multiselect_background_color_hex=c["multiselect_background_color_hex"],
         sidebar_header_bg_hex=c["sidebar_header_bg_hex"],
+        sidebar_background_color_hex=sidebar_bg,
+        sidebar_text_color_hex=sidebar_text,
         # Thumbnail cell border only — not Qt control borders (those keep t0.border_default_hex / border_hover_hex)
         default_border_color_hex=border,
         # Splitters, status bar top, section header frames (see chrome_border_hex in theme.py)
@@ -555,21 +594,21 @@ def build_user_theme_from_colors(colors: Dict[str, Any]) -> DarkTheme:
         splitter_handle_pressed_hex=sp,
         sidebar_splitter_handle_hex=border,
         sidebar_header_border_hex=border,
-        status_bar_label_text_hex=text,
-        tree_view_text_hex=text,
+        main_status_bar_bg_hex=status_bg,
+        status_bar_label_text_hex=status_text,
+        tree_view_text_hex=sidebar_text,
         browse_view_fg_hex=text,
-        thumbnail_status_label_text_hex=text,
-        shortcuts_sidebar_primary_text_hex=text,
-        shortcuts_sidebar_heading_text_hex=text,
-        sidebar_header_text_hex=text,
-        file_tree_nav_button_text_hex=text,
-        information_link_tooltip_fg_hex=text,
-        # Information pane and right sidebar shell use the same customizable default background
-        right_sidebar_combined_bg_hex=bg,
-        information_panel_bg_hex=bg,
-        information_textbrowser_bg_hex=bg,
-        information_link_tooltip_bg_hex=bg,
-        **_shortcuts_sidebar_chrome_from_theme(bg, border, sh),
+        thumbnail_status_label_text_hex=status_text,
+        shortcuts_sidebar_primary_text_hex=sidebar_text,
+        sidebar_header_text_hex=sidebar_text,
+        file_tree_nav_button_text_hex=sidebar_text,
+        information_link_tooltip_fg_hex=sidebar_text,
+        # Information pane and right sidebar shell use customizable sidebar background
+        right_sidebar_combined_bg_hex=sidebar_bg,
+        information_panel_bg_hex=sidebar_bg,
+        information_textbrowser_bg_hex=sidebar_bg,
+        information_link_tooltip_bg_hex=sidebar_bg,
+        **_shortcuts_sidebar_chrome_from_theme(sidebar_bg, border, sh),
         button_bg_default_hex=c["button_bg_default_hex"],
         button_border_default_hex=c["button_border_default_hex"],
         button_bg_hover_hex=c["button_bg_hover_hex"],
@@ -585,6 +624,14 @@ def build_dark_theme_from_colors(colors: Dict[str, str]) -> DarkTheme:
     text = c["text_color_hex"]
     border = c["default_border_color_hex"]
     bg = c["default_background_color_hex"]
+    dialog_bg = c["dialog_background_hex"]
+    dialog_text = c["dialog_text_color_hex"]
+    thumb_grid_bg = c["thumbnail_grid_background_color_hex"]
+    thumb_text = c["thumbnail_text_color_hex"]
+    sidebar_bg = c["sidebar_background_color_hex"]
+    sidebar_text = c["sidebar_text_color_hex"]
+    status_bg = c["status_bar_background_color_hex"]
+    status_text = c["status_bar_text_color_hex"]
     t0 = DEFAULT_DARK_THEME
     sh, sp = _splitter_hover_pressed_from_chrome(border)
     dbw = int(c["default_image_border_width_index"])
@@ -597,8 +644,11 @@ def build_dark_theme_from_colors(colors: Dict[str, str]) -> DarkTheme:
         general_text_color_hex=text,
         general_bg_color_hex=bg,
         default_background_color_hex=bg,
+        thumbnail_grid_background_color_hex=thumb_grid_bg,
+        thumbnail_text_color_hex=thumb_text,
         text_color_hex=text,
-        dialog_text_color_hex=text,
+        dialog_background_hex=dialog_bg,
+        dialog_text_color_hex=dialog_text,
         default_image_color_hex=c["default_image_color_hex"],
         default_image_background_color_hex=c["default_image_background_color_hex"],
         current_image_border_color_hex=c["current_image_border_color_hex"],
@@ -610,6 +660,8 @@ def build_dark_theme_from_colors(colors: Dict[str, str]) -> DarkTheme:
         multiselect_border_color_hex=c["multiselect_border_color_hex"],
         multiselect_background_color_hex=c["multiselect_background_color_hex"],
         sidebar_header_bg_hex=c["sidebar_header_bg_hex"],
+        sidebar_background_color_hex=sidebar_bg,
+        sidebar_text_color_hex=sidebar_text,
         default_border_color_hex=border,
         chrome_border_hex=border,
         splitter_handle_hex=border,
@@ -617,20 +669,20 @@ def build_dark_theme_from_colors(colors: Dict[str, str]) -> DarkTheme:
         splitter_handle_pressed_hex=sp,
         sidebar_splitter_handle_hex=border,
         sidebar_header_border_hex=border,
-        status_bar_label_text_hex=text,
-        tree_view_text_hex=text,
+        main_status_bar_bg_hex=status_bg,
+        status_bar_label_text_hex=status_text,
+        tree_view_text_hex=sidebar_text,
         browse_view_fg_hex=text,
-        thumbnail_status_label_text_hex=text,
-        shortcuts_sidebar_primary_text_hex=text,
-        shortcuts_sidebar_heading_text_hex=text,
-        sidebar_header_text_hex=text,
-        file_tree_nav_button_text_hex=text,
-        information_link_tooltip_fg_hex=text,
-        right_sidebar_combined_bg_hex=bg,
-        information_panel_bg_hex=bg,
-        information_textbrowser_bg_hex=bg,
-        information_link_tooltip_bg_hex=bg,
-        **_shortcuts_sidebar_chrome_from_theme(bg, border, sh),
+        thumbnail_status_label_text_hex=status_text,
+        shortcuts_sidebar_primary_text_hex=sidebar_text,
+        sidebar_header_text_hex=sidebar_text,
+        file_tree_nav_button_text_hex=sidebar_text,
+        information_link_tooltip_fg_hex=sidebar_text,
+        right_sidebar_combined_bg_hex=sidebar_bg,
+        information_panel_bg_hex=sidebar_bg,
+        information_textbrowser_bg_hex=sidebar_bg,
+        information_link_tooltip_bg_hex=sidebar_bg,
+        **_shortcuts_sidebar_chrome_from_theme(sidebar_bg, border, sh),
         button_bg_default_hex=c["button_bg_default_hex"],
         button_border_default_hex=c["button_border_default_hex"],
         button_bg_hover_hex=c["button_bg_hover_hex"],
@@ -646,6 +698,14 @@ def build_light_theme_from_colors(colors: Dict[str, str]) -> LightTheme:
     text = c["text_color_hex"]
     border = c["default_border_color_hex"]
     bg = c["default_background_color_hex"]
+    dialog_bg = c["dialog_background_hex"]
+    dialog_text = c["dialog_text_color_hex"]
+    thumb_grid_bg = c["thumbnail_grid_background_color_hex"]
+    thumb_text = c["thumbnail_text_color_hex"]
+    sidebar_bg = c["sidebar_background_color_hex"]
+    sidebar_text = c["sidebar_text_color_hex"]
+    status_bg = c["status_bar_background_color_hex"]
+    status_text = c["status_bar_text_color_hex"]
     t0 = DEFAULT_LIGHT_THEME
     sh, sp = _splitter_hover_pressed_from_chrome(border)
     dbw = int(c["default_image_border_width_index"])
@@ -658,8 +718,11 @@ def build_light_theme_from_colors(colors: Dict[str, str]) -> LightTheme:
         general_text_color_hex=text,
         general_bg_color_hex=bg,
         default_background_color_hex=bg,
+        thumbnail_grid_background_color_hex=thumb_grid_bg,
+        thumbnail_text_color_hex=thumb_text,
         text_color_hex=text,
-        dialog_text_color_hex=text,
+        dialog_background_hex=dialog_bg,
+        dialog_text_color_hex=dialog_text,
         default_image_color_hex=c["default_image_color_hex"],
         default_image_background_color_hex=c["default_image_background_color_hex"],
         current_image_border_color_hex=c["current_image_border_color_hex"],
@@ -671,6 +734,8 @@ def build_light_theme_from_colors(colors: Dict[str, str]) -> LightTheme:
         multiselect_border_color_hex=c["multiselect_border_color_hex"],
         multiselect_background_color_hex=c["multiselect_background_color_hex"],
         sidebar_header_bg_hex=c["sidebar_header_bg_hex"],
+        sidebar_background_color_hex=sidebar_bg,
+        sidebar_text_color_hex=sidebar_text,
         default_border_color_hex=border,
         chrome_border_hex=border,
         splitter_handle_hex=border,
@@ -678,19 +743,20 @@ def build_light_theme_from_colors(colors: Dict[str, str]) -> LightTheme:
         splitter_handle_pressed_hex=sp,
         sidebar_splitter_handle_hex=border,
         sidebar_header_border_hex=border,
-        status_bar_label_text_hex=text,
-        tree_view_text_hex=text,
+        main_status_bar_bg_hex=status_bg,
+        status_bar_label_text_hex=status_text,
+        tree_view_text_hex=sidebar_text,
         browse_view_fg_hex=text,
-        thumbnail_status_label_text_hex=text,
-        shortcuts_sidebar_primary_text_hex=text,
-        shortcuts_sidebar_heading_text_hex=text,
-        file_tree_nav_button_text_hex=text,
-        information_link_tooltip_fg_hex=text,
-        right_sidebar_combined_bg_hex=bg,
-        information_panel_bg_hex=bg,
-        information_textbrowser_bg_hex=bg,
-        information_link_tooltip_bg_hex=bg,
-        **_shortcuts_sidebar_chrome_from_theme(bg, border, sh),
+        thumbnail_status_label_text_hex=status_text,
+        shortcuts_sidebar_primary_text_hex=sidebar_text,
+        sidebar_header_text_hex=sidebar_text,
+        file_tree_nav_button_text_hex=sidebar_text,
+        information_link_tooltip_fg_hex=sidebar_text,
+        right_sidebar_combined_bg_hex=sidebar_bg,
+        information_panel_bg_hex=sidebar_bg,
+        information_textbrowser_bg_hex=sidebar_bg,
+        information_link_tooltip_bg_hex=sidebar_bg,
+        **_shortcuts_sidebar_chrome_from_theme(sidebar_bg, border, sh),
         button_bg_default_hex=c["button_bg_default_hex"],
         button_border_default_hex=c["button_border_default_hex"],
         button_bg_hover_hex=c["button_bg_hover_hex"],
@@ -759,6 +825,8 @@ def sync_to_thumbnail_constants(theme: ThemeType) -> None:
 
     tc.DEFAULT_BACKGROUND_COLOR_HEX = t.default_background_color_hex
     tc.DEFAULT_BACKGROUND_COLOR = QColor(t.default_background_color_hex)
+    tc.THUMBNAIL_GRID_BACKGROUND_COLOR_HEX = t.thumbnail_grid_background_color_hex
+    tc.THUMBNAIL_GRID_BACKGROUND_COLOR = QColor(t.thumbnail_grid_background_color_hex)
     tc.DEFAULT_BORDER_COLOR_HEX = t.default_border_color_hex
     tc.DEFAULT_BORDER_COLOR = QColor(t.default_border_color_hex)
     tc.DEFAULT_IMAGE_BACKGROUND_COLOR_HEX = t.default_image_background_color_hex
@@ -768,6 +836,8 @@ def sync_to_thumbnail_constants(theme: ThemeType) -> None:
 
     tc.TEXT_COLOR_HEX = t.text_color_hex
     tc.TEXT_COLOR = QColor(t.text_color_hex)
+    tc.THUMBNAIL_TEXT_COLOR_HEX = t.thumbnail_text_color_hex
+    tc.THUMBNAIL_TEXT_COLOR = QColor(t.thumbnail_text_color_hex)
     tc.QMENU_DEFAULT_STYLE_SHEET = t.qmenu_stylesheet()
 
     tc.TAB_BUTTON_FOCUS_BACKGROUND_COLOR_HEX = t.tab_button_focus_background_color_hex

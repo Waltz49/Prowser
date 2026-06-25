@@ -310,6 +310,19 @@ def get_button_focus_colors() -> tuple:
     return (BUTTON_BG_HOVER_HEX, BUTTON_BORDER_HOVER_HEX, BUTTON_TEXT_HOVER_HEX)
 
 
+def get_dialog_shell_stylesheet() -> str:
+    """Dialog window + child QWidget backgrounds (overrides global application QWidget fill)."""
+    from theme.theme_service import get_active_theme
+
+    th = get_active_theme()
+    return (
+        f"QDialog, QDialog QWidget {{ "
+        f"background-color: {th.dialog_background_hex}; "
+        f"color: {th.dialog_text_color_hex}; "
+        f"}}\n"
+    )
+
+
 def get_button_style() -> str:
     """
     Returns the standard button style string for all QPushButton widgets.
@@ -697,12 +710,8 @@ def styled_message_box(
 
     dialog = _StyledMessageDialog(parent, parent)
     dialog.setWindowTitle(title)
-    from theme.theme_service import get_active_theme
-
-    th = get_active_theme()
     dialog.setStyleSheet(
-        f"QDialog {{ background-color: {th.dialog_background_hex}; color: {th.dialog_text_color_hex}; }}\n"
-        + get_button_style()
+        get_dialog_shell_stylesheet() + get_button_style()
     )
     dialog.setWindowFlags(Qt.Window | Qt.WindowTitleHint | Qt.WindowSystemMenuHint | Qt.WindowCloseButtonHint | Qt.WindowStaysOnTopHint)
     dialog.setWindowModality(Qt.WindowModality.ApplicationModal)

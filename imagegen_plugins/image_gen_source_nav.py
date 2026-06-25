@@ -297,7 +297,11 @@ class ImageGenSourceNavRow(QWidget):
         layout.addWidget(self._center_host, 1)
         layout.addWidget(self._next_btn, 0, Qt.AlignmentFlag.AlignVCenter)
 
+        from imagegen_plugins.image_gen_dialog import apply_image_gen_preview_client_background
+
         self.setStyleSheet(_arrow_button_stylesheet())
+        apply_image_gen_preview_client_background(self)
+        apply_image_gen_preview_client_background(self._center_host)
         self.refresh_arrows()
 
     def set_active_source_path(self, path: Optional[str]) -> None:

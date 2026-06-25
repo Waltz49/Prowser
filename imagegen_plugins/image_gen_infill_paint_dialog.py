@@ -243,7 +243,7 @@ class ImageGenInfillPaintDialog(QDialog):
                 configure_image_gen_embedded_panel_layout,
             )
 
-            configure_image_gen_embedded_panel_layout(layout)
+            configure_image_gen_embedded_panel_layout(layout, self)
         splitter = ImageGenPreviewSplitter(self)
 
         canvas_host = QFrame()

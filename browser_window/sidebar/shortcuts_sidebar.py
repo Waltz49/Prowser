@@ -21,8 +21,6 @@ from PySide6.QtWidgets import (
 from thumbnails.thumbnail_constants import (
     CMD_SYMBOL,
     OPTION_SYMBOL,
-    TEXT_COLOR_HEX,
-    HEADING_COLOR_HEX,
     asset_file_url,
 )
 from theme.theme_service import get_active_theme
@@ -31,12 +29,11 @@ from tooltip_popup_utils import ensure_tooltip_label, position_tooltip_near_curs
 
 def _shortcuts_primary_text_hex():
     th = get_active_theme()
-    return getattr(th, "shortcuts_sidebar_primary_text_hex", None) or TEXT_COLOR_HEX
+    return getattr(th, "shortcuts_sidebar_primary_text_hex", None) or th.sidebar_text_color_hex
 
 
 def _shortcuts_heading_text_hex():
-    th = get_active_theme()
-    return getattr(th, "shortcuts_sidebar_heading_text_hex", None) or HEADING_COLOR_HEX
+    return get_active_theme().sidebar_heading_color_hex()
 
 
 class _NoContextMenuLabel(QLabel):

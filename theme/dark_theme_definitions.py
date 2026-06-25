@@ -27,10 +27,12 @@ class DarkTheme(ThemeStylesMixin):
     view_border_width_px: int = 2
 
     default_background_color_hex: str = general_bg_color_hex
+    thumbnail_grid_background_color_hex: str = general_bg_color_hex
     default_border_color_hex: str = "#606060"
     # Non-current thumbnail cell colors (preserve current dark behavior)
     default_image_background_color_hex: str = "#000000"
     default_image_color_hex: str = "#606060"
+    thumbnail_text_color_hex: str = general_text_color_hex
     text_color_hex: str = general_text_color_hex
 
     dialog_background_hex: str = "#2a2a2a"
@@ -61,6 +63,8 @@ class DarkTheme(ThemeStylesMixin):
     button_default_border_hex: str = "#7f9cb9"
 
     sidebar_header_bg_hex: str = "#2b2b2b"
+    sidebar_background_color_hex: str = general_bg_color_hex
+    sidebar_text_color_hex: str = general_text_color_hex
     sidebar_header_border_hex: str = "#404040"
     sidebar_header_text_hex: str = "#b6b6b6"  # same as dialog_text_color_hex (previous header label color)
     sidebar_splitter_handle_hex: str = "#444444"
@@ -98,8 +102,8 @@ class DarkTheme(ThemeStylesMixin):
     splitter_handle_hex: str = "#444444"
     splitter_handle_hover_hex: str = "#999999"
     splitter_handle_pressed_hex: str = "#cccccc"
-    main_status_bar_bg_hex: str = "#2a2a2a"
-    status_bar_label_text_hex: str = "#b6b6b6"
+    main_status_bar_bg_hex: str = general_bg_color_hex
+    status_bar_label_text_hex: str = general_text_color_hex
     status_bar_label_disabled_hex: str = "#888888"
 
     progress_bar_border_hex: str = "#808080"

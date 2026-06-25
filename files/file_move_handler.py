@@ -202,8 +202,8 @@ class FileMoveHandler:
             dialog.accept()
         dialog.reject = handle_reject
         
-        # Styling is applied globally via QApplication.setStyleSheet() in main.py
-        # Only widget-specific overrides are set here (e.g., transparent backgrounds)
+        from utils import get_dialog_shell_stylesheet, get_button_style
+        dialog.setStyleSheet(get_dialog_shell_stylesheet() + get_button_style())
         
         # Execute dialog
         dialog.exec()

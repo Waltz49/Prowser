@@ -334,10 +334,10 @@ class InformationSidebar(QWidget):
         return new_disp, self._reference_level_paths
 
     def _info_text_hex(self) -> str:
-        return get_active_theme().text_color_hex
+        return get_active_theme().sidebar_text_color_hex
 
     def _info_heading_hex(self) -> str:
-        return get_active_theme().heading_color_hex()
+        return get_active_theme().sidebar_heading_color_hex()
 
     def _imagegen_action_cells(self, hovered_anchor, icon_box, spacer_box) -> str:
         """Optional Create / Edit-with-AI icon cells when imagegen plugins are available."""

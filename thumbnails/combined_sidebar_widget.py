@@ -59,6 +59,14 @@ class HeaderWidget(QFrame):
         layout.addWidget(self.title_label)
         
         layout.addStretch()
+
+        self.status_label = QLabel("")
+        self.status_label.setFocusPolicy(Qt.NoFocus)
+        self.status_label.setAlignment(
+            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+        )
+        self.status_label.hide()
+        layout.addWidget(self.status_label)
         
         # Hide button
         self.hide_button = QPushButton("−")
@@ -116,6 +124,14 @@ class HeaderWidget(QFrame):
                 color: {tc.SIDEBAR_HEADER_TEXT_HEX};
                 font-weight: bold;
                 font-size: 12px;
+                border-width: 0px;
+            }}
+        """)
+        self.status_label.setStyleSheet(f"""
+            QLabel {{
+                color: {tc.SIDEBAR_HEADER_TEXT_HEX};
+                font-weight: normal;
+                font-size: 10px;
                 border-width: 0px;
             }}
         """)
@@ -198,6 +214,12 @@ class HeaderWidget(QFrame):
         self._single_click_timer.stop()
         self.title_double_clicked.emit()
         event.accept()
+
+    def set_status_text(self, text: str) -> None:
+        """Optional right-aligned status beside the hide button (e.g. job queue counts)."""
+        text = (text or "").strip()
+        self.status_label.setText(text)
+        self.status_label.setVisible(bool(text))
 
 class CombinedSidebarWidget(QWidget):
     """Combined widget containing tree view and preview with resizable sections"""
@@ -288,6 +310,10 @@ class CombinedSidebarWidget(QWidget):
     def refresh_theme_styles(self):
         """Reapply header and splitter styles after global theme change."""
         self._apply_splitter_theme_styles()
+        th = get_active_theme()
+        tree_shell = th.file_tree_pane_shell_stylesheet()
+        if getattr(self, "tree_content", None):
+            self.tree_content.setStyleSheet(tree_shell)
         if getattr(self, "tree_header", None):
             self.tree_header.refresh_theme_styles()
         if getattr(self, "preview_header", None):

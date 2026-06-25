@@ -26,6 +26,7 @@ from imagegen_plugins.image_gen_job_queue_dialog import (
     info_html_for_queue_row,
     open_reference_thumbnail_paths,
 )
+from config import job_queue_cell_background_hex
 from imagegen_plugins.job_prompt_tooltip import install_delayed_prompt_tooltip
 from imagegen_plugins.model_task_status_info import strip_references_from_status_html
 from status_bar_config import (
@@ -39,6 +40,30 @@ _THUMB_SIZE = 55
 _THUMB_GAP = 14
 
 
+def _jobs_header_status_text(controller) -> str:
+    """Title-bar queue summary: waiting count takes priority over running."""
+    waiting = sum(1 for row in controller.queue_snapshot() if not row.is_active)
+    if waiting > 0:
+        return f"{waiting} waiting"
+    if controller.is_running():
+        return "(1 running)"
+    return ""
+
+
+def _jobs_header(main_window):
+    right_sidebar = getattr(main_window, "right_sidebar", None)
+    if right_sidebar is None:
+        return None
+    return getattr(right_sidebar, "jobs_header", None)
+
+
+def _update_jobs_header_status(main_window, controller) -> None:
+    header = _jobs_header(main_window)
+    if header is None:
+        return
+    header.set_status_text(_jobs_header_status_text(controller))
+
+
 def _disable_tab_focus(root: QWidget) -> None:
     """Keep job pane controls out of the keyboard tab order."""
     root.setFocusPolicy(Qt.FocusPolicy.NoFocus)
@@ -48,11 +73,11 @@ def _disable_tab_focus(root: QWidget) -> None:
 
 def _job_card_stylesheet() -> str:
     t = get_active_theme()
-    bg = t.default_background_color_hex
+    bg = job_queue_cell_background_hex()
     return f"""
         QFrame#sidebarJobCard {{
             background-color: {bg};
-            color: {t.dialog_text_color_hex};
+            color: {t.sidebar_text_color_hex};
             border: 1px solid {t.border_default_hex};
             border-radius: 4px;
         }}
@@ -336,13 +361,14 @@ class SidebarJobsWidget(QWidget):
         self._empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         t = get_active_theme()
         self._empty_label.setStyleSheet(
-            f"color: {t.dialog_text_color_hex}; font-size: 12px; padding: 12px;"
+            f"color: {t.sidebar_text_color_hex}; font-size: 12px; padding: 12px;"
         )
 
         self._scroll = QScrollArea()
         self._scroll.setWidgetResizable(True)
         self._scroll.setFrameShape(QScrollArea.Shape.NoFrame)
         self._scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._scroll.setStyleSheet(get_active_theme().sidebar_jobs_scroll_stylesheet())
         self._scroll.viewport().installEventFilter(self)
 
         self._list_host = QWidget()
@@ -360,6 +386,9 @@ class SidebarJobsWidget(QWidget):
         if self._signal_connected:
             return
         self._controller.queue_changed.connect(self._schedule_refresh_table)
+        self._controller.queue_changed.connect(self._update_header_status)
+        self._controller.generation_started.connect(self._update_header_status)
+        self._controller.generation_finished.connect(self._update_header_status)
         self._controller.task_status_info_changed.connect(
             lambda: self._refresh_active_row(force=True)
         )
@@ -369,10 +398,30 @@ class SidebarJobsWidget(QWidget):
         timer.timeout.connect(lambda: self._refresh_active_row(force=False))
         timer.start()
         self._live_timer = timer
+        self._update_header_status()
+
+    def _update_header_status(self) -> None:
+        _update_jobs_header_status(self.main_window, self._controller)
+
+    def refresh_header_status(self) -> None:
+        self._update_header_status()
+
+    def refresh_theme_styles(self) -> None:
+        """Reapply sidebar theme colors to empty state and job cards."""
+        t = get_active_theme()
+        self._empty_label.setStyleSheet(
+            f"color: {t.sidebar_text_color_hex}; font-size: 12px; padding: 12px;"
+        )
+        if hasattr(self, "_scroll"):
+            self._scroll.setStyleSheet(t.sidebar_jobs_scroll_stylesheet())
+        card_ss = _job_card_stylesheet()
+        for card in self._job_cards:
+            card.setStyleSheet(card_ss)
 
     def showEvent(self, event) -> None:
         super().showEvent(event)
         self._schedule_refresh_table()
+        self._update_header_status()
         if self._live_timer is not None:
             self._live_timer.start()
 
@@ -503,3 +552,4 @@ class SidebarJobsWidget(QWidget):
 
         self._schedule_reflow()
         _disable_tab_focus(self)
+        self._update_header_status()

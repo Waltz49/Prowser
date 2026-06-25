@@ -391,7 +391,7 @@ class ListCanvas(QWidget):
             # If visible rect is invalid (empty), use full widget rect for initial paint
             if not self._visible_rect.isValid():
                 self._visible_rect = self.rect()
-            painter.fillRect(self._visible_rect, tc.DEFAULT_BACKGROUND_COLOR)
+            painter.fillRect(self._visible_rect, tc.THUMBNAIL_GRID_BACKGROUND_COLOR)
             
             with QMutexLocker(self.mutex):
                 # Header is now painted by separate ListHeaderWidget - don't paint it here
@@ -585,7 +585,7 @@ class ListCanvas(QWidget):
             else:
                 bg_color = tc.MULTISELECT_BACKGROUND_COLOR
         else:
-            base = tc.DEFAULT_BACKGROUND_COLOR
+            base = tc.THUMBNAIL_GRID_BACKGROUND_COLOR
             if base.lightness() > 135:
                 bg_color = QColor(base).darker(103)
             else:
@@ -633,7 +633,7 @@ class ListCanvas(QWidget):
                 self._draw_deleted_overlay(painter, thumb_rect)
 
         # Draw text columns - ALL FIXED WIDTH except name
-        painter.setPen(tc.TEXT_COLOR)
+        painter.setPen(tc.THUMBNAIL_TEXT_COLOR)
         font = QFont("Arial", 13)
         painter.setFont(font)
         font_metrics = painter.fontMetrics()

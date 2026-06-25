@@ -15,9 +15,9 @@ from imagegen_plugins.image_gen_dim_limits import (
     APP_MAX_GENERATION_DIMENSION_DEFAULT,
     align_generation_dimension,
 )
+from imagegen_plugins.image_gen_dialog import image_gen_preview_workarea_fill
 from imagegen_plugins.outpaint_mask import fit_infill_paint_dims
 
-WORKAREA_FILL = QColor(0, 0, 0)
 MASK_OVERLAY = QColor(255, 60, 60, 120)
 BRUSH_MIN = 4
 BRUSH_MAX = 256
@@ -452,7 +452,7 @@ class InfillPaintCanvas(QWidget):
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
-        painter.fillRect(self.rect(), WORKAREA_FILL)
+        painter.fillRect(self.rect(), image_gen_preview_workarea_fill())
         self._update_image_geometry()
         r = self._image_rect
 

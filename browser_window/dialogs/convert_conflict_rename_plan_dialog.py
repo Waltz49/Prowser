@@ -134,7 +134,7 @@ class ConvertConflictRenamePlanDialog(QDialog):
         self._blocking_select_all_sync = False
 
         th = get_active_theme()
-        bg_color = th.default_background_color_hex
+        bg_color = th.dialog_background_hex
         text_color = th.dialog_text_color_hex
         border_color = th.border_default_hex
         focus_border = th.current_image_border_color_hex
@@ -156,8 +156,9 @@ class ConvertConflictRenamePlanDialog(QDialog):
         self.setModal(False)
 
         self.setStyleSheet(f"""
-            QDialog {{
+            QDialog, QDialog QWidget {{
                 background-color: {bg_color};
+                color: {text_color};
             }}
             QLabel {{
                 font-size: 13px;

@@ -7,7 +7,7 @@ from PySide6.QtWidgets import (
 )
 import thumbnails.thumbnail_constants as tc
 
-# Snapshot at import for initial layout; refresh_theme_styles() re-reads tc.* after theme changes.
+from settings.widgets.settings_dialog_theme import resolve_settings_chrome_from_widget
 TAB_BUTTON_FOCUS_BACKGROUND_COLOR_HEX = tc.TAB_BUTTON_FOCUS_BACKGROUND_COLOR_HEX
 TAB_BUTTON_FOCUS_BORDER_COLOR_HEX = tc.TAB_BUTTON_FOCUS_BORDER_COLOR_HEX
 DIALOG_BACKGROUND_HEX = tc.DIALOG_BACKGROUND_HEX
@@ -112,29 +112,31 @@ class MultiRowTabWidget(QWidget):
         # Stacked widget for content
         self.stacked_widget = QWidget()
         self.stacked_widget.setMinimumHeight(360)
+        self.stacked_widget.setStyleSheet("background-color: transparent;")
         self.stacked_layout = QVBoxLayout(self.stacked_widget)
         self.stacked_layout.setContentsMargins(0, 0, 0, 0)
         self.stacked_widgets = []
         layout.addWidget(self.stacked_widget, 1)  # Give content stretch factor
         
         # Style for tabs - buttons will size to content (vertical column style)
+        _init_chrome = resolve_settings_chrome_from_widget(self)
         self.tab_style = f"""
             QPushButton {{
-                background-color: {DIALOG_BACKGROUND_HEX};
-                color: {DIALOG_TEXT_COLOR_HEX};
-                border: 1px solid {BORDER_DEFAULT_HEX};
+                background-color: {_init_chrome.bg_hex};
+                color: {_init_chrome.text_hex};
+                border: 1px solid {_init_chrome.groupbox_border_hex};
                 border-radius: 4px;
                 padding: 6px 12px;
                 text-align: left;
             }}
             QPushButton:hover {{
-                background-color: {TAB_BUTTON_HOVER_BG_HEX};
+                background-color: {_init_chrome.tab_hover_bg_hex};
             }}
             QPushButton:pressed {{
-                background-color: {WIDGET_BG_HOVER_HEX};
+                background-color: {_init_chrome.control_hover_bg_hex};
             }}
             QPushButton:checked {{
-                background-color: {BUTTON_BG_DEFAULT_HEX};
+                background-color: {_init_chrome.tab_checked_bg_hex};
                 border-left: 2px solid {TAB_BUTTON_FOCUS_BORDER_COLOR_HEX};
             }}
         """
@@ -143,10 +145,12 @@ class MultiRowTabWidget(QWidget):
         self.button_container.installEventFilter(self)
 
     def refresh_theme_styles(self):
-        """Refresh tab chrome using current theme constants from thumbnail_constants."""
+        """Refresh tab chrome using settings-dialog palette (not generic dialog colors)."""
+        chrome = resolve_settings_chrome_from_widget(self)
         self.button_container.setStyleSheet(f"""
             QWidget {{
                 border: 2px solid transparent;
+                background-color: transparent;
             }}
             QWidget:focus {{
                 border: 2px solid {tc.TAB_BUTTON_FOCUS_BORDER_COLOR_HEX};
@@ -155,21 +159,21 @@ class MultiRowTabWidget(QWidget):
         """)
         self.tab_style = f"""
             QPushButton {{
-                background-color: {tc.DIALOG_BACKGROUND_HEX};
-                color: {tc.DIALOG_TEXT_COLOR_HEX};
-                border: 1px solid {tc.BORDER_DEFAULT_HEX};
+                background-color: {chrome.bg_hex};
+                color: {chrome.text_hex};
+                border: 1px solid {chrome.groupbox_border_hex};
                 border-radius: 4px;
                 padding: 6px 12px;
                 text-align: left;
             }}
             QPushButton:hover {{
-                background-color: {tc.TAB_BUTTON_HOVER_BG_HEX};
+                background-color: {chrome.tab_hover_bg_hex};
             }}
             QPushButton:pressed {{
-                background-color: {tc.WIDGET_BG_HOVER_HEX};
+                background-color: {chrome.control_hover_bg_hex};
             }}
             QPushButton:checked {{
-                background-color: {tc.BUTTON_BG_DEFAULT_HEX};
+                background-color: {chrome.tab_checked_bg_hex};
                 border-left: 2px solid {tc.TAB_BUTTON_FOCUS_BORDER_COLOR_HEX};
             }}
         """
@@ -283,23 +287,24 @@ class MultiRowTabWidget(QWidget):
         
         # Build style string - buttons size to content
         # Include checked state styling so it works with button group
+        chrome = resolve_settings_chrome_from_widget(self)
         base_style = f"""
             QPushButton {{
-                background-color: {tc.DIALOG_BACKGROUND_HEX};
-                color: {tc.DIALOG_TEXT_COLOR_HEX};
-                border: 1px solid {tc.BORDER_DEFAULT_HEX};
+                background-color: {chrome.bg_hex};
+                color: {chrome.text_hex};
+                border: 1px solid {chrome.groupbox_border_hex};
                 border-radius: 4px;
                 padding: 6px 12px;
                 text-align: left;
             }}
             QPushButton:hover {{
-                background-color: {tc.TAB_BUTTON_HOVER_BG_HEX};
+                background-color: {chrome.tab_hover_bg_hex};
             }}
             QPushButton:pressed {{
-                background-color: {tc.WIDGET_BG_HOVER_HEX};
+                background-color: {chrome.control_hover_bg_hex};
             }}
             QPushButton:checked {{
-                background-color: {tc.TAB_BUTTON_FOCUS_BACKGROUND_COLOR_HEX}; 
+                background-color: {chrome.tab_checked_bg_hex}; 
                 border-left: 2px solid {tc.TAB_BUTTON_FOCUS_BORDER_COLOR_HEX};
                 border-right: 1px inset solid {tc.TAB_BUTTON_FOCUS_BORDER_COLOR_HEX};
                 border-bottom: 1px inset solid {tc.TAB_BUTTON_FOCUS_BORDER_COLOR_HEX};

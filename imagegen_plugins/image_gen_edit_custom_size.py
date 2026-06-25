@@ -125,14 +125,19 @@ def _add_labeled_slider_row(
     col.setContentsMargins(0, 0, 0, 0)
     col.setSpacing(2)
     col.addWidget(make_image_gen_field_label(label_text, row), 0)
-    control.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
     col.addWidget(
         wrap_image_gen_field_control_indent(
             wrap_image_gen_bordered_field(control), row
         ),
         0,
+        Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
     )
-    layout.addWidget(row)
+    row.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
+    layout.addWidget(
+        row,
+        0,
+        Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop,
+    )
 
 
 def _build_dim_helper_icon_buttons(dialog: Any, parent: QWidget) -> Tuple[QWidget, ...]:
@@ -197,12 +202,14 @@ def _build_custom_size_group_box(
     controls_layout.addWidget(
         btn_row, 0, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
     )
+    controls_row.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
     group_layout.addWidget(controls_row)
 
     aspect_cb.setChecked(bool(values.get("aspect_ratio_lock", False)))
     apply_dim_helper_tooltips(aspect_checkbox=aspect_cb)
     aspect_cb.toggled.connect(dialog._on_aspect_lock_toggled)
     dialog._aspect_checkbox = aspect_cb
+    group_box.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
     return group_box
 
 
@@ -285,9 +292,8 @@ def mount_custom_size_section(
         aspect_cb=aspect_cb,
         values=values,
     )
-    group_box.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-
     outer = QWidget(panel._controls_host)
+    outer.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
     outer_col = QVBoxLayout(outer)
     outer_col.setContentsMargins(0, 0, 0, 0)
     outer_col.setSpacing(8)

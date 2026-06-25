@@ -3562,6 +3562,8 @@ class FileTreeHandler(QObject):
         from PySide6.QtWidgets import QFileSystemModel
 
         self.file_tree_widget = QWidget()
+        self.file_tree_widget.setAutoFillBackground(True)
+        self.file_tree_widget.setStyleSheet(get_active_theme().file_tree_pane_shell_stylesheet())
         layout = QVBoxLayout(self.file_tree_widget)
         layout.setContentsMargins(5, 5, 7, 5)
         self.setup_navigation_controls(layout)
@@ -3791,14 +3793,20 @@ class FileTreeHandler(QObject):
             focus_bg, focus_border, focus_text, dim=False
         )
         t = theme
+        pressed = (
+            QColor(t._file_tree_control_surface_hex()).darker(112).name()
+            if t.theme_id == "light"
+            else QColor(t._file_tree_control_surface_hex()).lighter(108).name()
+        )
+        hover = t._file_tree_control_surface_hover_hex()
         return (
             base
             + f"""
             QPushButton:checked {{
-                background-color: {t.file_tree_nav_button_pressed_hex};
+                background-color: {pressed};
             }}
             QPushButton:checked:hover {{
-                background-color: {t.file_tree_nav_button_hover_hex};
+                background-color: {hover};
             }}
         """
         )
@@ -4001,6 +4009,9 @@ class FileTreeHandler(QObject):
 
         # Add the directory label on a new line (below the nav bar)
         dir_label_container = QWidget()
+        self._dir_label_container = dir_label_container
+        dir_label_container.setAutoFillBackground(True)
+        dir_label_container.setStyleSheet(_theme.file_tree_pane_shell_stylesheet())
         dir_label_layout = QHBoxLayout(dir_label_container)
         dir_label_layout.setContentsMargins(0, 0, 0, 5)
         dir_label_layout.addWidget(self.current_dir_label, 1)
@@ -4011,6 +4022,11 @@ class FileTreeHandler(QObject):
         theme = get_active_theme()
         from utils import get_button_focus_colors
 
+        shell_ss = theme.file_tree_pane_shell_stylesheet()
+        if hasattr(self, "file_tree_widget") and self.file_tree_widget:
+            self.file_tree_widget.setStyleSheet(shell_ss)
+        if hasattr(self, "_dir_label_container") and self._dir_label_container:
+            self._dir_label_container.setStyleSheet(shell_ss)
         focus_bg, focus_border, focus_text = get_button_focus_colors()
         if hasattr(self, "file_tree") and self.file_tree:
             self.file_tree.setStyleSheet(theme.file_tree_panel_stylesheet())

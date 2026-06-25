@@ -7,7 +7,7 @@ import os
 from typing import Any, Dict, List, Optional
 
 from PySide6.QtCore import Qt, QTimer, Signal
-from PySide6.QtGui import QGuiApplication
+from PySide6.QtGui import QGuiApplication, QPalette
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -475,6 +475,7 @@ def create_image_gen_side_button_column(
     col.setContentsMargins(0, 0, 0, IMAGE_GEN_FIELD_BORDER_PAD)
     col.setSpacing(IMAGE_GEN_SIDE_BUTTON_SPACING)
     col.setAlignment(Qt.AlignmentFlag.AlignTop)
+    apply_image_gen_preview_client_background(host)
     return host, col
 
 
@@ -1009,9 +1010,78 @@ class ImageGenDimensionAspectMixin:
             self._aspect_ratio = height / width
 
 
+IMAGE_GEN_PREVIEW_CLIENT_OBJECT_NAME = "imageGenPreviewClient"
+
+
 def apply_image_gen_preview_splitter_theme(splitter: QSplitter) -> None:
     """Preview | controls splitter — same chrome as main window splitters."""
     apply_view_chrome_splitter_theme(splitter)
+
+
+def image_gen_preview_workarea_fill():
+    """Client-area margin behind letterboxed previews (browse border color)."""
+    from config import effective_browse_border_qcolor
+
+    return effective_browse_border_qcolor()
+
+
+def image_gen_preview_client_background_hex() -> str:
+    return image_gen_preview_workarea_fill().name()
+
+
+def _image_gen_preview_client_stylesheet() -> str:
+    """Work-area chrome (browse border color); overrides global QDialog QWidget dialog fill."""
+    bg = image_gen_preview_client_background_hex()
+    t = get_active_theme()
+    name = IMAGE_GEN_PREVIEW_CLIENT_OBJECT_NAME
+    return f"""
+    #imageGenDialog,
+    #imageGenDialog QWidget {{
+        background-color: {bg};
+        color: {t.dialog_text_color_hex};
+    }}
+    #imageGenDialog QLabel {{
+        background-color: transparent;
+    }}
+    #imageGenDialog QWidget#{name},
+    #imageGenDialog QFrame#{name},
+    #imageGenDialog QLabel#{name},
+    #imageGenDialog QWidget#imageGenBelowPromptRow,
+    #imageGenDialog QWidget#imageGenControlsHost,
+    #imageGenDialog QWidget#imageGenSideButtonColumn,
+    #imageGenDialog QWidget#imageGenDialogFooter,
+    #imageGenDialog QWidget#imageGenActionButtons {{
+        background-color: {bg};
+    }}
+    #imageGenDialog QScrollArea {{
+        background-color: {bg};
+        border: none;
+    }}
+    #imageGenDialog QScrollArea > QWidget > QWidget {{
+        background-color: {bg};
+    }}
+    #imageGenDialog QPushButton#imageGenFunctionSwitcherButton {{
+        background-color: transparent;
+    }}
+    """
+
+
+def apply_image_gen_preview_client_background(widget: QWidget) -> None:
+    """Paint preview pane chrome using Settings > Theme > Browse border color."""
+    if not widget.objectName():
+        widget.setObjectName(IMAGE_GEN_PREVIEW_CLIENT_OBJECT_NAME)
+    fill = image_gen_preview_workarea_fill()
+    hex_color = fill.name()
+    widget.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+    widget.setAutoFillBackground(True)
+    palette = widget.palette()
+    palette.setColor(QPalette.ColorRole.Window, fill)
+    palette.setColor(QPalette.ColorRole.Base, fill)
+    widget.setPalette(palette)
+    prior = (widget.styleSheet() or "").strip()
+    bg_rule = f"background-color: {hex_color};"
+    if bg_rule not in prior:
+        widget.setStyleSheet(f"{prior}\n{bg_rule}" if prior else bg_rule)
 
 
 class ImageGenPreviewSplitter(QSplitter):
@@ -1031,15 +1101,18 @@ class ImageGenPreviewSplitter(QSplitter):
         self.setChildrenCollapsible(False)
         self.setOpaqueResize(True)
         apply_image_gen_preview_splitter_theme(self)
+        apply_image_gen_preview_client_background(self)
         self.splitterMoved.connect(self._clamp_left_size)
 
     def add_preview_pane(self, widget: QWidget) -> None:
+        apply_image_gen_preview_client_background(widget)
         widget.setSizePolicy(
             QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding
         )
         self.addWidget(widget)
 
     def add_controls_pane(self, widget: QWidget, *, min_width: int = 300) -> None:
+        apply_image_gen_preview_client_background(widget)
         widget.setMinimumWidth(min_width)
         widget.setSizePolicy(
             QSizePolicy.Policy.MinimumExpanding, QSizePolicy.Policy.Expanding
@@ -1123,7 +1196,15 @@ def apply_image_gen_dialog_shell(
         flags |= Qt.WindowStaysOnTopHint
     dlg.setWindowFlags(flags)
     dlg.setWindowModality(Qt.WindowModality.NonModal)
-    dlg.setStyleSheet(dlg.styleSheet() + _text_input_stylesheet())
+    from theme.theme import push_button_stylesheet
+
+    t = get_active_theme()
+    dlg.setStyleSheet(
+        (dlg.styleSheet() or "")
+        + _image_gen_preview_client_stylesheet()
+        + push_button_stylesheet(t, selector="#imageGenDialog QPushButton")
+        + _text_input_stylesheet()
+    )
 
 
 class ImageGenDialog(ImageGenDimensionAspectMixin, QDialog):
@@ -1244,7 +1325,7 @@ class ImageGenDialog(ImageGenDimensionAspectMixin, QDialog):
                 configure_image_gen_embedded_panel_layout,
             )
 
-            configure_image_gen_embedded_panel_layout(layout)
+            configure_image_gen_embedded_panel_layout(layout, self)
 
         scroll = QScrollArea()
         self._fields_panel = ImageGenFieldsPanel(self, compact=self._panel_mode)

@@ -251,7 +251,7 @@ class ImageGenExpandDialog(ImageGenDimensionAspectMixin, QDialog):
                 configure_image_gen_embedded_panel_layout,
             )
 
-            configure_image_gen_embedded_panel_layout(layout)
+            configure_image_gen_embedded_panel_layout(layout, self)
         splitter = ImageGenPreviewSplitter(self)
 
         canvas_w = int(self._values.get("width", 1024))

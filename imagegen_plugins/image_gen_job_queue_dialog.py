@@ -31,6 +31,11 @@ from imagegen_plugins.image_gen_persistence import (
     load_job_queue_geometry_hex,
     save_job_queue_geometry_hex,
 )
+from config import (
+    job_queue_action_bar_background_hex,
+    job_queue_action_bar_background_qcolor,
+    job_queue_cell_background_hex,
+)
 from status_bar_config import (
     _apply_task_info_html_to_browser,
     configure_task_info_text_browser,
@@ -52,18 +57,19 @@ _ACTION_COL_WIDTH = 36
 _ICON_BTN_SIZE = 22
 
 
-def _job_queue_app_background_hex() -> str:
-    return get_active_theme().default_background_color_hex
-
-
 def _job_queue_cell_background_stylesheet() -> str:
-    bg = _job_queue_app_background_hex()
+    bg = job_queue_cell_background_hex()
+    return f"background-color: {bg};"
+
+
+def _job_queue_action_bar_background_stylesheet() -> str:
+    bg = job_queue_action_bar_background_hex()
     return f"background-color: {bg};"
 
 
 def _job_queue_table_stylesheet() -> str:
     t = get_active_theme()
-    bg = t.default_background_color_hex
+    bg = job_queue_cell_background_hex()
     return f"""
             QTableWidget {{
                 background-color: {bg};
@@ -91,6 +97,11 @@ def _job_queue_table_stylesheet() -> str:
 
 def _apply_job_queue_cell_background(widget: QWidget) -> None:
     widget.setStyleSheet(_job_queue_cell_background_stylesheet())
+    widget.setAutoFillBackground(True)
+
+
+def _apply_job_queue_action_bar_background(widget: QWidget) -> None:
+    widget.setStyleSheet(_job_queue_action_bar_background_stylesheet())
     widget.setAutoFillBackground(True)
 
 
@@ -253,7 +264,7 @@ def build_job_queue_action_widget(
         lambda _checked=False, r=row_idx: job_queue_cancel_row(main_window, controller, r)
     )
     action_wrap = QWidget()
-    _apply_job_queue_cell_background(action_wrap)
+    _apply_job_queue_action_bar_background(action_wrap)
     action_layout = QVBoxLayout(action_wrap)
     action_layout.setContentsMargins(2, 0, 2, 0)
     action_layout.setSpacing(2)
@@ -329,9 +340,12 @@ def _icon_push_button_stylesheet(icon_name: str, *, hover_icon_name: str | None 
     hover_name = hover_icon_name or icon_name.replace(".png", "_hover.png")
     hover_url = f"url({asset_path(hover_name)})"
     sz = _ICON_BTN_SIZE
+    btn_bg = job_queue_action_bar_background_hex()
+    btn_hover = job_queue_cell_background_hex()
+    btn_pressed = job_queue_action_bar_background_qcolor().darker(120).name()
     return f"""
         QPushButton {{
-            background-color: {t.dialog_background_hex};
+            background-color: {btn_bg};
             border: 1px solid {t.border_default_hex};
             border-radius: 3px;
             padding: 0px;
@@ -346,12 +360,12 @@ def _icon_push_button_stylesheet(icon_name: str, *, hover_icon_name: str | None 
             outline: none;
         }}
         QPushButton:hover {{
-            background-color: {t.tab_button_hover_bg_hex};
-            border: 1px solid {t.tab_button_hover_bg_hex};
+            background-color: {btn_hover};
+            border: 1px solid {t.border_default_hex};
             image: {hover_url};
         }}
         QPushButton:pressed {{
-            background-color: {t.sidebar_splitter_handle_hex};
+            background-color: {btn_pressed};
         }}
         QPushButton:disabled {{
             opacity: 0.35;
@@ -378,17 +392,17 @@ def _series_minus_button_stylesheet() -> str:
 
 
 def _series_refinement_button_stylesheet() -> str:
-    t = get_active_theme()
     active_url = f"url({asset_path('series_refinement_icon_active.png')})"
     active_hover_url = f"url({asset_path('series_refinement_icon_active_hover.png')})"
+    btn_hover = job_queue_cell_background_hex()
     return _icon_push_button_stylesheet("series_refinement_icon.png") + f"""
+        QPushButton:checked:hover {{
+            background-color: {btn_hover};
+            border: 1px solid {get_active_theme().border_default_hex};
+            image: {active_hover_url};
+        }}
         QPushButton:checked {{
             image: {active_url};
-        }}
-        QPushButton:checked:hover {{
-            background-color: {t.tab_button_hover_bg_hex};
-            border: 1px solid {t.tab_button_hover_bg_hex};
-            image: {active_hover_url};
         }}
     """
 
