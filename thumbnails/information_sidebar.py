@@ -44,8 +44,6 @@ else:
     _DELETE_ICON_HTML = "⊘"
 
 _INFO_AI_ICON_SIZE = 16  # display size; source assets are 40x40
-# Sidebar width minus this → active-job bordered table (browser pad, borders, cell pad).
-_INFO_ACTIVE_JOB_WIDTH_INSET = 80
 
 
 def _information_ai_icon_html() -> str:
@@ -75,8 +73,7 @@ class InformationSidebar(QWidget):
         self._reference_level_paths: Optional[List[str]] = None
         self._gen_timing_path: Optional[str] = None
         self._overlay_has_image_model = False
-        self._gen_timing_timer: Optional[QTimer] = None
-        self._gen_timing_signal_connected = False
+        self._input_heading_signal_connected = False
         self.setup_ui()
 
     def setup_ui(self):
@@ -131,7 +128,6 @@ class InformationSidebar(QWidget):
 
     def clear_info(self):
         """Clear the info text edit content"""
-        self._stop_gen_timing_updates()
         if self.info_text_edit:
             self.info_text_edit.clear()
 
@@ -872,11 +868,7 @@ class InformationSidebar(QWidget):
         )
         return int(doc_h) + extra
 
-    def _info_active_job_width_px(self) -> int:
-        """Bordered active-job table width (container minus chrome inset)."""
-        return max(120, self._info_container_width_px() - _INFO_ACTIVE_JOB_WIDTH_INSET)
-
-    def _should_show_generation_timing_row(self) -> bool:
+    def _should_show_input_to_active_job_heading(self) -> bool:
         try:
             from bundle_capabilities import imagegen_ui_enabled
 
@@ -895,43 +887,6 @@ class InformationSidebar(QWidget):
             ).viewing_path_matches_active_generation(path)
         except ImportError:
             return False
-
-    def _build_generation_timing_cell_html(
-        self, *, hovered_anchor: str | None = None
-    ) -> Optional[str]:
-        if not self._should_show_generation_timing_row():
-            return None
-        try:
-            from imagegen_plugins.image_gen_controller import get_imagegen_controller
-            from imagegen_plugins.model_task_status_info import (
-                format_information_generation_cooldown_cell_html,
-                format_information_generation_timing_cell_html,
-                generation_cancel_icon_html,
-            )
-
-            cancel_hovered = hovered_anchor == "cancelgen://"
-            controller = get_imagegen_controller(self.main_window)
-            path = getattr(self.main_window, "current_image_path", None) or ""
-            if controller.is_viewing_output_in_copy_cooldown(path):
-                return format_information_generation_cooldown_cell_html(
-                    controller.copy_cooldown_seconds_remaining(),
-                    cancel_hovered=cancel_hovered,
-                )
-            elapsed, estimate, step, step_total = (
-                controller.snapshot_generation_timing_for_info_panel()
-            )
-            if elapsed is None:
-                return None
-            return format_information_generation_timing_cell_html(
-                elapsed,
-                estimate,
-                cancel_icon_html=generation_cancel_icon_html(hovered=cancel_hovered),
-                completed_steps=step,
-                total_steps=step_total,
-                content_width_px=self._info_active_job_width_px(),
-            )
-        except ImportError:
-            return None
 
     def _restore_info_scroll_position(self, scroll_pos: int) -> None:
         """Restore vertical scroll after HTML relayout (scrollbar is hidden but still drives viewport)."""
@@ -981,16 +936,13 @@ class InformationSidebar(QWidget):
             return
         scroll_pos = self.info_text_edit.verticalScrollBar().value()
         data = self._last_overlay_data
-        gen_timing_cell = self._build_generation_timing_cell_html(
-            hovered_anchor=hovered_anchor
-        )
         info_text = self._build_info_overlay_html(
             data["filename"],
             data["field_value_pairs"],
             data.get("description"),
             data.get("speakable_plain_text"),
             hovered_anchor=hovered_anchor,
-            gen_timing_cell_html=gen_timing_cell,
+            show_input_to_active_job_heading=self._should_show_input_to_active_job_heading(),
         )
         if info_text:
             self.info_text_edit.blockSignals(True)
@@ -1000,29 +952,8 @@ class InformationSidebar(QWidget):
             )
             self.info_text_edit.blockSignals(False)
 
-    def _stop_gen_timing_updates(self) -> None:
-        """Stop the 500ms poll timer; keep controller signals connected for the next job."""
-        timer = self._gen_timing_timer
-        self._gen_timing_timer = None
-        if timer is not None:
-            try:
-                timer.stop()
-            except (RuntimeError, SystemError):
-                pass
-            try:
-                timer.deleteLater()
-            except (RuntimeError, SystemError):
-                pass
-        if getattr(self, "_last_overlay_data", None) and self.info_text_edit:
-            self._rebuild_overlay_from_cache(
-                hovered_anchor=getattr(self, "_hovered_anchor", None)
-            )
-
-    def _on_gen_timing_task_status_changed(self) -> None:
-        self._sync_gen_timing_updates()
-
-    def _ensure_gen_timing_signal_connected(self) -> None:
-        if self._gen_timing_signal_connected:
+    def _ensure_input_heading_signal_connected(self) -> None:
+        if self._input_heading_signal_connected:
             return
         try:
             from imagegen_plugins.image_gen_controller import get_imagegen_controller
@@ -1030,51 +961,16 @@ class InformationSidebar(QWidget):
             controller = get_imagegen_controller(self.main_window)
         except ImportError:
             return
-        controller.task_status_info_changed.connect(
-            self._on_gen_timing_task_status_changed
-        )
-        controller.generation_finished.connect(self._stop_gen_timing_updates)
-        self._gen_timing_signal_connected = True
+        controller.generation_started.connect(self._refresh_input_to_active_job_heading)
+        controller.generation_finished.connect(self._refresh_input_to_active_job_heading)
+        self._input_heading_signal_connected = True
 
-    def _refresh_generation_timing_display(self, *, force: bool = False) -> None:
-        if not getattr(self, "_last_overlay_data", None) or not self.info_text_edit:
-            return
-        if not self._should_show_generation_timing_row():
-            return
-        if not force:
-            try:
-                from imagegen_plugins.image_gen_controller import get_imagegen_controller
-
-                if not get_imagegen_controller(
-                    self.main_window
-                ).task_status_display_needs_refresh():
-                    return
-            except ImportError:
-                pass
-        self._rebuild_overlay_from_cache(
-            hovered_anchor=getattr(self, "_hovered_anchor", None)
-        )
-
-    def _sync_gen_timing_updates(self) -> None:
-        self._ensure_gen_timing_signal_connected()
-        if not self._should_show_generation_timing_row():
-            self._stop_gen_timing_updates()
-            return
-        timer = self._gen_timing_timer
-        if timer is None:
-            timer = QTimer(self)
-            timer.setInterval(500)
-            timer.timeout.connect(
-                lambda: self._refresh_generation_timing_display(force=False)
+    def _refresh_input_to_active_job_heading(self) -> None:
+        self._ensure_input_heading_signal_connected()
+        if getattr(self, "_last_overlay_data", None) and self.info_text_edit:
+            self._rebuild_overlay_from_cache(
+                hovered_anchor=getattr(self, "_hovered_anchor", None)
             )
-            timer.start()
-            self._gen_timing_timer = timer
-        elif not timer.isActive():
-            timer.start()
-        self._refresh_generation_timing_display(force=True)
-
-    def _start_gen_timing_updates(self) -> None:
-        self._sync_gen_timing_updates()
 
     def _refresh_overlay_for_hover(self, hovered_anchor=None):
         """Rebuild overlay HTML with hovered link highlighted (text and border #50c8ff)."""
@@ -1092,7 +988,7 @@ class InformationSidebar(QWidget):
         speakable_plain_text: str = None,
         hovered_anchor: str = None,
         *,
-        gen_timing_cell_html: str | None = None,
+        show_input_to_active_job_heading: bool = False,
     ) -> str:
         """Build HTML overlay from field-value pairs using table format.
 
@@ -1133,23 +1029,12 @@ class InformationSidebar(QWidget):
 
             html_parts.append('</table>')
 
-        if gen_timing_cell_html:
-            active_bdr = _th.current_image_border_color_hex
-            active_bdr_w = max(
-                1, int(getattr(_th, "current_image_border_width_index", 2))
-            )
-            active_border = f"{active_bdr_w}px solid {active_bdr}"
-            active_job_w = self._info_active_job_width_px()
+        if show_input_to_active_job_heading:
             html_parts.append(
                 f'<div style="margin-top: 12px; padding-top: 10px; padding-bottom: 4px; '
                 f'border-top: 1px solid {bdr};">'
                 f'<div style="font-weight: bold; font-size: 12pt; color: {text_hex}; '
-                f'margin-bottom: 6px;">Active Job</div>'
-                f'<table width="{active_job_w}" cellspacing="0" cellpadding="0" '
-                f'style="border: {active_border}; border-collapse: collapse;">'
-                f'<tr><td style="border: {active_border}; padding: 4px 8px; color: {text_hex}; '
-                f'vertical-align: middle; line-height: 16px;">'
-                f"{gen_timing_cell_html}</td></tr></table>"
+                f'margin-bottom: 6px;">Input to Active Job</div>'
                 f"</div>"
             )
 
@@ -1436,16 +1321,13 @@ class InformationSidebar(QWidget):
                 'description': description,
                 'speakable_plain_text': speakable_plain_text,
             }
-            gen_timing_cell = self._build_generation_timing_cell_html(
-                hovered_anchor=getattr(self, "_hovered_anchor", None)
-            )
             info_text = self._build_info_overlay_html(
                 filename,
                 field_value_pairs,
                 description,
                 speakable_plain_text,
                 hovered_anchor=getattr(self, "_hovered_anchor", None),
-                gen_timing_cell_html=gen_timing_cell,
+                show_input_to_active_job_heading=self._should_show_input_to_active_job_heading(),
             )
 
         except Exception as e:
@@ -1507,10 +1389,9 @@ class InformationSidebar(QWidget):
             self._hovered_anchor = None
             self.info_text_edit.clear()
             self._apply_info_html_to_browser(info_text)
-            self._sync_gen_timing_updates()
+            self._refresh_input_to_active_job_heading()
 
     def hide_image_info_overlay(self):
         """Hide image info overlay"""
-        self._stop_gen_timing_updates()
         if self.info_text_edit:
             self.info_text_edit.hide()

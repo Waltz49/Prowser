@@ -717,6 +717,14 @@ def handle_task_info_reference_link_clicked(main_window, url: QUrl) -> None:
         except ImportError:
             pass
         return
+    if url_str == "cancelgen://":
+        try:
+            from imagegen_plugins.image_gen_controller import get_imagegen_controller
+
+            get_imagegen_controller(main_window).confirm_cancel_generation(main_window)
+        except ImportError:
+            pass
+        return
     if url_str != "reflevel://":
         return
     try:

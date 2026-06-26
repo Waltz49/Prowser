@@ -28,16 +28,54 @@ from imagegen_plugins.image_gen_job_queue_dialog import (
 )
 from config import job_queue_cell_background_hex
 from imagegen_plugins.job_prompt_tooltip import install_delayed_prompt_tooltip
-from imagegen_plugins.model_task_status_info import strip_references_from_status_html
+from imagegen_plugins.model_task_status_info import (
+    build_active_job_timing_cell_html,
+    strip_references_from_status_html,
+    wrap_active_job_timing_table_html,
+)
 from status_bar_config import (
     _apply_task_info_html_to_browser,
+    _wrap_task_info_html,
     configure_task_info_text_browser,
+    handle_task_info_reference_link_clicked,
 )
 from theme.theme_service import get_active_theme
 from utils import create_job_status_thumbnail_label
 
 _THUMB_SIZE = 55
 _THUMB_GAP = 14
+_ACTIVE_JOB_STRIP_MARGIN = 8  # left + right margins on the strip layout
+
+
+def _active_job_strip_browser_stylesheet() -> str:
+    t = get_active_theme()
+    return f"""
+        QTextBrowser {{
+            color: {t.sidebar_text_color_hex};
+            background: transparent;
+            padding: 0;
+            margin: 0;
+            border: none;
+        }}
+    """
+
+
+def _apply_active_job_strip_html(
+    browser: QTextBrowser, body_html: str, *, content_width: int
+) -> int:
+    """Size the active-job strip browser to the bordered table (no trailing fill box)."""
+    browser.setFixedWidth(content_width)
+    browser.setHtml(_wrap_task_info_html(body_html))
+    browser.document().setDocumentMargin(0)
+    browser.document().setTextWidth(content_width)
+    doc = browser.document()
+    layout_h = doc.documentLayout().documentSize().height()
+    doc_h = doc.size().height()
+    content_h = max(doc_h, layout_h, browser.fontMetrics().lineSpacing())
+    height = int(max(content_h, 28) + 2)
+    browser.setFixedHeight(height)
+    browser.setMinimumHeight(height)
+    return height
 
 
 def _jobs_header_status_text(controller) -> str:
@@ -348,6 +386,7 @@ class SidebarJobsWidget(QWidget):
         self._refresh_table_timer: QTimer | None = None
         self._live_timer: QTimer | None = None
         self._resize_timer: QTimer | None = None
+        self._active_job_hovered_anchor: str | None = None
         self._signal_connected = False
         self._setup_ui()
         self._connect_controller()
@@ -364,6 +403,38 @@ class SidebarJobsWidget(QWidget):
             f"color: {t.sidebar_text_color_hex}; font-size: 12px; padding: 12px;"
         )
 
+        self._active_job_strip = QWidget()
+        active_job_layout = QVBoxLayout(self._active_job_strip)
+        active_job_layout.setContentsMargins(4, 4, 4, 0)
+        active_job_layout.setSpacing(0)
+        self._active_job_browser = QTextBrowser()
+        self._active_job_browser.setReadOnly(True)
+        self._active_job_browser.setOpenExternalLinks(False)
+        self._active_job_browser.setOpenLinks(False)
+        self._active_job_browser.setFrameShape(QTextBrowser.Shape.NoFrame)
+        self._active_job_browser.setVerticalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
+        self._active_job_browser.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
+        self._active_job_browser.setStyleSheet(_active_job_strip_browser_stylesheet())
+        self._active_job_browser.anchorClicked.connect(
+            lambda url: handle_task_info_reference_link_clicked(self.main_window, url)
+        )
+        self._active_job_browser.setSizePolicy(
+            QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed
+        )
+        self._active_job_viewport = self._active_job_browser.viewport()
+        self._active_job_viewport.setMouseTracking(True)
+        self._active_job_viewport.installEventFilter(self)
+        active_job_layout.addWidget(
+            self._active_job_browser,
+            0,
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop,
+        )
+        self._active_job_strip.hide()
+
         self._scroll = QScrollArea()
         self._scroll.setWidgetResizable(True)
         self._scroll.setFrameShape(QScrollArea.Shape.NoFrame)
@@ -378,6 +449,7 @@ class SidebarJobsWidget(QWidget):
         self._list_layout.addStretch(1)
 
         self._scroll.setWidget(self._list_host)
+        layout.addWidget(self._active_job_strip)
         layout.addWidget(self._empty_label)
         layout.addWidget(self._scroll, 1)
         _disable_tab_focus(self)
@@ -388,14 +460,22 @@ class SidebarJobsWidget(QWidget):
         self._controller.queue_changed.connect(self._schedule_refresh_table)
         self._controller.queue_changed.connect(self._update_header_status)
         self._controller.generation_started.connect(self._update_header_status)
+        self._controller.generation_started.connect(
+            lambda: self._refresh_active_job_strip(force=True)
+        )
         self._controller.generation_finished.connect(self._update_header_status)
+        self._controller.generation_finished.connect(self._refresh_active_job_strip)
         self._controller.task_status_info_changed.connect(
             lambda: self._refresh_active_row(force=True)
+        )
+        self._controller.task_status_info_changed.connect(
+            lambda: self._refresh_active_job_strip(force=True)
         )
         self._signal_connected = True
         timer = QTimer(self)
         timer.setInterval(500)
         timer.timeout.connect(lambda: self._refresh_active_row(force=False))
+        timer.timeout.connect(lambda: self._refresh_active_job_strip(force=False))
         timer.start()
         self._live_timer = timer
         self._update_header_status()
@@ -414,14 +494,22 @@ class SidebarJobsWidget(QWidget):
         )
         if hasattr(self, "_scroll"):
             self._scroll.setStyleSheet(t.sidebar_jobs_scroll_stylesheet())
+        if hasattr(self, "_active_job_browser"):
+            self._active_job_browser.setStyleSheet(_active_job_strip_browser_stylesheet())
         card_ss = _job_card_stylesheet()
         for card in self._job_cards:
             card.setStyleSheet(card_ss)
+        self._refresh_active_job_strip(force=True)
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self._refresh_active_job_strip(force=True)
 
     def showEvent(self, event) -> None:
         super().showEvent(event)
         self._schedule_refresh_table()
         self._update_header_status()
+        self._refresh_active_job_strip(force=True)
         if self._live_timer is not None:
             self._live_timer.start()
 
@@ -431,12 +519,28 @@ class SidebarJobsWidget(QWidget):
         super().hideEvent(event)
 
     def eventFilter(self, obj, event) -> bool:
+        if hasattr(self, "_active_job_viewport") and obj is self._active_job_viewport:
+            if event.type() == QEvent.Type.MouseMove:
+                pos = (
+                    event.position().toPoint()
+                    if hasattr(event, "position")
+                    else event.pos()
+                )
+                anchor = self._active_job_browser.anchorAt(pos)
+                if anchor != self._active_job_hovered_anchor:
+                    self._active_job_hovered_anchor = anchor or None
+                    self._refresh_active_job_strip(force=True)
+            elif event.type() == QEvent.Type.Leave:
+                if self._active_job_hovered_anchor is not None:
+                    self._active_job_hovered_anchor = None
+                    self._refresh_active_job_strip(force=True)
         if (
             hasattr(self, "_scroll")
             and obj is self._scroll.viewport()
             and event.type() == QEvent.Type.Resize
         ):
             self._schedule_reflow()
+            self._refresh_active_job_strip(force=True)
         return super().eventFilter(obj, event)
 
     def _schedule_reflow(self) -> None:
@@ -463,6 +567,47 @@ class SidebarJobsWidget(QWidget):
 
     def _info_content_width(self) -> int:
         return max(80, self._viewport_width() - _ACTION_COL_WIDTH - 20)
+
+    def _active_job_content_width(self) -> int:
+        w = self.width() if self.width() > 0 else self._viewport_width()
+        return max(120, w - _ACTIVE_JOB_STRIP_MARGIN)
+
+    def _should_show_active_job_strip(self) -> bool:
+        return self._controller.is_running()
+
+    def _refresh_active_job_strip(self, *, force: bool = False) -> None:
+        if not hasattr(self, "_active_job_strip"):
+            return
+        visible = self.isVisible() and self._should_show_active_job_strip()
+        if not visible:
+            if self._active_job_strip.isVisible():
+                self._active_job_strip.hide()
+            return
+        if not force and not self._controller.task_status_display_needs_refresh():
+            if self._active_job_strip.isVisible():
+                return
+        table_w = self._active_job_content_width()
+        cell_content_w = max(120, table_w - 16)
+        hovered = self._active_job_hovered_anchor
+        cell_html = build_active_job_timing_cell_html(
+            self._controller,
+            content_width_px=cell_content_w,
+            cancel_hovered=hovered == "cancelgen://",
+            skip_hovered=hovered == "skipcooldown://",
+        )
+        if not cell_html:
+            self._active_job_strip.hide()
+            return
+        body_html = wrap_active_job_timing_table_html(
+            cell_html, content_width_px=table_w
+        )
+        _apply_active_job_strip_html(
+            self._active_job_browser,
+            body_html,
+            content_width=table_w,
+        )
+        self._active_job_strip.show()
+        _disable_tab_focus(self._active_job_strip)
 
     def _refresh_active_row(self, *, force: bool = False) -> None:
         if not self.isVisible() or not self._job_cards:
@@ -498,13 +643,19 @@ class SidebarJobsWidget(QWidget):
 
     def preferred_content_height(self) -> int:
         """Height needed to show all job rows without vertical scrolling."""
+        total = 0
+        if (
+            hasattr(self, "_active_job_strip")
+            and self._active_job_strip.isVisible()
+        ):
+            total += self._active_job_strip.sizeHint().height()
         if not self._job_cards:
-            return self._empty_label.sizeHint().height()
+            return total + self._empty_label.sizeHint().height()
         info_w = self._info_content_width()
         width = self._viewport_width()
         rows = self._controller.queue_snapshot()
         margins = self._list_layout.contentsMargins()
-        total = margins.top() + margins.bottom()
+        total += margins.top() + margins.bottom()
         spacing = self._list_layout.spacing()
         for row_idx, card in enumerate(self._job_cards):
             if row_idx > 0:
@@ -553,3 +704,4 @@ class SidebarJobsWidget(QWidget):
         self._schedule_reflow()
         _disable_tab_focus(self)
         self._update_header_status()
+        self._refresh_active_job_strip(force=True)

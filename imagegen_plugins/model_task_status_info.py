@@ -372,7 +372,7 @@ def format_information_generation_timing_cell_html(
     total_steps: int | None = None,
     content_width_px: int = 0,
 ) -> str:
-    """Elapsed/Est and step progress for the File Information active-job box."""
+    """Elapsed/Est and step progress for the active-job timing strip."""
     from theme.theme_service import get_active_theme
 
     th = get_active_theme()
@@ -463,13 +463,14 @@ def _information_panel_inline_row_html(text_html: str, icon_html: str = "") -> s
     )
 
 
-def _information_panel_skip_cooldown_icon_html() -> str:
+def _information_panel_skip_cooldown_icon_html(*, hovered: bool = False) -> str:
     from theme.theme_base import asset_file_url
 
     url = asset_file_url("skip_cooldown_icon.png")
+    hover_style = "opacity:0.65;" if hovered else ""
     return (
         f'<a href="skipcooldown://" title="Skip cooldown" '
-        f'style="text-decoration:none;line-height:0;">'
+        f'style="text-decoration:none;line-height:0;{hover_style}">'
         f'<img src="{url}" width="16" height="16" '
         f'style="display:block;margin:0;padding:0;border:none;">'
         f"</a>"
@@ -480,12 +481,13 @@ def format_information_generation_cooldown_cell_html(
     remaining_seconds: int,
     *,
     cancel_hovered: bool = False,
+    skip_hovered: bool = False,
 ) -> str:
     """Cooldown row for File Information: label, seconds in parens, skip + cancel icons."""
     remaining = max(0, int(remaining_seconds))
     text = f"Cooldown: ({remaining})"
     icons = (
-        _information_panel_skip_cooldown_icon_html()
+        _information_panel_skip_cooldown_icon_html(hovered=skip_hovered)
         + '<span style="display:inline-block;width:4px;"></span>'
         + generation_cancel_icon_html(hovered=cancel_hovered)
     )
@@ -504,6 +506,59 @@ def generation_cancel_icon_html(*, hovered: bool = False) -> str:
         f'<img src="{url}" width="16" height="16" '
         f'style="display:block;margin:0;padding:0;border:none;">'
         f"</a>"
+    )
+
+
+def build_active_job_timing_cell_html(
+    controller,
+    *,
+    content_width_px: int,
+    cancel_hovered: bool = False,
+    skip_hovered: bool = False,
+) -> str | None:
+    """Elapsed/Est progress or cooldown row for the jobs-pane active-job strip."""
+    remaining = controller.copy_cooldown_seconds_remaining()
+    if remaining > 0:
+        return format_information_generation_cooldown_cell_html(
+            remaining,
+            cancel_hovered=cancel_hovered,
+            skip_hovered=skip_hovered,
+        )
+    elapsed, estimate, step, step_total = (
+        controller.snapshot_generation_timing_for_info_panel()
+    )
+    if elapsed is None:
+        return None
+    return format_information_generation_timing_cell_html(
+        elapsed,
+        estimate,
+        cancel_icon_html=generation_cancel_icon_html(hovered=cancel_hovered),
+        completed_steps=step,
+        total_steps=step_total,
+        content_width_px=content_width_px,
+    )
+
+
+def wrap_active_job_timing_table_html(
+    cell_html: str,
+    *,
+    content_width_px: int,
+) -> str:
+    """Bordered table wrapping active-job timing/cooldown cell (jobs pane strip)."""
+    from theme.theme_service import get_active_theme
+
+    th = get_active_theme()
+    text_hex = th.sidebar_text_color_hex
+    active_bdr = th.current_image_border_color_hex
+    active_bdr_w = max(1, int(getattr(th, "current_image_border_width_index", 2)))
+    active_border = f"{active_bdr_w}px solid {active_bdr}"
+    table_w = max(120, int(content_width_px))
+    return (
+        f'<table width="{table_w}" cellspacing="0" cellpadding="0" '
+        f'style="border: {active_border}; border-collapse: collapse;">'
+        f'<tr><td style="border: {active_border}; padding: 4px 8px; color: {text_hex}; '
+        f'vertical-align: middle; line-height: 16px;">'
+        f"{cell_html}</td></tr></table>"
     )
 
 
