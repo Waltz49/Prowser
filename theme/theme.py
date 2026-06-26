@@ -109,6 +109,35 @@ def global_scrollbar_stylesheet(t) -> str:
     )
 
 
+def dialog_context_stylesheet(t) -> str:
+    """Overrides for dialog children that would otherwise inherit application chrome colors."""
+    return f"""
+    QDialog QScrollArea {{
+        background-color: {t.dialog_background_hex};
+    }}
+    QDialog QTabBar::tab:!selected {{
+        background-color: {t.dialog_background_hex};
+    }}
+    QDialog QComboBox {{
+        background-color: {t.button_bg_default_hex};
+    }}
+    QDialog QComboBox QAbstractItemView {{
+        background-color: {t.button_bg_default_hex};
+    }}
+    QDialog QTextEdit {{
+        background-color: {t.dialog_background_hex};
+    }}
+    QDialog QSlider::groove:horizontal {{
+        border: 1px solid {t.border_default_hex};
+        background: {t.dialog_background_hex};
+    }}
+    QDialog QSlider::groove:vertical {{
+        border: 1px solid {t.border_default_hex};
+        background: {t.dialog_background_hex};
+    }}
+    """
+
+
 def push_button_stylesheet(
     t,
     selector: str = "QPushButton",
@@ -196,32 +225,9 @@ def global_stylesheet_light(t) -> str:
         padding: 4px 8px;
     }}
     QMenuBar::item:selected {{
-        background-color: {t.default_background_color_hex};
-    }}
-    QMenu {{
-        background-color: {t.context_menu_bg_hex};
-        color: {t.text_color_hex};
-        border: 1px solid {t.border_default_hex};
-    }}
-    QMenu::item {{
-            min-height: 20px;
-            font-size: 13pt;
-            font-weight: 500;
-            color: {t.text_color_hex};
-            padding:0px 8px
-        }}
-    QMenu::item:selected {{
         background-color: {t.widget_bg_hover_hex};
     }}
-    QMenu::item:disabled {{
-        color: {t.qmenu_item_disabled_hex};
-        font-weight: 100;
-    }}
-    QMenu::separator {{
-        height: 1px;
-        background: {t.text_disabled_hex};
-        margin: 5px 8px;
-    }}
+    {t.context_menu_stylesheet()}
 
     QStatusBar {{
         background-color: {t.main_status_bar_bg_hex};
@@ -519,6 +525,7 @@ def global_stylesheet_light(t) -> str:
         border-radius: 3px;
     }}
 
+    {dialog_context_stylesheet(t)}
     {global_scrollbar_stylesheet(t)}
     """.strip()
 
@@ -558,32 +565,9 @@ def global_stylesheet_dark(t) -> str:
         padding: 4px 8px;
     }}
     QMenuBar::item:selected {{
-        background-color: {t.default_background_color_hex};
-    }}
-    QMenu {{
-        background-color: {t.context_menu_bg_hex};
-        color: {t.text_color_hex};
-        border: 1px solid {t.border_default_hex};
-    }}
-    QMenu::item {{
-            min-height: 20px;
-            font-size: 13pt;
-            font-weight: 500;
-            color:{t.text_color_hex};
-            padding:0px 8px
-        }}
-    QMenu::item:selected {{
         background-color: {t.widget_bg_hover_hex};
     }}
-    QMenu::item:disabled {{
-        color: {t.qmenu_item_disabled_hex};
-        font-weight: 100;
-    }}
-    QMenu::separator {{
-        height: 1px;
-        background: {t.text_disabled_hex};
-        margin: 5px 8px;
-    }}
+    {t.context_menu_stylesheet()}
 
     /* Status Bar */
     QStatusBar {{
@@ -897,43 +881,63 @@ def global_stylesheet_dark(t) -> str:
         border-radius: 3px;
     }}
 
+    {dialog_context_stylesheet(t)}
     {global_scrollbar_stylesheet(t)}
     """.strip()
 
 class ThemeStylesMixin:
     """Stylesheet methods shared by LightTheme and DarkTheme (palette via `self`)."""
 
-    def qmenu_stylesheet(self) -> str:
+    def context_menu_stylesheet(self, *, rounded: bool = False) -> str:
+        """QMenu rules using status bar background, text, selection, and disabled colors."""
         t = self
-        return f"""
-    QMenu {{
-        background-color: {t.context_menu_bg_hex};
-        color: {t.text_color_hex};
-        border: 1px solid {t.border_default_hex};
+        selected_bg = t.status_bar_menu_item_selected_bg_hex()
+        shell_extra = ""
+        if rounded:
+            shell_extra = """
         border-radius: 7px;
         padding-top: 7px;
-        padding-bottom: 7px;
-    }}
-    QMenu::separator {{
-        height: 1px;
-        background: {t.text_disabled_hex};
-        margin: 5px 8px
+        padding-bottom: 7px;"""
+        return f"""
+    QMenu {{
+        background-color: {t.main_status_bar_bg_hex};
+        color: {t.status_bar_label_text_hex};
+        border: 1px solid {t.border_default_hex};{shell_extra}
     }}
     QMenu::item {{
         min-height: 20px;
         font-size: 13pt;
         font-weight: 500;
-        color: {t.text_color_hex};
-        padding:0px 8px
+        color: {t.status_bar_label_text_hex};
+        padding: 0px 8px;
     }}
-    QMenu::item:selected {{ background-color: {t.widget_bg_hover_hex}; }}
-    QMenu::item:disabled {{color: {t.qmenu_item_disabled_hex}; font-weight: 100;}}
+    QMenu::item:selected {{
+        background-color: {selected_bg};
+        color: {t.status_bar_label_text_hex};
+    }}
+    QMenu::item:disabled {{
+        color: {t.status_bar_label_disabled_hex};
+        font-weight: 100;
+    }}
+    QMenu::separator {{
+        height: 1px;
+        background: {t.status_bar_label_disabled_hex};
+        margin: 5px 8px;
+    }}
     """
+
+    def qmenu_stylesheet(self) -> str:
+        return self.context_menu_stylesheet(rounded=True)
 
     def heading_color_hex(self) -> str:
         if self.theme_id == "light":
             return QColor(self.text_color_hex).darker(108).name()
         return QColor(self.text_color_hex).lighter(115).name()
+
+    def dialog_heading_color_hex(self) -> str:
+        if self.theme_id == "light":
+            return QColor(self.dialog_text_color_hex).darker(108).name()
+        return QColor(self.dialog_text_color_hex).lighter(115).name()
 
     def sidebar_heading_color_hex(self) -> str:
         if self.theme_id == "light":

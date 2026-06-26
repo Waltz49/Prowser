@@ -138,6 +138,7 @@ from settings.widgets.settings_dialog_theme import (
 )
 from settings.widgets.collapsible_theme_group import (
     CollapsibleThemeGroup,
+    THEME_COLLAPSE_GROUP_KEYS,
     merge_theme_settings_groups_expanded,
 )
 from settings.widgets.multi_row_tab_widget import (
@@ -148,13 +149,13 @@ from settings.widgets.multi_row_tab_widget import (
 
 THEME_COLOR_SWATCH_TOOLTIPS = {
     "default_background_color_hex": "Background for the main application window chrome (not thumbnails or dialogs).",
-    "text_color_hex": "Default text color for labels, menus, and general information.",
+    "text_color_hex": "Browse view and other main-window information (not dialogs or menus).",
     "dialog_background_hex": "Background for modal and modeless dialog windows.",
     "dialog_text_color_hex": "Text color for dialog labels and general dialog content.",
     "thumbnail_grid_background_color_hex": "Background behind the thumbnail and list grids (margins and empty areas).",
     "thumbnail_text_color_hex": "Text on thumbnail overlays, list rows, and in-grid labels.",
-    "status_bar_background_color_hex": "Background fill for the main status bar (defaults match sidebar panes).",
-    "status_bar_text_color_hex": "Text color for status bar labels and sections (defaults match sidebar pane text).",
+    "status_bar_background_color_hex": "Background fill for the main status bar, context menus, and menu-bar dropdowns.",
+    "status_bar_text_color_hex": "Text color for status bar labels, context menus, and menu-bar dropdown items.",
     "sidebar_header_bg_hex": "Background of view title bars (e.g. Favorites, folder name headers).",
     "sidebar_background_color_hex": "Background for left and right sidebar panes (file tree, preview, organize, information, jobs).",
     "sidebar_text_color_hex": "Text color for sidebar content, titlebar labels, and tables; section headings are derived automatically.",
@@ -415,7 +416,7 @@ class _FaceAssignCanvas(QWidget):
         painter.fillRect(self.rect(), QColor(chrome.bg_hex))
 
         if not self._pixmap or self._pixmap.isNull():
-            painter.setPen(tc.TEXT_COLOR)
+            painter.setPen(QColor(chrome.text_hex))
             painter.drawText(self.rect(), Qt.AlignCenter, "Image unavailable")
             return
 
@@ -453,7 +454,7 @@ class _FaceAssignCanvas(QWidget):
             painter.drawRect(st.label_rect_display)
 
             # label text
-            painter.setPen(tc.TEXT_COLOR)
+            painter.setPen(QColor(chrome.text_hex))
             painter.setFont(self._font)
             painter.drawText(st.label_rect_display, Qt.AlignCenter, st.display_name if st.display_name else PLACEHOLDER_ADD)
 
@@ -2628,6 +2629,7 @@ class SettingsDialog(QDialog):
         ):
             self._theme_collapse_groups[key] = group
             group.expanded_changed.connect(self._on_theme_group_expanded_changed)
+            group.option_set_all_expanded.connect(self._on_theme_groups_option_set_all_expanded)
 
         outer.addStretch(0)
         scroll.setWidget(inner)
@@ -2655,6 +2657,25 @@ class SettingsDialog(QDialog):
             if hasattr(self, "current_settings") else None
         )
         merged[state_key] = expanded
+        self._persist_theme_collapse_groups(merged)
+
+    def _on_theme_groups_option_set_all_expanded(self, expanded: bool) -> None:
+        """Option-click on any theme section header expands or collapses every group."""
+        if not hasattr(self, "_theme_collapse_groups"):
+            return
+        merged = merge_theme_settings_groups_expanded(
+            self.current_settings.get("theme_settings_groups_expanded")
+            if hasattr(self, "current_settings") else None
+        )
+        for key in THEME_COLLAPSE_GROUP_KEYS:
+            merged[key] = expanded
+        for group in self._theme_collapse_groups.values():
+            group.blockSignals(True)
+            group.set_expanded(expanded)
+            group.blockSignals(False)
+        self._persist_theme_collapse_groups(merged)
+
+    def _persist_theme_collapse_groups(self, merged: dict[str, bool]) -> None:
         merged_copy = copy.deepcopy(merged)
         if hasattr(self, "current_settings"):
             self.current_settings["theme_settings_groups_expanded"] = merged_copy

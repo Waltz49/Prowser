@@ -28,7 +28,6 @@ from thumbnails.thumbnail_constants import (
     BUTTON_BG_DEFAULT_HEX,
     COPY_SYMBOL,
     DIALOG_TEXT_COLOR_HEX,
-    HEADING_COLOR_HEX,
 )
 
 _COLLAPSED_ARROW = "▶"
@@ -269,8 +268,8 @@ def _toggle_header(
 def build_downloading_models_html(expanded: Set[str]) -> str:
     """Build help HTML; section bodies shown only when section_id is in expanded."""
     th = get_active_theme()
-    text_hex = getattr(th, "text_color_hex", DIALOG_TEXT_COLOR_HEX)
-    heading_hex = getattr(th, "heading_color_hex", HEADING_COLOR_HEX)
+    text_hex = th.dialog_text_color_hex
+    heading_hex = th.dialog_heading_color_hex()
     border_hex = getattr(th, "default_border_color_hex", BORDER_DEFAULT_HEX)
     code_bg = getattr(th, "button_bg_default_hex", BUTTON_BG_DEFAULT_HEX)
     accent_hex = getattr(th, "accent_color_hex", heading_hex)

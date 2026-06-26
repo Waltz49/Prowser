@@ -41,7 +41,7 @@ from PySide6.QtGui import (QPainter, QPen, QFont, QColor, QPalette, QKeyEvent, Q
 )
 
 from thumbnails.thumbnail_constants import (get_image_extensions, EXCLUDED_EXTENSIONS, SKIPPED_PATTERNS, MIN_THUMBNAIL_SIZE,
-    TREE_UPDATE_DEBOUNCE_TIMER, TREE_FOLDER_WITH_IMAGES_COLOR, TEXT_COLOR, TEXT_COLOR_HEX,
+    TREE_UPDATE_DEBOUNCE_TIMER, TREE_FOLDER_WITH_IMAGES_COLOR,
     TREE_DRAG_AUTO_SCROLL_SPEEDS, TREE_DRAG_AUTO_SCROLL_TIMER_MS, asset_path,
 )
 import thumbnails.thumbnail_constants as tc
@@ -1038,17 +1038,18 @@ class CustomTreeView(QTreeView):
         self._rename_editor.setGeometry(editor_x, editor_y, editor_width, editor_height)
 
         # Style with skyblue border (matching thumbnail rename)
-        self._rename_editor.setStyleSheet("""
-            QLineEdit {
+        sidebar_text = get_active_theme().sidebar_text_color_hex
+        self._rename_editor.setStyleSheet(f"""
+            QLineEdit {{
                 border: 1px solid #6b6b6b;
                 border-radius: 0px;
                 background-color: rgba(0, 0, 0, 240);
-                color: {TEXT_COLOR_HEX};
+                color: {sidebar_text};
                 font-family: Arial;
                 font-weight: 100;
                 font-size: 13px;
                 padding: 2px;
-            }
+            }}
         """)
 
         # Store directory path being edited

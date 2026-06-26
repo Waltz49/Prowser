@@ -10,8 +10,9 @@ import os
 from typing import Any, List, Optional, Tuple
 
 from PySide6.QtCore import QRect, Qt, Signal
-from PySide6.QtGui import QPainter, QPen, QPixmap
+from PySide6.QtGui import QColor, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import QDialog, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
+from theme.theme_service import get_active_theme
 import thumbnails.thumbnail_constants as tc
 
 # Reserved subject name for quick multi-sample search (max 4 samples).
@@ -85,13 +86,14 @@ class _FacePickCanvas(QWidget):
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing, True)
-        painter.fillRect(self.rect(), tc.DEFAULT_BACKGROUND_COLOR)
+        th = get_active_theme()
+        painter.fillRect(self.rect(), QColor(th.dialog_background_hex))
 
         self._layout_boxes = []
         self._hit_geom_ready = False
 
         if not self._pixmap or self._pixmap.isNull():
-            painter.setPen(tc.TEXT_COLOR)
+            painter.setPen(QColor(th.dialog_text_color_hex))
             painter.drawText(self.rect(), Qt.AlignCenter, "Image unavailable")
             return
 

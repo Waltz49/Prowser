@@ -39,6 +39,7 @@ from PySide6.QtWidgets import (
 )
 
 # Local imports
+from theme.theme_service import get_active_theme
 from event_bus import SELECTION_CHANGED, DIRECTORY_LOADED, FILE_OPERATION_COMPLETE
 from cache.cache_prepopulator import prepopulate_cache
 from files.external_editor import edit_current_image_with_editor
@@ -198,7 +199,7 @@ class LineWithText(QWidget):
 
     def paintEvent(self, event):
         painter = QPainter(self)
-        color = QColor("#888888")
+        color = QColor(get_active_theme().text_disabled_hex)
         pen = QPen(color)
         pen.setWidth(1)
         painter.setPen(pen)

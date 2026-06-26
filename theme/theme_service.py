@@ -128,7 +128,6 @@ class LightTheme(ThemeStylesMixin):
     thumbnail_empty_filter_btn_text_hover_hex: str = "#0d47a1"
 
     right_sidebar_combined_bg_hex: str = "#fafafa"
-    context_menu_bg_hex: str = dialog_background_hex
 
     browse_view_bg_rgb: str = "245, 245, 245"
     browse_view_fg_hex: str = general_text_color_hex

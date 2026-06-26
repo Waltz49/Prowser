@@ -125,8 +125,6 @@ class DarkTheme(ThemeStylesMixin):
 
     # Right sidebar shell (Organize + Information splitter)
     right_sidebar_combined_bg_hex: str = "#2a2a2a"
-    # QMenu surfaces (menu bar dropdowns, global QMenu rules, status bar menus)
-    context_menu_bg_hex: str = dialog_background_hex
 
     # Browse view
     browse_view_bg_rgb: str = "0, 0, 0"

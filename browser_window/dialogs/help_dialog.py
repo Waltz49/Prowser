@@ -20,10 +20,11 @@ from config import get_config
 from tooltip_popup_utils import ensure_tooltip_label, position_tooltip_near_cursor
 from thumbnails.thumbnail_constants import (
     DIALOG_BACKGROUND_HEX, DIALOG_TEXT_COLOR_HEX, ERROR_COLOR_HEX,
-    DEFAULT_BORDER_COLOR_HEX, HEADING_COLOR_HEX,
+    DEFAULT_BORDER_COLOR_HEX,
     BUTTON_TEXT_HOVER_HEX, BUTTON_BG_DEFAULT_HEX, BUTTON_TEXT_DEFAULT_HEX,
     MODIFIER_SYMBOLS,
 )
+from theme.theme_service import get_active_theme
 
 # Color constants (help-dialog-specific; base colors from thumbnail_constants)
 COLOR_BACKGROUND = DIALOG_BACKGROUND_HEX
@@ -31,7 +32,6 @@ COLOR_KEY_BOX_BG = BUTTON_BG_DEFAULT_HEX
 COLOR_KEY_TEXT = BUTTON_TEXT_DEFAULT_HEX
 COLOR_BORDER = DEFAULT_BORDER_COLOR_HEX
 COLOR_TEXT = DIALOG_TEXT_COLOR_HEX
-COLOR_TITLE_TEXT = HEADING_COLOR_HEX
 COLOR_INSTRUCTION_TEXT = DIALOG_TEXT_COLOR_HEX
 COLOR_ASTERISK = ERROR_COLOR_HEX
 COLOR_ACTIVE_HEADER_TEXT = BUTTON_TEXT_HOVER_HEX
@@ -687,7 +687,7 @@ class HelpDialog:
         
         title = QLabel(titles[current_mode])
         title.setAlignment(Qt.AlignCenter | Qt.AlignVCenter)
-        title.setStyleSheet(f"background-color: transparent; font-size: 20px; font-weight: bold; padding: 0px; margin: 0px; color: {COLOR_TITLE_TEXT};")
+        title.setStyleSheet(f"background-color: transparent; font-size: 20px; font-weight: bold; padding: 0px; margin: 0px; color: {get_active_theme().dialog_heading_color_hex()};")
         
         # Question mark icon with custom tooltip (QToolTip stylesheet unreliable on macOS)
         qmark_label = QLabel()

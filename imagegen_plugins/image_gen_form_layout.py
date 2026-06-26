@@ -1423,6 +1423,22 @@ def image_gen_field_label_stylesheet() -> str:
     #imageGenDialog QSlider::groove:horizontal {{
         height: 4px;
         border-radius: 2px;
+        border: 1px solid {t.groupbox_border_hex};
+        background: {t.groupbox_border_hex};
+    }}
+    #imageGenDialog QSlider::add-page:horizontal {{
+        background: {t.groupbox_border_hex};
+        border-radius: 2px;
+    }}
+    #imageGenDialog QSlider::groove:vertical {{
+        width: 4px;
+        border-radius: 2px;
+        border: 1px solid {t.groupbox_border_hex};
+        background: {t.groupbox_border_hex};
+    }}
+    #imageGenDialog QSlider::add-page:vertical {{
+        background: {t.groupbox_border_hex};
+        border-radius: 2px;
     }}
     #imageGenDialog QSlider::handle:horizontal {{
         background: {t.accent_color_hex};

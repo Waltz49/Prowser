@@ -27,6 +27,7 @@ def _shortcut_label(text: str, shortcut: str) -> str:
 from event_bus import THUMBNAIL_CLICKED
 import thumbnails.thumbnail_constants as tc
 from macos_process import reveal_in_finder
+from theme.theme_service import get_active_theme
 from utils import show_styled_warning
 
 
@@ -37,7 +38,8 @@ class MenuNoteLabel(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(8, 4, 8, 4)
         label = QLabel(text)
-        label.setStyleSheet(f"color: {tc.TEXT_DISABLED_HEX}; font-style: italic;")
+        disabled_hex = get_active_theme().status_bar_label_disabled_hex
+        label.setStyleSheet(f"color: {disabled_hex}; font-style: italic;")
         label.setWordWrap(True)
         layout.addWidget(label)
 

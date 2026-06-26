@@ -41,6 +41,7 @@ def merge_theme_settings_groups_expanded(saved: dict | None) -> dict[str, bool]:
 
 class _ClickableLabel(QLabel):
     clicked = Signal()
+    option_clicked = Signal()
 
     def __init__(self, text: str = "", parent=None):
         super().__init__(text, parent)
@@ -48,12 +49,18 @@ class _ClickableLabel(QLabel):
 
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
-            self.clicked.emit()
+            if event.modifiers() & Qt.KeyboardModifier.AltModifier:
+                self.option_clicked.emit()
+            else:
+                self.clicked.emit()
+            event.accept()
+            return
         super().mousePressEvent(event)
 
 
 class _ClickableTitleGroupBox(QGroupBox):
     title_clicked = Signal()
+    title_option_clicked = Signal()
 
     def __init__(self, title: str = "", parent=None):
         super().__init__(title, parent)
@@ -61,7 +68,10 @@ class _ClickableTitleGroupBox(QGroupBox):
 
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton and self._title_rect_contains(event.pos()):
-            self.title_clicked.emit()
+            if event.modifiers() & Qt.KeyboardModifier.AltModifier:
+                self.title_option_clicked.emit()
+            else:
+                self.title_clicked.emit()
             event.accept()
             return
         super().mousePressEvent(event)
@@ -93,6 +103,7 @@ class CollapsibleThemeGroup(QWidget):
     """Theme tab section: collapsed single-line header or expanded QGroupBox, never both."""
 
     expanded_changed = Signal(str, bool)
+    option_set_all_expanded = Signal(bool)
 
     def __init__(self, title: str, parent=None, *, state_key: str = "", expanded: bool = False):
         super().__init__(parent)
@@ -107,9 +118,15 @@ class CollapsibleThemeGroup(QWidget):
         self._collapsed_header = _ClickableLabel(f"{_COLLAPSED_PREFIX}{title}")
         self._collapsed_header.setStyleSheet(f"color: {tc.DIALOG_TEXT_COLOR_HEX}; padding: 2px 0px;")
         self._collapsed_header.clicked.connect(self._expand)
+        self._collapsed_header.option_clicked.connect(
+            lambda: self.option_set_all_expanded.emit(True)
+        )
 
         self._group_box = _ClickableTitleGroupBox(f"{_EXPANDED_PREFIX}{title}")
         self._group_box.title_clicked.connect(self._collapse)
+        self._group_box.title_option_clicked.connect(
+            lambda: self.option_set_all_expanded.emit(False)
+        )
         self._content_layout = QVBoxLayout(self._group_box)
 
         root.addWidget(self._collapsed_header)
