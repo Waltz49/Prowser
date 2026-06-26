@@ -651,7 +651,7 @@ def usercomment_text_for_clipboard(text: str, *, copy_full: bool = False) -> str
     """Prepare user-comment text for clipboard copy.
 
     Default (copy_full=False): prompt section only (see USERCOMMENT_SKIP_HEADINGS),
-    with newlines and semicolons escaped for paste-friendly text.
+    with semicolons replaced by periods for paste-friendly text.
     Option-click (copy_full=True): entire comment unchanged.
     """
     if not text:
@@ -659,7 +659,7 @@ def usercomment_text_for_clipboard(text: str, *, copy_full: bool = False) -> str
     if copy_full:
         return text
     prompt = truncate_usercomment_before_prompt(text)
-    return prompt.replace("\n", "\\n").replace(";", ".")
+    return prompt.replace(";", ".")
 
 
 def decode_usercomment(data: bytes) -> str:

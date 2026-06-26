@@ -637,7 +637,6 @@ class EditExifUserCommentDialog(QDialog):
         text = self.text_edit.toPlainText()
         if not raw:
             text = truncate_usercomment_before_prompt(text)
-            text = text.replace("\n", "\\n")  # escape newlines for clipboard
             text = text.replace(";", ".")  # replace semicolons with periods for clipboard copy only
         from copy_feedback import copy_text_to_clipboard
 
