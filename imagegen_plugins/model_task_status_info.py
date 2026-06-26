@@ -586,6 +586,7 @@ def _generation_status_queue_table_rows(
     steps_value: str | None = None,
     elapsed_seconds: float | None = None,
     estimate_seconds: float | None = None,
+    omit_live_steps_row: bool = False,
 ) -> list[str]:
     """Compact job-queue rows: combine short fields on one line where possible."""
     rows: list[str] = []
@@ -597,21 +598,25 @@ def _generation_status_queue_table_rows(
     if fields.get("size"):
         rows.append(_table_row("Size:", fields["size"]))
 
-    steps_display = steps_value if steps_value is not None else fields.get("steps", "")
     quant = fields.get("quant")
-    steps_inline = _steps_row_inline_parts(
-        fields,
-        elapsed_seconds=elapsed_seconds,
-        estimate_seconds=estimate_seconds,
-    )
-    if steps_display and steps_inline:
-        rows.append(
-            _table_row_primary_plus_inline("Steps:", steps_display, steps_inline)
+    if omit_live_steps_row:
+        if quant:
+            rows.append(_table_row(_QUANT_STATUS_LABEL, quant))
+    else:
+        steps_display = steps_value if steps_value is not None else fields.get("steps", "")
+        steps_inline = _steps_row_inline_parts(
+            fields,
+            elapsed_seconds=elapsed_seconds,
+            estimate_seconds=estimate_seconds,
         )
-    elif steps_display:
-        rows.append(_table_row("Steps:", steps_display))
-    elif quant:
-        rows.append(_table_row(_QUANT_STATUS_LABEL, quant))
+        if steps_display and steps_inline:
+            rows.append(
+                _table_row_primary_plus_inline("Steps:", steps_display, steps_inline)
+            )
+        elif steps_display:
+            rows.append(_table_row("Steps:", steps_display))
+        elif quant:
+            rows.append(_table_row(_QUANT_STATUS_LABEL, quant))
 
     if fields.get("prompt"):
         rows.append(_table_row_prompt(fields["prompt_label"], fields["prompt"]))
@@ -844,6 +849,7 @@ def format_image_generation_queue_status_html(
     running: bool = False,
     series_images_after: int | None = None,
     series_copies_total: int | None = None,
+    omit_live_steps_row: bool = False,
 ) -> str:
     """Rich-text block for the job queue — same field order as the status-bar menu."""
     pipeline_id = plugin.pipeline_id
@@ -864,6 +870,7 @@ def format_image_generation_queue_status_html(
         steps_value=steps_value,
         elapsed_seconds=elapsed_seconds if show_timing else None,
         estimate_seconds=estimate_seconds if show_timing else None,
+        omit_live_steps_row=omit_live_steps_row and show_timing,
     )
 
     ref_row = _references_row_for_values(

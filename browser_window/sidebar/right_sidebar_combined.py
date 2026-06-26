@@ -162,6 +162,7 @@ class RightSidebarCombinedWidget(QWidget):
             self.shortcuts_content = content_area
         else:
             self.jobs_content = content_area
+            content_area.setMinimumHeight(0)
 
         sect_layout.addWidget(content_area)
         return section
@@ -183,9 +184,25 @@ class RightSidebarCombinedWidget(QWidget):
         """Minimum splitter height so a pane's title bar stays visible."""
         if not self._pane_visibility()[pane_idx]:
             return 0
+        if (
+            pane_idx == 2
+            and not header_only
+            and self.jobs_visible
+            and self.jobs_widget is not None
+        ):
+            return (
+                self._header_height_for_pane(pane_idx)
+                + self.jobs_widget.compact_content_height()
+            )
         return pane_min_height(
             self._header_height_for_pane(pane_idx), header_only=header_only
         )
+
+    def _jobs_compact_pane_height(self) -> int:
+        header_h = self._header_height_for_pane(2)
+        if not self.jobs_visible or self.jobs_widget is None:
+            return header_h
+        return header_h + self.jobs_widget.compact_content_height()
 
     def _set_splitter_sizes_safe(self, sizes: list[int]) -> None:
         self._adjusting_splitter = True
@@ -219,6 +236,31 @@ class RightSidebarCombinedWidget(QWidget):
             return header_h + self.jobs_widget.preferred_content_height()
         return header_h + MIN_PANE_CONTENT
 
+    def _resize_pane_to_height(self, pane_idx: int, target_height: int) -> None:
+        """Resize one pane to *target_height*; shrink neighbors only as needed."""
+        vis = self._pane_visibility()
+        if not vis[pane_idx]:
+            return
+
+        total = max(self.height(), 1)
+        collapse_flags = collapse_flags_for_target(
+            pane_idx, target_height, total, vis, self._pane_min_height
+        )
+        new_sizes = redistribute_for_target_pane(
+            self.splitter,
+            3,
+            pane_idx,
+            target_height,
+            vis,
+            self._header_height_for_pane,
+            self._pane_min_height,
+            total,
+            collapse_header_only=collapse_flags,
+        )
+        self._set_splitter_sizes_safe(new_sizes)
+        self._ensure_pane_headers_visible(collapse_flags)
+        self._persist_splitter_sizes()
+
     def _expand_pane_to_fit(self, pane_idx: int) -> None:
         """Resize one pane to fit its content; shrink neighbors only as needed."""
         if pane_idx == 0 and not self.shortcuts_visible:
@@ -237,24 +279,7 @@ class RightSidebarCombinedWidget(QWidget):
         if pane_idx < len(sizes) and sizes[pane_idx] == needed:
             return
 
-        total = max(self.height(), 1)
-        collapse_flags = collapse_flags_for_target(
-            pane_idx, needed, total, vis, self._pane_min_height
-        )
-        new_sizes = redistribute_for_target_pane(
-            self.splitter,
-            3,
-            pane_idx,
-            needed,
-            vis,
-            self._header_height_for_pane,
-            self._pane_min_height,
-            total,
-            collapse_header_only=collapse_flags,
-        )
-        self._set_splitter_sizes_safe(new_sizes)
-        self._ensure_pane_headers_visible(collapse_flags)
-        self._persist_splitter_sizes()
+        self._resize_pane_to_height(pane_idx, needed)
 
     def _persist_splitter_sizes(self) -> None:
         """Merge current splitter sizes for visible panes into saved settings."""
@@ -308,7 +333,21 @@ class RightSidebarCombinedWidget(QWidget):
         self._expand_pane_to_fit(1)
 
     def _expand_jobs_pane_to_fit(self) -> None:
-        self._expand_pane_to_fit(2)
+        if not self.jobs_visible:
+            self.set_jobs_visible(True)
+
+        vis = self._pane_visibility()
+        if not vis[2]:
+            return
+
+        needed = self._needed_pane_height(2)
+        compact = self._jobs_compact_pane_height()
+        sizes = self.splitter.sizes()
+        current = sizes[2] if len(sizes) > 2 else 0
+        if abs(current - needed) <= 1:
+            self._resize_pane_to_height(2, compact)
+        else:
+            self._expand_pane_to_fit(2)
 
     def set_shortcuts_visible(self, visible):
         """Set Shortcuts visibility programmatically (e.g. from O key)"""
@@ -348,7 +387,7 @@ class RightSidebarCombinedWidget(QWidget):
         if self.jobs_widget:
             if self.jobs_widget.parent():
                 self.jobs_widget.setParent(None)
-            self.jobs_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+            self.jobs_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
             layout = self.jobs_content.layout()
             layout.addWidget(self.jobs_widget)
             self.jobs_widget.show()

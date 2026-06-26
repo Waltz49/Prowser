@@ -61,8 +61,8 @@ def redistribute_for_target_pane(
 
     total = max(total_height, 1)
     other_indices = [i for i, v in enumerate(vis) if v and i != target_idx]
-    target_header = header_height_for_pane(target_idx)
-    needed_target = max(needed_target, pane_min_height(target_header))
+    target_min = min_height_for_pane(target_idx)
+    needed_target = max(needed_target, target_min)
 
     other_mins: dict[int, int] = {}
     for i in other_indices:
@@ -70,7 +70,7 @@ def redistribute_for_target_pane(
         other_mins[i] = min_height_for_pane(i, header_only=header_only)
 
     max_target = total - sum(other_mins.values())
-    new_target = min(needed_target, max(max_target, pane_min_height(target_header)))
+    new_target = min(needed_target, max(max_target, target_min))
 
     sizes = list(splitter.sizes())
     if len(sizes) < pane_count:

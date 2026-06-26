@@ -79,12 +79,10 @@ def _apply_active_job_strip_html(
 
 
 def _jobs_header_status_text(controller) -> str:
-    """Title-bar queue summary: waiting count takes priority over running."""
+    """Title-bar queue summary: waiting jobs only."""
     waiting = sum(1 for row in controller.queue_snapshot() if not row.is_active)
     if waiting > 0:
         return f"{waiting} waiting"
-    if controller.is_running():
-        return "(1 running)"
     return ""
 
 
@@ -449,6 +447,15 @@ class SidebarJobsWidget(QWidget):
         self._list_layout.addStretch(1)
 
         self._scroll.setWidget(self._list_host)
+        self._scroll.setMinimumHeight(0)
+        self._scroll.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Ignored
+        )
+        self._list_host.setMinimumSize(0, 0)
+        self._list_host.setSizePolicy(
+            QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Ignored
+        )
+        self._empty_label.setMinimumHeight(0)
         layout.addWidget(self._active_job_strip)
         layout.addWidget(self._empty_label)
         layout.addWidget(self._scroll, 1)
@@ -618,7 +625,9 @@ class SidebarJobsWidget(QWidget):
         if not rows or not rows[0].is_active:
             return
         row = rows[0]
-        info_html = info_html_for_queue_row(self._controller, 0, row)
+        info_html = info_html_for_queue_row(
+            self._controller, 0, row, for_sidebar=True
+        )
         info_w = self._info_content_width()
         self._job_cards[0].update_info_html(info_html, info_w)
         self._job_cards[0]._replace_refs(row.thumbnail_paths, info_w)
@@ -640,6 +649,39 @@ class SidebarJobsWidget(QWidget):
             if card._last_info_html:
                 card.update_info_html(card._last_info_html, info_w)
             card.reflow_refs(width)
+
+    def compact_content_height(self) -> int:
+        """Minimum client height: active job strip only (if applicable)."""
+        if not self._should_show_active_job_strip():
+            return 0
+        if (
+            hasattr(self, "_active_job_strip")
+            and self._active_job_strip.isVisible()
+            and self._active_job_strip.height() > 0
+        ):
+            return self._active_job_strip.sizeHint().height()
+        table_w = self._active_job_content_width()
+        cell_content_w = max(120, table_w - 16)
+        cell_html = build_active_job_timing_cell_html(
+            self._controller,
+            content_width_px=cell_content_w,
+        )
+        if not cell_html:
+            return 0
+        body_html = wrap_active_job_timing_table_html(
+            cell_html, content_width_px=table_w
+        )
+        browser_h = _apply_active_job_strip_html(
+            self._active_job_browser,
+            body_html,
+            content_width=table_w,
+        )
+        margins = self._active_job_strip.layout().contentsMargins()
+        return browser_h + margins.top() + margins.bottom()
+
+    def minimumSizeHint(self) -> QSize:
+        """Allow pane shrink to active-job strip only; queue scroll may clip."""
+        return QSize(0, self.compact_content_height())
 
     def preferred_content_height(self) -> int:
         """Height needed to show all job rows without vertical scrolling."""
@@ -684,7 +726,9 @@ class SidebarJobsWidget(QWidget):
 
         info_w = self._info_content_width()
         for row_idx, row in enumerate(rows):
-            info_html = info_html_for_queue_row(self._controller, row_idx, row)
+            info_html = info_html_for_queue_row(
+                self._controller, row_idx, row, for_sidebar=True
+            )
             card = _JobCard(
                 self.main_window,
                 self._controller,

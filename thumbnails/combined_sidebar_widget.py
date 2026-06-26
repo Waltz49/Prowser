@@ -130,8 +130,8 @@ class HeaderWidget(QFrame):
         self.status_label.setStyleSheet(f"""
             QLabel {{
                 color: {tc.SIDEBAR_HEADER_TEXT_HEX};
-                font-weight: normal;
-                font-size: 10px;
+                font-weight: bold;
+                font-size: 12px;
                 border-width: 0px;
             }}
         """)

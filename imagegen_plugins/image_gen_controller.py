@@ -797,7 +797,7 @@ class ImageGenController(QObject):
         self._live_estimate_seconds = None
         self._step_seconds_per_step = None
 
-    def get_task_queue_status_info_html(self) -> str:
+    def get_task_queue_status_info_html(self, *, omit_live_steps_row: bool = False) -> str:
         """Compact info table for the job queue pane and sidebar (rebuilt from live state)."""
         plugin = self._active_plugin
         if plugin is None:
@@ -820,6 +820,7 @@ class ImageGenController(QObject):
             estimate_seconds=estimate,
             running=self._tasks.is_running(),
             series_images_after=series_after,
+            omit_live_steps_row=omit_live_steps_row,
         )
         if not html:
             return ""
@@ -854,7 +855,11 @@ class ImageGenController(QObject):
                 self._cooldown_seconds_remaining(),
                 skip_icon_html=cooldown_skip_icon_html(),
             )
-        if self._step_progress_start_time is not None and self._live_step_total > 0:
+        if (
+            not omit_live_steps_row
+            and self._step_progress_start_time is not None
+            and self._live_step_total > 0
+        ):
             display_elapsed = elapsed
             if display_elapsed is None:
                 display_elapsed = self._wall_clock_elapsed_seconds(

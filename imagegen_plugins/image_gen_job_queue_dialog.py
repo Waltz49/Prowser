@@ -222,9 +222,13 @@ def _apply_info_browser_html(
     )
 
 
-def info_html_for_queue_row(controller, row_idx: int, row) -> str:
+def info_html_for_queue_row(
+    controller, row_idx: int, row, *, for_sidebar: bool = False
+) -> str:
     if row.is_active:
-        return controller.get_task_queue_status_info_html()
+        return controller.get_task_queue_status_info_html(
+            omit_live_steps_row=for_sidebar
+        )
     return row.status_html or ""
 
 
