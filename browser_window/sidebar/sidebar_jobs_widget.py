@@ -385,6 +385,7 @@ class SidebarJobsWidget(QWidget):
         self._live_timer: QTimer | None = None
         self._resize_timer: QTimer | None = None
         self._active_job_hovered_anchor: str | None = None
+        self._queue_compact = False
         self._signal_connected = False
         self._setup_ui()
         self._connect_controller()
@@ -447,15 +448,6 @@ class SidebarJobsWidget(QWidget):
         self._list_layout.addStretch(1)
 
         self._scroll.setWidget(self._list_host)
-        self._scroll.setMinimumHeight(0)
-        self._scroll.setSizePolicy(
-            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Ignored
-        )
-        self._list_host.setMinimumSize(0, 0)
-        self._list_host.setSizePolicy(
-            QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Ignored
-        )
-        self._empty_label.setMinimumHeight(0)
         layout.addWidget(self._active_job_strip)
         layout.addWidget(self._empty_label)
         layout.addWidget(self._scroll, 1)
@@ -608,13 +600,66 @@ class SidebarJobsWidget(QWidget):
         body_html = wrap_active_job_timing_table_html(
             cell_html, content_width_px=table_w
         )
-        _apply_active_job_strip_html(
+        browser_h = _apply_active_job_strip_html(
             self._active_job_browser,
             body_html,
             content_width=table_w,
         )
+        layout = self._active_job_strip.layout()
+        margin_h = 0
+        if layout is not None:
+            margins = layout.contentsMargins()
+            margin_h = margins.top() + margins.bottom()
+        self._active_job_strip.setFixedHeight(browser_h + margin_h)
         self._active_job_strip.show()
         _disable_tab_focus(self._active_job_strip)
+        if self._queue_compact:
+            sidebar = getattr(self.main_window, "right_sidebar", None)
+            if sidebar is not None and getattr(sidebar, "_jobs_pane_compact", False):
+                sidebar._sync_jobs_compact_geometry()
+
+    def set_queue_compact(self, compact: bool) -> None:
+        """Minimized pane: hide queue list so only the progress strip sizes the pane."""
+        compact = bool(compact)
+        if compact == self._queue_compact:
+            if compact:
+                self.refresh_compact_geometry()
+            return
+        self._queue_compact = compact
+        self._apply_queue_compact_layout()
+
+    def refresh_compact_geometry(self, strip_h: int | None = None) -> None:
+        """Re-pin widget height to the strip (compact mode only)."""
+        if not self._queue_compact:
+            return
+        if strip_h is None:
+            strip_h = self.compact_content_height()
+        self.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
+        )
+        self.setFixedHeight(strip_h)
+        self.updateGeometry()
+
+    def _apply_queue_compact_layout(self) -> None:
+        has_rows = bool(self._job_cards)
+        if self._queue_compact:
+            self._scroll.hide()
+            self._empty_label.setVisible(not has_rows)
+            self.refresh_compact_geometry()
+        else:
+            self.setMinimumHeight(0)
+            self.setMaximumHeight(16777215)
+            self.setSizePolicy(
+                QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
+            )
+            self._empty_label.setVisible(not has_rows)
+            self._scroll.setVisible(has_rows)
+        self.updateGeometry()
+
+    def minimumSizeHint(self) -> QSize:
+        if self._queue_compact:
+            return QSize(0, self.compact_content_height())
+        return super().minimumSizeHint()
 
     def _refresh_active_row(self, *, force: bool = False) -> None:
         if not self.isVisible() or not self._job_cards:
@@ -651,7 +696,7 @@ class SidebarJobsWidget(QWidget):
             card.reflow_refs(width)
 
     def compact_content_height(self) -> int:
-        """Minimum client height: active job strip only (if applicable)."""
+        """Client height for minimized pane: active progress strip only."""
         if not self._should_show_active_job_strip():
             return 0
         if (
@@ -659,7 +704,7 @@ class SidebarJobsWidget(QWidget):
             and self._active_job_strip.isVisible()
             and self._active_job_strip.height() > 0
         ):
-            return self._active_job_strip.sizeHint().height()
+            return self._active_job_strip.height()
         table_w = self._active_job_content_width()
         cell_content_w = max(120, table_w - 16)
         cell_html = build_active_job_timing_cell_html(
@@ -676,12 +721,11 @@ class SidebarJobsWidget(QWidget):
             body_html,
             content_width=table_w,
         )
-        margins = self._active_job_strip.layout().contentsMargins()
+        layout = self._active_job_strip.layout()
+        if layout is None:
+            return browser_h
+        margins = layout.contentsMargins()
         return browser_h + margins.top() + margins.bottom()
-
-    def minimumSizeHint(self) -> QSize:
-        """Allow pane shrink to active-job strip only; queue scroll may clip."""
-        return QSize(0, self.compact_content_height())
 
     def preferred_content_height(self) -> int:
         """Height needed to show all job rows without vertical scrolling."""
@@ -690,7 +734,8 @@ class SidebarJobsWidget(QWidget):
             hasattr(self, "_active_job_strip")
             and self._active_job_strip.isVisible()
         ):
-            total += self._active_job_strip.sizeHint().height()
+            strip_h = self._active_job_strip.height()
+            total += strip_h if strip_h > 0 else self._active_job_strip.sizeHint().height()
         if not self._job_cards:
             return total + self._empty_label.sizeHint().height()
         info_w = self._info_content_width()
@@ -703,25 +748,32 @@ class SidebarJobsWidget(QWidget):
             if row_idx > 0:
                 total += spacing
             row = rows[row_idx] if row_idx < len(rows) else None
-            if row is not None:
+            # Measure from cached HTML — do not re-fetch live active-job state here
+            # (would flash Steps timing and fight the progress-bar strip).
+            if card._last_info_html:
+                card.update_info_html(card._last_info_html, info_w)
+            elif row is not None:
                 card.update_info_html(
-                    info_html_for_queue_row(self._controller, row_idx, row),
+                    info_html_for_queue_row(
+                        self._controller, row_idx, row, for_sidebar=True
+                    ),
                     info_w,
                 )
-                card._replace_refs(row.thumbnail_paths, info_w)
-                card.reflow_refs(width)
-            elif card._last_info_html:
-                card.update_info_html(card._last_info_html, info_w)
+                if row.thumbnail_paths:
+                    card._replace_refs(row.thumbnail_paths, info_w)
             else:
                 card.reflow_refs(width)
+                total += card.minimumHeight()
+                continue
+            card.reflow_refs(width)
             total += card.minimumHeight()
         return total
 
     def refresh_table(self) -> None:
         rows = self._controller.queue_snapshot()
         has_rows = bool(rows)
-        self._empty_label.setVisible(not has_rows)
-        self._scroll.setVisible(has_rows)
+        self._empty_label.setVisible(not has_rows and not self._queue_compact)
+        self._scroll.setVisible(has_rows and not self._queue_compact)
         self._clear_job_cards()
 
         info_w = self._info_content_width()

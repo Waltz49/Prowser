@@ -69,6 +69,7 @@ class RightSidebarCombinedWidget(QWidget):
         self.shortcuts_content = None
         self.jobs_content = None
         self._adjusting_splitter = False
+        self._jobs_pane_compact = False
 
         self.setFocusPolicy(Qt.NoFocus)
         self.setup_ui()
@@ -184,16 +185,6 @@ class RightSidebarCombinedWidget(QWidget):
         """Minimum splitter height so a pane's title bar stays visible."""
         if not self._pane_visibility()[pane_idx]:
             return 0
-        if (
-            pane_idx == 2
-            and not header_only
-            and self.jobs_visible
-            and self.jobs_widget is not None
-        ):
-            return (
-                self._header_height_for_pane(pane_idx)
-                + self.jobs_widget.compact_content_height()
-            )
         return pane_min_height(
             self._header_height_for_pane(pane_idx), header_only=header_only
         )
@@ -203,6 +194,60 @@ class RightSidebarCombinedWidget(QWidget):
         if not self.jobs_visible or self.jobs_widget is None:
             return header_h
         return header_h + self.jobs_widget.compact_content_height()
+
+    def _set_jobs_pane_compact(self, compact: bool) -> None:
+        self._jobs_pane_compact = bool(compact)
+        if self.jobs_widget is not None:
+            self.jobs_widget.set_queue_compact(compact)
+        if self.jobs_content is None:
+            return
+        if compact:
+            self._sync_jobs_compact_geometry()
+        else:
+            self.jobs_content.setMinimumHeight(0)
+            self.jobs_content.setMaximumHeight(16777215)
+            self.jobs_content.setSizePolicy(
+                QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
+            )
+
+    def _sync_jobs_compact_geometry(self) -> None:
+        """Pin jobs content and splitter to the progress strip height."""
+        if not self._jobs_pane_compact or self.jobs_widget is None:
+            return
+        strip_h = self.jobs_widget.compact_content_height()
+        self.jobs_widget.refresh_compact_geometry(strip_h)
+        if self.jobs_content is not None:
+            self.jobs_content.setSizePolicy(
+                QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
+            )
+            self.jobs_content.setFixedHeight(strip_h)
+        self._enforce_jobs_compact_splitter_size()
+
+    def _enforce_jobs_compact_splitter_size(self) -> None:
+        """Keep the jobs splitter slice at header + strip when minimized."""
+        if not self._jobs_pane_compact or not self._pane_visibility()[2]:
+            return
+        compact = self._jobs_compact_pane_height()
+        sizes = list(self.splitter.sizes())
+        if len(sizes) < 3 or sizes[2] == compact:
+            return
+        delta = sizes[2] - compact
+        sizes[2] = compact
+        if delta > 0:
+            if sizes[1] > 0:
+                sizes[1] += delta
+            elif sizes[0] > 0:
+                sizes[0] += delta
+        else:
+            need = -delta
+            for idx in (1, 0):
+                if need <= 0:
+                    break
+                min_h = self._pane_min_height(idx)
+                take = min(max(0, sizes[idx] - min_h), need)
+                sizes[idx] -= take
+                need -= take
+        self._set_splitter_sizes_safe(sizes)
 
     def _set_splitter_sizes_safe(self, sizes: list[int]) -> None:
         self._adjusting_splitter = True
@@ -259,6 +304,8 @@ class RightSidebarCombinedWidget(QWidget):
         )
         self._set_splitter_sizes_safe(new_sizes)
         self._ensure_pane_headers_visible(collapse_flags)
+        if pane_idx == 2 and self._jobs_pane_compact:
+            self._sync_jobs_compact_geometry()
         self._persist_splitter_sizes()
 
     def _expand_pane_to_fit(self, pane_idx: int) -> None:
@@ -340,13 +387,24 @@ class RightSidebarCombinedWidget(QWidget):
         if not vis[2]:
             return
 
+        if self.jobs_widget is not None:
+            self.jobs_widget._refresh_active_job_strip(force=True)
+
         needed = self._needed_pane_height(2)
-        compact = self._jobs_compact_pane_height()
         sizes = self.splitter.sizes()
         current = sizes[2] if len(sizes) > 2 else 0
-        if abs(current - needed) <= 1:
+        strip_h = (
+            self.jobs_widget.compact_content_height()
+            if self.jobs_widget is not None
+            else 0
+        )
+        if strip_h > 0 and abs(current - needed) <= 1:
+            self._set_jobs_pane_compact(True)
+            compact = self._jobs_compact_pane_height()
             self._resize_pane_to_height(2, compact)
+            self._sync_jobs_compact_geometry()
         else:
+            self._set_jobs_pane_compact(False)
             self._expand_pane_to_fit(2)
 
     def set_shortcuts_visible(self, visible):
@@ -387,9 +445,10 @@ class RightSidebarCombinedWidget(QWidget):
         if self.jobs_widget:
             if self.jobs_widget.parent():
                 self.jobs_widget.setParent(None)
-            self.jobs_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
+            self.jobs_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
             layout = self.jobs_content.layout()
             layout.addWidget(self.jobs_widget)
+            self._set_jobs_pane_compact(False)
             self.jobs_widget.show()
             if hasattr(self.jobs_widget, "refresh_header_status"):
                 self.jobs_widget.refresh_header_status()
@@ -445,6 +504,8 @@ class RightSidebarCombinedWidget(QWidget):
                     scaled[visible_indices[-1]] += current_height - total_scaled
                 self._set_splitter_sizes_safe(scaled)
                 self._ensure_pane_headers_visible()
+                if self._jobs_pane_compact:
+                    self._sync_jobs_compact_geometry()
                 return
 
         each = current_height // len(visible_indices)
@@ -456,11 +517,15 @@ class RightSidebarCombinedWidget(QWidget):
             sizes[visible_indices[-1]] += remainder
         self._set_splitter_sizes_safe(sizes)
         self._ensure_pane_headers_visible()
+        if self._jobs_pane_compact:
+            self._sync_jobs_compact_geometry()
 
     def _on_splitter_moved(self):
         """Handle splitter resize - save sizes, update information text width, emit signal"""
         if not self._adjusting_splitter:
             self._ensure_pane_headers_visible()
+            if self._jobs_pane_compact:
+                self._sync_jobs_compact_geometry()
         self._persist_splitter_sizes()
         if self.information_widget and self.information_widget.info_text_edit and self.information_widget.info_text_edit.isVisible():
             w = self.information_widget.width()

@@ -193,11 +193,6 @@ def _table_title_row(title: str, *, running: bool = False) -> str:
     )
 
 
-def _series_after_this_one_value(count: int) -> str:
-    noun = "image" if count == 1 else "images"
-    return f"{count} {noun} after this one."
-
-
 def _series_queued_value(count: int) -> str:
     noun = "image" if count == 1 else "images"
     return f"{count} {noun}."
@@ -241,13 +236,23 @@ def _generation_status_table_rows(
         rows.append(_table_row("Model:", fields["model"]))
     if fields.get("lora"):
         rows.append(_table_row("LoRA:", fields["lora"]))
+    quant = fields.get("quant")
+    quant_on_size = False
     if fields.get("size"):
-        rows.append(_table_row("Size:", fields["size"]))
+        if quant:
+            rows.append(
+                _table_row_primary_plus_inline(
+                    "Size:", fields["size"], [(_QUANT_STATUS_LABEL, quant)]
+                )
+            )
+            quant_on_size = True
+        else:
+            rows.append(_table_row("Size:", fields["size"]))
     steps_display = steps_value if steps_value is not None else fields.get("steps", "")
     if steps_display:
         rows.append(_table_row("Steps:", steps_display))
-    if fields.get("quant"):
-        rows.append(_table_row(_QUANT_STATUS_LABEL, fields["quant"]))
+    if quant and not quant_on_size:
+        rows.append(_table_row(_QUANT_STATUS_LABEL, quant))
     if fields.get("prompt"):
         rows.append(_table_row_prompt(fields["prompt_label"], fields["prompt"]))
     if fields.get("neg"):
@@ -258,8 +263,8 @@ def _generation_status_table_rows(
 # File Information active-job layout (pixel widths — Qt rich text ignores CSS %).
 _INFO_PANEL_ACTIVE_JOB_CELL_H_PAD = 16
 _INFO_PANEL_CANCEL_ICON_W = 22
-_INFO_PANEL_LABEL_W = 48
-_INFO_PANEL_PREFIX_W = 22
+_INFO_PANEL_LABEL_W = 56
+_INFO_PANEL_PREFIX_W = 40
 _INFO_PANEL_POSTFIX_W = 48
 _INFO_PANEL_BAR_MIN_W = 48
 _INFO_PANEL_BAR_H = 10
@@ -333,7 +338,7 @@ def _information_panel_progress_rows_html(
     border_hex: str,
     bg_hex: str,
 ) -> str:
-    """Stacked Est/Steps rows in one table so columns stay aligned."""
+    """Stacked Elapsed/Est/Steps/Series rows in one table so columns stay aligned."""
     tr_parts: list[str] = []
     for label, prefix, postfix, fill_percent in rows:
         bar = _information_panel_progress_bar_html(
@@ -363,16 +368,38 @@ def _information_panel_progress_rows_html(
     )
 
 
+def _series_progress_row(
+    completed_series: int, total_series: int
+) -> tuple[str, str, str, str] | None:
+    """One Series progress-bar row, or None when not a multi-image batch."""
+    if total_series <= 1:
+        return None
+    series_total = int(total_series)
+    series_done = max(0, min(int(completed_series), series_total))
+    if series_done > 0:
+        remaining_series = series_total - series_done
+        fill_percent = int(round(100.0 * series_done / series_total))
+        return (
+            "Series:",
+            str(series_done),
+            str(remaining_series),
+            str(fill_percent),
+        )
+    return ("Series:", str(series_total), "(total)", "0")
+
+
 def format_information_generation_timing_cell_html(
     elapsed_seconds: float,
     estimate_seconds: float | None = None,
     *,
     cancel_icon_html: str = "",
+    completed_series: int | None = None,
+    total_series: int | None = None,
     completed_steps: int | None = None,
     total_steps: int | None = None,
     content_width_px: int = 0,
 ) -> str:
-    """Elapsed/Est and step progress for the active-job timing strip."""
+    """Elapsed/Est, series, and step progress for the active-job timing strip."""
     from theme.theme_service import get_active_theme
 
     th = get_active_theme()
@@ -387,7 +414,6 @@ def format_information_generation_timing_cell_html(
     bar_w = _information_panel_bar_width(row_width)
 
     progress_rows: list[tuple[str, str, str, str]] = []
-    elapsed_line = ""
     has_estimate = estimate_seconds is not None and estimate_seconds > 0
     if has_estimate:
         total_time = elapsed_seconds + float(estimate_seconds)
@@ -399,15 +425,19 @@ def format_information_generation_timing_cell_html(
         progress_rows.append(
             (
                 "Est:",
-                "",
+                _format_duration(elapsed_seconds),
                 _format_duration(float(estimate_seconds)),
                 str(fill_percent),
             )
         )
     else:
-        elapsed_line = (
-            f"Elapsed:{_LABEL_VALUE_NBSP}"
-            f"{_escape(_format_duration(elapsed_seconds))}"
+        progress_rows.append(
+            (
+                "Elapsed:",
+                _format_duration(elapsed_seconds),
+                "",
+                "0",
+            )
         )
 
     if completed_steps is not None and total_steps is not None and total_steps > 0:
@@ -424,8 +454,10 @@ def format_information_generation_timing_cell_html(
                 ("Steps:", str(total_i), "(total)", "0")
             )
 
-    if not progress_rows:
-        return elapsed_line or ""
+    if completed_series is not None and total_series is not None:
+        series_row = _series_progress_row(completed_series, total_series)
+        if series_row is not None:
+            progress_rows.append(series_row)
 
     table_html = _information_panel_progress_rows_html(
         progress_rows,
@@ -435,10 +467,7 @@ def format_information_generation_timing_cell_html(
         border_hex=border_hex,
         bg_hex=bg_hex,
     )
-    if elapsed_line:
-        body = f'{elapsed_line}<br>{table_html}'
-    else:
-        body = table_html
+    body = table_html
 
     if not has_icon:
         return body
@@ -482,8 +511,13 @@ def format_information_generation_cooldown_cell_html(
     *,
     cancel_hovered: bool = False,
     skip_hovered: bool = False,
+    completed_series: int | None = None,
+    total_series: int | None = None,
+    content_width_px: int = 0,
 ) -> str:
-    """Cooldown row for File Information: label, seconds in parens, skip + cancel icons."""
+    """Cooldown row for the jobs-pane strip; optional series progress below."""
+    from theme.theme_service import get_active_theme
+
     remaining = max(0, int(remaining_seconds))
     text = f"Cooldown: ({remaining})"
     icons = (
@@ -491,7 +525,29 @@ def format_information_generation_cooldown_cell_html(
         + '<span style="display:inline-block;width:4px;"></span>'
         + generation_cancel_icon_html(hovered=cancel_hovered)
     )
-    return _information_panel_inline_row_html(text, icons)
+    body = _information_panel_inline_row_html(text, icons)
+
+    if completed_series is None or total_series is None:
+        return body
+
+    series_row = _series_progress_row(completed_series, total_series)
+    if series_row is None:
+        return body
+
+    th = get_active_theme()
+    row_width = _information_panel_row_content_width(
+        content_width_px or 250, has_icon=False
+    )
+    bar_w = _information_panel_bar_width(row_width)
+    series_html = _information_panel_progress_rows_html(
+        [series_row],
+        row_width,
+        bar_w,
+        fill_hex=_INFO_PANEL_PROGRESS_BAR_FILL_HEX,
+        border_hex=th.progress_bar_border_hex,
+        bg_hex=th.progress_bar_bg_hex,
+    )
+    return f"{body}<br>{series_html}"
 
 
 def generation_cancel_icon_html(*, hovered: bool = False) -> str:
@@ -517,12 +573,21 @@ def build_active_job_timing_cell_html(
     skip_hovered: bool = False,
 ) -> str | None:
     """Elapsed/Est progress or cooldown row for the jobs-pane active-job strip."""
+    series_progress = controller.snapshot_series_progress_for_active_job_strip()
+    completed_series = None
+    total_series = None
+    if series_progress is not None:
+        completed_series, total_series = series_progress
+
     remaining = controller.copy_cooldown_seconds_remaining()
     if remaining > 0:
         return format_information_generation_cooldown_cell_html(
             remaining,
             cancel_hovered=cancel_hovered,
             skip_hovered=skip_hovered,
+            completed_series=completed_series,
+            total_series=total_series,
+            content_width_px=content_width_px,
         )
     elapsed, estimate, step, step_total = (
         controller.snapshot_generation_timing_for_info_panel()
@@ -533,6 +598,8 @@ def build_active_job_timing_cell_html(
         elapsed,
         estimate,
         cancel_icon_html=generation_cancel_icon_html(hovered=cancel_hovered),
+        completed_series=completed_series,
+        total_series=total_series,
         completed_steps=step,
         total_steps=step_total,
         content_width_px=content_width_px,
@@ -568,11 +635,8 @@ def _steps_row_inline_parts(
     elapsed_seconds: float | None = None,
     estimate_seconds: float | None = None,
 ) -> list[tuple[str, str]]:
-    """Inline label/value pairs after the Steps cell (Q, Elapsed, Est)."""
+    """Inline label/value pairs after the Steps cell (Elapsed, Est)."""
     parts: list[tuple[str, str]] = []
-    quant = fields.get("quant")
-    if quant:
-        parts.append((_QUANT_STATUS_LABEL, quant))
     if elapsed_seconds is not None:
         parts.append(("Elapsed:", _format_duration(elapsed_seconds)))
         if estimate_seconds is not None and estimate_seconds > 0:
@@ -595,14 +659,21 @@ def _generation_status_queue_table_rows(
 
     if fields.get("lora"):
         rows.append(_table_row("LoRA:", fields["lora"]))
-    if fields.get("size"):
-        rows.append(_table_row("Size:", fields["size"]))
 
     quant = fields.get("quant")
-    if omit_live_steps_row:
+    quant_on_size = False
+    if fields.get("size"):
         if quant:
-            rows.append(_table_row(_QUANT_STATUS_LABEL, quant))
-    else:
+            rows.append(
+                _table_row_primary_plus_inline(
+                    "Size:", fields["size"], [(_QUANT_STATUS_LABEL, quant)]
+                )
+            )
+            quant_on_size = True
+        else:
+            rows.append(_table_row("Size:", fields["size"]))
+
+    if not omit_live_steps_row:
         steps_display = steps_value if steps_value is not None else fields.get("steps", "")
         steps_inline = _steps_row_inline_parts(
             fields,
@@ -615,8 +686,9 @@ def _generation_status_queue_table_rows(
             )
         elif steps_display:
             rows.append(_table_row("Steps:", steps_display))
-        elif quant:
-            rows.append(_table_row(_QUANT_STATUS_LABEL, quant))
+
+    if quant and not quant_on_size:
+        rows.append(_table_row(_QUANT_STATUS_LABEL, quant))
 
     if fields.get("prompt"):
         rows.append(_table_row_prompt(fields["prompt_label"], fields["prompt"]))
@@ -847,7 +919,6 @@ def format_image_generation_queue_status_html(
     source_path: str = "",
     base_path: str = "",
     running: bool = False,
-    series_images_after: int | None = None,
     series_copies_total: int | None = None,
     omit_live_steps_row: bool = False,
 ) -> str:
@@ -870,7 +941,7 @@ def format_image_generation_queue_status_html(
         steps_value=steps_value,
         elapsed_seconds=elapsed_seconds if show_timing else None,
         estimate_seconds=estimate_seconds if show_timing else None,
-        omit_live_steps_row=omit_live_steps_row and show_timing,
+        omit_live_steps_row=omit_live_steps_row,
     )
 
     ref_row = _references_row_for_values(
@@ -879,19 +950,10 @@ def format_image_generation_queue_status_html(
     if ref_row:
         rows.append(ref_row)
 
-    if series_images_after is not None and series_images_after > 0:
+    if series_copies_total is not None and series_copies_total > 1:
         rows.append(
             _table_row(
-                "Series:",
-                format_series_line_value(
-                    _series_after_this_one_value(series_images_after), values
-                ),
-            )
-        )
-    elif series_copies_total is not None and series_copies_total > 1:
-        rows.append(
-            _table_row(
-                "Series:",
+                "Copies:",
                 format_series_line_value(
                     _series_queued_value(series_copies_total), values
                 ),

@@ -788,11 +788,6 @@ class ImageGenController(QObject):
             self._stop_copy_cooldown_timer()
             self._finish_copy_batch()
 
-    def _series_images_after_for_queue_display(self) -> int | None:
-        """Images still to render after the current one in a multi-copy batch."""
-        after = self.active_series_remaining_after()
-        return after if after > 0 else None
-
     def _reset_live_queue_progress(self) -> None:
         self._live_step = 0
         self._live_step_total = 0
@@ -808,7 +803,6 @@ class ImageGenController(QObject):
 
         in_cooldown = self._is_in_copy_cooldown()
         elapsed, estimate = self._snapshot_live_timing(in_cooldown=in_cooldown)
-        series_after = self._series_images_after_for_queue_display()
         step = self._live_step if self._live_step_total > 0 else None
         step_total = self._live_step_total if self._live_step_total > 0 else None
 
@@ -822,7 +816,6 @@ class ImageGenController(QObject):
             elapsed_seconds=elapsed,
             estimate_seconds=estimate,
             running=self._tasks.is_running(),
-            series_images_after=series_after,
             omit_live_steps_row=omit_live_steps_row,
         )
         if not html:
@@ -966,6 +959,16 @@ class ImageGenController(QObject):
         step = self._live_step if self._live_step_total > 0 else None
         step_total = self._live_step_total if self._live_step_total > 0 else None
         return elapsed, estimate, step, step_total
+
+    def snapshot_series_progress_for_active_job_strip(
+        self,
+    ) -> tuple[int, int] | None:
+        """Completed and total images for the jobs-pane series progress bar."""
+        if not self._copy_batch_active or self._copies_total <= 1:
+            return None
+        if not self._tasks.is_running() and not self._is_in_copy_cooldown():
+            return None
+        return self._copies_done, self._copies_total
 
     def get_task_reference_paths(self) -> list[str]:
         return list(self._task_reference_paths)
