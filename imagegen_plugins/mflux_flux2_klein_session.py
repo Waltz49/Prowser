@@ -61,7 +61,7 @@ class _VaeEncodeCache:
             evicted_key, _ = self._data.popitem(last=False)
             perf_log_kv(
                 "vae_cache",
-                event="evict",
+                action="evict",
                 cache_size=self._maxsize,
                 key_basename=str(evicted_key[3])[:120] if len(evicted_key) > 3 else "",
             )
