@@ -246,6 +246,34 @@ class ImageGenController(QObject):
         self._sync_cancel_menu()
         return True
 
+    def is_queued_job_replaceable(self, job_id: str) -> bool:
+        return bool(job_id) and self._queued_job_by_id(job_id) is not None
+
+    def replace_queued_job(
+        self, job_id: str, plugin: ImageGenModelPlugin, values: Dict[str, Any]
+    ) -> bool:
+        """Update a pending queue entry in place (same job_id and position)."""
+        job = self._queued_job_by_id(job_id)
+        if job is None:
+            return False
+        copies = self._normalize_copies(values.get("copies", 1))
+        values = dict(values)
+        values["copies"] = copies
+        if copies > 1 and not values.get("random_seed"):
+            if not prompt_enable_random_seed_for_copies(self.main_window):
+                return False
+            values["random_seed"] = True
+            sync_random_seed_setting(self.main_window, True)
+        job.plugin = plugin
+        job.values = values
+        job.copies_total = copies
+        job.thumbnail_paths = thumbnail_paths_for_values(plugin, values)
+        job.full_prompt = str(values.get("prompt") or "").strip()
+        refresh_queued_job_status(job)
+        self.queue_changed.emit()
+        self._sync_cancel_menu()
+        return True
+
     def cancel_queued_job(self, job_id: str) -> None:
         before = len(self._queue)
         self._queue = [job for job in self._queue if job.job_id != job_id]

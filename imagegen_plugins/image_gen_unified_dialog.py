@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from typing import Dict, Optional, Set
+from typing import Any, Dict, Optional, Set, Tuple
 
 from PySide6.QtCore import QEvent, QObject, QTimer, Qt
 from PySide6.QtGui import QGuiApplication
@@ -67,6 +67,7 @@ from imagegen_plugins.image_gen_persistence import (
     save_close_dialog_on_generate,
     save_dialog_sessions_batch,
     save_imagegen_dialog_geometry_hex,
+    save_plugin_dialog_settings,
 )
 from imagegen_plugins.image_gen_session_state import FunctionSessionState
 from imagegen_plugins.image_gen_submit_notice import (
@@ -138,6 +139,8 @@ class ImageGenUnifiedDialog(QDialog):
         self._dirty_recheck_timer = QTimer(self)
         self._dirty_recheck_timer.setSingleShot(True)
         self._dirty_recheck_timer.timeout.connect(self._recheck_cancel_visibility)
+        self._replace_job_id = ""
+        self._replace_queue_signal_connected = False
 
         apply_image_gen_dialog_shell(
             self,
@@ -160,9 +163,11 @@ class ImageGenUnifiedDialog(QDialog):
             on_generate=self._on_generate,
             on_close=self._on_close,
             on_cancel=self._on_cancel,
+            on_replace=self._on_replace,
         )
         from PySide6.QtWidgets import QPushButton
 
+        self._replace_btn = self._actions.findChild(QPushButton, "imageGenReplaceButton")
         self._generate_btn = self._actions.findChild(QPushButton, "imageGenGenerateButton")
         self._submit_notice = ImageGenSubmitNotice(self, self._generate_btn)
         self._close_on_generate_cb = create_image_gen_close_on_generate_checkbox(
@@ -184,6 +189,36 @@ class ImageGenUnifiedDialog(QDialog):
         install_source_nav_keyboard_shortcuts(self, None)
         install_image_gen_footer_keyboard_shortcuts(self)
         self.finished.connect(self._save_geometry)
+        self.finished.connect(self._disconnect_replace_queue_signal)
+
+    def set_queue_replace_context(self, job_id: Optional[str] = None) -> None:
+        self._replace_job_id = (job_id or "").strip()
+        if self._replace_job_id and not self._replace_queue_signal_connected:
+            self._controller.queue_changed.connect(self._update_replace_visibility)
+            self._replace_queue_signal_connected = True
+        self._update_replace_visibility()
+
+    def _clear_queue_replace_context(self) -> None:
+        self._replace_job_id = ""
+        self._update_replace_visibility()
+
+    def _update_replace_visibility(self) -> None:
+        if self._replace_btn is None:
+            return
+        visible = bool(self._replace_job_id) and self._controller.is_queued_job_replaceable(
+            self._replace_job_id
+        )
+        self._replace_btn.setVisible(visible)
+        self._replace_btn.setEnabled(visible)
+
+    def _disconnect_replace_queue_signal(self) -> None:
+        if not self._replace_queue_signal_connected:
+            return
+        try:
+            self._controller.queue_changed.disconnect(self._update_replace_visibility)
+        except (RuntimeError, TypeError):
+            pass
+        self._replace_queue_signal_connected = False
 
     def switch_to_function(
         self,
@@ -194,6 +229,9 @@ class ImageGenUnifiedDialog(QDialog):
         seed_state: Optional[FunctionSessionState] = None,
     ) -> bool:
         """Show a function panel; return False if prerequisites are not met."""
+        if function != self._function:
+            self._clear_queue_replace_context()
+
         if function == self._function and self._current_panel is not None:
             if initial_prompt and self._current_panel is not None:
                 restore = getattr(self._current_panel, "restore_state", None)
@@ -443,6 +481,30 @@ class ImageGenUnifiedDialog(QDialog):
         except Exception:
             pass
 
+    def _collect_validated_submit(self) -> Optional[Tuple[Any, Dict[str, Any]]]:
+        if self._current_panel is None:
+            return None
+        plugin = getattr(self._current_panel, "plugin", None)
+        prepare = getattr(self._current_panel, "_prepare_run_values", None)
+        if plugin is None or prepare is None:
+            return None
+        values = prepare()
+        if values is None:
+            return None
+        return plugin, values
+
+    def _after_successful_submit(self) -> None:
+        self._save_current_to_session()
+        snapshot = getattr(self._current_panel, "snapshot_state", None)
+        if snapshot is not None:
+            self._baselines[self._function] = snapshot()
+        self._reset_cancel_dirty_fast_path()
+        self._update_cancel_visibility()
+        if self._close_on_generate_cb.isChecked():
+            self._close_after_successful_generate()
+        else:
+            self._submit_notice.show(submit_notice_text(self._function))
+
     def _on_generate(self) -> None:
         if self._current_panel is None:
             return
@@ -450,16 +512,35 @@ class ImageGenUnifiedDialog(QDialog):
         if run is None:
             return
         if run():
-            self._save_current_to_session()
-            snapshot = getattr(self._current_panel, "snapshot_state", None)
-            if snapshot is not None:
-                self._baselines[self._function] = snapshot()
-            self._reset_cancel_dirty_fast_path()
-            self._update_cancel_visibility()
-            if self._close_on_generate_cb.isChecked():
-                self._close_after_successful_generate()
-            else:
-                self._submit_notice.show(submit_notice_text(self._function))
+            self._after_successful_submit()
+
+    def _on_replace(self) -> None:
+        if not self._replace_job_id:
+            return
+        collected = self._collect_validated_submit()
+        if collected is None:
+            return
+        plugin, values = collected
+        from imagegen_plugins.image_gen_active_model import set_active_plugin_for_function
+        from imagegen_plugins.image_gen_model_availability import (
+            confirm_model_download_if_needed,
+        )
+
+        if not confirm_model_download_if_needed(plugin, self._main_window):
+            return
+        save_plugin_dialog_settings(self._function, plugin.plugin_id, values)
+        set_active_plugin_for_function(self._main_window, self._function, plugin)
+        if not self._controller.replace_queued_job(
+            self._replace_job_id, plugin, values
+        ):
+            self._clear_queue_replace_context()
+            show_styled_warning(
+                self._main_window,
+                "Replace job",
+                "That queued job is no longer available (it may have started or been cancelled).",
+            )
+            return
+        self._after_successful_submit()
 
     def _close_after_successful_generate(self) -> None:
         if self._dismissing:

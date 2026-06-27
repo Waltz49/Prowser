@@ -224,6 +224,7 @@ def _open_or_switch_unified_dialog(
     auto_import_available: bool = False,
     geometry_hex: Optional[str] = None,
     seed_state: Optional[FunctionSessionState] = None,
+    replace_job_id: Optional[str] = None,
 ) -> None:
     existing = getattr(main_window, "_imagegen_function_dialog", None)
     if isinstance(existing, ImageGenUnifiedDialog) and existing.isVisible():
@@ -234,6 +235,7 @@ def _open_or_switch_unified_dialog(
             seed_state=seed_state,
         ):
             return
+        existing.set_queue_replace_context(replace_job_id)
         _raise_imagegen_function_dialog(existing)
         return
 
@@ -247,6 +249,7 @@ def _open_or_switch_unified_dialog(
     ):
         dlg.deleteLater()
         return
+    dlg.set_queue_replace_context(replace_job_id)
     _show_imagegen_function_dialog(main_window, controller, function, dlg)
 
 
@@ -267,6 +270,8 @@ def open_imagegen_dialog_from_job(
     main_window,
     plugin: ImageGenModelPlugin,
     values: Dict[str, Any],
+    *,
+    replace_job_id: Optional[str] = None,
 ) -> None:
     """Reopen the function dialog prefilled from a queue job (active or pending)."""
     controller = get_imagegen_controller(main_window)
@@ -321,6 +326,7 @@ def open_imagegen_dialog_from_job(
         function,
         initial_prompt=initial_prompt,
         seed_state=seed_state,
+        replace_job_id=replace_job_id,
     )
 
 

@@ -233,13 +233,20 @@ def info_html_for_queue_row(
 
 
 def job_queue_edit_row(main_window, controller, row: int) -> None:
+    rows = controller.queue_snapshot()
+    if row < 0 or row >= len(rows):
+        return
+    entry = rows[row]
     record = controller.job_record_for_row(row)
     if record is None:
         return
     plugin, values = record
     from imagegen_plugins.image_gen_menu import open_imagegen_dialog_from_job
 
-    open_imagegen_dialog_from_job(main_window, plugin, values)
+    replace_job_id = entry.job_id if not entry.is_active else None
+    open_imagegen_dialog_from_job(
+        main_window, plugin, values, replace_job_id=replace_job_id
+    )
 
 
 def job_queue_cancel_row(
@@ -261,7 +268,10 @@ def build_job_queue_action_widget(
     """Action column: series controls, edit, cancel (active and queued rows)."""
     _ = is_active
     edit_btn = QPushButton()
-    edit_btn.setToolTip("Replicate job settings…")
+    edit_btn.setToolTip(
+        "Replicate job settings…\n"
+        "For a pending job, use Replace in the dialog to update it in place."
+    )
     edit_btn.setStyleSheet(_edit_button_stylesheet())
     edit_btn.clicked.connect(
         lambda _checked=False, r=row_idx: job_queue_edit_row(main_window, controller, r)

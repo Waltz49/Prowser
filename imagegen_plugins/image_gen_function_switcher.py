@@ -219,8 +219,9 @@ def create_image_gen_action_buttons(
     on_generate: Callable[[], None],
     on_close: Callable[[], None],
     on_cancel: Optional[Callable[[], None]] = None,
+    on_replace: Optional[Callable[[], None]] = None,
 ) -> QWidget:
-    """Cancel (optional) + Close + primary action; panel stays open after action."""
+    """Cancel (optional) + Close + Replace (optional) + primary action."""
     from imagegen_plugins.imagegen_control_tooltips import (
         apply_image_gen_action_button_tooltips,
     )
@@ -248,11 +249,21 @@ def create_image_gen_action_buttons(
     generate_btn.setAutoDefault(True)
     close_btn.clicked.connect(on_close)
     generate_btn.clicked.connect(on_generate)
+    replace_btn = QPushButton("Replace")
+    replace_btn.setObjectName("imageGenReplaceButton")
+    replace_btn.setToolTip(
+        "Update this queued job with the current settings (does not add a new job)."
+    )
+    replace_btn.hide()
+    if on_replace is not None:
+        replace_btn.clicked.connect(on_replace)
     row.addWidget(cancel_btn)
     row.addWidget(close_btn)
+    row.addWidget(replace_btn)
     row.addWidget(generate_btn)
     widget._imagegen_cancel_btn = cancel_btn  # type: ignore[attr-defined]
     widget._imagegen_close_btn = close_btn  # type: ignore[attr-defined]
+    widget._imagegen_replace_btn = replace_btn  # type: ignore[attr-defined]
     widget._imagegen_generate_btn = generate_btn  # type: ignore[attr-defined]
     return widget
 
