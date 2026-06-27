@@ -285,13 +285,12 @@ def resolve_infill_reference(
     fallback_paths: Optional[List[str]] = None,
 ) -> Optional[Tuple[str, str]]:
     """Best reference (EXIF line, path) for infill output."""
+    from imagegen_plugins.image_gen_naming import exif_reference_line_for_path
+
     if pixelmator_file_path:
         ap = os.path.normpath(os.path.abspath(pixelmator_file_path))
-        out_dir = os.path.normpath(os.path.dirname(os.path.abspath(output_path)))
         if os.path.isfile(ap):
-            if os.path.dirname(ap) == out_dir:
-                return (f"./{os.path.basename(ap)}", ap)
-            return (ap, ap)
+            return (exif_reference_line_for_path(ap, output_path), ap)
     hit = resolve_paint_reference_in_dir(output_path, doc_name)
     if hit:
         return hit
@@ -299,8 +298,5 @@ def resolve_infill_reference(
         if not p or not os.path.isfile(p):
             continue
         ap = os.path.normpath(os.path.abspath(p))
-        out_dir = os.path.normpath(os.path.dirname(os.path.abspath(output_path)))
-        if os.path.dirname(ap) == out_dir:
-            return (f"./{os.path.basename(ap)}", ap)
-        return (ap, ap)
+        return (exif_reference_line_for_path(ap, output_path), ap)
     return None

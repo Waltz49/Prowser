@@ -394,15 +394,14 @@ def source_paths_for_generation_exif(
 
 
 def exif_reference_line_for_path(source_path: str, output_path: str) -> str:
-    """Human-facing References label: ./basename, ~/relative, or basename (never /tmp temps)."""
+    """Human-facing References label: ./basename, ~/relative, or full path (never /tmp temps)."""
     ap = os.path.normpath(os.path.abspath(source_path))
     out_dir = os.path.normpath(os.path.dirname(os.path.abspath(output_path)))
     if os.path.dirname(ap) == out_dir:
         return f"./{os.path.basename(ap)}"
-    home = os.path.normpath(os.path.expanduser("~"))
-    if ap.startswith(home + os.sep):
-        return "~" + ap[len(home) :]
-    return os.path.basename(ap)
+    from utils import normalize_path_for_display
+
+    return normalize_path_for_display(ap)
 
 
 def reference_entry_for_source(
