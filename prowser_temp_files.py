@@ -154,6 +154,21 @@ def validate_temporary_files_directory_for_settings(
         return f"Cannot use temporary files directory: {exc}"
 
 
+def is_path_under_prowser_temp_dir(path: str) -> bool:
+    """True when *path* lives under the configured Prowser temporary work directory."""
+    if not path or not str(path).strip():
+        return False
+    try:
+        ap = os.path.normpath(os.path.abspath(os.path.expanduser(str(path))))
+    except (OSError, ValueError):
+        return False
+    try:
+        temp_root = os.path.normpath(resolve_temporary_files_directory())
+    except Exception:
+        temp_root = os.path.normpath(default_temporary_files_directory())
+    return ap == temp_root or ap.startswith(temp_root + os.sep)
+
+
 def prowser_mkstemp_path(prefix: str = "", suffix: str = "") -> str:
     """Create a private temp file under the configured Prowser temp directory."""
     temp_dir = ensure_temporary_files_directory()

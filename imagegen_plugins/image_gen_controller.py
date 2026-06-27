@@ -390,8 +390,11 @@ class ImageGenController(QObject):
                     )
                 else:
                     canonical_source_paths = source_paths_for_generation_exif(values)
-                display_paths = worker_source_paths or canonical_source_paths
+                display_paths = canonical_source_paths or worker_source_paths
                 if canonical_source_paths:
+                    self._pending_values["_canonical_source_image_paths"] = list(
+                        canonical_source_paths
+                    )
                     self._pending_values["source_image_path"] = (
                         canonical_source_paths[0]
                     )
@@ -1212,7 +1215,6 @@ class ImageGenController(QObject):
                     fallback_source_paths=self._exif_fallback_source_paths(),
                 )
                 if get_pipeline(plugin.pipeline_id).requires_source_image:
-                    source_paths = resolve_source_image_paths(values)
                     will_refine_next = (
                         self._copy_batch_active
                         and not self._copy_batch_cancelled
@@ -1220,7 +1222,9 @@ class ImageGenController(QObject):
                         and (self._copies_done + 1 < self._copies_total)
                     )
                     if ref_entries and not will_refine_next:
-                        self._task_reference_paths = list(source_paths)
+                        self._task_reference_paths = source_paths_for_generation_exif(
+                            values
+                        )
                 write_exif_user_comment(
                     output_path,
                     comment,
@@ -1267,6 +1271,7 @@ class ImageGenController(QObject):
         if not cancelled:
             self._remove_partial_output()
         if cancelled:
+            self._repair_cancelled_output_exif_references(output_path)
             self._finish_copy_batch(cancelled=True)
             self.generation_finished.emit(False, output_path, err)
             return
@@ -1282,8 +1287,46 @@ class ImageGenController(QObject):
     def _open_in_browse(self, output_path: str) -> None:
         self._refresh_progressive_image(output_path, force_fullscreen=True)
 
+    def _repair_cancelled_output_exif_references(self, output_path: str) -> None:
+        """Fix progressive-preview References when a job is cancelled mid-run."""
+        plugin = self._active_plugin
+        if plugin is None or not output_path or not os.path.isfile(output_path):
+            return
+        try:
+            from exif.exif_utils import decode_usercomment, get_usercomment_from_path
+
+            raw = get_usercomment_from_path(output_path)
+            if not raw:
+                return
+            comment = decode_usercomment(raw).strip()
+            if not comment.startswith("Image Model:"):
+                return
+            ref_entries, allow_cross_dir = self._exif_reference_entries_for_output(
+                plugin,
+                self._pending_values,
+                output_path,
+                fallback_source_paths=self._exif_fallback_source_paths(),
+            )
+            if not ref_entries:
+                return
+            write_exif_user_comment(
+                output_path,
+                comment,
+                reference_entries=ref_entries,
+                allow_cross_directory_references=allow_cross_dir,
+            )
+        except Exception:
+            pass
+
     def _exif_fallback_source_paths(self) -> List[str]:
         """Source paths captured at job launch when dialog values omit them."""
+        canonical = self._pending_values.get("_canonical_source_image_paths")
+        if isinstance(canonical, list) and canonical:
+            paths = source_paths_for_generation_exif(
+                {"_canonical_source_image_paths": canonical}
+            )
+            if paths:
+                return paths
         paths: List[str] = []
         seen: set[str] = set()
         for raw in (*self._task_reference_paths, self._expand_source_path):

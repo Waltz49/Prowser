@@ -350,25 +350,59 @@ def resolve_source_image_paths(values: Dict[str, Any]) -> List[str]:
     return paths
 
 
+def _is_prowser_temp_work_path(path: str) -> bool:
+    from prowser_temp_files import is_path_under_prowser_temp_dir
+
+    return is_path_under_prowser_temp_dir(path)
+
+
+def _dedupe_existing_file_paths(paths: List[str]) -> List[str]:
+    out: List[str] = []
+    seen: set[str] = set()
+    for raw in paths:
+        ap = os.path.normpath(os.path.abspath(str(raw or "")))
+        if not ap or not os.path.isfile(ap) or ap in seen:
+            continue
+        if _is_prowser_temp_work_path(ap):
+            continue
+        seen.add(ap)
+        out.append(ap)
+    return out
+
+
 def source_paths_for_generation_exif(
     values: Dict[str, Any],
     *,
     extra_paths: Optional[List[str]] = None,
 ) -> List[str]:
-    """Source paths for EXIF References: values first, then optional fallbacks."""
-    paths = resolve_source_image_paths(values)
+    """Source paths for EXIF References: canonical originals, then values, then fallbacks."""
+    canonical = values.get("_canonical_source_image_paths")
+    if isinstance(canonical, list) and canonical:
+        paths = _dedupe_existing_file_paths(
+            [os.path.normpath(os.path.abspath(str(raw or ""))) for raw in canonical]
+        )
+        if paths:
+            return paths
+    paths = _dedupe_existing_file_paths(resolve_source_image_paths(values))
     if paths:
         return paths
     if not extra_paths:
         return []
-    out: List[str] = []
-    seen: set[str] = set()
-    for raw in extra_paths:
-        ap = os.path.normpath(os.path.abspath(str(raw or "")))
-        if ap and os.path.isfile(ap) and ap not in seen:
-            seen.add(ap)
-            out.append(ap)
-    return out
+    return _dedupe_existing_file_paths(
+        [os.path.normpath(os.path.abspath(str(raw or ""))) for raw in extra_paths]
+    )
+
+
+def exif_reference_line_for_path(source_path: str, output_path: str) -> str:
+    """Human-facing References label: ./basename, ~/relative, or basename (never /tmp temps)."""
+    ap = os.path.normpath(os.path.abspath(source_path))
+    out_dir = os.path.normpath(os.path.dirname(os.path.abspath(output_path)))
+    if os.path.dirname(ap) == out_dir:
+        return f"./{os.path.basename(ap)}"
+    home = os.path.normpath(os.path.expanduser("~"))
+    if ap.startswith(home + os.sep):
+        return "~" + ap[len(home) :]
+    return os.path.basename(ap)
 
 
 def reference_entry_for_source(
@@ -378,10 +412,9 @@ def reference_entry_for_source(
     if not source_path or not os.path.isfile(source_path):
         return None
     ap = os.path.normpath(os.path.abspath(source_path))
-    out_dir = os.path.normpath(os.path.dirname(os.path.abspath(output_path)))
-    if os.path.dirname(ap) == out_dir:
-        return (f"./{os.path.basename(ap)}", ap)
-    return (ap, ap)
+    if _is_prowser_temp_work_path(ap):
+        return None
+    return (exif_reference_line_for_path(ap, output_path), ap)
 
 
 def reference_entries_for_source_paths(
@@ -401,6 +434,41 @@ def reference_entries_for_source_paths(
         seen_abs.add(ap)
         entries.append(entry)
     return entries
+
+
+def _strip_references_section(comment: str) -> str:
+    """Remove an existing References block so inject can replace it."""
+    if not comment:
+        return comment
+    lines = comment.splitlines()
+    out: List[str] = []
+    i = 0
+    stop_headers = frozenset(
+        ("prompt:", "image model:", "title:", "description:")
+    )
+    while i < len(lines):
+        if lines[i].strip().lower() == "references:":
+            i += 1
+            while i < len(lines):
+                label = lines[i].strip()
+                if not label:
+                    i += 1
+                    continue
+                if label.lower() in stop_headers:
+                    break
+                if i + 1 < len(lines) and re.fullmatch(
+                    r"^\d+(?:\.\d+)?$", lines[i + 1].strip()
+                ):
+                    i += 2
+                    continue
+                i += 1
+            continue
+        out.append(lines[i])
+        i += 1
+    text = "\n".join(out)
+    while "\n\n\n" in text:
+        text = text.replace("\n\n\n", "\n\n")
+    return text.strip()
 
 
 def inject_references_exif_section(
@@ -437,9 +505,11 @@ def inject_references_exif_section(
             if ap in seen_abs:
                 continue
             seen_abs.add(ap)
+            if _is_prowser_temp_work_path(ap):
+                continue
             line = exif_line.strip()
-            if allow_cross_directory and os.path.dirname(ap) != out_dir:
-                line = ap
+            if not line or os.path.isabs(line):
+                line = exif_reference_line_for_path(ap, new_file_path)
             try:
                 mtime_stamp = f"{os.path.getmtime(ap):.6f}"
             except OSError:
@@ -448,6 +518,7 @@ def inject_references_exif_section(
 
     if not pairs:
         return base_comment
+    base_comment = _strip_references_section(base_comment)
     ref_lines = ["References:"]
     for line, mtime_stamp in pairs:
         ref_lines.append(line)

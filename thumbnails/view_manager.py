@@ -1107,12 +1107,15 @@ class ListCanvasManager(QWidget):
     
     def set_selected_indices(self, indices: Set[int]):
         """Set the selected row indices"""
-        self.canvas.selected_indices = indices
-        self.canvas.update()
+        if self.canvas.selected_indices != indices:
+            self.canvas.selected_indices = indices.copy()
+            self.canvas.update()
     
     def set_multi_select_mode(self, enabled: bool):
         """Set multi-select mode"""
-        self.canvas.multi_select_mode = enabled
+        if self.canvas.multi_select_mode != enabled:
+            self.canvas.multi_select_mode = enabled
+            self.canvas.update()
     
     def scroll_to_highlighted(self, index: int = None, force: bool = False):
         """Scroll to the highlighted row only if it's not already fully visible

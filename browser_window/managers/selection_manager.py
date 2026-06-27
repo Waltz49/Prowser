@@ -80,14 +80,19 @@ class SelectionManager:
         return indices
     
     def update_canvas_selection(self, highlight_index: Optional[int] = None):
-        """Centralized method to update canvas selection state"""
-        if hasattr(self.main_window, 'thumbnail_container') and self.main_window.thumbnail_container:
-            # Convert file names to indices for visual display
-            display_indices = self._get_selected_indices_for_display()
-            self.main_window.thumbnail_container.set_selected_indices(display_indices)
-            self.main_window.thumbnail_container.set_multi_select_mode(self.main_window.multi_select_mode)
-            if highlight_index is not None:
-                self.main_window.thumbnail_container.set_highlighted_index(highlight_index)
+        """Centralized method to update canvas selection state on grid and list views."""
+        display_indices = self._get_selected_indices_for_display()
+        multi = self.main_window.multi_select_mode
+        for attr in ("thumbnail_container", "list_view_container"):
+            container = getattr(self.main_window, attr, None)
+            if not container:
+                continue
+            if hasattr(container, "set_selected_indices"):
+                container.set_selected_indices(display_indices)
+            if hasattr(container, "set_multi_select_mode"):
+                container.set_multi_select_mode(multi)
+            if highlight_index is not None and hasattr(container, "set_highlighted_index"):
+                container.set_highlighted_index(highlight_index)
     
     def select_thumbnail(self, index: int, add_to_selection: bool = False):
         """Optimized selection logic for thumbnails."""

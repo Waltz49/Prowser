@@ -528,6 +528,7 @@ def build_worker_payload(
         apply_lora_to_mflux_payload(merged, for_fill=False, for_klein=True)
         source_paths = resolve_source_image_paths(merged)
         if source_paths:
+            merged["_canonical_source_image_paths"] = list(source_paths)
             merged["source_image_paths"] = source_paths
             merged["source_image_path"] = source_paths[0]
             pad_temps: list[str] = []
@@ -543,7 +544,6 @@ def build_worker_payload(
                 except (TypeError, ValueError):
                     target_w = target_h = 0
                 if target_w > 0 and target_h > 0:
-                    canonical_source_paths = list(source_paths)
                     source_paths, screen_temps = (
                         generator_paths_with_screen_size_expansion(
                             source_paths,
@@ -552,7 +552,6 @@ def build_worker_payload(
                         )
                     )
                     pad_temps.extend(screen_temps)
-                    merged["_canonical_source_image_paths"] = canonical_source_paths
                     prompt = str(merged.get("prompt") or "")
                     merged["prompt"] = prompt + SCREEN_SIZE_EXPERIMENTAL_PROMPT_SUFFIX
             if merged.get("aspect_ratio_test"):

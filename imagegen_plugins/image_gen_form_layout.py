@@ -54,8 +54,10 @@ def _image_gen_prompt_edit_is_alive(edit: QPlainTextEdit) -> bool:
 def image_gen_prompt_height_for_lines(line_count: int, font_metrics) -> int:
     """Height for QPlainTextEdit prompt fields (text + padding + border)."""
     lines = max(1, int(line_count))
+    line_spacing = font_metrics.lineSpacing()
     return (
-        font_metrics.lineSpacing() * lines
+        line_spacing * lines
+        + line_spacing // 2  # half-line fudge; layout count is slightly conservative
         + IMAGE_GEN_PROMPT_STYLE_PADDING_V
         + IMAGE_GEN_PROMPT_STYLE_BORDER_V
         + 2
@@ -1043,6 +1045,7 @@ class ImageGenFieldsPanel:
         self._reflow_timer.timeout.connect(self._reflow_controls_layout)
         self._last_reflow_width = -1
         self._last_reflow_two_col: Optional[bool] = None
+        self._scroll_area: Optional[QScrollArea] = None
         self._resize_filter = _ImageGenFieldsReflowFilter(self)
         self._controls_host.installEventFilter(self._resize_filter)
         self.widget.installEventFilter(self._resize_filter)
@@ -1078,6 +1081,68 @@ class ImageGenFieldsPanel:
         if control_count < IMAGE_GEN_TWO_COLUMN_MIN_FIELD_COUNT:
             return False
         return self._available_controls_width() >= IMAGE_GEN_TWO_COLUMN_MIN_WIDTH
+
+    def _side_button_width(self) -> int:
+        if self._side_btn_host is None or not self._side_btn_host.isVisible():
+            return 0
+        return (
+            self._side_btn_host.sizeHint().width()
+            + IMAGE_GEN_BELOW_PROMPT_SPACING
+        )
+
+    def _group_natural_width(self, group: QWidget) -> int:
+        width = group.sizeHint().width()
+        if width <= 0:
+            width = group.minimumSizeHint().width()
+        return max(0, width)
+
+    def _controls_content_minimum_width(self) -> int:
+        groups = self._control_groups + self._checkbox_groups
+        if not groups:
+            return self._side_button_width()
+
+        if self._use_two_column_layout(len(self._control_groups)):
+            base = IMAGE_GEN_TWO_COLUMN_MIN_WIDTH
+        else:
+            base = 0
+            for group in groups:
+                base = max(base, self._group_natural_width(group))
+
+        return base + self._side_button_width()
+
+    def _outer_fields_minimum_width(self) -> int:
+        outer_min = 0
+        for i in range(self._layout.count()):
+            item = self._layout.itemAt(i)
+            if item is None:
+                continue
+            widget = item.widget()
+            if widget is None or widget is self._below_row:
+                continue
+            outer_min = max(outer_min, self._group_natural_width(widget))
+        return outer_min
+
+    def _content_minimum_width(self) -> int:
+        area_min = max(
+            self._outer_fields_minimum_width(),
+            self._controls_content_minimum_width(),
+        )
+        return area_min + self._inset_h + self._inset_right
+
+    def _sync_minimum_widths(self) -> None:
+        """Stop horizontal shrink once fixed-width controls would need a scrollbar."""
+        controls_min = self._controls_content_minimum_width()
+        content_min = self._content_minimum_width()
+
+        self._controls_host.setMinimumWidth(controls_min)
+        self._below_row.setMinimumWidth(controls_min)
+        self.widget.setMinimumWidth(content_min)
+        if self._scroll_area is not None:
+            self._scroll_area.setMinimumWidth(content_min)
+            splitter = self._scroll_area.parent()
+            clamp = getattr(splitter, "_clamp_left_size", None)
+            if callable(clamp):
+                QTimer.singleShot(0, clamp)
 
     def _detach_below_prompt_groups(self) -> None:
         for group in self._control_groups + self._checkbox_groups:
@@ -1133,6 +1198,7 @@ class ImageGenFieldsPanel:
     def _reflow_controls_layout(self) -> None:
         if not self._control_groups and not self._checkbox_groups:
             self._clear_controls_layout_wrappers()
+            self._sync_minimum_widths()
             return
 
         width = self._available_controls_width()
@@ -1172,6 +1238,8 @@ class ImageGenFieldsPanel:
         else:
             for group in controls + checkboxes:
                 self._mount_group_in_layout(self._controls_layout, group)
+
+        self._sync_minimum_widths()
 
     def prepend_control_group(self, group: QWidget) -> None:
         self._ensure_below_row_in_layout()
@@ -1232,6 +1300,12 @@ class ImageGenFieldsPanel:
         if self._below_row_in_layout:
             self._layout.removeWidget(self._below_row)
             self._below_row_in_layout = False
+
+        self._controls_host.setMinimumWidth(0)
+        self._below_row.setMinimumWidth(0)
+        self.widget.setMinimumWidth(0)
+        if self._scroll_area is not None:
+            self._scroll_area.setMinimumWidth(0)
 
         while self._layout.count() > keep:
             item = self._layout.takeAt(keep)
@@ -1389,7 +1463,7 @@ def mount_image_gen_fields_in_scroll(
 
     scroll.setWidgetResizable(True)
     scroll.setHorizontalScrollBarPolicy(
-        Qt.ScrollBarPolicy.ScrollBarAsNeeded
+        Qt.ScrollBarPolicy.ScrollBarAlwaysOff
     )
     scroll.setFrameShape(QScrollArea.Shape.NoFrame)
     apply_image_gen_preview_client_background(scroll)
@@ -1397,6 +1471,7 @@ def mount_image_gen_fields_in_scroll(
     viewport.setAutoFillBackground(True)
     apply_image_gen_preview_client_background(viewport)
     scroll.setWidget(panel.widget)
+    panel._scroll_area = scroll
     apply_image_gen_preview_client_background(panel.widget)
     panel.widget.setSizePolicy(
         QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum

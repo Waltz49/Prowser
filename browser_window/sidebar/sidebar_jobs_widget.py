@@ -82,7 +82,7 @@ def _jobs_header_status_text(controller) -> str:
     """Title-bar queue summary: waiting jobs only."""
     waiting = sum(1 for row in controller.queue_snapshot() if not row.is_active)
     if waiting > 0:
-        return f"{waiting} waiting"
+        return f"+{waiting} "
     return ""
 
 

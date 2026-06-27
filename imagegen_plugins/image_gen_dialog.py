@@ -1152,12 +1152,20 @@ class ImageGenPreviewSplitter(QSplitter):
             total = self.width()
         if total <= 0:
             return
+        controls = self.widget(1)
+        controls_min = controls.minimumWidth() if controls is not None else 0
+        right_min = max(1, controls_min)
         max_left = max(1, int(total * self._max_left_ratio))
-        left = sizes[0]
-        if left <= max_left:
+        max_left_for_controls = max(1, total - right_min)
+        left_cap = min(max_left, max_left_for_controls)
+        left = min(sizes[0], left_cap)
+        right = max(right_min, total - left)
+        if left + right > total:
+            left = max(1, total - right)
+        if left == sizes[0] and right == sizes[1]:
             return
         self.blockSignals(True)
-        self.setSizes([max_left, max(1, total - max_left)])
+        self.setSizes([left, right])
         self.blockSignals(False)
 
 

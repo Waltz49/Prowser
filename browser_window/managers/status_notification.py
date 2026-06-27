@@ -179,6 +179,7 @@ class StatusNotification(QWidget):
         super().__init__(parent)
         self.parent_window = parent
         self._bubbles = []
+        self._last_shown_message = None
         self._pos_anim_group = None
         self.setup_ui()
 
@@ -229,10 +230,9 @@ class StatusNotification(QWidget):
             b.raise_()
 
     def show_message(self, message: str, duration: int = 3000):
-        if self._bubbles:
-            last = self._bubbles[-1]
-            if last.label.text() == message and last.is_still_displayed():
-                return
+        if message == self._last_shown_message:
+            return
+        self._last_shown_message = message
         w, new_h = self._measure_bubble_size(message)
         bubble = NotificationBubble(message, self.parent_window)
         bubble.adjustSize()
