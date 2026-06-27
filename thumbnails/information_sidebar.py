@@ -156,7 +156,8 @@ class InformationSidebar(QWidget):
         if getattr(self, "_last_overlay_data", None):
             self._refresh_overlay_for_hover(getattr(self, "_hovered_anchor", None))
 
-    # Tooltips for information action links (Qt does not render HTML title attributes)
+    # Tooltips for information action links (Qt does not render HTML title attributes).
+    # MAINTAINER: Option+click behaviors here should also be listed in help_hidden_gems.py.
     _ANCHOR_TOOLTIPS = {
         "speak://": "Read aloud (click again to stop)",
         "copy://": (
@@ -1038,10 +1039,12 @@ class InformationSidebar(QWidget):
             html_parts.append('</table>')
 
         if show_input_to_active_job_heading:
+            active_bdr = _th.current_image_border_color_hex
+            active_bdr_w = max(1, int(getattr(_th, "current_image_border_width_index", 2)))
             html_parts.append(
                 f'<div style="margin-top: 12px; padding-top: 10px; padding-bottom: 4px; '
-                f'border-top: 1px solid {bdr};">'
-                f'<div style="font-weight: bold; font-size: 12pt; color: {text_hex}; '
+                f'border-top: {active_bdr_w}px solid {active_bdr};">'
+                f'<div style="font-weight: bold; font-size: 12pt; color: {active_bdr}; '
                 f'margin-bottom: 6px;">Input to Active Job</div>'
                 f"</div>"
             )

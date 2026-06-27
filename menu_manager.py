@@ -2028,6 +2028,11 @@ class MenuManager:
             self.main_window.show_downloading_models_help
         )
         help_menu.addAction(downloading_models_action)
+
+        # Modifier+click actions — update browser_window/dialogs/help_hidden_gems.py when adding new ones
+        hidden_gems_action = QAction("Hidden Gems...", self.main_window)
+        hidden_gems_action.triggered.connect(self.main_window.show_hidden_gems_help)
+        help_menu.addAction(hidden_gems_action)
         
         # help_menu.addSeparator()
         # Separator: Developer's notes

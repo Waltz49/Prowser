@@ -197,6 +197,8 @@ def connect_import_button_with_option_modifier(
 
     ``QPushButton.clicked`` on macOS often runs after modifiers are cleared; read them
     from the press event instead (same pattern as option+click copy in EXIF editor).
+
+    MAINTAINER: document new uses in browser_window/dialogs/help_hidden_gems.py.
     """
     def mouse_press(event):
         if event.button() == Qt.MouseButton.LeftButton:

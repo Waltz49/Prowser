@@ -92,6 +92,7 @@ from browser_window.dialogs.help_api import APIDocumentationDialog
 from browser_window.dialogs.help_command_line import CommandLineHelpDialog
 from browser_window.dialogs.help_dialog import HelpDialog
 from browser_window.dialogs.help_downloading_models import DownloadingAIModelsHelpDialog
+from browser_window.dialogs.help_hidden_gems import HiddenGemsHelpDialog
 from browser_window.dialogs.help_pf import PFKeysHelpDialog
 from browser_window.dialogs.help_why import WhyWasThisWrittenDialog
 from cache.image_cache import cleanup_cache, get_cache_manager
@@ -5366,6 +5367,12 @@ class ImageBrowserWindow(QMainWindow):
         if not hasattr(self, "downloading_models_help_dialog"):
             self.downloading_models_help_dialog = DownloadingAIModelsHelpDialog(self)
         present_auxiliary_dialog(self.downloading_models_help_dialog)
+
+    def show_hidden_gems_help(self):
+        """Show modifier + click hidden actions (Option/Ctrl/Cmd/Shift + click)."""
+        if not hasattr(self, "hidden_gems_help_dialog"):
+            self.hidden_gems_help_dialog = HiddenGemsHelpDialog(self)
+        present_auxiliary_dialog(self.hidden_gems_help_dialog)
 
     def on_settings_changed(self, new_settings):
         """Handle settings changes"""

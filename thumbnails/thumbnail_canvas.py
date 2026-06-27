@@ -4412,6 +4412,7 @@ class ThumbnailCanvas(QWidget):
             # - Default: MoveAction (macOS will handle same/different volume detection)
             # - Option (Alt): Force CopyAction
             # - Command (Control/Meta): Force MoveAction
+            # MAINTAINER: also update browser_window/dialogs/help_hidden_gems.py
             modifiers = QApplication.keyboardModifiers()
             if modifiers & Qt.AltModifier:
                 # Option key: force copy

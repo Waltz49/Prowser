@@ -263,6 +263,25 @@ class ImageGenController(QObject):
         else:
             self.cancel_queued_job(entry.job_id)
 
+    def cancel_jobs_from_row_and_subsequent(self, row: int) -> None:
+        """Remove the queue row and every row after it (no confirmation)."""
+        rows = self.queue_snapshot()
+        if row < 0 or row >= len(rows):
+            return
+        if rows[row].is_active:
+            self._queue.clear()
+            self.queue_changed.emit()
+            self._sync_cancel_menu()
+            self.cancel_active_job()
+            return
+        queue_offset = 1 if rows[0].is_active else 0
+        queue_index = row - queue_offset
+        if queue_index < 0 or queue_index >= len(self._queue):
+            return
+        self._queue = self._queue[:queue_index]
+        self.queue_changed.emit()
+        self._sync_cancel_menu()
+
     def confirm_cancel_job_at_row(self, parent=None, row: int = -1) -> bool:
         """Confirm cancel/remove for a queue row; runs the action if user chooses Yes."""
         rows = self.queue_snapshot()

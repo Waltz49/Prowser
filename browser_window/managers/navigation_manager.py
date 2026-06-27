@@ -220,6 +220,7 @@ class NavigationManager:
         """Handle thumbnail click with support for multiple selection and range selection.
 
         On macOS: Cmd+click = multiselect, Ctrl+click = context menu only, Shift+click = range select.
+        MAINTAINER: document changes in browser_window/dialogs/help_hidden_gems.py.
         Single-click opens browse mode (same as space or f keys).
         Double-click also opens browse mode.
         Drag operations are detected and do not trigger browse mode.

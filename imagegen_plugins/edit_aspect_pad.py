@@ -11,7 +11,7 @@ from prowser_temp_files import prowser_mkstemp_path
 from PIL import Image
 
 SCREEN_SIZE_EXPERIMENTAL_PROMPT_SUFFIX = (
-    " Fill all white borders (if any) with image related content (image expansion)."
+    ". Fill all white borders (if any) with image related content (image expansion)."
 )
 
 

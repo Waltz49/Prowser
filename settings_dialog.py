@@ -2660,7 +2660,10 @@ class SettingsDialog(QDialog):
         self._persist_theme_collapse_groups(merged)
 
     def _on_theme_groups_option_set_all_expanded(self, expanded: bool) -> None:
-        """Option-click on any theme section header expands or collapses every group."""
+        """Option-click on any theme section header expands or collapses every group.
+
+        MAINTAINER: document in browser_window/dialogs/help_hidden_gems.py.
+        """
         if not hasattr(self, "_theme_collapse_groups"):
             return
         merged = merge_theme_settings_groups_expanded(

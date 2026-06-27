@@ -242,8 +242,13 @@ def job_queue_edit_row(main_window, controller, row: int) -> None:
     open_imagegen_dialog_from_job(main_window, plugin, values)
 
 
-def job_queue_cancel_row(main_window, controller, row: int) -> None:
-    controller.confirm_cancel_job_at_row(main_window, row)
+def job_queue_cancel_row(
+    main_window, controller, row: int, *, option_held: bool = False
+) -> None:
+    if option_held:
+        controller.cancel_jobs_from_row_and_subsequent(row)
+    else:
+        controller.confirm_cancel_job_at_row(main_window, row)
 
 
 def build_job_queue_action_widget(
@@ -262,10 +267,16 @@ def build_job_queue_action_widget(
         lambda _checked=False, r=row_idx: job_queue_edit_row(main_window, controller, r)
     )
     cancel_btn = QPushButton()
-    cancel_btn.setToolTip("Cancel job")
+    cancel_btn.setToolTip(
+        "Cancel job\n"
+        "Option+click to cancel this job and all jobs after it (no confirmation)."
+    )
     cancel_btn.setStyleSheet(_trash_button_stylesheet())
-    cancel_btn.clicked.connect(
-        lambda _checked=False, r=row_idx: job_queue_cancel_row(main_window, controller, r)
+    connect_import_button_with_option_modifier(
+        cancel_btn,
+        lambda option_held=False, r=row_idx: job_queue_cancel_row(
+            main_window, controller, r, option_held=option_held
+        ),
     )
     action_wrap = QWidget()
     _apply_job_queue_action_bar_background(action_wrap)
