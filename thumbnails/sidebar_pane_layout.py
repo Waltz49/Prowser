@@ -4,6 +4,37 @@
 from __future__ import annotations
 
 MIN_PANE_CONTENT = 20
+MIN_PREVIEW_CONTENT_HEIGHT = 64
+MIN_INFORMATION_CONTENT_HEIGHT = 20
+MIN_JOBS_QUEUE_CONTENT_HEIGHT = 20
+
+# Tolerance for "already fit to content" double-click toggle (px).
+PANE_FIT_HEIGHT_TOLERANCE_MIN = 8
+
+
+def pane_fit_height_tolerance(needed: int) -> int:
+    """Pixel slack when comparing splitter size to a fit-to-content target."""
+    if needed <= 0:
+        return PANE_FIT_HEIGHT_TOLERANCE_MIN
+    return max(PANE_FIT_HEIGHT_TOLERANCE_MIN, int(needed * 0.02))
+
+
+def pane_height_at_target(
+    current: int,
+    needed: int,
+    *,
+    stored_target: int | None = None,
+) -> bool:
+    """True when *current* splitter size matches a fit-to-content target."""
+    if needed <= 0 and stored_target is None:
+        return False
+    ref = needed if needed > 0 else (stored_target or 0)
+    if ref <= 0:
+        return False
+    tolerance = pane_fit_height_tolerance(ref)
+    if stored_target is not None and abs(current - stored_target) <= tolerance:
+        return True
+    return abs(current - needed) <= tolerance
 
 
 def pane_min_height(header_h: int, *, header_only: bool = False) -> int:
@@ -151,3 +182,42 @@ def ensure_pane_headers_visible(
     if drift and donors:
         sizes[donors[0]] += drift
     return sizes
+
+
+def apply_pane_titlebar_drag_delta(
+    splitter,
+    pane_idx: int,
+    dy: int,
+    vis: list[bool],
+    min_height_for_pane,
+    *,
+    start_sizes: list[int] | None = None,
+) -> bool:
+    """Move pane *pane_idx*'s title bar by *dy* screen pixels (cursor-following)."""
+    if pane_idx < 1 or dy == 0:
+        return False
+    if pane_idx >= len(vis) or not vis[pane_idx]:
+        return False
+    upper = pane_idx - 1
+    if not vis[upper]:
+        return False
+
+    base = list(start_sizes if start_sizes is not None else splitter.sizes())
+    if len(base) <= pane_idx:
+        return False
+
+    min_upper = min_height_for_pane(upper)
+    min_lower = min_height_for_pane(pane_idx)
+    # Drag down: title bar moves down => neighbor above grows, this pane shrinks.
+    if dy > 0:
+        dy = min(dy, max(0, base[pane_idx] - min_lower))
+    else:
+        dy = max(dy, -max(0, base[upper] - min_upper))
+    if dy == 0:
+        return False
+
+    sizes = list(base)
+    sizes[upper] = base[upper] + dy
+    sizes[pane_idx] = base[pane_idx] - dy
+    splitter.setSizes(sizes)
+    return True

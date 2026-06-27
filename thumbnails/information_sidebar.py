@@ -10,10 +10,11 @@ from html import escape, unescape
 from typing import Any, Dict, List, Optional, Tuple
 
 from PIL.ExifTags import GPSTAGS
-from PySide6.QtCore import QEvent, Qt, QTimer
+from PySide6.QtCore import QEvent, Qt, QTimer, QSize
 from PySide6.QtWidgets import QLabel, QTextBrowser, QVBoxLayout, QWidget
 
 from thumbnails.combined_sidebar_widget import HeaderWidget
+from thumbnails.sidebar_pane_layout import MIN_INFORMATION_CONTENT_HEIGHT
 from thumbnails.thumbnail_constants import ALT_SYMBOL, COPY_SYMBOL
 from theme.theme_base import asset_file_url
 from theme.theme_service import get_active_theme
@@ -97,6 +98,7 @@ class InformationSidebar(QWidget):
         # Create scrollable text browser for EXIF info (QTextBrowser for link handling)
         self.info_text_edit = QTextBrowser(self)
         self.info_text_edit.setReadOnly(True)
+        self.info_text_edit.setMinimumHeight(0)
         self.info_text_edit.setOpenExternalLinks(False)
         self.info_text_edit.setOpenLinks(False)
         self.info_text_edit.anchorClicked.connect(self._on_anchor_clicked)
@@ -130,6 +132,12 @@ class InformationSidebar(QWidget):
         """Clear the info text edit content"""
         if self.info_text_edit:
             self.info_text_edit.clear()
+
+    def minimumSizeHint(self) -> QSize:
+        header_h = 30
+        if self.information_header is not None:
+            header_h = self.information_header.height()
+        return QSize(0, header_h + MIN_INFORMATION_CONTENT_HEIGHT)
 
     def refresh_theme_styles(self):
         """Reapply theme stylesheets and rebuild overlay HTML so borders/text match the active theme."""

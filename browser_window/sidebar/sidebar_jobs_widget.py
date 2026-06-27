@@ -40,6 +40,7 @@ from status_bar_config import (
     handle_task_info_reference_link_clicked,
 )
 from theme.theme_service import get_active_theme
+from thumbnails.sidebar_pane_layout import MIN_JOBS_QUEUE_CONTENT_HEIGHT
 from utils import create_job_status_thumbnail_label
 
 _THUMB_SIZE = 55
@@ -437,6 +438,7 @@ class SidebarJobsWidget(QWidget):
         self._scroll = QScrollArea()
         self._scroll.setWidgetResizable(True)
         self._scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        self._scroll.setMinimumHeight(0)
         self._scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self._scroll.setStyleSheet(get_active_theme().sidebar_jobs_scroll_stylesheet())
         self._scroll.viewport().installEventFilter(self)
@@ -652,6 +654,7 @@ class SidebarJobsWidget(QWidget):
             self.setSizePolicy(
                 QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
             )
+            self._scroll.setMinimumHeight(0)
             self._empty_label.setVisible(not has_rows)
             self._scroll.setVisible(has_rows)
         self.updateGeometry()
@@ -659,7 +662,20 @@ class SidebarJobsWidget(QWidget):
     def minimumSizeHint(self) -> QSize:
         if self._queue_compact:
             return QSize(0, self.compact_content_height())
-        return super().minimumSizeHint()
+        # Ignore queue scroll height so the splitter can shrink into compact mode.
+        h = 0
+        if (
+            hasattr(self, "_active_job_strip")
+            and self._active_job_strip.isVisible()
+        ):
+            h = self._active_job_strip.height()
+            if h <= 0:
+                h = self.compact_content_height()
+        elif self._empty_label.isVisible():
+            h = self._empty_label.sizeHint().height()
+        elif hasattr(self, "_scroll") and self._scroll.isVisible():
+            h = MIN_JOBS_QUEUE_CONTENT_HEIGHT
+        return QSize(0, h)
 
     def _refresh_active_row(self, *, force: bool = False) -> None:
         if not self.isVisible() or not self._job_cards:

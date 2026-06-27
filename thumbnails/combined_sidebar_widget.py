@@ -3,7 +3,7 @@
 Combined Sidebar Widget - Combines tree view and preview in a single resizable widget
 """
 
-from PySide6.QtCore import Qt, QSize, Signal, QModelIndex, QTimer, QEvent, QPointF
+from PySide6.QtCore import Qt, QSize, Signal, QModelIndex, QTimer, QEvent, QPointF, QEventLoop
 from PySide6.QtGui import QFont, QColor, QPalette, QMouseEvent
 from PySide6.QtWidgets import (
     QApplication,
@@ -14,8 +14,11 @@ import thumbnails.thumbnail_constants as tc
 from thumbnails.thumbnail_constants import GREEN, RESET, YELLOW
 from thumbnails.sidebar_pane_layout import (
     MIN_PANE_CONTENT,
+    MIN_PREVIEW_CONTENT_HEIGHT,
+    apply_pane_titlebar_drag_delta,
     collapse_flags_for_target,
     ensure_pane_headers_visible,
+    pane_height_at_target,
     pane_min_height,
     redistribute_for_target_pane,
 )
@@ -43,6 +46,15 @@ class HeaderWidget(QFrame):
         self._single_click_timer = QTimer(self)
         self._single_click_timer.setSingleShot(True)
         self._single_click_timer.timeout.connect(self._emit_title_clicked)
+        self._pane_resize_splitter = None
+        self._pane_resize_idx: int | None = None
+        self._pane_resize_min_h = None
+        self._pane_resize_vis_fn = None
+        self._pane_resize_on_drag_before = None
+        self._pane_resize_on_drag_after = None
+        self._pane_resize_press_global_y: float | None = None
+        self._pane_resize_start_sizes: list[int] | None = None
+        self._pane_resize_dragging = False
         self.setup_ui()
         
     def setup_ui(self):
@@ -186,25 +198,46 @@ class HeaderWidget(QFrame):
     def eventFilter(self, watched, event) -> bool:
         if watched is self.title_label:
             et = event.type()
-            if et in (
-                QEvent.Type.MouseButtonPress,
-                QEvent.Type.MouseButtonDblClick,
-            ) and isinstance(event, QMouseEvent):
-                mapped = self._map_title_label_mouse_event(event)
-                if et == QEvent.Type.MouseButtonDblClick:
-                    self.mouseDoubleClickEvent(mapped)
-                else:
-                    self.mousePressEvent(mapped)
-                return True
+            if isinstance(event, QMouseEvent):
+                if et in (
+                    QEvent.Type.MouseButtonPress,
+                    QEvent.Type.MouseButtonDblClick,
+                ):
+                    mapped = self._map_title_label_mouse_event(event)
+                    if et == QEvent.Type.MouseButtonDblClick:
+                        self.mouseDoubleClickEvent(mapped)
+                    else:
+                        self.mousePressEvent(mapped)
+                    return True
+                if et == QEvent.Type.MouseMove:
+                    mapped = self._map_title_label_mouse_event(event)
+                    if self._handle_pane_resize_mouse_move(mapped):
+                        return True
+                if et == QEvent.Type.MouseButtonRelease:
+                    mapped = self._map_title_label_mouse_event(event)
+                    if self._handle_pane_resize_mouse_release(mapped):
+                        return True
         return super().eventFilter(watched, event)
 
     def mousePressEvent(self, event: QMouseEvent):
         """Defer single-click so double-click on the title bar is not swallowed."""
+        self._handle_pane_resize_mouse_press(event)
         if event.button() == Qt.LeftButton and not self._titlebar_click_excludes_hide_button(event):
             app = QApplication.instance()
             interval = app.doubleClickInterval() if app else 400
             self._single_click_timer.start(interval)
         super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event: QMouseEvent):
+        if self._handle_pane_resize_mouse_move(event):
+            return
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event: QMouseEvent):
+        if self._handle_pane_resize_mouse_release(event):
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)
 
     def mouseDoubleClickEvent(self, event: QMouseEvent):
         """Emit when the title bar (not the hide button) is double-clicked."""
@@ -212,6 +245,7 @@ class HeaderWidget(QFrame):
             super().mouseDoubleClickEvent(event)
             return
         self._single_click_timer.stop()
+        self._end_pane_resize_drag()
         self.title_double_clicked.emit()
         event.accept()
 
@@ -220,6 +254,112 @@ class HeaderWidget(QFrame):
         text = (text or "").strip()
         self.status_label.setText(text)
         self.status_label.setVisible(bool(text))
+
+    def configure_pane_drag_resize(
+        self,
+        splitter,
+        pane_idx: int,
+        min_height_for_pane,
+        vis_fn,
+        *,
+        on_drag_before=None,
+        on_drag_after=None,
+    ) -> None:
+        """Drag this title bar up/down to resize *pane_idx* via the splitter above it."""
+        if pane_idx < 1:
+            return
+        self._pane_resize_splitter = splitter
+        self._pane_resize_idx = pane_idx
+        self._pane_resize_min_h = min_height_for_pane
+        self._pane_resize_vis_fn = vis_fn
+        self._pane_resize_on_drag_before = on_drag_before
+        self._pane_resize_on_drag_after = on_drag_after
+        self.setMouseTracking(True)
+
+    def _pane_resize_active(self) -> bool:
+        return (
+            self._pane_resize_splitter is not None
+            and self._pane_resize_idx is not None
+            and self._pane_resize_min_h is not None
+            and self._pane_resize_vis_fn is not None
+        )
+
+    def _pane_resize_drag_threshold_exceeded(self, global_y: float) -> bool:
+        if self._pane_resize_press_global_y is None:
+            return False
+        return abs(global_y - self._pane_resize_press_global_y) >= 3
+
+    def _begin_pane_resize_drag(self, global_y: float) -> None:
+        self._single_click_timer.stop()
+        self._pane_resize_dragging = True
+        self.setCursor(Qt.CursorShape.SizeVerCursor)
+        self.grabMouse()
+        self._pane_resize_start_sizes = list(self._pane_resize_splitter.sizes())
+
+    def _apply_pane_resize_step(self, global_y: float) -> None:
+        if (
+            not self._pane_resize_dragging
+            or self._pane_resize_press_global_y is None
+            or self._pane_resize_start_sizes is None
+        ):
+            return
+        total_dy = int(round(global_y - self._pane_resize_press_global_y))
+        if total_dy == 0:
+            return
+        if self._pane_resize_on_drag_before:
+            if self._pane_resize_on_drag_before(
+                total_dy, self._pane_resize_start_sizes
+            ):
+                self._pane_resize_start_sizes = list(self._pane_resize_splitter.sizes())
+                self._pane_resize_press_global_y = global_y
+                total_dy = 0
+        if total_dy != 0:
+            apply_pane_titlebar_drag_delta(
+                self._pane_resize_splitter,
+                self._pane_resize_idx,
+                total_dy,
+                self._pane_resize_vis_fn(),
+                self._pane_resize_min_h,
+                start_sizes=self._pane_resize_start_sizes,
+            )
+        if self._pane_resize_on_drag_after:
+            self._pane_resize_on_drag_after(total_dy)
+
+    def _end_pane_resize_drag(self) -> None:
+        if self._pane_resize_dragging:
+            self._pane_resize_dragging = False
+            self._pane_resize_start_sizes = None
+            self.unsetCursor()
+            if self.mouseGrabber() is self:
+                self.releaseMouse()
+        self._pane_resize_press_global_y = None
+
+    def _handle_pane_resize_mouse_press(self, event: QMouseEvent) -> None:
+        if (
+            event.button() == Qt.MouseButton.LeftButton
+            and self._pane_resize_active()
+            and not self._titlebar_click_excludes_hide_button(event)
+        ):
+            self._pane_resize_press_global_y = event.globalPosition().y()
+
+    def _handle_pane_resize_mouse_move(self, event: QMouseEvent) -> bool:
+        if not self._pane_resize_active() or self._pane_resize_press_global_y is None:
+            return False
+        global_y = event.globalPosition().y()
+        if not self._pane_resize_dragging:
+            if not self._pane_resize_drag_threshold_exceeded(global_y):
+                return False
+            self._begin_pane_resize_drag(global_y)
+        self._apply_pane_resize_step(global_y)
+        event.accept()
+        return True
+
+    def _handle_pane_resize_mouse_release(self, event: QMouseEvent) -> bool:
+        if event.button() != Qt.MouseButton.LeftButton:
+            return False
+        was_dragging = self._pane_resize_dragging
+        self._end_pane_resize_drag()
+        return was_dragging
 
 class CombinedSidebarWidget(QWidget):
     """Combined widget containing tree view and preview with resizable sections"""
@@ -241,6 +381,7 @@ class CombinedSidebarWidget(QWidget):
         # Format: [tree_size, preview_size] or None if not yet set
         self.saved_splitter_sizes = None
         self._adjusting_splitter = False
+        self._pane_fit_targets: dict[int, int] = {}
 
         # Set focus policy to be in tab order
         # self.setFocusPolicy(Qt.StrongFocus)
@@ -341,6 +482,12 @@ class CombinedSidebarWidget(QWidget):
             self.preview_header = header
             header.hide_button.clicked.connect(self._toggle_preview)
             header.title_double_clicked.connect(self._expand_preview_pane_to_fit)
+            header.configure_pane_drag_resize(
+                self.splitter,
+                1,
+                self._pane_min_height,
+                self._pane_visibility,
+            )
         
         layout.addWidget(header)
         
@@ -457,9 +604,12 @@ class CombinedSidebarWidget(QWidget):
     def _pane_min_height(self, pane_idx: int, *, header_only: bool = False) -> int:
         if not self._pane_visibility()[pane_idx]:
             return 0
-        return pane_min_height(
-            self._header_height_for_pane(pane_idx), header_only=header_only
-        )
+        header_h = self._header_height_for_pane(pane_idx)
+        if header_only:
+            return header_h
+        if pane_idx == 1:
+            return header_h + MIN_PREVIEW_CONTENT_HEIGHT
+        return pane_min_height(header_h, header_only=False)
 
     def _set_splitter_sizes_safe(self, sizes: list[int]) -> None:
         self._adjusting_splitter = True
@@ -601,41 +751,35 @@ class CombinedSidebarWidget(QWidget):
             width = self.width()
         return max(width, 1)
 
-    def _needed_pane_height(self, pane_idx: int) -> int:
-        header_h = self._header_height_for_pane(pane_idx)
+    def _prepare_pane_measure(self, pane_idx: int) -> None:
         if pane_idx == 0:
-            return header_h + self._tree_preferred_content_height()
-        if pane_idx == 1 and self.preview_widget:
-            return header_h + self.preview_widget.preferred_content_height(
-                self._preview_client_width()
-            )
-        return header_h + MIN_PANE_CONTENT
+            tree = self._tree_view()
+            if tree is not None:
+                tree.updateGeometry()
+        if pane_idx == 1 and self.preview_widget is not None:
+            self.preview_widget.updateGeometry()
+        QApplication.processEvents(QEventLoop.ProcessEventsFlag.ExcludeUserInputEvents)
 
-    def _expand_pane_to_fit(self, pane_idx: int) -> None:
-        """Resize one pane to fit its content; shrink neighbors only as needed."""
-        if pane_idx == 0 and not self.tree_visible:
-            self.set_tree_visible(True)
-        elif pane_idx == 1 and not self.preview_visible:
-            self.set_preview_visible(True)
+    def _pane_size_at_fit_target(self, pane_idx: int, current: int, needed: int) -> bool:
+        return pane_height_at_target(
+            current,
+            needed,
+            stored_target=self._pane_fit_targets.get(pane_idx),
+        )
 
+    def _resize_pane_to_height(self, pane_idx: int, target_height: int) -> None:
         vis = self._pane_visibility()
         if not vis[pane_idx]:
             return
-
-        needed = self._needed_pane_height(pane_idx)
-        sizes = self.splitter.sizes()
-        if pane_idx < len(sizes) and sizes[pane_idx] == needed:
-            return
-
         total = max(self.height(), 1)
         collapse_flags = collapse_flags_for_target(
-            pane_idx, needed, total, vis, self._pane_min_height
+            pane_idx, target_height, total, vis, self._pane_min_height
         )
         new_sizes = redistribute_for_target_pane(
             self.splitter,
             2,
             pane_idx,
-            needed,
+            target_height,
             vis,
             self._header_height_for_pane,
             self._pane_min_height,
@@ -646,11 +790,67 @@ class CombinedSidebarWidget(QWidget):
         self._ensure_pane_headers_visible(collapse_flags)
         self._persist_splitter_sizes()
 
+    def _collapse_pane_from_fit(self, pane_idx: int) -> None:
+        self._resize_pane_to_height(pane_idx, self._pane_min_height(pane_idx))
+
+    def _expand_pane_to_fit_stabilized(self, pane_idx: int) -> None:
+        vis = self._pane_visibility()
+        if not vis[pane_idx]:
+            return
+
+        prev_needed = -1
+        prev_current = -1
+        for _ in range(4):
+            self._prepare_pane_measure(pane_idx)
+            needed = self._needed_pane_height(pane_idx)
+            sizes = self.splitter.sizes()
+            current = sizes[pane_idx] if pane_idx < len(sizes) else 0
+
+            if prev_needed >= 0 and abs(needed - prev_needed) <= 1 and current == prev_current:
+                break
+
+            self._resize_pane_to_height(pane_idx, needed)
+            prev_needed = needed
+            prev_current = self.splitter.sizes()[pane_idx]
+
+        self._pane_fit_targets[pane_idx] = self.splitter.sizes()[pane_idx]
+
+    def _toggle_pane_fit(self, pane_idx: int) -> None:
+        if pane_idx == 0 and not self.tree_visible:
+            self.set_tree_visible(True)
+        elif pane_idx == 1 and not self.preview_visible:
+            self.set_preview_visible(True)
+
+        vis = self._pane_visibility()
+        if not vis[pane_idx]:
+            return
+
+        self._prepare_pane_measure(pane_idx)
+        needed = self._needed_pane_height(pane_idx)
+        sizes = self.splitter.sizes()
+        current = sizes[pane_idx] if pane_idx < len(sizes) else 0
+
+        if self._pane_size_at_fit_target(pane_idx, current, needed):
+            self._collapse_pane_from_fit(pane_idx)
+            self._pane_fit_targets.pop(pane_idx, None)
+        else:
+            self._expand_pane_to_fit_stabilized(pane_idx)
+
+    def _needed_pane_height(self, pane_idx: int) -> int:
+        header_h = self._header_height_for_pane(pane_idx)
+        if pane_idx == 0:
+            return header_h + self._tree_preferred_content_height()
+        if pane_idx == 1 and self.preview_widget:
+            return header_h + self.preview_widget.preferred_content_height(
+                self._preview_client_width()
+            )
+        return header_h + MIN_PANE_CONTENT
+
     def _expand_tree_pane_to_fit(self) -> None:
-        self._expand_pane_to_fit(0)
+        self._toggle_pane_fit(0)
 
     def _expand_preview_pane_to_fit(self) -> None:
-        self._expand_pane_to_fit(1)
+        self._toggle_pane_fit(1)
 
     def _persist_splitter_sizes(self) -> None:
         """Merge current splitter sizes for visible panes into saved settings."""
@@ -725,6 +925,7 @@ class CombinedSidebarWidget(QWidget):
     def _on_splitter_moved(self):
         """Handle splitter resize events"""
         if not self._adjusting_splitter:
+            self._pane_fit_targets.clear()
             self._ensure_pane_headers_visible()
         self._persist_splitter_sizes()
         self.widget_resized.emit()
