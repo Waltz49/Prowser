@@ -963,6 +963,11 @@ class ImageGenEditDialog(ImageGenDimensionAspectMixin, QDialog):
         self._save_geometry()
         super().closeEvent(event)
 
+    def _refresh_use_custom_size_label(self) -> None:
+        refresh = getattr(self, "_refresh_use_custom_size_label", None)
+        if callable(refresh):
+            refresh()
+
     def _on_source_image_changed(self, path: str) -> None:
         self.source_path = os.path.abspath(path)
         # Single-image nav replaces the sole source; keep _source_paths aligned for generate.
@@ -972,6 +977,7 @@ class ImageGenEditDialog(ImageGenDimensionAspectMixin, QDialog):
             self._source_preview.set_source_path(self.source_path)
         if self._source_nav is not None:
             self._source_nav.set_active_source_path(self.source_path)
+        self._refresh_use_custom_size_label()
         if self._panel_mode:
             self.state_changed.emit()
 
@@ -987,6 +993,7 @@ class ImageGenEditDialog(ImageGenDimensionAspectMixin, QDialog):
         self._source_paths = list(paths)
         if self._source_paths:
             self.source_path = self._source_paths[0]
+        self._refresh_use_custom_size_label()
 
     def _on_external_paths_dropped(
         self,
@@ -1027,10 +1034,12 @@ class ImageGenEditDialog(ImageGenDimensionAspectMixin, QDialog):
                 self._multi_source_preview.set_source_paths(paths)
             elif self._source_preview is not None:
                 self._source_preview.set_source_path(self.source_path)
+            self._refresh_use_custom_size_label()
             if self._panel_mode:
                 self.state_changed.emit()
             return
         self._rebuild_source_preview()
+        self._refresh_use_custom_size_label()
         if self._panel_mode:
             self.state_changed.emit()
 

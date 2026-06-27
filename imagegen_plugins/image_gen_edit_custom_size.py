@@ -34,6 +34,63 @@ from imagegen_plugins.imagegen_control_tooltips import (
     apply_field_control_tooltips,
 )
 
+_USE_CUSTOM_SIZE_BASE_LABEL = "Use Custom Size"
+
+
+def _image_pixel_size(image_path: str) -> Optional[Tuple[int, int]]:
+    try:
+        from PIL import Image
+    except ImportError:
+        return None
+    try:
+        with Image.open(image_path) as img:
+            return int(img.size[0]), int(img.size[1])
+    except Exception:
+        return None
+
+
+def _edit_first_source_path(dialog: Any) -> Optional[str]:
+    paths = getattr(dialog, "_source_paths", None) or []
+    if paths:
+        return str(paths[0])
+    path = getattr(dialog, "source_path", None)
+    return str(path) if path else None
+
+
+def _first_source_pixel_size(dialog: Any) -> Optional[Tuple[int, int]]:
+    path = _edit_first_source_path(dialog)
+    if not path:
+        return None
+    size = _image_pixel_size(path)
+    if size is None:
+        return None
+    w, h = size
+    if w <= 0 or h <= 0:
+        return None
+    return w, h
+
+
+def _use_custom_size_checkbox_text(
+    *, checked: bool, size: Optional[Tuple[int, int]]
+) -> str:
+    if checked or size is None:
+        return _USE_CUSTOM_SIZE_BASE_LABEL
+    w, h = size
+    return f"{_USE_CUSTOM_SIZE_BASE_LABEL} (Current: {w} x {h})"
+
+
+def _refresh_use_custom_size_checkbox_label(
+    dialog: Any, use_widget: QWidget
+) -> None:
+    if not isinstance(use_widget, QCheckBox):
+        return
+    use_widget.setText(
+        _use_custom_size_checkbox_text(
+            checked=use_widget.isChecked(),
+            size=_first_source_pixel_size(dialog),
+        )
+    )
+
 
 def migrate_edit_size_saved_values(values: Dict[str, Any]) -> Dict[str, Any]:
     """Map legacy screen_size_experimental to use_custom_size + screen dimensions."""
@@ -227,6 +284,7 @@ def _remove_existing_custom_size_section(
     if existing in panel._control_groups:
         panel._control_groups.remove(existing)
     existing.deleteLater()
+    dialog._refresh_use_custom_size_label = None
     remove_keys = ("width", "height")
     if optional:
         remove_keys = ("use_custom_size", "width", "height")
@@ -305,8 +363,14 @@ def mount_custom_size_section(
         use_checked = bool(use_spec.default)
         group_box.setVisible(use_checked)
 
+        _refresh_use_custom_size_checkbox_label(dialog, use_widget)
+        dialog._refresh_use_custom_size_label = (
+            lambda: _refresh_use_custom_size_checkbox_label(dialog, use_widget)
+        )
+
         def _on_use_custom_size_toggled(checked: bool) -> None:
             group_box.setVisible(checked)
+            _refresh_use_custom_size_checkbox_label(dialog, use_widget)
             if getattr(dialog, "_panel_mode", False):
                 dialog.state_changed.emit()
 
