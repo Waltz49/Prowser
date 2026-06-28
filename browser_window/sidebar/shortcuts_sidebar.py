@@ -37,6 +37,24 @@ def _shortcuts_heading_text_hex():
     return get_active_theme().sidebar_heading_color_hex()
 
 
+def _move_shortcut_prefix(num: int, disabled_hex: str) -> str:
+    """Cmd vs Cmd+Option key label with a muted slash separator."""
+    return (
+        f"{CMD_SYMBOL} {num}"
+        f'<span style="color:{disabled_hex};"> / </span>'
+        f"{OPTION_SYMBOL}{CMD_SYMBOL} {num}:"
+    )
+
+
+def _click_mode_tooltip_text() -> str:
+    """Multi-line tooltip for the Organize pane Click Mode pulldown."""
+    return (
+        "Move : Move selected files to the destination\n"
+        "Copy : Copy selected files to the destination\n"
+        "No Action: Mouse clicks are ignored"
+    )
+
+
 class _NoContextMenuLabel(QLabel):
     """QLabel that suppresses the default 'Copy Link Location' context menu on links."""
 
@@ -133,6 +151,9 @@ class ShortcutsSidebar(QWidget):
         self._move_mode_combo.setCurrentIndex(idx)
         self._move_mode_combo.currentIndexChanged.connect(self._on_move_mode_changed)
         self._move_mode_combo.setStyleSheet(get_active_theme().shortcuts_sidebar_combo_stylesheet())
+        click_mode_tip = _click_mode_tooltip_text()
+        self._move_mode_combo.setToolTip(click_mode_tip)
+        self._move_mode_label.setToolTip(click_mode_tip)
 
         # Put label and combo on the same line
         self._move_mode_row = QWidget()
@@ -167,11 +188,13 @@ class ShortcutsSidebar(QWidget):
             self.refresh_shortcuts()
 
     def _tooltip_for_organize_url(self, url: str) -> str:
-        """Full path for QLabel tooltips when hovering Organize path links."""
+        """Tooltip text for Organize sidebar links (paths and settings gear buttons)."""
         if not url:
             return ""
-        if url in ('settings:favorites', 'settings:move'):
-            return ""
+        if url == "settings:favorites":
+            return "Edit Favorites..."
+        if url == "settings:move":
+            return "Edit Destinations..."
         settings = self.main_window.config.load_settings()
         favorites = (settings.get('favorite_directories', [None] * 9) + [None] * 9)[:9]
         destinations = (settings.get('move_destinations', [None] * 9) + [None] * 9)[:9]
@@ -365,7 +388,7 @@ class ShortcutsSidebar(QWidget):
                 cursor = "pointer" if use_links else "default"
                 link = f'<a href="move:{i+1}" style="color:{primary}; text-decoration:none; cursor:{cursor}; font-weight:{weight};">{display}</a>'
                 dest_rows.append(row(
-                    f"{CMD_SYMBOL} {i + 1} / {OPTION_SYMBOL}{CMD_SYMBOL} {i + 1}: &nbsp;&nbsp;{link}",
+                    f"{_move_shortcut_prefix(i + 1, _theme.text_disabled_hex)} &nbsp;&nbsp;{link}",
                     value_row=True,
                     compress_vertical_padding=True,
                 ))
@@ -381,7 +404,7 @@ class ShortcutsSidebar(QWidget):
             if use_links:
                 link = f'<a href="move:0" style="color:{primary}; text-decoration:none; cursor:pointer;font-weight:300;">{display}</a>'
                 dest_rows.append(row(
-                    f"{CMD_SYMBOL} 0 / {OPTION_SYMBOL}{CMD_SYMBOL} 0: &nbsp;&nbsp;{link}",
+                    f"{_move_shortcut_prefix(0, _theme.text_disabled_hex)} &nbsp;&nbsp;{link}",
                     value_row=True,
                     compress_vertical_padding=True,
                 ))
@@ -392,13 +415,13 @@ class ShortcutsSidebar(QWidget):
                     f'font-weight:300;">{display}</a>'
                 )
                 dest_rows.append(row(
-                    f"{CMD_SYMBOL} 0 / {OPTION_SYMBOL}{CMD_SYMBOL} 0: &nbsp;&nbsp;{link}",
+                    f"{_move_shortcut_prefix(0, _theme.text_disabled_hex)} &nbsp;&nbsp;{link}",
                     value_row=True,
                     compress_vertical_padding=True,
                 ))
         else:
             dest_rows.append(row(
-                f'{CMD_SYMBOL} 0 / {OPTION_SYMBOL}{CMD_SYMBOL} 0: &nbsp;&nbsp;'
+                f'{_move_shortcut_prefix(0, _theme.text_disabled_hex)} &nbsp;&nbsp;'
                 f'<span style="color:{_muted};">Not yet set</span>',
                 value_row=True,
                 compress_vertical_padding=True,

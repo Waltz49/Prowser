@@ -48,6 +48,12 @@ _THUMB_SIZE = 55
 _THUMB_GAP = 14
 _ACTIVE_JOB_STRIP_MARGIN = 8  # left + right margins on the strip layout
 
+# When scroll viewport width exceeds this and a row has 1–2 reference images, show
+# them in a vertical column beside the text instead of below it.
+JOB_CELL_INLINE_REFS_MIN_SCROLL_WIDTH = 350
+JOB_CELL_INLINE_REFS_RIGHT_PADDING_PX = 2
+_JOB_CELL_INLINE_TEXT_REFS_SPACING = 4
+
 
 def _active_job_strip_browser_stylesheet() -> str:
     t = get_active_theme()
@@ -197,12 +203,12 @@ class _FlowReferenceThumbs(QWidget):
                     row_layout.takeAt(0)
                 row_layout.deleteLater()
 
-    def reflow_to_width(self, width: int) -> None:
+    def reflow_to_width(self, width: int, *, force_cols: int | None = None) -> None:
         width = self._effective_reflow_width(width)
         self._last_reflow_width = width
         if self._reflow_guard or not self._cells:
             return
-        cols = self._cols_for_width(width)
+        cols = force_cols if force_cols is not None else self._cols_for_width(width)
         if cols == self._last_cols and self._outer.count() > 0:
             self._apply_thumb_height(cols, width)
             return
@@ -274,6 +280,8 @@ class _JobCard(QFrame):
         self._row_idx = row_idx
         self._full_prompt = ""
         self._last_info_html = ""
+        self._scroll_width = 0
+        self._content_inline = False
 
         row_layout = QHBoxLayout(self)
         row_layout.setContentsMargins(2, 2, 2, 2)
@@ -289,9 +297,6 @@ class _JobCard(QFrame):
 
         self._content = QWidget()
         _apply_job_queue_cell_background(self._content)
-        content_layout = QVBoxLayout(self._content)
-        content_layout.setContentsMargins(0, 0, 0, 0)
-        content_layout.setSpacing(2)
 
         self._info_browser = QTextBrowser()
         configure_task_info_text_browser(
@@ -302,19 +307,91 @@ class _JobCard(QFrame):
         )
 
         self._refs = _FlowReferenceThumbs(main_window, [])
-        content_layout.addWidget(self._info_browser, 0, Qt.AlignmentFlag.AlignTop)
-        content_layout.addWidget(
-            self._refs, 0, Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignRight
-        )
+        self._ensure_content_layout(False)
         row_layout.addWidget(self._content, 1)
 
-    def _sync_card_height(self, content_width: int, *, browser_h: int | None = None) -> None:
-        if self._refs.isVisible():
+    def _ref_count(self) -> int:
+        return len(getattr(self._refs, "_paths", []) or [])
+
+    def _use_inline_refs_layout(self, scroll_width: int) -> bool:
+        return (
+            scroll_width > JOB_CELL_INLINE_REFS_MIN_SCROLL_WIDTH
+            and 1 <= self._ref_count() <= 2
+        )
+
+    def _browser_content_width(self, content_width: int, scroll_width: int) -> int:
+        if self._use_inline_refs_layout(scroll_width):
+            reserved = (
+                _THUMB_SIZE
+                + JOB_CELL_INLINE_REFS_RIGHT_PADDING_PX
+                + _JOB_CELL_INLINE_TEXT_REFS_SPACING
+            )
+            return max(80, content_width - reserved)
+        return max(80, content_width)
+
+    def _ensure_content_layout(self, inline: bool) -> None:
+        if inline == self._content_inline and self._content.layout() is not None:
+            return
+        self._content_inline = inline
+        old_layout = self._content.layout()
+        if old_layout is not None:
+            old_layout.removeWidget(self._info_browser)
+            old_layout.removeWidget(self._refs)
+            QWidget().setLayout(old_layout)
+        if inline:
+            layout = QHBoxLayout(self._content)
+            layout.setContentsMargins(
+                0, 0, JOB_CELL_INLINE_REFS_RIGHT_PADDING_PX, 0
+            )
+            layout.setSpacing(_JOB_CELL_INLINE_TEXT_REFS_SPACING)
+            self._refs.setSizePolicy(
+                QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed
+            )
+            layout.addWidget(self._info_browser, 1, Qt.AlignmentFlag.AlignTop)
+            layout.addWidget(
+                self._refs,
+                0,
+                Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignRight,
+            )
+        else:
+            layout = QVBoxLayout(self._content)
+            layout.setContentsMargins(0, 0, 0, 0)
+            layout.setSpacing(2)
+            self._refs.setSizePolicy(
+                QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
+            )
+            layout.addWidget(self._info_browser, 0, Qt.AlignmentFlag.AlignTop)
+            layout.addWidget(
+                self._refs,
+                0,
+                Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignRight,
+            )
+
+    def _reflow_visible_refs(self, content_width: int, scroll_width: int) -> None:
+        if not self._refs.isVisible():
+            return
+        if self._use_inline_refs_layout(scroll_width):
+            self._refs.reflow_to_width(_THUMB_SIZE, force_cols=1)
+        else:
             self._refs.reflow_to_width(max(_THUMB_SIZE, content_width))
+
+    def _sync_card_height(
+        self,
+        content_width: int,
+        *,
+        browser_h: int | None = None,
+        scroll_width: int | None = None,
+    ) -> None:
+        sw = scroll_width if scroll_width is not None else self._scroll_width
+        self._ensure_content_layout(self._use_inline_refs_layout(sw))
+        self._reflow_visible_refs(content_width, sw)
         refs_h = self._refs.sizeHint().height() if self._refs.isVisible() else 0
         if browser_h is None:
             browser_h = self._info_browser.height()
-        content_h = browser_h + refs_h + 2
+        if self._use_inline_refs_layout(sw):
+            content_h = max(browser_h, refs_h) + 2
+        else:
+            content_h = browser_h + refs_h + 2
         self._content.setMinimumHeight(content_h)
         min_h = max(content_h, self._actions.sizeHint().height())
         self.setMinimumHeight(min_h)
@@ -327,52 +404,93 @@ class _JobCard(QFrame):
         full_prompt: str,
         thumbnail_paths: list[str],
         content_width: int,
+        scroll_width: int,
     ) -> None:
+        self._scroll_width = scroll_width
         self._full_prompt = full_prompt or ""
         install_delayed_prompt_tooltip(self._info_browser, self._full_prompt)
-        self.update_info_html(info_html, content_width)
-        self._replace_refs(thumbnail_paths, content_width)
-        self._sync_card_height(content_width)
+        self._replace_refs(thumbnail_paths, content_width, scroll_width=scroll_width)
+        self.update_info_html(info_html, content_width, scroll_width=scroll_width)
 
-    def update_info_html(self, info_html: str, content_width: int) -> None:
+    def update_info_html(
+        self,
+        info_html: str,
+        content_width: int,
+        *,
+        scroll_width: int | None = None,
+    ) -> None:
+        sw = (
+            scroll_width
+            if scroll_width is not None
+            else self._scroll_width or (content_width + _ACTION_COL_WIDTH + 20)
+        )
+        self._scroll_width = sw
+        self._ensure_content_layout(self._use_inline_refs_layout(sw))
         self._last_info_html = info_html or ""
         display_html = strip_references_from_status_html(self._last_info_html)
+        text_w = self._browser_content_width(content_width, sw)
         browser_h = _apply_task_info_html_to_browser(
             self._info_browser,
             display_html,
-            content_width=max(80, content_width),
+            content_width=text_w,
             job_queue_cell=True,
             max_height=None,
         )
         self._info_browser.setSizePolicy(
             QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed
         )
-        self._sync_card_height(content_width, browser_h=browser_h)
+        self._sync_card_height(content_width, browser_h=browser_h, scroll_width=sw)
 
-    def _replace_refs(self, paths: list[str], content_width: int) -> None:
+    def _replace_refs(
+        self,
+        paths: list[str],
+        content_width: int,
+        *,
+        scroll_width: int | None = None,
+    ) -> None:
+        sw = (
+            scroll_width
+            if scroll_width is not None
+            else self._scroll_width or (content_width + _ACTION_COL_WIDTH + 20)
+        )
+        self._scroll_width = sw
         valid = _valid_preview_paths(paths)
+        inline = self._use_inline_refs_layout(sw)
         if (
             self._refs.isVisible()
             and getattr(self._refs, "_paths", None) == valid
+            and inline == self._content_inline
         ):
-            self._refs.reflow_to_width(max(_THUMB_SIZE, content_width))
+            self._reflow_visible_refs(content_width, sw)
             return
         layout = self._content.layout()
-        if layout is None:
-            return
-        layout.removeWidget(self._refs)
+        if layout is not None:
+            layout.removeWidget(self._refs)
         self._refs.deleteLater()
         self._refs = _FlowReferenceThumbs(self._main_window, paths)
-        layout.addWidget(
-            self._refs, 0, Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignRight
-        )
-        if self._refs._paths:
-            self._refs.reflow_to_width(max(_THUMB_SIZE, content_width))
+        mode_changed = inline != self._content_inline
+        self._ensure_content_layout(inline)
+        if not mode_changed:
+            layout = self._content.layout()
+            if layout is not None:
+                layout.addWidget(
+                    self._refs,
+                    0,
+                    Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignRight,
+                )
+        self._reflow_visible_refs(content_width, sw)
 
-    def reflow_refs(self, width: int) -> None:
-        if self._refs.isVisible():
-            self._refs.reflow_to_width(max(_THUMB_SIZE, width - _ACTION_COL_WIDTH - 20))
-        self._sync_card_height(max(80, width - _ACTION_COL_WIDTH - 20))
+    def reflow_refs(self, scroll_width: int) -> None:
+        content_width = max(80, scroll_width - _ACTION_COL_WIDTH - 20)
+        self._scroll_width = scroll_width
+        self._ensure_content_layout(self._use_inline_refs_layout(scroll_width))
+        if self._last_info_html:
+            self.update_info_html(
+                self._last_info_html, content_width, scroll_width=scroll_width
+            )
+        else:
+            self._reflow_visible_refs(content_width, scroll_width)
+            self._sync_card_height(content_width, scroll_width=scroll_width)
 
 
 class SidebarJobsWidget(QWidget):
@@ -695,9 +813,12 @@ class SidebarJobsWidget(QWidget):
             self._controller, 0, row, for_sidebar=True
         )
         info_w = self._info_content_width()
-        self._job_cards[0].update_info_html(info_html, info_w)
-        self._job_cards[0]._replace_refs(row.thumbnail_paths, info_w)
-        self._job_cards[0].reflow_refs(self._viewport_width())
+        viewport_w = self._viewport_width()
+        self._job_cards[0].update_info_html(info_html, info_w, scroll_width=viewport_w)
+        self._job_cards[0]._replace_refs(
+            row.thumbnail_paths, info_w, scroll_width=viewport_w
+        )
+        self._job_cards[0].reflow_refs(viewport_w)
         _disable_tab_focus(self._job_cards[0])
 
     def _clear_job_cards(self) -> None:
@@ -713,7 +834,9 @@ class SidebarJobsWidget(QWidget):
         info_w = self._info_content_width()
         for card in self._job_cards:
             if card._last_info_html:
-                card.update_info_html(card._last_info_html, info_w)
+                card.update_info_html(
+                    card._last_info_html, info_w, scroll_width=width
+                )
             card.reflow_refs(width)
 
     def compact_content_height(self) -> int:
@@ -772,16 +895,21 @@ class SidebarJobsWidget(QWidget):
             # Measure from cached HTML — do not re-fetch live active-job state here
             # (would flash Steps timing and fight the progress-bar strip).
             if card._last_info_html:
-                card.update_info_html(card._last_info_html, info_w)
+                card.update_info_html(
+                    card._last_info_html, info_w, scroll_width=width
+                )
             elif row is not None:
                 card.update_info_html(
                     info_html_for_queue_row(
                         self._controller, row_idx, row, for_sidebar=True
                     ),
                     info_w,
+                    scroll_width=width,
                 )
                 if row.thumbnail_paths:
-                    card._replace_refs(row.thumbnail_paths, info_w)
+                    card._replace_refs(
+                        row.thumbnail_paths, info_w, scroll_width=width
+                    )
             else:
                 card.reflow_refs(width)
                 total += card.minimumHeight()
@@ -798,6 +926,7 @@ class SidebarJobsWidget(QWidget):
         self._clear_job_cards()
 
         info_w = self._info_content_width()
+        viewport_w = self._viewport_width()
         for row_idx, row in enumerate(rows):
             info_html = info_html_for_queue_row(
                 self._controller, row_idx, row, for_sidebar=True
@@ -813,6 +942,7 @@ class SidebarJobsWidget(QWidget):
                 full_prompt=row.full_prompt,
                 thumbnail_paths=row.thumbnail_paths,
                 content_width=info_w,
+                scroll_width=viewport_w,
             )
             self._list_layout.insertWidget(self._list_layout.count() - 1, card)
             self._job_cards.append(card)
