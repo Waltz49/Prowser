@@ -1501,6 +1501,10 @@ class ImageBrowserWindow(QMainWindow):
         self.main_splitter.addWidget(self.main_content_widget)
         self.main_splitter.addWidget(self.right_sidebar)
         
+        # Defer show until set_initial_sizes assigns geometry (avoids width-0 paint flash).
+        if self.right_sidebar_visible:
+            self.right_sidebar.hide()
+        
         # Set splitter sizes IMMEDIATELY after adding widgets to prevent Qt from calculating default sizes
         # Use a large initial width estimate - will be corrected once window is shown
         estimated_width = 1920  # Reasonable default for most screens

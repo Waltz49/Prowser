@@ -683,6 +683,10 @@ class SettingsDialog(QDialog):
         # Store original settings for comparison
         self.original_settings = {}
         self.current_settings = {}
+        # Thumbnail overlay settings (no UI; Cmd+I toggles in main window)
+        self._overlay_filename_visible = False
+        self._show_image_size = False
+        self._overlay_settings_dialog_edited = False
         
         # Track Option key state for reset button behavior
         self.option_key_pressed = False
@@ -1083,8 +1087,8 @@ class SettingsDialog(QDialog):
                     if hasattr(self, 'browse_image_history_save_after_slider') else 3000
                 ),
                 'show_extensions': self.show_extensions_checkbox.isChecked(),
-                'thumbnail_filename_visible': self.show_filename_checkbox.isChecked(),
-                'show_image_size': self.show_image_size_checkbox.isChecked(),
+                'thumbnail_filename_visible': self._get_overlay_settings_for_save()[0],
+                'show_image_size': self._get_overlay_settings_for_save()[1],
                 'debug_mode': self.debug_checkbox.isChecked(),
                 'confirm_delete': self.confirm_delete_checkbox.isChecked(),
                 'wrap_around': self.wrap_around_checkbox.isChecked(),
@@ -1311,11 +1315,12 @@ class SettingsDialog(QDialog):
                 self._update_browse_image_history_save_after_label()
             if 'show_extensions' in settings:
                 self.show_extensions_checkbox.setChecked(settings['show_extensions'])
-            if 'thumbnail_filename_visible' in settings:
-                self.show_filename_checkbox.setChecked(settings['thumbnail_filename_visible'])
-                self.on_show_filename_toggled(settings['thumbnail_filename_visible'])
-            if 'show_image_size' in settings:
-                self.show_image_size_checkbox.setChecked(settings['show_image_size'])
+            if 'thumbnail_filename_visible' in settings or 'show_image_size' in settings:
+                self._set_dialog_overlay_settings(
+                    settings.get('thumbnail_filename_visible', self._overlay_filename_visible),
+                    settings.get('show_image_size', self._show_image_size),
+                    dialog_edited=True,
+                )
             if 'debug_mode' in settings:
                 self.debug_checkbox.setChecked(settings['debug_mode'])
             if 'confirm_delete' in settings:
@@ -1580,9 +1585,8 @@ class SettingsDialog(QDialog):
                 self.browse_image_history_save_after_slider.setValue(6)
                 self.browse_image_history_save_after_slider.blockSignals(False)
                 self._update_browse_image_history_save_after_label()
-            self.show_filename_checkbox.setChecked(False)
             self.show_extensions_checkbox.setChecked(False)
-            self.show_image_size_checkbox.setChecked(False)
+            self._set_dialog_overlay_settings(False, False, dialog_edited=True)
             # General Settings
             self.debug_checkbox.setChecked(False)
             self.confirm_delete_checkbox.setChecked(True)
@@ -1777,9 +1781,8 @@ class SettingsDialog(QDialog):
                 self.browse_image_history_save_after_slider.setValue(6)
                 self.browse_image_history_save_after_slider.blockSignals(False)
                 self._update_browse_image_history_save_after_label()
-            self.show_filename_checkbox.setChecked(False)
             self.show_extensions_checkbox.setChecked(False)
-            self.show_image_size_checkbox.setChecked(False)
+            self._set_dialog_overlay_settings(False, False, dialog_edited=True)
             # General Settings
             self.debug_checkbox.setChecked(False)
             self.confirm_delete_checkbox.setChecked(True)
@@ -2024,41 +2027,19 @@ class SettingsDialog(QDialog):
         filter_pattern_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
         filter_pattern_label.setMinimumWidth(130)
         thumbnail_layout.addRow(filter_pattern_label, filter_container)
-         # Show file names checkbox (new control for cmd-I setting)
-        self.show_filename_checkbox = QCheckBox("Show file names over thumbnails")
-        self.show_filename_checkbox.setToolTip("Show filename overlay on thumbnails. This enables renaming images also.")
-        self.show_filename_checkbox.setStyleSheet(self.SMALL_CHECKBOX_STYLE)
-        self.show_filename_checkbox.toggled.connect(self.on_show_filename_toggled)
-        # Wrap checkbox in container widget to add left margin
-        filename_container = QWidget()
-        filename_layout = QHBoxLayout(filename_container)
-        filename_layout.setContentsMargins(0, 2, 0, 0)
-        filename_layout.addWidget(self.show_filename_checkbox)
-        filename_layout.addStretch()
-        thumbnail_layout.addRow("", filename_container)
-        # Show extensions checkbox (disabled when show file names is unchecked)
+        # Show extensions checkbox (filename/size overlays are toggled via Cmd+I)
         self.show_extensions_checkbox = QCheckBox("Always show file extensions on file names")
         self.show_extensions_checkbox.setToolTip("Always show file extensions on file names. If unchecked, file extensions are only shown when multiple files have the same base name.")
         self.show_extensions_checkbox.setStyleSheet(self.SMALL_CHECKBOX_STYLE)
-        # Wrap checkbox in container widget to add left margin
-        extensions_container = QWidget()
-        extensions_layout = QHBoxLayout(extensions_container)
-        extensions_layout.setContentsMargins(20, 2, 0, 0)
-        extensions_layout.addWidget(self.show_extensions_checkbox)
-        extensions_layout.addStretch()
-        thumbnail_layout.addRow("", extensions_container)
-        
-        # Show image size checkbox (independent of filename display)
-        self.show_image_size_checkbox = QCheckBox("Show image size")
-        self.show_image_size_checkbox.setToolTip("Show image dimensions (width x height) below thumbnails. Can be shown independently of file names.")
-        self.show_image_size_checkbox.setStyleSheet(self.SMALL_CHECKBOX_STYLE)
-        # Wrap checkbox in container widget to add left margin
-        size_container = QWidget()
-        size_layout = QHBoxLayout(size_container)
-        size_layout.setContentsMargins(0, 2, 0, 0)
-        size_layout.addWidget(self.show_image_size_checkbox)
-        size_layout.addStretch()
-        thumbnail_layout.addRow("", size_container)
+        extensions_field = QWidget()
+        extensions_field_layout = QVBoxLayout(extensions_field)
+        extensions_field_layout.setContentsMargins(0, 2, 0, 0)
+        extensions_field_layout.setSpacing(2)
+        extensions_field_layout.addWidget(self.show_extensions_checkbox)
+        extensions_hint = QLabel(f"Use {CMD_SYMBOL}-I to cycle display of names, etc.")
+        extensions_hint.setStyleSheet(f"color: {TEXT_DISABLED_HEX}; font-size: 13px; font-style: italic;margin-left:18px")
+        extensions_field_layout.addWidget(extensions_hint)
+        thumbnail_layout.addRow("", extensions_field)
        
         # Drag/Drop auto date change checkbox
         self.drag_drop_auto_date_change_checkbox = QCheckBox("Drag/Drop changes dates when sorted by date")
@@ -3355,24 +3336,39 @@ class SettingsDialog(QDialog):
             }}
         """)
     
-    def on_show_filename_toggled(self, checked: bool):
-        """Handle show filename checkbox toggle - enable/disable show extensions checkbox"""
-        self.show_extensions_checkbox.setEnabled(checked)
-        if not checked:
-            # Gray out the checkbox when disabled
-            disabled_style = self.SMALL_CHECKBOX_STYLE + f"""
-                QCheckBox {{
-                    color: {self._settings_chrome().text_disabled_hex};
-                }}
-                QCheckBox::indicator:disabled {{
-                    background-color: {self._settings_chrome().bg_hex};
-                    border: 1px solid {self._settings_chrome().groupbox_border_hex};
-                }}
-            """
-            self.show_extensions_checkbox.setStyleSheet(disabled_style)
-        else:
-            # Restore normal style when enabled
-            self.show_extensions_checkbox.setStyleSheet(self.SMALL_CHECKBOX_STYLE)
+    def _thumbnail_overlay_settings_from_window(self):
+        """Read thumbnail filename/size overlay state from the main window (Cmd+I toggles)."""
+        parent_window = self.parent()
+        if parent_window:
+            return (
+                getattr(parent_window, 'thumbnail_filename_visible', False),
+                getattr(parent_window, 'show_image_size', False),
+            )
+        return (
+            self._overlay_filename_visible,
+            self._show_image_size,
+        )
+
+    def _set_dialog_overlay_settings(self, filename_visible, show_image_size, *, dialog_edited=False):
+        """Track overlay settings in dialog state (no UI controls for these)."""
+        self._overlay_filename_visible = bool(filename_visible)
+        self._show_image_size = bool(show_image_size)
+        if dialog_edited:
+            self._overlay_settings_dialog_edited = True
+
+    def _sync_overlay_settings_from_window(self):
+        """Refresh dialog overlay state and baseline from the main window."""
+        filename_visible, show_image_size = self._thumbnail_overlay_settings_from_window()
+        self._set_dialog_overlay_settings(filename_visible, show_image_size, dialog_edited=False)
+        self._overlay_settings_dialog_edited = False
+        self.original_settings['thumbnail_filename_visible'] = self._overlay_filename_visible
+        self.original_settings['show_image_size'] = self._show_image_size
+
+    def _get_overlay_settings_for_save(self):
+        """Overlay values to persist: dialog edits win; otherwise live window (Cmd+I while open)."""
+        if self._overlay_settings_dialog_edited:
+            return self._overlay_filename_visible, self._show_image_size
+        return self._thumbnail_overlay_settings_from_window()
 
     def validate_filter_pattern(self, pattern):
         """Validate the filter pattern input and update match count info"""
@@ -6179,29 +6175,23 @@ class SettingsDialog(QDialog):
                 self.show_extensions_checkbox.setChecked(show_extensions)
                 self.original_settings['show_extensions'] = show_extensions
                 
-                # Set show filename setting (thumbnail_filename_visible)
+                # Set show filename / image size (no UI; toggled via Cmd+I)
                 thumbnail_filename_visible = getattr(parent_window, 'thumbnail_filename_visible', False)
                 if not hasattr(parent_window, 'thumbnail_filename_visible'):
-                    # Fallback to config if not set on window
                     settings = config.load_settings()
                     thumbnail_filename_visible = settings.get('thumbnail_filename_visible', False)
-                self.show_filename_checkbox.setChecked(thumbnail_filename_visible)
-                self.original_settings['thumbnail_filename_visible'] = thumbnail_filename_visible
-                
-                # Set show image size setting
                 show_image_size = getattr(parent_window, 'show_image_size', False)
                 if not hasattr(parent_window, 'show_image_size'):
-                    # Fallback to config if not set on window
                     show_image_size = self.original_settings.get('show_image_size', False)
                     if 'show_image_size' not in self.original_settings:
-                        # Load from config
                         settings = config.load_settings()
                         show_image_size = settings.get('show_image_size', False)
-                self.show_image_size_checkbox.setChecked(show_image_size)
-                self.original_settings['show_image_size'] = show_image_size
-                
-                # Update show extensions enabled state based on show filename
-                self.on_show_filename_toggled(thumbnail_filename_visible)
+                self._set_dialog_overlay_settings(
+                    thumbnail_filename_visible, show_image_size, dialog_edited=False
+                )
+                self._overlay_settings_dialog_edited = False
+                self.original_settings['thumbnail_filename_visible'] = self._overlay_filename_visible
+                self.original_settings['show_image_size'] = self._show_image_size
                 
                 settings = config.load_settings()
                 bts = merge_browse_transparency_settings(settings.get("browse_transparency_settings"))
@@ -6418,18 +6408,15 @@ class SettingsDialog(QDialog):
                 self.show_extensions_checkbox.setChecked(show_extensions)
                 self.original_settings['show_extensions'] = show_extensions
                 
-                # Set show filename setting (thumbnail_filename_visible)
+                # Set show filename / image size (no UI; toggled via Cmd+I)
                 thumbnail_filename_visible = settings.get('thumbnail_filename_visible', False)
-                self.show_filename_checkbox.setChecked(thumbnail_filename_visible)
-                self.original_settings['thumbnail_filename_visible'] = thumbnail_filename_visible
-                
-                # Set show image size setting
                 show_image_size = settings.get('show_image_size', False)
-                self.show_image_size_checkbox.setChecked(show_image_size)
-                self.original_settings['show_image_size'] = show_image_size
-                
-                # Update show extensions enabled state based on show filename
-                self.on_show_filename_toggled(thumbnail_filename_visible)
+                self._set_dialog_overlay_settings(
+                    thumbnail_filename_visible, show_image_size, dialog_edited=False
+                )
+                self._overlay_settings_dialog_edited = False
+                self.original_settings['thumbnail_filename_visible'] = self._overlay_filename_visible
+                self.original_settings['show_image_size'] = self._show_image_size
                 
                 bts = merge_browse_transparency_settings(settings.get("browse_transparency_settings"))
                 self.original_settings["browse_transparency_settings"] = copy.deepcopy(bts)
@@ -7399,8 +7386,8 @@ class SettingsDialog(QDialog):
             'allow_thumbnail_locking': self.allow_thumbnail_locking_checkbox.isChecked(),
             'allow_quick_mass_rename': self.allow_quick_mass_rename_checkbox.isChecked(),
             'show_extensions': self.show_extensions_checkbox.isChecked(),
-            'thumbnail_filename_visible': self.show_filename_checkbox.isChecked(),
-            'show_image_size': self.show_image_size_checkbox.isChecked(),
+            'thumbnail_filename_visible': self._get_overlay_settings_for_save()[0],
+            'show_image_size': self._get_overlay_settings_for_save()[1],
             'imagegen_max_generation_dimension': (
                 self._imagegen_max_generation_dimension_px()
                 if hasattr(self, 'imagegen_max_generation_dimension_slider')
@@ -7698,17 +7685,8 @@ class SettingsDialog(QDialog):
         else:
             self.apply_theme()
         # Refresh settings from main window to show current state (in case cmd-I was used)
-        parent_window = self.parent()
-        if parent_window:
-            # Update filename and image size checkboxes to reflect current state
-            thumbnail_filename_visible = getattr(parent_window, 'thumbnail_filename_visible', False)
-            show_image_size = getattr(parent_window, 'show_image_size', False)
-            self.show_filename_checkbox.setChecked(thumbnail_filename_visible)
-            self.show_image_size_checkbox.setChecked(show_image_size)
-            self.on_show_filename_toggled(thumbnail_filename_visible)
-            # Update original settings to match current state
-            self.original_settings['thumbnail_filename_visible'] = thumbnail_filename_visible
-            self.original_settings['show_image_size'] = show_image_size
+        if self.parent():
+            self._sync_overlay_settings_from_window()
         # Set focus to tab bar on initial display
         if getattr(self, 'tab_widget', None):
             QTimer.singleShot(50, lambda: self.tab_widget.button_container.setFocus())

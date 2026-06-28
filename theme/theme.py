@@ -1268,40 +1268,28 @@ class ThemeStylesMixin:
         return f"QFrame {{ background-color: {self.file_tree_filter_sep_hex}; max-width: 1px; }}"
 
     def shortcuts_sidebar_widget_stylesheet(self) -> str:
-        return f"QWidget {{ background-color: {self.shortcuts_panel_bg_hex}; }}"
+        return f"QWidget {{ background-color: {self.sidebar_background_color_hex}; }}"
 
-    def shortcuts_sidebar_scroll_stylesheet(self) -> str:
+    def sidebar_pane_scroll_area_stylesheet(self, track_bg_hex: str | None = None) -> str:
+        """Right-sidebar QScrollArea: pane-colored track with macOS-like oval handles."""
         t = self
-        track = t.shortcuts_scroll_bg_hex
+        track = track_bg_hex or t.sidebar_background_color_hex
         return f"""
             QScrollArea {{
                 background-color: {track};
                 border: none;
             }}
+            QScrollArea > QWidget {{
+                background-color: {track};
+            }}
             {macos_scrollbar_for_surface(t, track)}
         """
 
+    def shortcuts_sidebar_scroll_stylesheet(self) -> str:
+        return self.sidebar_pane_scroll_area_stylesheet()
+
     def sidebar_jobs_scroll_stylesheet(self) -> str:
-        """Jobs pane list scroll area — view-border track with contrasting handle."""
-        t = self
-        pane_bg = t.sidebar_background_color_hex
-        track = t.chrome_border_hex
-        handle_hex = macos_scrollbar_handle_hex(
-            track,
-            theme_id=t.theme_id,
-            chrome_handle_hex=t.splitter_handle_hover_hex,
-        )
-        return f"""
-            QScrollArea {{
-                background-color: {pane_bg};
-                border: none;
-            }}
-            {macos_scrollbar_stylesheet(
-                track_bg_hex=track,
-                handle_hex=handle_hex,
-                handle_hover_hex=t.splitter_handle_pressed_hex,
-            )}
-        """
+        return self.sidebar_pane_scroll_area_stylesheet()
 
     def thumbnail_scroll_area_chrome_stylesheet(self, object_name: str = "thumbnailScrollArea") -> str:
         """Thumbnail grid scroll area: grid fill throughout; scrollbar track matches grid."""
@@ -1369,9 +1357,9 @@ class ThemeStylesMixin:
                 font-family: "Courier New", "Monaco", "Menlo";
                 font-size: 12pt;
                 font-weight: normal;
-                padding: 15px 18px;
+                padding: 0;
             }}
-            {macos_scrollbar_for_surface(t, track, selector_prefix="QTextBrowser")}
+            {macos_scrollbar_for_surface(t, track)}
         """
 
     def information_link_tooltip_stylesheet(self) -> str:
@@ -1383,11 +1371,14 @@ class ThemeStylesMixin:
         """
 
     def right_sidebar_combined_stylesheet(self) -> str:
-        return f"QWidget {{ background-color: {self.right_sidebar_combined_bg_hex}; }}"
+        return f"QWidget {{ background-color: {self.sidebar_background_color_hex}; }}"
 
     def right_sidebar_inner_splitter_stylesheet(self) -> str:
         t = self
         return f"""
+            QSplitter {{
+                background-color: {t.sidebar_background_color_hex};
+            }}
             QSplitter::handle {{
                 background-color: {t.chrome_border_hex};
                 border: none;

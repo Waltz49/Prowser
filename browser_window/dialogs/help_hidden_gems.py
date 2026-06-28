@@ -34,6 +34,8 @@ class HiddenGemsHelpDialog(MarkdownDialog):
 
 Many useful actions are not in the menus. Some are hinted in tooltips only; this page collects them.
 
+This page is really just a development aid to guide future design and possibly document some design shortcomings.
+
 #
 
 ## macOS key names
@@ -111,7 +113,7 @@ These links appear in the information pane when a user comment is present.
 | Modifier + click | Where | Action |
 |------------------|-------|--------|
 | **{opt}+click** | Job queue — **Cancel** (trash) | Cancel this job **and all later jobs** with no confirmation. |
-| **{opt}+click** | Job queue — series **minus** (−) | Remove **all** remaining images in the series (not just one). |
+| **{opt}+click** | Job queue — series **minus** (-) | Remove **all** remaining images in the series (not just one). |
 
 Related (modifier + drag, not click):
 

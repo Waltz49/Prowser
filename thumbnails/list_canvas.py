@@ -26,6 +26,7 @@ from PySide6.QtWidgets import QWidget, QApplication
 
 # Local imports
 import thumbnails.thumbnail_constants as tc
+from theme.theme_base import asset_path
 from thumbnails.thumbnail_constants import (
     BASE_MARGIN, CANVAS_TOP_MARGIN, CANVAS_BOTTOM_MARGIN, CANVAS_TOTAL_TOP_MARGIN,
     inset_rect_for_stroke,
@@ -746,7 +747,7 @@ class ListCanvas(QWidget):
     def _draw_padlock_overlay(self, painter: QPainter, rect: QRect):
         """Draw padlock icon overlay"""
         # Try to load padlock image
-        padlock_path = os.path.join(os.path.dirname(__file__), "assets", "padlock.png")
+        padlock_path = asset_path("padlock.png")
         if os.path.exists(padlock_path):
             padlock_pixmap = QPixmap(padlock_path)
             if not padlock_pixmap.isNull():

@@ -194,6 +194,11 @@ DEFAULT_TTS_SPEECH_SPEED = 1.0
 TTS_SPEECH_SPEED_MIN = 0.5
 TTS_SPEECH_SPEED_MAX = 2.0
 TTS_SPEECH_SPEED_SLIDER_SCALE = 100
+BEEP_SCRIPT = Path(os.environ.get("BEEP_SCRIPT", str(Path.home() / "bin" / "beep")))
+BEEP_AUDIO_FALLBACK = Path(
+    os.environ.get("BEEP_AUDIO", str(Path.home() / "Sites/roku/beephi.mp3"))
+)
+BEEP_PLAYBACK_RATE = float(os.environ.get("BEEP_PLAYBACK_RATE", "4"))
 GEMMA4_THINKING_SKIP_PREFILL = "<|channel>thought\n<|channel|>"
 GEMMA4_NO_THINK_SYSTEM = (
     "Thinking and planning are disabled. Reply with only the final spoken answer. "
@@ -1389,6 +1394,111 @@ def _piper_length_scale(speech_speed: float) -> float:
     return max(0.1, min(3.0, 1.0 / speed))
 
 
+_EMOJI_RE = re.compile(
+    "["
+    "\U0001F1E0-\U0001F1FF"  # regional indicators (flags)
+    "\U0001F300-\U0001FAFF"  # symbols & pictographs
+    "\U00002700-\U000027BF"  # dingbats
+    "\U000024C2-\U0001F251"  # enclosed characters
+    "\U0001F600-\U0001F64F"  # emoticons
+    "\U0001F680-\U0001F6FF"  # transport & map
+    "\U00002600-\U000026FF"  # misc symbols
+    "\u200d"  # ZWJ (compound emoji joiner)
+    "\ufe0f"  # variation selector-16
+    "\u20e3"  # combining enclosing keycap
+    "]+",
+    flags=re.UNICODE,
+)
+
+
+def _text_for_tts(text: str) -> str:
+    """Remove emoji and collapse whitespace before speech synthesis."""
+    if not text:
+        return ""
+    cleaned = _EMOJI_RE.sub("", text)
+    return re.sub(r"\s+", " ", cleaned).strip()
+
+
+def play_input_beep() -> None:
+    """Short ack when the user finishes speaking (end of VAD utterance)."""
+    try:
+        if BEEP_SCRIPT.is_file():
+            subprocess.Popen(
+                ["/bin/sh", str(BEEP_SCRIPT)],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            return
+        afplay = shutil.which("afplay")
+        if afplay and BEEP_AUDIO_FALLBACK.is_file():
+            subprocess.Popen(
+                [afplay, "-r", str(BEEP_PLAYBACK_RATE), str(BEEP_AUDIO_FALLBACK)],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+    except OSError:
+        pass
+
+
+def _piper_write_wav(
+    text: str,
+    voice_path: str,
+    out_path: str,
+    *,
+    speech_speed: float = DEFAULT_TTS_SPEECH_SPEED,
+) -> bool:
+    text = _text_for_tts(text)
+    if not text or not Path(voice_path).is_file():
+        return False
+    piper_cmd = [
+        sys.executable,
+        "-m",
+        "piper",
+        "--model",
+        voice_path,
+        "--output_file",
+        out_path,
+    ]
+    if abs(speech_speed - 1.0) > 0.01:
+        piper_cmd.extend(["--length-scale", f"{_piper_length_scale(speech_speed):.3f}"])
+    proc = subprocess.run(
+        piper_cmd,
+        input=text.encode("utf-8"),
+        capture_output=True,
+        timeout=120,
+    )
+    return proc.returncode == 0 and Path(out_path).is_file()
+
+
+def synthesize_text_to_wav(
+    text: str,
+    out_path: str,
+    *,
+    engine: str,
+    piper_voice_path: str,
+    pocket_voice: str,
+    speech_speed: float = DEFAULT_TTS_SPEECH_SPEED,
+    pocket_engine: PocketTTSEngine | None = None,
+    stop_events: tuple[threading.Event, ...] = (),
+) -> bool:
+    if not text.strip():
+        return False
+    if engine == TTS_ENGINE_POCKET:
+        voice_id = resolve_pocket_voice(pocket_voice)
+        if pocket_engine is not None:
+            try:
+                return pocket_engine.write_wav(text, voice_id, out_path, stop_events)
+            except Exception:
+                pass
+        return _pocket_generate_wav(text, voice_id, out_path, *stop_events)
+    return _piper_write_wav(
+        text,
+        piper_voice_path,
+        out_path,
+        speech_speed=speech_speed,
+    )
+
+
 def _read_pipe_chunk(pipe: Any, timeout_sec: float = 0.2) -> bytes | None:
     """Read from a pipe, or None if no data within timeout (poll stop events meanwhile)."""
     ready, _, _ = select.select([pipe], [], [], timeout_sec)
@@ -1405,7 +1515,8 @@ def piper_speak(
     on_active: Callable[[subprocess.Popen[Any], Any], None] | None = None,
     on_inactive: Callable[[], None] | None = None,
 ) -> None:
-    if not text.strip():
+    text = _text_for_tts(text)
+    if not text:
         return
     if not Path(voice_path).exists():
         raise FileNotFoundError(f"Piper voice not found: {voice_path}")
@@ -1464,6 +1575,7 @@ def piper_speak(
 
 
 def _pocket_prepare_text(text: str) -> str:
+    text = _text_for_tts(text)
     text = re.sub(r"\s+", " ", text.replace("#", " ").replace("*", " ")).strip()
     text = re.sub(r"honest", "onest", text, flags=re.I)
     return text.replace(". ", "... ")
@@ -2157,6 +2269,7 @@ class VoiceLoopWorker(QThread):
         self._ui_commands: queue.Queue[str] = queue.Queue()
         self._pending_redo_turn: ChatTurn | None = None
         self._redo_only = False
+        self._command_wav_cache: dict[str, str] = {}
 
     def set_system_prompt(self, prompt: str | None) -> None:
         self._system_prompt = prompt.strip() if prompt and prompt.strip() else None
@@ -2282,36 +2395,92 @@ class VoiceLoopWorker(QThread):
         self.command_feedback.emit(message)
         self.status.emit(message)
 
+    def _ensure_command_wav(self, message: str) -> str | None:
+        cached = self._command_wav_cache.get(message)
+        if cached and Path(cached).is_file():
+            return cached
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False, prefix="cmdfb_") as tmp:
+            wav_path = tmp.name
+        pocket_engine: PocketTTSEngine | None = None
+        if self._tts_engine == TTS_ENGINE_POCKET:
+            try:
+                pocket_engine = self._ensure_pocket_engine()
+                if not pocket_engine.loaded:
+                    pocket_engine.warmup(self._pocket_voice)
+            except Exception:
+                pocket_engine = None
+        ok = synthesize_text_to_wav(
+            message,
+            wav_path,
+            engine=self._tts_engine,
+            piper_voice_path=self._piper_voice,
+            pocket_voice=self._pocket_voice,
+            speech_speed=self._tts_speech_speed,
+            pocket_engine=pocket_engine,
+        )
+        if not ok:
+            Path(wav_path).unlink(missing_ok=True)
+            return None
+        self._command_wav_cache[message] = wav_path
+        return wav_path
+
+    def _speak_command_feedback(self, message: str) -> None:
+        self._command_note(message)
+        wav_path = self._ensure_command_wav(message)
+        if wav_path is None:
+            return
+        self._tts_stop.clear()
+        try:
+            if self._tts_engine == TTS_ENGINE_POCKET and abs(self._tts_speech_speed - 1.0) > 0.01:
+                _afplay_wav(
+                    wav_path,
+                    self._tts_speech_speed,
+                    self._tts_stop,
+                    on_active=self._set_tts_active,
+                    on_inactive=self._clear_tts_active,
+                )
+            else:
+                play_wav_file(
+                    wav_path,
+                    self._tts_stop,
+                    on_active=self._set_tts_active,
+                    on_inactive=self._clear_tts_active,
+                )
+        except Exception:
+            pass
+        finally:
+            self._tts_stop.clear()
+
     def _handle_voice_command(self, command: str) -> bool:
         """Handle redo/clear/stop/copy/undo. Returns False to exit the hands-free listen loop."""
         if command == "copy":
             last_reply = self._last_assistant_reply()
             if not last_reply:
-                self._command_note("Nothing to copy.")
+                self._speak_command_feedback("Nothing to copy.")
                 return True
             self.copy_to_clipboard.emit(last_reply)
-            self._command_note("Last response copied to clipboard.")
+            self._speak_command_feedback("Last response copied to clipboard.")
             return True
 
         if command == "clear":
             self.clear_history()
             self.chat_cleared.emit()
-            self._command_note("Conversation cleared.")
+            self._speak_command_feedback("Conversation cleared.")
             return True
 
         if command == "stop":
             self._continuous = False
-            self._stop.set()
             self.stop_requested.emit()
-            self._command_note("Stopped.")
+            self._speak_command_feedback("Stopped.")
+            self._stop.set()
             return False
 
         if command == "undo":
             if self._pop_last_exchange() is None:
-                self._command_note("Nothing to undo.")
+                self._speak_command_feedback("Nothing to undo.")
                 return True
             self.conversation_display_refresh.emit()
-            self.status.emit("Undone.")
+            self._speak_command_feedback("Undone.")
             return True
 
         if command == "redo":
@@ -2612,6 +2781,7 @@ class VoiceLoopWorker(QThread):
                 self.status.emit("No speech detected.")
             return True
 
+        play_input_beep()
         self.status.emit("Transcribing...")
         assert self._whisper is not None
         try:
@@ -2639,6 +2809,9 @@ class VoiceLoopWorker(QThread):
         whisper = self._whisper
         self._whisper = None
         self._client = None
+        for path in self._command_wav_cache.values():
+            Path(path).unlink(missing_ok=True)
+        self._command_wav_cache.clear()
         if whisper is not None:
             del whisper
         if self._pocket_engine is not None:

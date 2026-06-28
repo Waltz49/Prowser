@@ -15,6 +15,7 @@ from typing import Dict, List, Optional, Set, Tuple
 # Local imports
 from utils import entry_debug, entry_debug_wrapper, normalize_path_for_display, show_styled_warning, is_inside_photos_library
 import thumbnails.thumbnail_constants as tc
+from theme.theme_base import asset_path
 
 # Third-party imports
 from PySide6.QtCore import (
@@ -3516,8 +3517,7 @@ class ThumbnailCanvas(QWidget):
         if self._padlock_pixmap is not None:
             return self._padlock_pixmap
         
-        # Try to load padlock image from assets folder
-        padlock_path = os.path.join(os.path.dirname(__file__), "assets", "padlock.png")
+        padlock_path = asset_path("padlock.png")
         if os.path.exists(padlock_path):
             pixmap = QPixmap(padlock_path)
             if not pixmap.isNull():

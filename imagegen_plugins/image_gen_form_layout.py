@@ -433,6 +433,7 @@ IMAGE_GEN_BELOW_PROMPT_SPACING = 8
 IMAGE_GEN_SLIDER_TRACK_WIDTH = 200
 IMAGE_GEN_SLIDER_ROW_SPACING = 8
 IMAGE_GEN_FIELD_LABEL_OBJECT_NAME = "imageGenFieldLabel"
+IMAGE_GEN_FIELD_LABEL_FONT_SIZE = 14
 # Two-column flow below the prompt when there are enough fields and width.
 IMAGE_GEN_TWO_COLUMN_MIN_FIELD_COUNT = 5
 IMAGE_GEN_TWO_COLUMN_MIN_ITEM_WIDTH = (
@@ -915,13 +916,7 @@ def _build_image_gen_column_cell(
     cell_layout.setContentsMargins(0, 0, 0, 0)
     cell_layout.setSpacing(IMAGE_GEN_FIELD_LABEL_SPACING)
     cell_layout.addWidget(make_image_gen_field_label(label_text, cell), 0)
-    if half_column:
-        cell_layout.addWidget(
-            control,
-            0,
-            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
-        )
-    elif control.sizePolicy().horizontalPolicy() == QSizePolicy.Policy.Maximum:
+    if control.sizePolicy().horizontalPolicy() == QSizePolicy.Policy.Maximum:
         cell_layout.addWidget(
             wrap_image_gen_field_control_indent(control, cell),
             0,
@@ -1484,7 +1479,7 @@ def image_gen_field_label_stylesheet() -> str:
     return f"""
     #imageGenDialog QLabel#{IMAGE_GEN_FIELD_LABEL_OBJECT_NAME} {{
         color: {t.dialog_text_color_hex};
-        font-size: 11px;
+        font-size: {IMAGE_GEN_FIELD_LABEL_FONT_SIZE}px;
         font-weight: normal;
         padding-top: 4px;
         margin: 0px;

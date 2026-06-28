@@ -40,6 +40,7 @@ from status_bar_config import (
     handle_task_info_reference_link_clicked,
 )
 from theme.theme_service import get_active_theme
+from browser_window.sidebar.sidebar_pane_chrome import apply_scroll_area_viewport_background
 from thumbnails.sidebar_pane_layout import MIN_JOBS_QUEUE_CONTENT_HEIGHT
 from utils import create_job_status_thumbnail_label
 
@@ -441,7 +442,10 @@ class SidebarJobsWidget(QWidget):
         self._scroll.setMinimumHeight(0)
         self._scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self._scroll.setStyleSheet(get_active_theme().sidebar_jobs_scroll_stylesheet())
-        self._scroll.viewport().installEventFilter(self)
+        apply_scroll_area_viewport_background(self._scroll, t.sidebar_background_color_hex)
+        vp = self._scroll.viewport()
+        if vp:
+            vp.installEventFilter(self)
 
         self._list_host = QWidget()
         self._list_layout = QVBoxLayout(self._list_host)
@@ -495,6 +499,7 @@ class SidebarJobsWidget(QWidget):
         )
         if hasattr(self, "_scroll"):
             self._scroll.setStyleSheet(t.sidebar_jobs_scroll_stylesheet())
+            apply_scroll_area_viewport_background(self._scroll, t.sidebar_background_color_hex)
         if hasattr(self, "_active_job_browser"):
             self._active_job_browser.setStyleSheet(_active_job_strip_browser_stylesheet())
         card_ss = _job_card_stylesheet()

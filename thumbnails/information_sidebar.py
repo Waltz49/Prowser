@@ -44,6 +44,13 @@ if os.path.exists(_TRASH_ICON_PATH):
 else:
     _DELETE_ICON_HTML = "⊘"
 
+# Content inset via viewport margins so the vertical scrollbar stays flush right.
+_INFO_VIEWPORT_MARGIN_LEFT = 18
+_INFO_VIEWPORT_MARGIN_TOP = 15
+_INFO_VIEWPORT_MARGIN_RIGHT = 18
+_INFO_VIEWPORT_MARGIN_BOTTOM = 15
+_INFO_CONTENT_WIDTH_INSET = _INFO_VIEWPORT_MARGIN_LEFT + _INFO_VIEWPORT_MARGIN_RIGHT
+
 _INFO_AI_ICON_SIZE = 16  # display size; source assets are 40x40
 
 
@@ -102,13 +109,19 @@ class InformationSidebar(QWidget):
         self.info_text_edit.setOpenExternalLinks(False)
         self.info_text_edit.setOpenLinks(False)
         self.info_text_edit.anchorClicked.connect(self._on_anchor_clicked)
-        self.info_text_edit.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.info_text_edit.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         self.info_text_edit.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.info_text_edit.setFocusPolicy(Qt.NoFocus)
         vp = self.info_text_edit.viewport()
         vp.setMouseTracking(True)
         vp.installEventFilter(self)
         self._information_viewport = vp
+        self.info_text_edit.setViewportMargins(
+            _INFO_VIEWPORT_MARGIN_LEFT,
+            _INFO_VIEWPORT_MARGIN_TOP,
+            _INFO_VIEWPORT_MARGIN_RIGHT,
+            _INFO_VIEWPORT_MARGIN_BOTTOM,
+        )
         self.info_text_edit.setStyleSheet(get_active_theme().information_sidebar_textbrowser_stylesheet())
         self.info_text_edit.hide()
         right_sidebar_layout.addWidget(self.info_text_edit)
@@ -840,7 +853,7 @@ class InformationSidebar(QWidget):
         if self.info_text_edit is not None:
             vp_w = int(self.info_text_edit.viewport().width())
             if vp_w > 0:
-                return vp_w + 36
+                return vp_w + _INFO_CONTENT_WIDTH_INSET
         return 250
 
     def _info_content_width_px(self) -> int:
@@ -852,7 +865,7 @@ class InformationSidebar(QWidget):
             vp_w = int(self.info_text_edit.viewport().width())
             if vp_w > 0:
                 return vp_w
-        return max(160, self._info_container_width_px() - 36)
+        return max(160, self._info_container_width_px() - _INFO_CONTENT_WIDTH_INSET)
 
     def preferred_content_height(self) -> int:
         """Height needed to show all information content without vertical scrolling."""
@@ -865,8 +878,8 @@ class InformationSidebar(QWidget):
             doc.setTextWidth(content_w)
         layout = doc.documentLayout()
         doc_h = layout.documentSize().height() if layout is not None else doc.size().height()
-        # QTextBrowser stylesheet uses 15px vertical padding; include margins and slack.
-        pad_v = 30
+        # Viewport top/bottom margins (15px each); include slack.
+        pad_v = _INFO_VIEWPORT_MARGIN_TOP + _INFO_VIEWPORT_MARGIN_BOTTOM
         extra = (
             pad_v
             + doc.documentMargin() * 2
@@ -898,7 +911,7 @@ class InformationSidebar(QWidget):
             return False
 
     def _restore_info_scroll_position(self, scroll_pos: int) -> None:
-        """Restore vertical scroll after HTML relayout (scrollbar is hidden but still drives viewport)."""
+        """Restore vertical scroll after HTML relayout."""
         if not self.info_text_edit:
             return
         sb = self.info_text_edit.verticalScrollBar()
@@ -922,9 +935,9 @@ class InformationSidebar(QWidget):
             if self.isVisible():
                 sidebar_width = self.width()
                 if sidebar_width > 0:
-                    doc.setTextWidth(sidebar_width - 36)
+                    doc.setTextWidth(sidebar_width - _INFO_CONTENT_WIDTH_INSET)
             elif hasattr(self.main_window, "right_sidebar_width"):
-                doc.setTextWidth(self.main_window.right_sidebar_width - 36)
+                doc.setTextWidth(self.main_window.right_sidebar_width - _INFO_CONTENT_WIDTH_INSET)
             self.info_text_edit.update()
             if preserve_scroll:
                 self._restore_info_scroll_position(scroll_pos)
@@ -933,9 +946,9 @@ class InformationSidebar(QWidget):
         if self.isVisible():
             sidebar_width = self.width()
             if sidebar_width > 0:
-                doc.setTextWidth(sidebar_width - 36)
+                doc.setTextWidth(sidebar_width - _INFO_CONTENT_WIDTH_INSET)
         elif hasattr(self.main_window, "right_sidebar_width"):
-            doc.setTextWidth(self.main_window.right_sidebar_width - 36)
+            doc.setTextWidth(self.main_window.right_sidebar_width - _INFO_CONTENT_WIDTH_INSET)
         self.info_text_edit.update()
         if preserve_scroll:
             self._restore_info_scroll_position(scroll_pos)

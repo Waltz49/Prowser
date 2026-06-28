@@ -23,6 +23,7 @@ from PySide6.QtGui import (
 
 # Local imports
 from exif.exif_image_loader import load_image_with_exif_correction
+from theme.theme_base import asset_path
 from theme.theme_service import get_active_theme
 from thumbnails.thumbnail_canvas import ThumbnailCanvas
 from thumbnails.list_canvas import ListCanvas
@@ -1235,8 +1236,7 @@ class BrowseImageLabel(QLabel):
         if self._padlock_pixmap is not None:
             return self._padlock_pixmap
         
-        # Try to load padlock image from assets folder
-        padlock_path = os.path.join(os.path.dirname(__file__), "assets", "padlock.png")
+        padlock_path = asset_path("padlock.png")
         if os.path.exists(padlock_path):
             pixmap = QPixmap(padlock_path)
             if not pixmap.isNull():

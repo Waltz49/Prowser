@@ -8,6 +8,11 @@ from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QSplitter, QSizePolicy, QApplication,
 )
 
+from browser_window.sidebar.sidebar_pane_chrome import (
+    apply_section_pane_shell,
+    apply_sidebar_pane_background,
+)
+
 from thumbnails.combined_sidebar_widget import HeaderWidget
 from thumbnails.information_sidebar import InformationSidebar
 from browser_window.sidebar.shortcuts_sidebar import ShortcutsSidebar
@@ -87,6 +92,8 @@ class RightSidebarCombinedWidget(QWidget):
         self.setMinimumWidth(250)
         self.setMaximumWidth(800)
         _th = get_active_theme()
+        pane_bg = _th.sidebar_background_color_hex
+        apply_sidebar_pane_background(self, pane_bg)
         self.setStyleSheet(_th.right_sidebar_combined_stylesheet())
 
         layout = QVBoxLayout(self)
@@ -95,6 +102,7 @@ class RightSidebarCombinedWidget(QWidget):
 
         self.splitter = QSplitter(Qt.Vertical)
         self.splitter.setFocusPolicy(Qt.NoFocus)
+        apply_sidebar_pane_background(self.splitter, pane_bg)
         self.splitter.setHandleWidth(_th.view_border_width_px)
         self.splitter.setStyleSheet(_th.right_sidebar_inner_splitter_stylesheet())
 
@@ -184,6 +192,11 @@ class RightSidebarCombinedWidget(QWidget):
             content_area.setMinimumHeight(0)
 
         sect_layout.addWidget(content_area)
+        _th = get_active_theme()
+        pane_bg = _th.sidebar_background_color_hex
+        pane_ss = _th.file_tree_pane_shell_stylesheet()
+        for w in (section, content_area):
+            apply_section_pane_shell(w, pane_bg, pane_ss)
         return section
 
     def _wire_pane_titlebar_drag(self, header, pane_idx: int, *, on_drag_before=None, on_drag_after=None) -> None:
@@ -715,9 +728,21 @@ class RightSidebarCombinedWidget(QWidget):
     def refresh_theme_styles(self):
         """Reapply shell, headers, and embedded widgets after theme change."""
         th = get_active_theme()
+        pane_bg = th.sidebar_background_color_hex
+        apply_sidebar_pane_background(self, pane_bg)
         self.setStyleSheet(th.right_sidebar_combined_stylesheet())
         self.splitter.setHandleWidth(th.view_border_width_px)
+        apply_sidebar_pane_background(self.splitter, pane_bg)
         self.splitter.setStyleSheet(th.right_sidebar_inner_splitter_stylesheet())
+        pane_ss = th.file_tree_pane_shell_stylesheet()
+        for w in (
+            getattr(self, "shortcuts_section", None),
+            getattr(self, "jobs_section", None),
+            getattr(self, "shortcuts_content", None),
+            getattr(self, "jobs_content", None),
+        ):
+            if w is not None:
+                apply_section_pane_shell(w, pane_bg, pane_ss)
         if getattr(self, "shortcuts_header", None):
             self.shortcuts_header.refresh_theme_styles()
         if getattr(self, "jobs_header", None):

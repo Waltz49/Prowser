@@ -24,6 +24,7 @@ from thumbnails.thumbnail_constants import (
     asset_file_url,
 )
 from theme.theme_service import get_active_theme
+from browser_window.sidebar.sidebar_pane_chrome import apply_scroll_area_viewport_background
 from tooltip_popup_utils import ensure_tooltip_label, position_tooltip_near_cursor
 
 
@@ -96,6 +97,7 @@ class ShortcutsSidebar(QWidget):
         scroll_area.setWidget(self.content_widget)
         if scroll_area.viewport():
             scroll_area.viewport().setFocusPolicy(Qt.NoFocus)
+            apply_scroll_area_viewport_background(scroll_area, _th.sidebar_background_color_hex)
         layout.addWidget(scroll_area)
 
         self._shortcuts_label = None
@@ -525,6 +527,7 @@ class ShortcutsSidebar(QWidget):
         th = get_active_theme()
         self.setStyleSheet(th.shortcuts_sidebar_widget_stylesheet())
         self.scroll_area.setStyleSheet(th.shortcuts_sidebar_scroll_stylesheet())
+        apply_scroll_area_viewport_background(self.scroll_area, th.sidebar_background_color_hex)
         if self._move_mode_combo:
             self._move_mode_combo.setStyleSheet(th.shortcuts_sidebar_combo_stylesheet())
         if self._move_mode_note_label:
