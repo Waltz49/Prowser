@@ -1532,7 +1532,12 @@ class ImageGenController(QObject):
 
     def _remove_partial_output(self) -> None:
         path = self._output_path
-        if path and os.path.isfile(path):
+        if not path:
+            return
+        from prowser_temp_files import cleanup_cancelled_generation_output_artifacts
+
+        cleanup_cancelled_generation_output_artifacts(path)
+        if os.path.isfile(path):
             try:
                 if os.path.getsize(path) < 64:
                     os.remove(path)
@@ -1624,6 +1629,19 @@ class ImageGenController(QObject):
             remove_edit_aspect_pad_temps(self._aspect_pad_temp_paths)
             self._aspect_pad_temp_paths = []
 
+    def _cleanup_cancelled_generation_temps(self) -> None:
+        from prowser_temp_files import (
+            cleanup_cancelled_generation_output_artifacts,
+            cleanup_stale_imagegen_worker_temps,
+        )
+
+        output_path = self._output_path
+        if output_path:
+            cleanup_cancelled_generation_output_artifacts(output_path)
+        if self._expand_base_path:
+            remove_expand_base_temp(self._expand_base_path)
+        cleanup_stale_imagegen_worker_temps()
+
     def _cleanup_infill_batch_assets(self) -> None:
         plugin = self._active_plugin
         if plugin is None or plugin.pipeline_id != "mflux_fill_infill":
@@ -1634,6 +1652,8 @@ class ImageGenController(QObject):
 
     def _finish_copy_batch(self, *, cancelled: bool = False) -> None:
         self._stop_copy_cooldown_timer()
+        if cancelled:
+            self._cleanup_cancelled_generation_temps()
         self._remove_aspect_pad_temps()
         self._cleanup_infill_batch_assets()
         self._copy_batch_active = False

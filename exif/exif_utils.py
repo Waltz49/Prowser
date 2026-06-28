@@ -735,6 +735,7 @@ def restore_usercomment_to_file(file_path: str, usercomment: bytes) -> bool:
     is_webp = ext == '.webp'
     is_png = ext == '.png'
     is_tiff = ext in ['.tiff', '.tif']
+    temp_path: str | None = None
     try:
         import piexif
         from PIL import Image
@@ -755,6 +756,7 @@ def restore_usercomment_to_file(file_path: str, usercomment: bytes) -> bool:
             temp_path = file_path + ".tmp"
             piexif.insert(new_exif, file_path, temp_path)
             os.replace(temp_path, file_path)
+            temp_path = None
             os.utime(file_path, (file_atime, file_mtime))
             return True
         elif is_png or is_tiff:
@@ -792,10 +794,17 @@ def restore_usercomment_to_file(file_path: str, usercomment: bytes) -> bool:
                     exif[TAG_USERCOMMENT] = usercomment
                     img.save(temp_path, "TIFF", exif=exif)
             os.replace(temp_path, file_path)
+            temp_path = None
             os.utime(file_path, (file_atime, file_mtime))
             return True
     except Exception as e:
         print(f"DEBUG restore_usercomment_to_file: failed for {file_path}: {e}")
+    finally:
+        if temp_path:
+            try:
+                os.unlink(temp_path)
+            except OSError:
+                pass
     return False
 
 

@@ -7,10 +7,9 @@ import json
 import os
 import re
 import shutil
-import tempfile
 import threading
 
-from prowser_temp_files import prowser_mkdtemp
+from prowser_temp_files import prowser_mkdtemp, prowser_mkstemp_path
 import time
 from typing import Any, Callable, Dict, Optional, Set, Tuple
 
@@ -36,21 +35,17 @@ def emit_mflux_progress(
 
 
 def atomic_copy2(src: str, dst: str) -> None:
-    """Copy src to dst via a same-directory temp file and os.replace (atomic on macOS)."""
-    dst_dir = os.path.dirname(os.path.abspath(dst)) or "."
-    fd, tmp_path = tempfile.mkstemp(
-        prefix=".imagegen-progress-", suffix=".png", dir=dst_dir
-    )
-    os.close(fd)
+    """Copy src to dst using a temp file under the configured Prowser temp directory."""
+    tmp_path = prowser_mkstemp_path(prefix="imagegen-progress-", suffix=".png")
     try:
         shutil.copy2(src, tmp_path)
-        os.replace(tmp_path, dst)
-    except Exception:
+        shutil.copy2(tmp_path, dst)
+    finally:
         try:
-            os.unlink(tmp_path)
+            if os.path.isfile(tmp_path):
+                os.unlink(tmp_path)
         except OSError:
             pass
-        raise
 
 
 def _parse_stepwise_name(name: str) -> Optional[Tuple[int, int, int]]:

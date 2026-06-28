@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import getpass
 import os
+import shutil
 import tempfile
 import threading
 from typing import Optional
@@ -209,3 +210,81 @@ def prowser_temp_subdir(name: str) -> str:
     """Return (and create) a named subdirectory under the configured temp directory."""
     base = ensure_temporary_files_directory()
     return _prepare_dir(os.path.join(base, name))
+
+
+_LEGACY_PROGRESS_PREFIX = ".imagegen-progress-"
+
+_IMAGEGEN_TEMP_FILE_PREFIXES = (
+    "imagegen-mflux-",
+    "imagegen-progress-",
+    "imagegen-expand-base-",
+    "imagegen-mflux-infill-",
+    "imagegen-mflux-infill-mask-",
+    "imagegen-mflux-fill-",
+    "imagegen-mflux-mask-",
+)
+
+_IMAGEGEN_TEMP_DIR_PREFIXES = (
+    "imagegen-mflux-stepwise-",
+    "imagegen-infill-",
+)
+
+
+def remove_file_if_exists(path: str) -> None:
+    if not path:
+        return
+    try:
+        if os.path.isfile(path):
+            os.unlink(path)
+    except OSError:
+        pass
+
+
+def cleanup_exif_write_sidecar(image_path: str) -> None:
+    """Remove image_path.tmp left by an interrupted EXIF UserComment write."""
+    if not image_path:
+        return
+    remove_file_if_exists(image_path + ".tmp")
+
+
+def cleanup_legacy_progress_temps_near_output(output_path: str) -> None:
+    """Remove .imagegen-progress-*.png siblings left in the output directory."""
+    if not output_path:
+        return
+    directory = os.path.dirname(os.path.abspath(output_path))
+    if not directory or not os.path.isdir(directory):
+        return
+    try:
+        for name in os.listdir(directory):
+            if name.startswith(_LEGACY_PROGRESS_PREFIX) and name.endswith(".png"):
+                remove_file_if_exists(os.path.join(directory, name))
+    except OSError:
+        pass
+
+
+def cleanup_stale_imagegen_worker_temps(settings: Optional[dict] = None) -> None:
+    """Sweep the configured temp dir for orphaned imagegen worker files after cancel."""
+    try:
+        temp_dir = resolve_temporary_files_directory(settings)
+    except Exception:
+        return
+    if not os.path.isdir(temp_dir):
+        return
+    try:
+        names = os.listdir(temp_dir)
+    except OSError:
+        return
+    for name in names:
+        full = os.path.join(temp_dir, name)
+        if any(name.startswith(prefix) for prefix in _IMAGEGEN_TEMP_DIR_PREFIXES):
+            if os.path.isdir(full):
+                shutil.rmtree(full, ignore_errors=True)
+            continue
+        if any(name.startswith(prefix) for prefix in _IMAGEGEN_TEMP_FILE_PREFIXES):
+            remove_file_if_exists(full)
+
+
+def cleanup_cancelled_generation_output_artifacts(output_path: str) -> None:
+    """Remove sidecar and legacy temp files next to a cancelled generation output."""
+    cleanup_exif_write_sidecar(output_path)
+    cleanup_legacy_progress_temps_near_output(output_path)
