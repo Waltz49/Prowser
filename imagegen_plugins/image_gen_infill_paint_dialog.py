@@ -48,7 +48,11 @@ from imagegen_plugins.image_gen_session_state import (
     mask_from_png_bytes,
     mask_to_png_bytes,
 )
-from imagegen_plugins.infill_paint_canvas import InfillPaintCanvas
+from imagegen_plugins.infill_paint_canvas import (
+    InfillPaintCanvas,
+    install_infill_paint_mask_keyboard_shortcuts,
+    refresh_infill_paint_mask_keyboard_shortcuts,
+)
 from imagegen_plugins.image_gen_source_nav import (
     ImageGenSourceNavRow,
     install_source_nav_keyboard_shortcuts,
@@ -266,6 +270,7 @@ class ImageGenInfillPaintDialog(QDialog):
         self._source_nav.set_center_widget(self._canvas)
         canvas_host_layout.addWidget(self._source_nav)
         install_source_nav_keyboard_shortcuts(self, self._source_nav)
+        install_infill_paint_mask_keyboard_shortcuts(self, self._canvas)
         splitter.add_preview_pane(canvas_host)
 
         self._settings = InfillPaintSettingsDialog(
@@ -279,6 +284,7 @@ class ImageGenInfillPaintDialog(QDialog):
         )
         splitter.add_controls_pane(self._settings)
         layout.addWidget(splitter, 1)
+        refresh_infill_paint_mask_keyboard_shortcuts(self)
 
         if not self._panel_mode:
             actions = create_image_gen_action_buttons(
@@ -289,6 +295,7 @@ class ImageGenInfillPaintDialog(QDialog):
             layout.addWidget(
                 create_image_gen_dialog_footer(self, self._function, actions)
             )
+            refresh_infill_paint_mask_keyboard_shortcuts(self)
         else:
             self._canvas.maskChanged.connect(self.state_changed.emit)
             self._settings.state_changed.connect(self.state_changed.emit)
@@ -428,6 +435,7 @@ class ImageGenInfillPaintDialog(QDialog):
                         self._settings.plugin = plugin
                 self._settings._load_plugin_state(saved_override=state.values)
                 self._settings._populate_field_rows()
+            refresh_infill_paint_mask_keyboard_shortcuts(self)
             if state.mask_png_bytes and self._canvas is not None:
                 mask = mask_from_png_bytes(state.mask_png_bytes)
                 if mask is not None:
@@ -454,6 +462,7 @@ class ImageGenInfillPaintDialog(QDialog):
 
     def showEvent(self, event):
         super().showEvent(event)
+        refresh_infill_paint_mask_keyboard_shortcuts(self)
         if self._panel_mode:
             if self._canvas is not None:
                 self._canvas.setFocus(Qt.FocusReason.OtherFocusReason)
