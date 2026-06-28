@@ -229,6 +229,34 @@ def _merge_external_edit_source_paths(
     return new_paths, warnings
 
 
+def _merge_imported_edit_source_paths(
+    existing: list[str],
+    imported: list[str],
+    *,
+    max_total: int = MAX_EDIT_SOURCE_IMAGES,
+) -> list[str]:
+    """Apply EXIF import paths while preserving sources not in the imported set."""
+    imported_abs = [
+        os.path.abspath(p) for p in imported if p and os.path.isfile(p)
+    ]
+    imported_set = set(imported_abs)
+    merged = list(imported_abs)
+    merged_set = set(merged)
+    for path in existing:
+        if not path:
+            continue
+        abs_path = os.path.abspath(path)
+        if abs_path in imported_set or abs_path in merged_set:
+            continue
+        if not os.path.isfile(abs_path):
+            continue
+        if len(merged) >= max_total:
+            break
+        merged.append(abs_path)
+        merged_set.add(abs_path)
+    return merged[:max_total]
+
+
 def active_image_paths_for_edit(main_window) -> list[str]:
     """1–3 source paths for Klein edit (browse: current; thumbnail: selection)."""
     if main_window is None:
@@ -1292,9 +1320,10 @@ class ImageGenEditDialog(ImageGenDimensionAspectMixin, QDialog):
         ref_paths = valid_exif_reference_paths_for_image(
             self.source_path, max_count=MAX_EDIT_SOURCE_IMAGES
         )
-        self._set_edit_source_paths(ref_paths)
-        if self._panel_mode:
-            self.state_changed.emit()
+        merged_paths = _merge_imported_edit_source_paths(
+            self._source_paths, ref_paths
+        )
+        self._set_edit_source_paths(merged_paths)
 
     _on_import_available = _on_import_all
 

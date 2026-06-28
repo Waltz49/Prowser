@@ -269,6 +269,7 @@ _INFO_PANEL_POSTFIX_W = 48
 _INFO_PANEL_BAR_MIN_W = 48
 _INFO_PANEL_BAR_H = 10
 _INFO_PANEL_PROGRESS_BAR_FILL_HEX = "#3478F6"
+_INFO_PANEL_ACTIVE_JOB_TABLE_BORDER_W = 1
 _INFO_PANEL_NOWRAP = 'nowrap="1" style="white-space:nowrap;"'
 
 
@@ -616,9 +617,9 @@ def wrap_active_job_timing_table_html(
 
     th = get_active_theme()
     text_hex = th.sidebar_text_color_hex
-    active_bdr = th.current_image_border_color_hex
-    active_bdr_w = max(1, int(getattr(th, "current_image_border_width_index", 2)))
-    active_border = f"{active_bdr_w}px solid {active_bdr}"
+    # active_bdr = th.current_image_border_color_hex
+    active_bdr = th.default_border_color_hex
+    active_border = f"{_INFO_PANEL_ACTIVE_JOB_TABLE_BORDER_W}px solid {active_bdr}"
     table_w = max(120, int(content_width_px))
     return (
         f'<table width="{table_w}" cellspacing="0" cellpadding="0" '
