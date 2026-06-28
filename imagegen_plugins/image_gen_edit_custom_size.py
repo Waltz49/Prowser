@@ -76,7 +76,7 @@ def _use_custom_size_checkbox_text(
     if checked or size is None:
         return _USE_CUSTOM_SIZE_BASE_LABEL
     w, h = size
-    return f"{_USE_CUSTOM_SIZE_BASE_LABEL} (Current: {w} x {h})"
+    return f"{_USE_CUSTOM_SIZE_BASE_LABEL} ( Current: {w} x {h} )"
 
 
 def _refresh_use_custom_size_checkbox_label(
