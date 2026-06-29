@@ -1381,6 +1381,15 @@ def normalize_path_for_display(path: str) -> str:
     return path
 
 
+def folder_basename_for_display(path: str) -> str:
+    """Last path segment for brief status messages; safe when path ends with '/'."""
+    if not path or not path.strip():
+        return ""
+    p = path.strip().rstrip("/")
+    segment = os.path.basename(p) if p else ""
+    return segment or normalize_path_for_display(path.strip())
+
+
 def display_to_path(display_path: str) -> str:
     """
     Convert display format path (with ~) to full path.

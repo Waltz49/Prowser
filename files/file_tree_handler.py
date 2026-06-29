@@ -50,6 +50,7 @@ from theme.theme_service import get_active_theme
 from utils import (
     entry_debug,
     file_string,
+    folder_basename_for_display,
     get_file_extension,
     path_matches_active_filter,
     is_inside_photos_library_resources_or_scopes,
@@ -2075,7 +2076,7 @@ class CustomTreeView(QTreeView):
                 self.main_window.status_notification.show_message(f"Copied {copied_count} {file_string(copied_count)}, skipped {skipped_count}"
                 )
             else:
-                self.main_window.status_notification.show_message(f"Copied {copied_count} {file_string(copied_count)} to {os.path.basename(target_directory)}"
+                self.main_window.status_notification.show_message(f"Copied {copied_count} {file_string(copied_count)} to {folder_basename_for_display(target_directory)}"
                 )
         else:
             self.main_window.status_notification.show_message("No files copied")
@@ -2291,7 +2292,7 @@ class CustomTreeView(QTreeView):
                 self.main_window.status_notification.show_message(f"Moved {moved_count} {file_string(moved_count)}, skipped {skipped_count}"
                 )
             else:
-                self.main_window.status_notification.show_message(f"Moved {moved_count} {file_string(moved_count)} to {os.path.basename(target_directory)}"
+                self.main_window.status_notification.show_message(f"Moved {moved_count} {file_string(moved_count)} to {folder_basename_for_display(target_directory)}"
                 )
 
         # Show error dialog if no files were moved (but only if not already shown above)

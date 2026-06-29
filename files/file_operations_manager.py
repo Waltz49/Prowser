@@ -66,6 +66,7 @@ from utils import (
     elide_progress_filename,
     wrap_progress_dialog_label_elision,
     file_string,
+    folder_basename_for_display,
     get_button_style,
     get_dialog_shell_stylesheet,
     get_file_extension,
@@ -5852,14 +5853,14 @@ class FileOperationsManager:
                 show_styled_information(
                     mw,
                     "Copy Completed",
-                    f"Successfully copied {copied_count} {file_string(copied_count)} from Photos Library to '{os.path.basename(target_directory)}'.\n\n"
+                    f"Successfully copied {copied_count} {file_string(copied_count)} from Photos Library to '{folder_basename_for_display(target_directory)}'.\n\n"
                     f"Original files remain in Photos Library."
                 )
         elif copied_count > 0:
             show_styled_information(
                 mw,
                 "Copy Completed",
-                f"Successfully copied {copied_count} {file_string(copied_count)} from Photos Library to '{os.path.basename(target_directory)}'.\n\n"
+                f"Successfully copied {copied_count} {file_string(copied_count)} from Photos Library to '{folder_basename_for_display(target_directory)}'.\n\n"
                 f"Original files remain in Photos Library."
             )
         elif skipped_count > 0:
@@ -6213,7 +6214,7 @@ class FileOperationsManager:
                 )
 
         # Show status message or error dialog
-        destination_name = os.path.basename(target_directory)
+        destination_name = folder_basename_for_display(target_directory)
         if moved_count > 0:
             if skipped_count > 0:
                 mw.status_notification.show_message(
