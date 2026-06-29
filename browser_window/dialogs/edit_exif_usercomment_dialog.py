@@ -6,7 +6,7 @@ Dialog for editing EXIF UserComment on a single image file.
 import os
 from PySide6.QtWidgets import (
     QApplication, QDialog, QVBoxLayout, QHBoxLayout, QLabel,
-    QPlainTextEdit, QPushButton, QMessageBox, QWidget, QSplitter, QSizePolicy
+    QPlainTextEdit, QPushButton, QMessageBox, QWidget, QSizePolicy
 )
 from PySide6.QtCore import Qt, QSize, QTimer, QByteArray, QEvent
 from PySide6.QtGui import QIcon, QPixmap, QPainter, QPen, QColor, QTextCursor
@@ -22,9 +22,9 @@ from thumbnails.thumbnail_constants import (
 )
 from config import get_config
 from exif.exif_utils import truncate_usercomment_before_prompt
-from theme.theme_base import asset_path
-from theme.theme_service import apply_view_chrome_splitter_theme, get_active_theme
+from theme.theme_service import get_active_theme
 from imagegen_plugins.lmstudio_caption import is_lmstudio_services_available
+from imagegen_plugins.lmstudio_instructions_pane import LmStudioInstructionsPane
 from speech_utils import speak_or_stop
 from utils import create_gear_icon, get_main_window
 from whisper_voice_input import (
@@ -100,17 +100,6 @@ def _overlay_chip_stylesheet() -> str:
             border: 1px solid {TEXT_DISABLED_HEX};
         }}
     """
-
-
-def _create_ai_instructions_icon() -> QIcon:
-    """Theme-aware 'AI' icon (40x40 asset) for the system-prompt toggle button."""
-    th = get_active_theme()
-    name = (
-        "ai_icon_info_light.png"
-        if getattr(th, "theme_id", "dark") == "light"
-        else "ai_icon_info_dark.png"
-    )
-    return QIcon(asset_path(name))
 
 
 class EditExifUserCommentDialog(QDialog):
@@ -329,17 +318,15 @@ class EditExifUserCommentDialog(QDialog):
         self.settings_btn.clicked.connect(self._on_open_captioning_settings)
         self.settings_btn.installEventFilter(self)
         btn_stack.addWidget(self.settings_btn, 0, Qt.AlignmentFlag.AlignRight)
+        self._instructions_pane: LmStudioInstructionsPane | None = None
         if is_lmstudio_services_available():
-            self.instructions_btn = QPushButton()
-            self.instructions_btn.setObjectName("instructions_btn")
-            self._instructions_icon_normal = _create_ai_instructions_icon()
-            self._instructions_icon_hover = _create_ai_instructions_icon()
-            self.instructions_btn.setIcon(self._instructions_icon_normal)
-            self.instructions_btn.setIconSize(QSize(16, 16))
-            self.instructions_btn.setToolTip("Show/hide Instructions field (override AI user prompt)")
-            self.instructions_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-            self.instructions_btn.clicked.connect(self._on_toggle_instructions)
-            self.instructions_btn.installEventFilter(self)
+            self._instructions_pane = LmStudioInstructionsPane(
+                self,
+                toggle_tooltip=(
+                    "Show/hide Instructions field (override AI user prompt)"
+                ),
+            )
+            self.instructions_btn = self._instructions_pane.toggle_button()
             btn_stack.addWidget(self.instructions_btn, 0, Qt.AlignmentFlag.AlignRight)
         else:
             self.instructions_btn = None
@@ -348,7 +335,6 @@ class EditExifUserCommentDialog(QDialog):
         main_layout.addLayout(header_row)
 
         # Instructions + user comment (resizable when LMS available)
-        self._instructions_visible = False
         self.text_edit = QPlainTextEdit()
         self.text_edit.setPlainText(original_text)
         self.text_edit.setPlaceholderText("Enter user comment…")
@@ -358,33 +344,13 @@ class EditExifUserCommentDialog(QDialog):
         self._text_edit_display = maybe_wrap_plain_text_edit_with_voice_mic(self.text_edit)
         text_edit_widget = self._wrap_text_edit_with_overlays()
 
-        if is_lmstudio_services_available():
-            instructions_container = QVBoxLayout()
-            instructions_container.setSpacing(4)
-            instructions_container.setContentsMargins(0, 0, 0, 0)
-            self.instructions_label = QLabel("System Prompt")
-            self.instructions_edit = QPlainTextEdit()
-            self.instructions_edit.setPlaceholderText("Provide system instructions for the AI…")
-       
-            self.instructions_edit.setMinimumHeight(60)
-            self.instructions_edit.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-            instructions_container.addWidget(self.instructions_label)
-            instructions_container.addWidget(
-                maybe_wrap_plain_text_edit_with_voice_mic(self.instructions_edit), 1
-            )
-            self._instructions_widget = QWidget()
-            self._instructions_widget.setLayout(instructions_container)
-            self._instructions_widget.setVisible(False)
-            self._instructions_widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        if is_lmstudio_services_available() and self._instructions_pane is not None:
+            self._instructions_widget = self._instructions_pane.widget()
+            self.instructions_edit = self._instructions_pane.instructions_edit()
 
-            self._text_splitter = QSplitter(Qt.Orientation.Vertical)
-            self._text_splitter.setChildrenCollapsible(False)
-            apply_view_chrome_splitter_theme(self._text_splitter)
-            self._text_splitter.addWidget(self._instructions_widget)
-            self._text_splitter.addWidget(text_edit_widget)
-            self._text_splitter.setStretchFactor(0, 0)
-            self._text_splitter.setStretchFactor(1, 1)
-            self._text_splitter.setSizes([100, 200])
+            self._text_splitter = self._instructions_pane.wrap_above_in_splitter(
+                text_edit_widget
+            )
             main_layout.addWidget(self._text_splitter, 1)
         else:
             self._instructions_widget = None
@@ -500,8 +466,6 @@ class EditExifUserCommentDialog(QDialog):
                 self.copy_btn.setIcon(self._copy_icon_hover)
             elif obj is self.settings_btn:
                 self.settings_btn.setIcon(self._settings_icon_hover)
-            elif self.instructions_btn is not None and obj is self.instructions_btn:
-                self.instructions_btn.setIcon(self._instructions_icon_hover)
         elif event.type() == QEvent.Type.Leave:
             if obj is self.thumb_label:
                 self.thumb_label.setStyleSheet(
@@ -511,8 +475,6 @@ class EditExifUserCommentDialog(QDialog):
                 self.copy_btn.setIcon(self._copy_icon_normal)
             elif obj is self.settings_btn:
                 self.settings_btn.setIcon(self._settings_icon_normal)
-            elif self.instructions_btn is not None and obj is self.instructions_btn:
-                self.instructions_btn.setIcon(self._instructions_icon_normal)
         return super().eventFilter(obj, event)
 
     def _save_geometry(self):
@@ -529,10 +491,16 @@ class EditExifUserCommentDialog(QDialog):
                 )
             except Exception:
                 pass
-        if self.instructions_edit is not None:
+        if self.instructions_edit is not None and self._instructions_pane is not None:
             try:
-                self._config.update_setting('edit_exif_usercomment_instructions', self.instructions_edit.toPlainText())
-                self._config.update_setting('edit_exif_usercomment_instructions_visible', self._instructions_visible)
+                self._config.update_setting(
+                    'edit_exif_usercomment_instructions',
+                    self._instructions_pane.plain_text(),
+                )
+                self._config.update_setting(
+                    'edit_exif_usercomment_instructions_visible',
+                    self._instructions_pane.is_visible(),
+                )
             except Exception:
                 pass
 
@@ -543,10 +511,14 @@ class EditExifUserCommentDialog(QDialog):
             geom_hex = settings.get('edit_exif_usercomment_dialog_geometry')
             if geom_hex:
                 self.restoreGeometry(QByteArray(bytes.fromhex(geom_hex)))
-            if self.instructions_edit is not None:
-                self.instructions_edit.setPlainText(settings.get('edit_exif_usercomment_instructions', ''))
-                self._instructions_visible = settings.get('edit_exif_usercomment_instructions_visible', False)
-                self._instructions_widget.setVisible(self._instructions_visible)
+            if self._instructions_pane is not None:
+                self._instructions_pane.set_plain_text(
+                    settings.get('edit_exif_usercomment_instructions', '')
+                )
+                self._instructions_pane.set_visible(
+                    settings.get('edit_exif_usercomment_instructions_visible', False)
+                )
+                self.instructions_edit = self._instructions_pane.instructions_edit()
             if self._text_splitter is not None:
                 saved_sizes = settings.get('edit_exif_usercomment_splitter_sizes')
                 if (
@@ -612,12 +584,6 @@ class EditExifUserCommentDialog(QDialog):
         open_imagegen_create_from_text_dialog(
             main_window, user_comment=self.text_edit.toPlainText()
         )
-
-    def _on_toggle_instructions(self):
-        if self.instructions_btn is None or self._instructions_widget is None:
-            return
-        self._instructions_visible = not self._instructions_visible
-        self._instructions_widget.setVisible(self._instructions_visible)
 
     def _on_open_captioning_settings(self):
         parent = self.parent()
@@ -749,8 +715,8 @@ class EditExifUserCommentDialog(QDialog):
         self._dot_phase = 0
         self._dot_timer.start()
         user_override = None
-        if self._instructions_visible and self.instructions_edit is not None:
-            user_override = self.instructions_edit.toPlainText().strip() or None
+        if self._instructions_pane is not None:
+            user_override = self._instructions_pane.effective_override_text()
         if not self._caption_connected:
             controller.caption_chunk.connect(self._on_caption_chunk)
             controller.caption_ready.connect(self._on_caption_ready)

@@ -1070,6 +1070,16 @@ class ImageGenController(QObject):
             self._update_status_bar_indicator(None)
         self._sync_cancel_menu()
 
+    def cancel_flux_prompt_refine(self) -> None:
+        """Stop in-flight FLUX prompt refinement without cancelling image generation."""
+        if self._tasks.is_running() and self._tasks.active_kind == "flux_prompt":
+            self._tasks.cancel_task()
+        if (
+            self._foreground_tasks.is_running()
+            and self._foreground_tasks.active_kind == "flux_prompt"
+        ):
+            self._foreground_tasks.cancel_task()
+
     def start_flux_prompt_refine(
         self,
         system_prompt: str,

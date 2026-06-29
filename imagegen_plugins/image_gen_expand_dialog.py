@@ -37,6 +37,7 @@ from imagegen_plugins.image_gen_dialog import (
     load_import_prompt_from_path,
     mount_pass_image_to_ai_checkbox,
     pass_image_to_ai_checked,
+    repopulate_image_gen_prompt_import_row,
     repopulate_image_gen_side_buttons,
     validate_copies_require_random_seed,
     wrap_image_gen_controls_with_side_buttons,
@@ -58,6 +59,10 @@ from imagegen_plugins.image_gen_parameter_panel import (
     default_widget_build_options,
 )
 from imagegen_plugins.imagegen_flux_prompt_ai import ImageGenFluxPromptAi
+from imagegen_plugins.flux_prompt_system_mount import (
+    flux_prompt_system_override_for,
+    remount_flux_prompt_system_splitter,
+)
 from imagegen_plugins.lmstudio_caption import is_lmstudio_services_available
 from imagegen_plugins.image_gen_model_selector import (
     apply_mflux_lora_collection_guard,
@@ -101,20 +106,11 @@ from utils import (
 
 def active_image_path_for_expand(main_window) -> Optional[str]:
     """Active image for expand: browse current or single thumbnail selection."""
-    if main_window is None:
-        return None
-    image_path = None
-    if main_window.current_view_mode == "browse":
-        if hasattr(main_window, "get_current_image_path"):
-            image_path = main_window.get_current_image_path()
-    elif main_window.current_view_mode == "thumbnail":
-        if hasattr(main_window, "selection_manager") and main_window.selection_manager:
-            selected_files = main_window.selection_manager.get_selected_files()
-            if selected_files and len(selected_files) == 1:
-                image_path = selected_files[0]
-    if not image_path or not os.path.isfile(image_path):
-        return None
-    return image_path
+    from imagegen_plugins.image_gen_source_nav import (
+        active_image_path_for_browse_or_thumbnail,
+    )
+
+    return active_image_path_for_browse_or_thumbnail(main_window)
 
 
 class ImageGenExpandDialog(ImageGenDimensionAspectMixin, QDialog):
@@ -150,6 +146,7 @@ class ImageGenExpandDialog(ImageGenDimensionAspectMixin, QDialog):
         self._fields_panel: Optional[ImageGenFieldsPanel] = None
         self._init_dim_aspect_state()
         self._flux_prompt_ai: Optional[ImageGenFluxPromptAi] = None
+        self._flux_system_prompt_pane = None
         self._pass_image_to_ai_cb: Optional[QCheckBox] = None
         self._side_btn_host: Optional[QWidget] = None
         self._side_btn_col: Optional[QVBoxLayout] = None
@@ -188,9 +185,11 @@ class ImageGenExpandDialog(ImageGenDimensionAspectMixin, QDialog):
 
     def reject(self) -> None:
         from imagegen_plugins.image_gen_panel_shell import panel_mode_reject
+        from imagegen_plugins.imagegen_flux_prompt_ai import cancel_dialog_flux_prompt_refine
 
         if panel_mode_reject(self):
             return
+        cancel_dialog_flux_prompt_refine(self)
         super().reject()
 
     def _load_plugin_state(self, *, saved_override: Optional[Dict[str, Any]] = None) -> None:
@@ -228,6 +227,12 @@ class ImageGenExpandDialog(ImageGenDimensionAspectMixin, QDialog):
         raise_dialog_without_space_hop(self)
 
     def closeEvent(self, event):
+        if not self._panel_mode:
+            from imagegen_plugins.imagegen_flux_prompt_ai import (
+                cancel_dialog_flux_prompt_refine,
+            )
+
+            cancel_dialog_flux_prompt_refine(self)
         self._save_geometry()
         super().closeEvent(event)
 
@@ -379,6 +384,7 @@ class ImageGenExpandDialog(ImageGenDimensionAspectMixin, QDialog):
                 build_options=self._param_panel._build_options,
                 optional=False,
             )
+        remount_flux_prompt_system_splitter(self)
         self._repopulate_side_buttons()
         self._connect_canvas_dimension_fields()
         self._connect_dim_aspect_lock()
@@ -458,34 +464,24 @@ class ImageGenExpandDialog(ImageGenDimensionAspectMixin, QDialog):
 
         return resolve_image_gen_main_window(self)
 
-    def _needs_prompt_side_column(self) -> bool:
-        return (
-            self._show_import_button()
-            or bool(self.source_path)
-            or is_lmstudio_services_available()
-        )
-
     def _repopulate_side_buttons(self) -> None:
-        if not self._needs_prompt_side_column():
-            repopulate_image_gen_side_buttons(self, None)
-            return
-        repopulate_image_gen_side_buttons(self, self._build_prompt_action_buttons())
-        mount_pass_image_to_ai_checkbox(self)
+        repopulate_image_gen_prompt_import_row(
+            self, self._build_prompt_action_buttons()
+        )
+        repopulate_image_gen_side_buttons(self, None)
 
     def _build_prompt_action_buttons(self) -> Optional[List[QPushButton]]:
-        if not self._needs_prompt_side_column():
+        if not (self._show_import_button() or bool(self.source_path)):
             return None
         buttons: List[QPushButton] = []
-        if self._show_import_button() or bool(self.source_path):
-            import_text_btn = QPushButton("Import Prompt")
-            import_text_btn.clicked.connect(self._on_import_prompt_text)
-            apply_edit_import_text_button_tooltip(import_text_btn)
-            buttons.append(import_text_btn)
-            import_all_btn = QPushButton("Import Rest")
-            import_all_btn.clicked.connect(self._on_import_available)
-            apply_edit_import_all_button_tooltip(import_all_btn)
-            buttons.append(import_all_btn)
-        buttons.extend(self._ensure_flux_prompt_ai().make_action_buttons())
+        import_text_btn = QPushButton("Import Prompt")
+        import_text_btn.clicked.connect(self._on_import_prompt_text)
+        apply_edit_import_text_button_tooltip(import_text_btn)
+        buttons.append(import_text_btn)
+        import_all_btn = QPushButton("Import Rest")
+        import_all_btn.clicked.connect(self._on_import_available)
+        apply_edit_import_all_button_tooltip(import_all_btn)
+        buttons.append(import_all_btn)
         return buttons or None
 
     def _populate_prompt_side_buttons(self, btn_col: QVBoxLayout) -> None:
@@ -561,6 +557,9 @@ class ImageGenExpandDialog(ImageGenDimensionAspectMixin, QDialog):
                 get_pass_image=lambda: pass_image_to_ai_checked(self),
                 get_image_path=lambda: self.source_path,
                 get_prompt_edit=self._prompt_edit_widget,
+                get_system_prompt_override=lambda: flux_prompt_system_override_for(
+                    self
+                ),
             )
         return self._flux_prompt_ai
 

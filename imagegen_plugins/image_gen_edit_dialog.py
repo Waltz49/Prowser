@@ -51,6 +51,7 @@ from imagegen_plugins.image_gen_dialog import (
     insert_image_gen_side_column_widget_before_stretch,
     mount_pass_image_to_ai_checkbox,
     pass_image_to_ai_checked,
+    repopulate_image_gen_prompt_import_row,
     repopulate_image_gen_side_buttons,
     wrap_image_gen_side_checkbox,
     validate_copies_require_random_seed,
@@ -97,6 +98,10 @@ from imagegen_plugins.image_gen_pipeline_modes import finalize_run_values
 from imagegen_plugins.image_gen_fields import FieldSpec
 from imagegen_plugins.image_gen_registry import ImageGenModelPlugin
 from imagegen_plugins.imagegen_flux_prompt_ai import ImageGenFluxPromptAi
+from imagegen_plugins.flux_prompt_system_mount import (
+    flux_prompt_system_override_for,
+    remount_flux_prompt_system_splitter,
+)
 from search.reference_graph import valid_exif_reference_paths_for_image
 from imagegen_plugins.image_gen_function_switcher import (
     create_image_gen_action_buttons,
@@ -898,6 +903,7 @@ class ImageGenEditDialog(ImageGenDimensionAspectMixin, QDialog):
         self._preview_host: Optional[QFrame] = None
         self._preview_layout: Optional[QVBoxLayout] = None
         self._flux_prompt_ai: Optional[ImageGenFluxPromptAi] = None
+        self._flux_system_prompt_pane = None
         self._pass_image_to_ai_cb: Optional[QCheckBox] = None
         self._side_btn_host: Optional[QWidget] = None
         self._side_btn_col: Optional[QVBoxLayout] = None
@@ -938,9 +944,11 @@ class ImageGenEditDialog(ImageGenDimensionAspectMixin, QDialog):
 
     def reject(self) -> None:
         from imagegen_plugins.image_gen_panel_shell import panel_mode_reject
+        from imagegen_plugins.imagegen_flux_prompt_ai import cancel_dialog_flux_prompt_refine
 
         if panel_mode_reject(self):
             return
+        cancel_dialog_flux_prompt_refine(self)
         super().reject()
 
     def _load_plugin_state(self, *, saved_override: Optional[Dict[str, Any]] = None) -> None:
@@ -982,6 +990,12 @@ class ImageGenEditDialog(ImageGenDimensionAspectMixin, QDialog):
         raise_dialog_without_space_hop(self)
 
     def closeEvent(self, event):
+        if not self._panel_mode:
+            from imagegen_plugins.imagegen_flux_prompt_ai import (
+                cancel_dialog_flux_prompt_refine,
+            )
+
+            cancel_dialog_flux_prompt_refine(self)
         try:
             save_plugin_dialog_settings(
                 self._function, self.plugin.plugin_id, self.collect_values()
@@ -1252,6 +1266,7 @@ class ImageGenEditDialog(ImageGenDimensionAspectMixin, QDialog):
         self._connect_dim_aspect_lock()
         self._restore_aspect_lock_from_values()
         self._apply_effective_max_to_dim_sliders()
+        remount_flux_prompt_system_splitter(self)
         self._repopulate_side_buttons()
 
         if self._source_nav is not None:
@@ -1366,8 +1381,10 @@ class ImageGenEditDialog(ImageGenDimensionAspectMixin, QDialog):
         return False
 
     def _repopulate_side_buttons(self) -> None:
-        repopulate_image_gen_side_buttons(self, self._build_prompt_action_buttons())
-        self._mount_pass_image_to_ai_checkbox()
+        repopulate_image_gen_prompt_import_row(
+            self, self._build_prompt_action_buttons()
+        )
+        repopulate_image_gen_side_buttons(self, None)
 
     def _build_prompt_action_buttons(self) -> List[QPushButton]:
         buttons: List[QPushButton] = []
@@ -1379,7 +1396,6 @@ class ImageGenEditDialog(ImageGenDimensionAspectMixin, QDialog):
         import_all_btn.clicked.connect(self._on_import_all)
         apply_edit_import_all_button_tooltip(import_all_btn, include_prompt=False)
         buttons.append(import_all_btn)
-        buttons.extend(self._ensure_flux_prompt_ai().make_action_buttons())
         return buttons
 
     def _populate_prompt_side_buttons(self, btn_col: QVBoxLayout) -> None:
@@ -1397,6 +1413,9 @@ class ImageGenEditDialog(ImageGenDimensionAspectMixin, QDialog):
                 get_pass_image=lambda: pass_image_to_ai_checked(self),
                 get_image_path=lambda: self.source_path,
                 get_prompt_edit=self._prompt_edit_widget,
+                get_system_prompt_override=lambda: flux_prompt_system_override_for(
+                    self
+                ),
             )
         return self._flux_prompt_ai
 

@@ -74,6 +74,7 @@ from imagegen_plugins.image_gen_submit_notice import (
     ImageGenSubmitNotice,
     submit_notice_text,
 )
+from imagegen_plugins.imagegen_flux_prompt_ai import cancel_dialog_flux_prompt_refine
 from utils import (
     _center_styled_dialog_on_screen,
     restore_dialog_geometry_before_first_show,
@@ -568,6 +569,7 @@ class ImageGenUnifiedDialog(QDialog):
         if self._dismissing:
             return
         self._dismissing = True
+        cancel_dialog_flux_prompt_refine(self)
         self._save_current_to_session()
         self._persist_session_for_functions(self._visited)
         self.done(QDialog.DialogCode.Rejected)
@@ -577,6 +579,7 @@ class ImageGenUnifiedDialog(QDialog):
         if self._dismissing:
             return
         self._dismissing = True
+        cancel_dialog_flux_prompt_refine(self)
         current = self._function
         was_dirty = self._is_dirty()
         if was_dirty:

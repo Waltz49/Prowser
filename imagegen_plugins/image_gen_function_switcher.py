@@ -6,7 +6,7 @@ from __future__ import annotations
 from typing import Callable, Optional
 
 from PySide6.QtCore import QEvent, QObject, Qt
-from PySide6.QtWidgets import QCheckBox, QDialog, QHBoxLayout, QPushButton, QWidget
+from PySide6.QtWidgets import QCheckBox, QDialog, QHBoxLayout, QPushButton, QSizePolicy, QWidget
 
 from imagegen_plugins.image_gen_active_model import (
     FUNCTION_CREATE,
@@ -235,8 +235,11 @@ def create_image_gen_action_buttons(
     row.setSpacing(8)
     cancel_btn = QPushButton("Cancel")
     cancel_btn.setObjectName("imageGenCancelButton")
+    cancel_btn.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
     cancel_btn.hide()
     close_btn = QPushButton("Close")
+    close_btn.setObjectName("imageGenCloseButton")
+    close_btn.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
     generate_btn = QPushButton(f"Generate {CMD_SYMBOL}{ENTER_SYMBOL}")
     generate_btn.setObjectName("imageGenGenerateButton")
     apply_image_gen_action_button_tooltips(close_btn, generate_btn)

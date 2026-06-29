@@ -26,6 +26,14 @@ def _qobject_alive(obj) -> bool:
 
 def resolve_image_gen_main_window(dialog: QWidget):
     """Walk parent widgets to find the host main window."""
+    from imagegen_plugins.image_gen_panel_shell import find_image_gen_unified_shell
+
+    if getattr(dialog, "_panel_mode", False):
+        shell = find_image_gen_unified_shell(dialog)
+        if shell is not None:
+            mw = getattr(shell, "_main_window", None)
+            if mw is not None and hasattr(mw, "current_view_mode"):
+                return mw
     widget = dialog
     while widget is not None:
         if hasattr(widget, "current_view_mode"):
@@ -35,6 +43,24 @@ def resolve_image_gen_main_window(dialog: QWidget):
             return host
         widget = widget.parent()
     return None
+
+
+def active_image_path_for_browse_or_thumbnail(main_window) -> Optional[str]:
+    """Active image in browse view or a single thumbnail selection."""
+    if main_window is None:
+        return None
+    image_path = None
+    if main_window.current_view_mode == "browse":
+        if hasattr(main_window, "get_current_image_path"):
+            image_path = main_window.get_current_image_path()
+    elif main_window.current_view_mode == "thumbnail":
+        if hasattr(main_window, "selection_manager") and main_window.selection_manager:
+            selected_files = main_window.selection_manager.get_selected_files()
+            if selected_files and len(selected_files) == 1:
+                image_path = selected_files[0]
+    if not image_path or not os.path.isfile(image_path):
+        return None
+    return image_path
 
 
 def open_image_in_browse(main_window, file_path: str) -> None:

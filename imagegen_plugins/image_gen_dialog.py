@@ -36,6 +36,7 @@ from exif.exif_utils import (
     truncate_usercomment_before_prompt,
 )
 from imagegen_plugins.image_gen_naming import parse_exif_generation_metadata
+from imagegen_plugins.image_gen_active_model import FUNCTION_CREATE
 from imagegen_plugins.image_gen_edit_custom_size import mount_custom_size_section
 from imagegen_plugins.image_gen_fields import FieldSpec
 from imagegen_plugins.image_gen_form_layout import (
@@ -89,6 +90,10 @@ from imagegen_plugins.image_gen_function_switcher import (
     refresh_image_gen_footer_keyboard_shortcuts,
 )
 from imagegen_plugins.imagegen_flux_prompt_ai import ImageGenFluxPromptAi
+from imagegen_plugins.flux_prompt_system_mount import (
+    flux_prompt_system_override_for,
+    remount_flux_prompt_system_splitter,
+)
 from imagegen_plugins.lmstudio_caption import is_lmstudio_services_available
 from theme.theme_service import apply_view_chrome_splitter_theme, get_active_theme
 from utils import (
@@ -440,6 +445,16 @@ def _text_input_stylesheet() -> str:
         min-width: 0px;
         max-width: {IMAGE_GEN_SIDE_BUTTON_WIDTH}px;
     }}
+    #imageGenDialog QPushButton#imageGenFluxPromptToolbarBtn {{
+        padding: 5px 6px;
+        font-size: 12px;
+        min-height: 24px;
+    }}
+    #imageGenDialog QPushButton#imageGenCancelButton,
+    #imageGenDialog QPushButton#imageGenCloseButton {{
+        min-width: 0px;
+        padding: 6px 12px;
+    }}
     """ + image_gen_field_label_stylesheet()
 
 
@@ -462,6 +477,46 @@ def configure_image_gen_side_button(button: QPushButton) -> None:
     button.setObjectName("imageGenSideActionBtn")
     button.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
     button.setFixedWidth(IMAGE_GEN_SIDE_BUTTON_WIDTH)
+
+
+def configure_image_gen_prompt_import_button(button: QPushButton) -> None:
+    """Import actions in the horizontal row under the image prompt field."""
+    from imagegen_plugins.imagegen_flux_prompt_ai import configure_flux_prompt_toolbar_button
+
+    configure_flux_prompt_toolbar_button(button)
+    button.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+
+
+def create_image_gen_prompt_import_row(buttons: List[QPushButton]) -> QWidget:
+    from imagegen_plugins.imagegen_flux_prompt_ai import _FLUX_PROMPT_TOOLBAR_SPACING
+
+    row = QWidget()
+    row.setSizePolicy(
+        QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum
+    )
+    layout = QHBoxLayout(row)
+    layout.setContentsMargins(
+        IMAGE_GEN_FIELD_BORDER_PAD, 0, IMAGE_GEN_FIELD_BORDER_PAD, 0
+    )
+    layout.setSpacing(_FLUX_PROMPT_TOOLBAR_SPACING)
+    layout.setAlignment(
+        Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+    )
+    for button in buttons:
+        configure_image_gen_prompt_import_button(button)
+        layout.addWidget(button, 0)
+    return row
+
+
+def repopulate_image_gen_prompt_import_row(
+    owner: Any,
+    buttons: Optional[List[QPushButton]],
+) -> None:
+    panel = getattr(owner, "_fields_panel", None)
+    if panel is None:
+        return
+    row = create_image_gen_prompt_import_row(buttons) if buttons else None
+    panel.mount_prompt_import_row(row)
 
 
 def create_image_gen_side_button_column(
@@ -1247,6 +1302,7 @@ class ImageGenDialog(ImageGenDimensionAspectMixin, QDialog):
         self._fields_panel: Optional[ImageGenFieldsPanel] = None
         self._init_dim_aspect_state()
         self._flux_prompt_ai: Optional[ImageGenFluxPromptAi] = None
+        self._flux_system_prompt_pane = None
         self._pass_image_to_ai_cb: Optional[QCheckBox] = None
         self._side_btn_host: Optional[QWidget] = None
         self._side_btn_col: Optional[QVBoxLayout] = None
@@ -1285,9 +1341,11 @@ class ImageGenDialog(ImageGenDimensionAspectMixin, QDialog):
 
     def reject(self) -> None:
         from imagegen_plugins.image_gen_panel_shell import panel_mode_reject
+        from imagegen_plugins.imagegen_flux_prompt_ai import cancel_dialog_flux_prompt_refine
 
         if panel_mode_reject(self):
             return
+        cancel_dialog_flux_prompt_refine(self)
         super().reject()
 
     def _load_plugin_state(self, *, saved_override: Optional[Dict[str, Any]] = None) -> None:
@@ -1325,6 +1383,12 @@ class ImageGenDialog(ImageGenDimensionAspectMixin, QDialog):
         raise_dialog_without_space_hop(self)
 
     def closeEvent(self, event):
+        if not self._panel_mode:
+            from imagegen_plugins.imagegen_flux_prompt_ai import (
+                cancel_dialog_flux_prompt_refine,
+            )
+
+            cancel_dialog_flux_prompt_refine(self)
         self._save_geometry()
         super().closeEvent(event)
 
@@ -1435,6 +1499,7 @@ class ImageGenDialog(ImageGenDimensionAspectMixin, QDialog):
                 build_options=self._param_panel._build_options,
                 optional=False,
             )
+        remount_flux_prompt_system_splitter(self)
         self._repopulate_side_buttons()
         self._connect_dim_aspect_lock()
         self._restore_aspect_lock_from_values()
@@ -1451,11 +1516,10 @@ class ImageGenDialog(ImageGenDimensionAspectMixin, QDialog):
         connect_panel_field_widgets(self, self.state_changed.emit)
 
     def _repopulate_side_buttons(self) -> None:
-        if not self._needs_prompt_side_column():
-            repopulate_image_gen_side_buttons(self, None)
-            return
-        repopulate_image_gen_side_buttons(self, self._build_prompt_action_buttons())
-        mount_pass_image_to_ai_checkbox(self, image_noun="active image")
+        repopulate_image_gen_prompt_import_row(
+            self, self._build_prompt_action_buttons()
+        )
+        repopulate_image_gen_side_buttons(self, None)
 
     def _on_model_combo_changed(self, _index: int = 0) -> None:
         plugin_id = self._model_combo.currentData()
@@ -1551,24 +1615,18 @@ class ImageGenDialog(ImageGenDimensionAspectMixin, QDialog):
 
         return resolve_image_gen_main_window(self)
 
-    def _needs_prompt_side_column(self) -> bool:
-        return self._show_import_button() or is_lmstudio_services_available()
-
     def _build_prompt_action_buttons(self) -> Optional[List[QPushButton]]:
-        if not self._needs_prompt_side_column():
+        if not self._show_import_button():
             return None
         buttons: List[QPushButton] = []
-        if self._show_import_button():
-            import_text_btn = QPushButton("Import Prompt")
-            import_text_btn.clicked.connect(self._on_import_prompt_text)
-            apply_edit_import_text_button_tooltip(import_text_btn)
-            buttons.append(import_text_btn)
-            import_all_btn = QPushButton("Import Rest")
-            import_all_btn.clicked.connect(self._on_import_available)
-            apply_edit_import_all_button_tooltip(import_all_btn)
-            buttons.append(import_all_btn)
-        ai = self._ensure_flux_prompt_ai()
-        buttons.extend(ai.make_action_buttons())
+        import_text_btn = QPushButton("Import Prompt")
+        import_text_btn.clicked.connect(self._on_import_prompt_text)
+        apply_edit_import_text_button_tooltip(import_text_btn)
+        buttons.append(import_text_btn)
+        import_all_btn = QPushButton("Import Rest")
+        import_all_btn.clicked.connect(self._on_import_available)
+        apply_edit_import_all_button_tooltip(import_all_btn)
+        buttons.append(import_all_btn)
         return buttons or None
 
     def _populate_prompt_side_buttons(self, btn_col: QVBoxLayout) -> None:
@@ -1581,28 +1639,22 @@ class ImageGenDialog(ImageGenDimensionAspectMixin, QDialog):
         finalize_image_gen_side_button_column(btn_col)
 
     def _show_import_button(self) -> bool:
+        if self._function != FUNCTION_CREATE:
+            return False
         mw = self._main_window()
         if mw is None:
             return False
+        if self._panel_mode:
+            return True
         return mw.current_view_mode in ("browse", "thumbnail")
 
     def _active_image_path_for_ai(self) -> Optional[str]:
         """Browse current or single thumbnail selection (any readable image file)."""
-        mw = self._main_window()
-        if mw is None:
-            return None
-        image_path = None
-        if mw.current_view_mode == "browse":
-            if hasattr(mw, "get_current_image_path"):
-                image_path = mw.get_current_image_path()
-        elif mw.current_view_mode == "thumbnail":
-            if hasattr(mw, "selection_manager") and mw.selection_manager:
-                selected_files = mw.selection_manager.get_selected_files()
-                if selected_files and len(selected_files) == 1:
-                    image_path = selected_files[0]
-        if not image_path or not os.path.isfile(image_path):
-            return None
-        return image_path
+        from imagegen_plugins.image_gen_source_nav import (
+            active_image_path_for_browse_or_thumbnail,
+        )
+
+        return active_image_path_for_browse_or_thumbnail(self._main_window())
 
     def _active_image_path_for_import(self) -> Optional[str]:
         """Same image resolution as copy/edit EXIF user comment (browse or single thumbnail)."""
@@ -1616,6 +1668,15 @@ class ImageGenDialog(ImageGenDimensionAspectMixin, QDialog):
 
     def _import_prompt_text_from_active_image(self) -> bool:
         """Load prompt text from EXIF; return True on success."""
+        mw = self._main_window()
+        if mw is not None and mw.current_view_mode not in ("browse", "thumbnail"):
+            show_styled_warning(
+                self,
+                "Import Text",
+                "Select an image in browse view, or select a single thumbnail, "
+                "before importing.",
+            )
+            return False
         image_path = self._active_image_path_for_import()
         if not image_path:
             show_styled_warning(self, "Import Text", "No image selected.")
@@ -1631,6 +1692,15 @@ class ImageGenDialog(ImageGenDimensionAspectMixin, QDialog):
             self.state_changed.emit()
 
     def _on_import_available(self) -> None:
+        mw = self._main_window()
+        if mw is not None and mw.current_view_mode not in ("browse", "thumbnail"):
+            show_styled_warning(
+                self,
+                "Import Rest",
+                "Select an image in browse view, or select a single thumbnail, "
+                "before importing.",
+            )
+            return
         if not self._import_prompt_text_from_active_image():
             return
         image_path = self._active_image_path_for_import()
@@ -1678,6 +1748,9 @@ class ImageGenDialog(ImageGenDimensionAspectMixin, QDialog):
                 get_pass_image=lambda: pass_image_to_ai_checked(self),
                 get_image_path=self._active_image_path_for_ai,
                 get_prompt_edit=self._prompt_edit_widget,
+                get_system_prompt_override=lambda: flux_prompt_system_override_for(
+                    self
+                ),
             )
         return self._flux_prompt_ai
 

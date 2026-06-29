@@ -24,6 +24,7 @@ from theme.theme_service import get_active_theme
 
 IMAGE_GEN_FIELD_RESET_BTN_SIZE = 26
 _IMAGE_GEN_TRASH_ICON_PX = 16
+_IMAGE_GEN_PROMPT_CLEAR_ICON_PX = 16
 IMAGE_GEN_DIM_HELPER_BTN_SIZE = 20 #DGN: 26
 
 IMAGE_GEN_FIELD_GROUP_SPACING = 10
@@ -416,11 +417,20 @@ def configure_image_gen_prompt_edit(
     _attach_image_gen_prompt_auto_height(edit, min_lines, max_lines)
 
 
-def wrap_image_gen_bordered_field(control: QWidget) -> QWidget:
+def wrap_image_gen_bordered_field(
+    control: QWidget,
+    *,
+    bottom_pad: Optional[int] = None,
+) -> QWidget:
     """Wrap a bordered control so layout does not clip its bottom/right edges."""
     host = QWidget()
     lay = QVBoxLayout(host)
-    lay.setContentsMargins(0, 0, 0, IMAGE_GEN_FIELD_BORDER_PAD)
+    lay.setContentsMargins(
+        0,
+        0,
+        0,
+        IMAGE_GEN_FIELD_BORDER_PAD if bottom_pad is None else bottom_pad,
+    )
     lay.setSpacing(0)
     lay.addWidget(control)
     host.setSizePolicy(
@@ -636,6 +646,113 @@ def image_gen_prompt_copy_btn_dialog_stylesheet() -> str:
     return image_gen_prompt_copy_btn_stylesheet(
         selector="#imageGenDialog QPushButton#imageGenPromptCopyBtn"
     )
+
+
+def image_gen_prompt_clear_btn_stylesheet(
+    *,
+    selector: str = "QPushButton",
+) -> str:
+    """Small clear (X) button beside the image prompt label."""
+    from imagegen_plugins.image_gen_dialog import image_gen_preview_client_background_hex
+
+    t = get_active_theme()
+    chrome_bg = image_gen_preview_client_background_hex()
+    sz = IMAGE_GEN_FIELD_RESET_BTN_SIZE
+    return f"""
+        {selector} {{
+            background-color: {chrome_bg};
+            border: 1px solid {t.border_default_hex};
+            border-radius: 3px;
+            padding: 0px;
+            min-width: {sz}px;
+            max-width: {sz}px;
+            min-height: {sz}px;
+            max-height: {sz}px;
+        }}
+        {selector}:focus {{
+            border: 1px solid {t.current_image_border_color_hex};
+            outline: none;
+        }}
+        {selector}:hover {{
+            background-color: {t.tab_button_hover_bg_hex};
+            border: 1px solid {t.tab_button_hover_bg_hex};
+        }}
+        {selector}:pressed {{
+            background-color: {t.sidebar_splitter_handle_hex};
+        }}
+        {selector}:disabled {{
+            opacity: 0.35;
+        }}
+    """
+
+
+def image_gen_prompt_clear_btn_dialog_stylesheet() -> str:
+    return image_gen_prompt_clear_btn_stylesheet(
+        selector="#imageGenDialog QPushButton#imageGenPromptClearBtn"
+    )
+
+
+class _ImageGenPromptClearButton(QPushButton):
+    """Boxed clear icon for the image prompt field label row."""
+
+    def __init__(
+        self,
+        edit: QPlainTextEdit,
+        parent: Optional[QWidget] = None,
+    ) -> None:
+        super().__init__("", parent)
+        self._edit = edit
+        self.setObjectName("imageGenPromptClearBtn")
+        self.setToolTip("Clear prompt")
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._normal_icon = QIcon(asset_path("clear_icon.webp"))
+        self._apply_icon()
+        self.setStyleSheet(
+            image_gen_prompt_clear_btn_stylesheet(selector="QPushButton")
+        )
+        self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        self.setFixedSize(
+            IMAGE_GEN_FIELD_RESET_BTN_SIZE, IMAGE_GEN_FIELD_RESET_BTN_SIZE
+        )
+        self.clicked.connect(self._clear_prompt)
+
+    def _apply_icon(self) -> None:
+        px = _IMAGE_GEN_PROMPT_CLEAR_ICON_PX
+        self.setIcon(self._normal_icon)
+        self.setIconSize(QSize(px, px))
+
+    def _clear_prompt(self) -> None:
+        self._edit.setPlainText("")
+        self._edit.setFocus()
+
+
+def create_image_gen_prompt_clear_button(
+    edit: QPlainTextEdit,
+    parent: Optional[QWidget] = None,
+) -> QPushButton:
+    return _ImageGenPromptClearButton(edit, parent)
+
+
+def make_image_gen_prompt_label_row(
+    label_text: str,
+    edit: QPlainTextEdit,
+    parent: Optional[QWidget] = None,
+) -> QWidget:
+    """Image Prompt heading with a clear button to the right of the label."""
+    row = QWidget(parent)
+    row.setObjectName("imageGenPromptLabelRow")
+    row.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+    layout = QHBoxLayout(row)
+    layout.setContentsMargins(0, 0, 0, 0)
+    layout.setSpacing(6)
+    layout.addWidget(make_image_gen_field_label(label_text, row), 0)
+    layout.addWidget(
+        create_image_gen_prompt_clear_button(edit, row),
+        0,
+        Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+    )
+    layout.addStretch(1)
+    return row
 
 
 def image_gen_prompt_voice_mic_btn_stylesheet(
@@ -1012,6 +1129,7 @@ class ImageGenFieldsPanel:
         )
 
         self._prompt_group: Optional[QWidget] = None
+        self._prompt_import_host: Optional[QWidget] = None
         self._below_row = QWidget(self.widget)
         self._below_row.setObjectName("imageGenBelowPromptRow")
         self._below_layout = QHBoxLayout(self._below_row)
@@ -1281,6 +1399,7 @@ class ImageGenFieldsPanel:
             self._layout.removeWidget(self._prompt_group)
             self._prompt_group.deleteLater()
             self._prompt_group = None
+        self._prompt_import_host = None
 
         for group in self._control_groups + self._checkbox_groups:
             group.deleteLater()
@@ -1321,9 +1440,12 @@ class ImageGenFieldsPanel:
         col = QVBoxLayout(group)
         col.setContentsMargins(1, 0, IMAGE_GEN_FIELD_BORDER_PAD, 0)
         col.setSpacing(IMAGE_GEN_FIELD_LABEL_SPACING)
-        col.addWidget(make_image_gen_field_label(label_text, group), 0)
         display_control = control
         if isinstance(control, QPlainTextEdit):
+            col.addWidget(
+                make_image_gen_prompt_label_row(label_text, control, group),
+                0,
+            )
             control.setSizePolicy(
                 QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum
             )
@@ -1332,6 +1454,7 @@ class ImageGenFieldsPanel:
                 control, control
             )
         else:
+            col.addWidget(make_image_gen_field_label(label_text, group), 0)
             display_control.setSizePolicy(
                 QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
             )
@@ -1356,6 +1479,94 @@ class ImageGenFieldsPanel:
         if self._below_row_in_layout:
             insert_at = max(0, self._layout.indexOf(self._below_row))
         self._layout.insertWidget(insert_at, group)
+
+    def prompt_editor_host_widget(self) -> Optional[QWidget]:
+        """Indented prompt editor wrapper (direct child of the prompt field group)."""
+        if self._prompt_group is None:
+            return None
+        copy_btn = self._prompt_group.findChild(QPushButton, "imageGenPromptCopyBtn")
+        if copy_btn is None:
+            return None
+        widget: Optional[QWidget] = copy_btn
+        while widget is not None:
+            parent = widget.parentWidget()
+            if parent is self._prompt_group:
+                return widget
+            if parent is None:
+                break
+            widget = parent
+        return None
+
+    def prompt_field_label_widget(self) -> Optional[QLabel]:
+        if self._prompt_group is None:
+            return None
+        return self._prompt_group.findChild(QLabel, IMAGE_GEN_FIELD_LABEL_OBJECT_NAME)
+
+    def prompt_field_label_row_widget(self) -> Optional[QWidget]:
+        if self._prompt_group is None:
+            return None
+        return self._prompt_group.findChild(QWidget, "imageGenPromptLabelRow")
+
+    def mount_system_prompt_above_image_prompt(self, system_prompt_widget: QWidget) -> None:
+        """System prompt block first, then Image Prompt label, then prompt editor."""
+        if self._prompt_group is None:
+            return
+        col = self._prompt_group.layout()
+        if col is None:
+            return
+        prompt_label_row = self.prompt_field_label_row_widget()
+        if prompt_label_row is None:
+            prompt_label_row = self.prompt_field_label_widget()
+        prompt_editor = self.prompt_editor_host_widget()
+        if prompt_label_row is None or prompt_editor is None:
+            return
+
+        system_prompt_widget.setParent(self._prompt_group)
+        for widget in (system_prompt_widget, prompt_label_row, prompt_editor):
+            if col.indexOf(widget) >= 0:
+                col.removeWidget(widget)
+
+        col.insertWidget(0, system_prompt_widget, 0)
+        col.insertWidget(1, prompt_label_row, 0)
+        col.insertWidget(2, prompt_editor, 0)
+
+    def mount_prompt_import_row(self, row: Optional[QWidget]) -> None:
+        """Import buttons directly under the image prompt editor."""
+        if self._prompt_group is None:
+            return
+        col = self._prompt_group.layout()
+        if col is None:
+            return
+        if self._prompt_import_host is not None:
+            col.removeWidget(self._prompt_import_host)
+            self._prompt_import_host.deleteLater()
+            self._prompt_import_host = None
+        if row is None:
+            return
+        prompt_editor = self.prompt_editor_host_widget()
+        if prompt_editor is None:
+            return
+        host = wrap_image_gen_field_control_indent(row, self._prompt_group)
+        self._prompt_import_host = host
+        idx = col.indexOf(prompt_editor)
+        if idx < 0:
+            col.addWidget(host, 0)
+        else:
+            col.insertWidget(idx + 1, host, 0)
+
+    def replace_prompt_editor_widget(self, new_widget: QWidget) -> None:
+        """Replace the bordered prompt editor area with new_widget (e.g. splitter)."""
+        if self._prompt_group is None:
+            return
+        col = self._prompt_group.layout()
+        if col is None or col.count() < 2:
+            return
+        item = col.itemAt(1)
+        old = item.widget() if item is not None else None
+        if old is not None:
+            col.removeWidget(old)
+            old.setParent(None)
+        col.addWidget(new_widget, 0)
 
     def add_labeled_field(
         self,
@@ -1537,6 +1748,6 @@ def image_gen_field_label_stylesheet() -> str:
     #imageGenDialog QLineEdit {{
         padding: 5px 8px;
     }}
-    """ + image_gen_field_reset_btn_dialog_stylesheet() + image_gen_prompt_copy_btn_dialog_stylesheet() + image_gen_prompt_voice_mic_btn_dialog_stylesheet()
+    """ + image_gen_field_reset_btn_dialog_stylesheet() + image_gen_prompt_copy_btn_dialog_stylesheet() + image_gen_prompt_clear_btn_dialog_stylesheet() + image_gen_prompt_voice_mic_btn_dialog_stylesheet()
 
 
