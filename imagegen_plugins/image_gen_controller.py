@@ -29,8 +29,13 @@ from imagegen_plugins.image_gen_naming import (
     write_exif_user_comment,
 )
 from imagegen_plugins.image_gen_persistence import (
+    load_hold_job_queue,
+    load_job_queue_records,
     load_plugin_dialog_settings,
+    save_hold_job_queue,
+    save_job_queue_records,
     save_plugin_dialog_settings,
+    serialize_queued_job_record,
 )
 from imagegen_plugins.image_gen_pipeline_modes import get_pipeline
 from imagegen_plugins.image_gen_registry import ImageGenModelPlugin
@@ -42,8 +47,10 @@ from imagegen_plugins.model_task_queue import (
     QueuedGenerateJob,
     QueueRowSnapshot,
     apply_payload_model_fields_to_values,
+    job_references_invalid,
     make_queued_generate_job,
     refresh_queued_job_status,
+    restore_queued_generate_job,
     thumbnail_paths_for_values,
 )
 from imagegen_plugins.model_task_status_info import (
@@ -78,6 +85,8 @@ class ImageGenController(QObject):
     generation_finished = Signal(bool, str, str)  # success, output_path, error_message
     task_status_info_changed = Signal()
     queue_changed = Signal()
+    hold_job_queue_changed = Signal()
+    jobs_pane_title_changed = Signal()
 
     caption_chunk = Signal(str)
     caption_ready = Signal(str)
@@ -145,6 +154,14 @@ class ImageGenController(QObject):
         self._live_estimate_seconds: Optional[float] = None
         # Seconds per step, frozen when a diffusion step completes (for live ETA).
         self._step_seconds_per_step: Optional[float] = None
+        self._hold_job_queue = load_hold_job_queue()
+        self._queue_advance_suppressed = False
+        self._exit_queue_persisted = False
+        self._queue_persist_suppressed = False
+        self._queue_persist_timer = QTimer(self)
+        self._queue_persist_timer.setSingleShot(True)
+        self._queue_persist_timer.timeout.connect(self._persist_job_queue_now)
+        self._restore_persisted_job_queue()
 
     def is_running(self) -> bool:
         if self._copy_batch_active and not self._copy_batch_cancelled:
@@ -153,6 +170,52 @@ class ImageGenController(QObject):
         if timer is not None and timer.isActive():
             return True
         return self._tasks.is_running()
+
+    def hold_job_queue(self) -> bool:
+        return bool(self._hold_job_queue)
+
+    def set_hold_job_queue(self, enabled: bool) -> None:
+        enabled = bool(enabled)
+        if enabled == self._hold_job_queue:
+            return
+        self._hold_job_queue = enabled
+        save_hold_job_queue(enabled)
+        self.hold_job_queue_changed.emit()
+        self._schedule_persist_job_queue()
+        self._emit_jobs_pane_title_changed()
+        if not enabled:
+            self._resume_after_hold_released()
+
+    def _resume_after_hold_released(self) -> None:
+        if self._queue_advance_suppressed:
+            return
+        if (
+            self._copy_batch_active
+            and not self._copy_batch_cancelled
+            and self._pending_batch_copies() > 0
+            and not self._tasks.is_running()
+            and not self._is_in_copy_cooldown()
+        ):
+            QTimer.singleShot(0, self._launch_next_copy_after_cooldown)
+            return
+        if not self.is_running():
+            QTimer.singleShot(0, self._try_start_next_queued_job)
+
+    def _generation_pipeline_idle(self) -> bool:
+        return not self._tasks.is_running() and not self._is_in_copy_cooldown()
+
+    def jobs_pane_title_suffix(self) -> str:
+        """Title-bar suffix for hold / quiesce state, or '' when unheld."""
+        if not self._hold_job_queue:
+            return ""
+        if self._active_queue_job_id and (
+            self._tasks.is_running() or self._is_in_copy_cooldown()
+        ):
+            return " - Quiesce"
+        return " - HOLD"
+
+    def _emit_jobs_pane_title_changed(self) -> None:
+        self.jobs_pane_title_changed.emit()
 
     def has_pending_work(self) -> bool:
         return bool(self._queue) or self.is_running()
@@ -187,6 +250,7 @@ class ImageGenController(QObject):
                     status_html=job.status_html,
                     thumbnail_paths=list(job.thumbnail_paths),
                     full_prompt=job.full_prompt,
+                    references_invalid=job.references_invalid,
                 )
             )
         return rows
@@ -206,6 +270,8 @@ class ImageGenController(QObject):
             return plugin, dict(self._pending_values)
         for job in self._queue:
             if job.job_id == entry.job_id:
+                if job.plugin is None:
+                    return None
                 return job.plugin, dict(job.values)
         return None
 
@@ -222,6 +288,9 @@ class ImageGenController(QObject):
             sync_random_seed_setting(self.main_window, True)
 
         if self.is_running():
+            return self.enqueue_generation(plugin, values)
+
+        if self._hold_job_queue and self._generation_pipeline_idle():
             return self.enqueue_generation(plugin, values)
 
         return self._start_generation_now(plugin, values)
@@ -244,6 +313,7 @@ class ImageGenController(QObject):
         self._queue.append(job)
         self.queue_changed.emit()
         self._sync_cancel_menu()
+        self._persist_job_queue_now()
         return True
 
     def is_queued_job_replaceable(self, job_id: str) -> bool:
@@ -265,13 +335,18 @@ class ImageGenController(QObject):
             values["random_seed"] = True
             sync_random_seed_setting(self.main_window, True)
         job.plugin = plugin
+        job.plugin_id = plugin.plugin_id
+        job.function = plugin.function
+        job.plugin_unavailable = False
         job.values = values
         job.copies_total = copies
         job.thumbnail_paths = thumbnail_paths_for_values(plugin, values)
         job.full_prompt = str(values.get("prompt") or "").strip()
+        job.references_invalid = job_references_invalid(plugin, values)
         refresh_queued_job_status(job)
         self.queue_changed.emit()
         self._sync_cancel_menu()
+        self._schedule_persist_job_queue()
         return True
 
     def cancel_queued_job(self, job_id: str) -> None:
@@ -280,6 +355,7 @@ class ImageGenController(QObject):
         if len(self._queue) != before:
             self.queue_changed.emit()
             self._sync_cancel_menu()
+            self._schedule_persist_job_queue()
 
     def cancel_job_at_row(self, row: int) -> None:
         rows = self.queue_snapshot()
@@ -300,6 +376,7 @@ class ImageGenController(QObject):
             self._queue.clear()
             self.queue_changed.emit()
             self._sync_cancel_menu()
+            self._schedule_persist_job_queue()
             self.cancel_active_job()
             return
         queue_offset = 1 if rows[0].is_active else 0
@@ -309,6 +386,7 @@ class ImageGenController(QObject):
         self._queue = self._queue[:queue_index]
         self.queue_changed.emit()
         self._sync_cancel_menu()
+        self._schedule_persist_job_queue()
 
     def confirm_cancel_job_at_row(self, parent=None, row: int = -1) -> bool:
         """Confirm cancel/remove for a queue row; runs the action if user chooses Yes."""
@@ -692,6 +770,7 @@ class ImageGenController(QObject):
         self._pending_values["series_refinement"] = enabled
         self.task_status_info_changed.emit()
         self.queue_changed.emit()
+        self._schedule_persist_job_queue()
         return True
 
     def _queued_job_by_id(self, job_id: str) -> QueuedGenerateJob | None:
@@ -699,6 +778,127 @@ class ImageGenController(QObject):
             if job.job_id == job_id:
                 return job
         return None
+
+    def _resolve_plugin_for_record(
+        self, plugin_id: str, function: str
+    ) -> ImageGenModelPlugin | None:
+        from imagegen_plugins import create_menu_plugins
+
+        for plugin in create_menu_plugins():
+            if plugin.plugin_id == plugin_id and plugin.function == function:
+                return plugin
+        return None
+
+    def _restore_persisted_job_queue(self) -> None:
+        records = load_job_queue_records()
+        if not records:
+            return
+        restored: List[QueuedGenerateJob] = []
+        for record in records:
+            plugin = None
+            plugin_unavailable = bool(record.get("plugin_unavailable"))
+            if not plugin_unavailable:
+                plugin = self._resolve_plugin_for_record(
+                    record["plugin_id"], record["function"]
+                )
+                if plugin is None:
+                    plugin_unavailable = True
+            job = restore_queued_generate_job(
+                job_id=record["job_id"],
+                plugin=plugin,
+                plugin_id=record["plugin_id"],
+                function=record["function"],
+                values=record["values"],
+                copies_total=record["copies_total"],
+                full_prompt=record.get("full_prompt") or "",
+                plugin_unavailable=plugin_unavailable,
+            )
+            restored.append(job)
+        self._queue = restored
+        if restored:
+            self.queue_changed.emit()
+            self._sync_cancel_menu()
+        if restored and not self._hold_job_queue:
+            QTimer.singleShot(0, self._try_start_next_queued_job)
+
+    def _active_job_persist_record(self) -> dict | None:
+        """Serializable queue head for the in-flight job (not stored in _queue)."""
+        plugin = self._active_plugin
+        if plugin is None or not self._active_queue_job_id:
+            return None
+        remaining = max(1, self._copies_total - self._copies_done)
+        values = dict(self._pending_values)
+        values["copies"] = remaining
+        job = restore_queued_generate_job(
+            job_id=self._active_queue_job_id,
+            plugin=plugin,
+            plugin_id=plugin.plugin_id,
+            function=plugin.function,
+            values=values,
+            copies_total=remaining,
+            full_prompt=str(values.get("prompt") or "").strip(),
+        )
+        thumbs = list(self._active_thumbnail_paths) or list(job.thumbnail_paths)
+        if thumbs:
+            job.thumbnail_paths = thumbs
+        return serialize_queued_job_record(job)
+
+    def _job_queue_records_for_persist(self) -> list:
+        """Pending queue plus active job snapshot (active first, same as shutdown fold)."""
+        records: list = []
+        active_id = self._active_queue_job_id or ""
+        active_rec = self._active_job_persist_record()
+        if active_rec is not None:
+            records.append(active_rec)
+        for job in self._queue:
+            if job.job_id == active_id:
+                continue
+            records.append(serialize_queued_job_record(job))
+        return records
+
+    def _schedule_persist_job_queue(self) -> None:
+        if self._queue_persist_suppressed:
+            return
+        self._queue_persist_timer.start(300)
+
+    def _persist_job_queue_now(self) -> None:
+        if self._queue_persist_suppressed:
+            return
+        self._queue_persist_timer.stop()
+        save_job_queue_records(self._job_queue_records_for_persist())
+
+    def _persist_job_queue_for_exit(self) -> None:
+        """Persist queue snapshot once at shutdown; block later empty overwrites."""
+        self._queue_persist_timer.stop()
+        if self._exit_queue_persisted:
+            return
+        save_job_queue_records(self._job_queue_records_for_persist())
+        self._exit_queue_persisted = True
+        self._queue_persist_suppressed = True
+
+    def _fold_active_job_into_queue(self) -> None:
+        """Legacy in-memory fold; persistence uses _job_queue_records_for_persist()."""
+        plugin = self._active_plugin
+        if plugin is None or not self._active_queue_job_id:
+            return
+        if any(job.job_id == self._active_queue_job_id for job in self._queue):
+            return
+        remaining = max(1, self._copies_total - self._copies_done)
+        values = dict(self._pending_values)
+        values["copies"] = remaining
+        job = restore_queued_generate_job(
+            job_id=self._active_queue_job_id,
+            plugin=plugin,
+            plugin_id=plugin.plugin_id,
+            function=plugin.function,
+            values=values,
+            copies_total=remaining,
+            full_prompt=str(values.get("prompt") or "").strip(),
+        )
+        job.thumbnail_paths = list(self._active_thumbnail_paths) or list(
+            job.thumbnail_paths
+        )
+        self._queue.insert(0, job)
 
     def series_remaining_after_for_row(self, row: int) -> int:
         """Pending images after the current one (active) or after the first (queued)."""
@@ -758,6 +958,7 @@ class ImageGenController(QObject):
         job.values["copies"] = 1
         refresh_queued_job_status(job)
         self.queue_changed.emit()
+        self._schedule_persist_job_queue()
         return True
 
     def series_refinement_enabled_for_row(self, row: int) -> bool:
@@ -784,6 +985,7 @@ class ImageGenController(QObject):
         job.values["series_refinement"] = enabled
         refresh_queued_job_status(job)
         self.queue_changed.emit()
+        self._schedule_persist_job_queue()
         return True
 
     def _adjust_queued_series_total(self, row: int, delta: int) -> bool:
@@ -810,6 +1012,7 @@ class ImageGenController(QObject):
         job.values["copies"] = new_total
         refresh_queued_job_status(job)
         self.queue_changed.emit()
+        self._schedule_persist_job_queue()
         return True
 
     def _adjust_active_series_remaining_after(self, delta: int) -> bool:
@@ -831,6 +1034,7 @@ class ImageGenController(QObject):
         self._copy_batch_active = new_total > 1
         self.task_status_info_changed.emit()
         self.queue_changed.emit()
+        self._schedule_persist_job_queue()
         if self._is_in_copy_cooldown() and self._pending_batch_copies() <= 0:
             self._stop_copy_cooldown_timer()
             self._finish_copy_batch()
@@ -1127,23 +1331,50 @@ class ImageGenController(QObject):
         """Stop any in-flight task without confirmation or failure dialogs."""
         if suppress_failure_ui:
             self._suppress_task_failure_ui = True
-        self._queue.clear()
-        self.cancel_generation()
+        self._queue_advance_suppressed = True
+        self._persist_job_queue_for_exit()
+        self._abort_active_generation_for_shutdown()
         if self._foreground_tasks.is_running():
             self._foreground_tasks.cancel_task()
+
+    def _abort_active_generation_for_shutdown(self) -> None:
+        if not self.is_running():
+            self._clear_active_generation_state()
+            return
+        self._copy_batch_cancelled = True
+        timer = self._cooldown_timer
+        if timer is not None and timer.isActive():
+            self._stop_copy_cooldown_timer()
+        self._tasks.cancel_task()
+        self._clear_active_generation_state()
+
+    def _clear_active_generation_state(self) -> None:
+        self._remove_aspect_pad_temps()
+        self._copy_batch_active = False
+        self._copies_total = 0
+        self._copies_done = 0
+        self._copy_batch_cancelled = False
+        self._active_queue_job_id = ""
+        self._active_thumbnail_paths = []
+        self._reset_generation_state()
+        self._update_status_bar_indicator(None)
+
+    def _quit_interrupts_active_worker(self) -> bool:
+        """True when quitting would cancel an in-flight model worker task."""
+        return self._tasks.is_running() or self._foreground_tasks.is_running()
 
     def confirm_quit_if_running(self, parent=None) -> bool:
         """Return True if quit may proceed (not running, or user confirmed)."""
         if getattr(self.main_window, "_api_quit_in_progress", False):
             self.prepare_for_shutdown()
             return True
-        if not self.has_pending_work() and not self._foreground_tasks.is_running():
+        if not self._quit_interrupts_active_worker():
             return True
         parent = parent or self.main_window
         answer = show_styled_question(
             parent,
             "AI task running",
-            "Image generation, an AI caption, or queued jobs are active. Quit anyway?",
+            "Image generation or an AI caption is in progress. Quit anyway?",
             default_no=True,
             proceed_note=_CANCEL_PROCEED_NOTE,
             on_proceed=self.prepare_for_shutdown,
@@ -1151,12 +1382,16 @@ class ImageGenController(QObject):
         return answer == QMessageBox.StandardButton.Yes
 
     def cleanup(self) -> None:
+        self._queue_advance_suppressed = True
+        self._persist_job_queue_for_exit()
         self._copy_batch_cancelled = True
-        self._queue.clear()
         self._stop_copy_cooldown_timer()
         self._tasks.cleanup()
         self._foreground_tasks.cleanup()
-        self._finish_copy_batch(cancelled=True)
+        self._queue.clear()
+        self._active_queue_job_id = ""
+        self._active_thumbnail_paths = []
+        self._reset_generation_state()
 
     def _on_foreground_task_finished(self, kind: str, _success: bool, _err: str) -> None:
         if kind == "caption":
@@ -1208,6 +1443,8 @@ class ImageGenController(QObject):
                 )
                 self.task_status_info_changed.emit()
         self._update_status_bar_indicator(kind)
+        if kind == "generate" and self._hold_job_queue:
+            self._emit_jobs_pane_title_changed()
 
     def _on_task_finished(self, kind: str, _success: bool, _err: str) -> None:
         if kind == "caption":
@@ -1573,6 +1810,8 @@ class ImageGenController(QObject):
         self.queue_changed.emit()
         self.task_status_info_changed.emit()
         self._schedule_copy_cooldown()
+        self._schedule_persist_job_queue()
+        self._emit_jobs_pane_title_changed()
 
     def _pending_batch_copies(self) -> int:
         """Images in the active batch still to generate (including after cooldown)."""
@@ -1618,10 +1857,17 @@ class ImageGenController(QObject):
         if self._pending_batch_copies() <= 0:
             self._finish_copy_batch()
             return
+        if self._hold_job_queue:
+            self.queue_changed.emit()
+            self._schedule_persist_job_queue()
+            self._emit_jobs_pane_title_changed()
+            return
         QTimer.singleShot(0, self._launch_next_copy_after_cooldown)
 
     def _launch_next_copy_after_cooldown(self) -> None:
         if self._copy_batch_cancelled:
+            return
+        if self._hold_job_queue:
             return
         if self._pending_batch_copies() <= 0:
             self._finish_copy_batch()
@@ -1676,13 +1922,36 @@ class ImageGenController(QObject):
         self._reset_generation_state()
         self.queue_changed.emit()
         self._sync_cancel_menu()
-        QTimer.singleShot(0, self._try_start_next_queued_job)
+        self._schedule_persist_job_queue()
+        self._emit_jobs_pane_title_changed()
+        if not self._hold_job_queue and not self._queue_advance_suppressed:
+            QTimer.singleShot(0, self._try_start_next_queued_job)
 
     def _try_start_next_queued_job(self) -> None:
+        if self._queue_advance_suppressed or self._hold_job_queue:
+            return
         if self.is_running() or not self._queue:
+            return
+        job = self._queue[0]
+        if job.plugin_unavailable or job.plugin is None:
+            show_styled_critical(
+                self.main_window,
+                "Job queue",
+                f"The first queued job uses an unavailable model ({job.plugin_id}). "
+                "Edit or remove it to continue.",
+            )
+            return
+        if job.references_invalid:
+            show_styled_critical(
+                self.main_window,
+                "Job queue",
+                "The first queued job has missing reference files. "
+                "Edit or remove it to continue.",
+            )
             return
         job = self._queue.pop(0)
         self.queue_changed.emit()
+        self._schedule_persist_job_queue()
         self._start_generation_now(
             job.plugin,
             job.values,

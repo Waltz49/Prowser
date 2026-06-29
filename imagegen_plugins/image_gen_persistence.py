@@ -483,6 +483,101 @@ def save_job_queue_geometry_hex(geom_hex: str) -> None:
     _mutate_imagegen_settings(mutate)
 
 
+def load_hold_job_queue() -> bool:
+    settings = get_config().load_settings()
+    imagegen = settings.get("imagegen") or {}
+    return bool(imagegen.get("hold_job_queue", False))
+
+
+def save_hold_job_queue(enabled: bool) -> None:
+    def mutate(imagegen: dict) -> None:
+        imagegen["hold_job_queue"] = bool(enabled)
+
+    _mutate_imagegen_settings(mutate)
+
+
+def _json_safe_value(value: Any) -> Any:
+    import json
+
+    json.dumps(value)
+    return value
+
+
+def _json_safe_dict(values: Dict[str, Any]) -> Dict[str, Any]:
+    out: Dict[str, Any] = {}
+    for key, value in dict(values).items():
+        try:
+            out[key] = _json_safe_value(value)
+        except (TypeError, ValueError):
+            continue
+    return out
+
+
+def serialize_queued_job_record(job) -> Dict[str, Any]:
+    """JSON-serializable dict for one pending queue entry."""
+    from imagegen_plugins.model_task_queue import QueuedGenerateJob
+
+    if not isinstance(job, QueuedGenerateJob):
+        raise TypeError("expected QueuedGenerateJob")
+    plugin_id = job.plugin_id or (
+        job.plugin.plugin_id if job.plugin is not None else ""
+    )
+    function = job.function or (
+        job.plugin.function if job.plugin is not None else ""
+    )
+    return {
+        "job_id": job.job_id,
+        "function": function,
+        "plugin_id": plugin_id,
+        "values": _json_safe_dict(job.values),
+        "copies_total": int(job.copies_total),
+        "full_prompt": job.full_prompt,
+        "plugin_unavailable": bool(job.plugin_unavailable),
+    }
+
+
+def save_job_queue_records(records: list) -> None:
+    def mutate(imagegen: dict) -> None:
+        imagegen["job_queue"] = list(records)
+
+    _mutate_imagegen_settings(mutate)
+
+
+def load_job_queue_records() -> list:
+    settings = get_config().load_settings()
+    imagegen = settings.get("imagegen") or {}
+    raw = imagegen.get("job_queue")
+    if not isinstance(raw, list):
+        return []
+    out: list = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        job_id = str(item.get("job_id") or "").strip()
+        plugin_id = str(item.get("plugin_id") or "").strip()
+        function = str(item.get("function") or "").strip()
+        values = item.get("values")
+        if not job_id or not plugin_id or not function or not isinstance(values, dict):
+            continue
+        copies_total = item.get("copies_total", values.get("copies", 1))
+        try:
+            copies_total = max(1, int(copies_total))
+        except (TypeError, ValueError):
+            copies_total = 1
+        out.append(
+            {
+                "job_id": job_id,
+                "plugin_id": plugin_id,
+                "function": function,
+                "values": dict(values),
+                "copies_total": copies_total,
+                "full_prompt": str(item.get("full_prompt") or "").strip(),
+                "plugin_unavailable": bool(item.get("plugin_unavailable", False)),
+            }
+        )
+    return out
+
+
 def load_infill_paint_dialog_geometry_hex() -> Optional[str]:
     """Deprecated alias — infill paint shares dialog_geometry with other image-gen dialogs."""
     return load_imagegen_dialog_geometry_hex()

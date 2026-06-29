@@ -5,11 +5,14 @@ from __future__ import annotations
 
 import os
 
-from PySide6.QtCore import QEvent, Qt, QTimer, QSize
+from PySide6.QtCore import QEvent, Qt, QTimer, QSize, QPoint
+from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QLabel,
+    QMenu,
+    QPushButton,
     QScrollArea,
     QSizePolicy,
     QTextBrowser,
@@ -23,6 +26,7 @@ from imagegen_plugins.image_gen_job_queue_dialog import (
     _apply_job_queue_cell_background,
     _valid_preview_paths,
     build_job_queue_action_widget,
+    create_invalid_job_preview_label,
     info_html_for_queue_row,
     open_reference_thumbnail_paths,
 )
@@ -39,6 +43,7 @@ from status_bar_config import (
     configure_task_info_text_browser,
     handle_task_info_reference_link_clicked,
 )
+from theme.theme_base import job_pane_tools_icon_path
 from theme.theme_service import get_active_theme
 from browser_window.sidebar.sidebar_pane_chrome import apply_scroll_area_viewport_background
 from thumbnails.sidebar_pane_layout import MIN_JOBS_QUEUE_CONTENT_HEIGHT
@@ -105,7 +110,50 @@ def _update_jobs_header_status(main_window, controller) -> None:
     header = _jobs_header(main_window)
     if header is None:
         return
+    header.set_title_suffix(controller.jobs_pane_title_suffix())
     header.set_status_text(_jobs_header_status_text(controller))
+
+
+def _show_jobs_pane_tools_menu(main_window, controller, anchor: QPushButton) -> None:
+    menu = QMenu(anchor)
+    t = get_active_theme()
+    menu.setStyleSheet(t.status_bar_context_menu_stylesheet())
+
+    inter_action = menu.addAction("Intermediate Images")
+    inter_action.setCheckable(True)
+    prog_state = controller.get_show_progressive_images_menu_state()
+    if prog_state is None:
+        inter_action.setEnabled(False)
+        inter_action.setChecked(False)
+    else:
+        _supported, enabled = prog_state
+        inter_action.setChecked(bool(enabled))
+        inter_action.triggered.connect(
+            lambda checked: controller.set_show_progressive_images(bool(checked))
+        )
+
+    hold_action = menu.addAction("Hold Job Queue")
+    hold_action.setCheckable(True)
+    hold_action.setChecked(controller.hold_job_queue())
+    hold_action.triggered.connect(
+        lambda checked: controller.set_hold_job_queue(bool(checked))
+    )
+
+    menu.exec(anchor.mapToGlobal(QPoint(0, anchor.height())))
+
+
+def _setup_jobs_titlebar_tools(main_window, controller) -> None:
+    header = _jobs_header(main_window)
+    if header is None:
+        return
+    btn = QPushButton()
+    btn.setIcon(QIcon(job_pane_tools_icon_path()))
+    btn.setIconSize(QSize(14, 14))
+    btn.setToolTip("Job queue tools")
+    btn.clicked.connect(
+        lambda: _show_jobs_pane_tools_menu(main_window, controller, btn)
+    )
+    header.set_tools_button(btn)
 
 
 def _disable_tab_focus(root: QWidget) -> None:
@@ -131,21 +179,38 @@ def _job_card_stylesheet() -> str:
 class _FlowReferenceThumbs(QWidget):
     """Reference thumbnails in right-aligned rows; wrap on resize."""
 
-    def __init__(self, main_window, paths: list[str], parent=None):
+    def __init__(
+        self,
+        main_window,
+        paths: list[str],
+        *,
+        references_invalid: bool = False,
+        parent=None,
+    ):
         super().__init__(parent)
         self._main_window = main_window
-        self._paths = _valid_preview_paths(paths)
+        self._references_invalid = bool(references_invalid)
+        self._paths = [] if self._references_invalid else _valid_preview_paths(paths)
         self._cells: list[QLabel] = []
         self._last_cols: int | None = None
         self._last_reflow_width = 0
         self._reflow_guard = False
-        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        if self._references_invalid:
+            self.setCursor(Qt.CursorShape.ArrowCursor)
+        else:
+            self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setAttribute(Qt.WidgetAttribute.WA_DontCreateNativeAncestors, True)
         self.setAttribute(Qt.WidgetAttribute.WA_NativeWindow, False)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self._outer = QVBoxLayout(self)
         self._outer.setContentsMargins(0, 2, 0, 0)
         self._outer.setSpacing(_THUMB_GAP)
+        if self._references_invalid:
+            thumb = create_invalid_job_preview_label(_THUMB_SIZE)
+            thumb.setToolTip("Reference files for this job are missing")
+            self._cells.append(thumb)
+            self.reflow_to_width(_THUMB_SIZE)
+            return
         for path in self._paths:
             thumb = create_job_status_thumbnail_label(path, _THUMB_SIZE)
             thumb.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -253,7 +318,11 @@ class _FlowReferenceThumbs(QWidget):
         return self.sizeHint()
 
     def mousePressEvent(self, event) -> None:
-        if event.button() == Qt.MouseButton.LeftButton and self._paths:
+        if (
+            event.button() == Qt.MouseButton.LeftButton
+            and self._paths
+            and not self._references_invalid
+        ):
             open_reference_thumbnail_paths(self._main_window, self._paths)
             event.accept()
             return
@@ -311,6 +380,8 @@ class _JobCard(QFrame):
         row_layout.addWidget(self._content, 1)
 
     def _ref_count(self) -> int:
+        if getattr(self._refs, "_references_invalid", False):
+            return 1
         return len(getattr(self._refs, "_paths", []) or [])
 
     def _use_inline_refs_layout(self, scroll_width: int) -> bool:
@@ -405,11 +476,17 @@ class _JobCard(QFrame):
         thumbnail_paths: list[str],
         content_width: int,
         scroll_width: int,
+        references_invalid: bool = False,
     ) -> None:
         self._scroll_width = scroll_width
         self._full_prompt = full_prompt or ""
         install_delayed_prompt_tooltip(self._info_browser, self._full_prompt)
-        self._replace_refs(thumbnail_paths, content_width, scroll_width=scroll_width)
+        self._replace_refs(
+            thumbnail_paths,
+            content_width,
+            scroll_width=scroll_width,
+            references_invalid=references_invalid,
+        )
         self.update_info_html(info_html, content_width, scroll_width=scroll_width)
 
     def update_info_html(
@@ -447,6 +524,7 @@ class _JobCard(QFrame):
         content_width: int,
         *,
         scroll_width: int | None = None,
+        references_invalid: bool = False,
     ) -> None:
         sw = (
             scroll_width
@@ -454,11 +532,12 @@ class _JobCard(QFrame):
             else self._scroll_width or (content_width + _ACTION_COL_WIDTH + 20)
         )
         self._scroll_width = sw
-        valid = _valid_preview_paths(paths)
+        valid = [] if references_invalid else _valid_preview_paths(paths)
         inline = self._use_inline_refs_layout(sw)
         if (
             self._refs.isVisible()
             and getattr(self._refs, "_paths", None) == valid
+            and getattr(self._refs, "_references_invalid", False) == references_invalid
             and inline == self._content_inline
         ):
             self._reflow_visible_refs(content_width, sw)
@@ -467,7 +546,11 @@ class _JobCard(QFrame):
         if layout is not None:
             layout.removeWidget(self._refs)
         self._refs.deleteLater()
-        self._refs = _FlowReferenceThumbs(self._main_window, paths)
+        self._refs = _FlowReferenceThumbs(
+            self._main_window,
+            paths,
+            references_invalid=references_invalid,
+        )
         mode_changed = inline != self._content_inline
         self._ensure_content_layout(inline)
         if not mode_changed:
@@ -582,11 +665,10 @@ class SidebarJobsWidget(QWidget):
             return
         self._controller.queue_changed.connect(self._schedule_refresh_table)
         self._controller.queue_changed.connect(self._update_header_status)
-        self._controller.generation_started.connect(self._update_header_status)
+        self._controller.jobs_pane_title_changed.connect(self._update_header_status)
         self._controller.generation_started.connect(
             lambda: self._refresh_active_job_strip(force=True)
         )
-        self._controller.generation_finished.connect(self._update_header_status)
         self._controller.generation_finished.connect(self._refresh_active_job_strip)
         self._controller.task_status_info_changed.connect(
             lambda: self._refresh_active_row(force=True)
@@ -594,6 +676,7 @@ class SidebarJobsWidget(QWidget):
         self._controller.task_status_info_changed.connect(
             lambda: self._refresh_active_job_strip(force=True)
         )
+        self._controller.hold_job_queue_changed.connect(self._update_header_status)
         self._signal_connected = True
         timer = QTimer(self)
         timer.setInterval(500)
@@ -605,6 +688,10 @@ class SidebarJobsWidget(QWidget):
 
     def _update_header_status(self) -> None:
         _update_jobs_header_status(self.main_window, self._controller)
+
+    def attach_titlebar_tools(self) -> None:
+        """Wire the Job Control titlebar tools menu (after right sidebar exists)."""
+        _setup_jobs_titlebar_tools(self.main_window, self._controller)
 
     def refresh_header_status(self) -> None:
         self._update_header_status()
@@ -943,6 +1030,7 @@ class SidebarJobsWidget(QWidget):
                 thumbnail_paths=row.thumbnail_paths,
                 content_width=info_w,
                 scroll_width=viewport_w,
+                references_invalid=row.references_invalid,
             )
             self._list_layout.insertWidget(self._list_layout.count() - 1, card)
             self._job_cards.append(card)

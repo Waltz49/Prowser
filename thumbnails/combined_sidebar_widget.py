@@ -43,6 +43,8 @@ class HeaderWidget(QFrame):
         self.omit_right_border = omit_right_border
         self.omit_left_border = omit_left_border
         self.hide_button = None
+        self.tools_button = None
+        self._header_layout = None
         self._single_click_timer = QTimer(self)
         self._single_click_timer.setSingleShot(True)
         self._single_click_timer.timeout.connect(self._emit_title_clicked)
@@ -62,6 +64,7 @@ class HeaderWidget(QFrame):
         self.setFocusPolicy(Qt.NoFocus)
         self.setFixedHeight(30)
         layout = QHBoxLayout(self)
+        self._header_layout = layout
         layout.setContentsMargins(8, 4, 8, 4)
         layout.setSpacing(8)
         
@@ -86,6 +89,62 @@ class HeaderWidget(QFrame):
         self.hide_button.setFocusPolicy(Qt.NoFocus)
         layout.addWidget(self.hide_button)
         self.refresh_theme_styles()
+
+    def set_tools_button(self, button: QPushButton | None) -> None:
+        """Optional titlebar tools control (inserted before the hide button)."""
+        layout = self._header_layout
+        if layout is None:
+            return
+        if self.tools_button is not None:
+            layout.removeWidget(self.tools_button)
+            self.tools_button.setParent(None)
+            self.tools_button = None
+        if button is None:
+            return
+        button.setFixedSize(20, 20)
+        button.setFocusPolicy(Qt.NoFocus)
+        self.tools_button = button
+        hide_idx = layout.indexOf(self.hide_button)
+        if hide_idx < 0:
+            layout.addWidget(button)
+        else:
+            layout.insertWidget(hide_idx, button)
+        self.refresh_theme_styles()
+
+    def _titlebar_chip_stylesheet(self) -> str:
+        titlebar = QColor(tc.SIDEBAR_HEADER_BG_HEX)
+        if not titlebar.isValid():
+            titlebar = QColor("#2b2b2b")
+        hb_bg = titlebar.lighter(200).name()
+        hb_hover = titlebar.lighter(300).name()
+        hb_pressed = titlebar.lighter(160).name()
+        hb_border = titlebar.lighter(160).name()
+        hb_border_hover = titlebar.lighter(180).name()
+        return f"""
+            QPushButton {{
+                background-color: {hb_bg};
+                border: 1px solid {hb_border};
+                border-radius: 3px;
+                color: {tc.SIDEBAR_HEADER_TEXT_HEX};
+                font-weight: bold;
+                min-width: 20px;
+                padding: 0px;
+            }}
+            QPushButton:hover {{
+                background-color: {hb_hover};
+                border-color: {hb_border_hover};
+            }}
+            QPushButton:pressed {{
+                background-color: {hb_pressed};
+                border-color: {hb_border};
+            }}
+            QPushButton:disabled {{
+                color: #888888;
+            }}
+        """
+
+    def _style_titlebar_chip(self, button: QPushButton) -> None:
+        button.setStyleSheet(self._titlebar_chip_stylesheet())
 
     def _qframe_stylesheet(self, background_color_hex: str) -> str:
         """QFrame-only sheet: borders and per-corner radii respect omit_* flags."""
@@ -147,39 +206,16 @@ class HeaderWidget(QFrame):
                 border-width: 0px;
             }}
         """)
-        titlebar = QColor(tc.SIDEBAR_HEADER_BG_HEX)
-        if not titlebar.isValid():
-            titlebar = QColor("#2b2b2b")
-        # Hide chip: fill/border derived from titlebar (lighter than bar; hover lighter still)
-        hb_bg = titlebar.lighter(200).name()
-        hb_hover = titlebar.lighter(300).name()
-        hb_pressed = titlebar.lighter(160).name()
-        hb_border = titlebar.lighter(160).name()
-        hb_border_hover = titlebar.lighter(180).name()
-        self.hide_button.setStyleSheet(f"""
-            QPushButton {{
-                background-color: {hb_bg};
-                border: 1px solid {hb_border};
-                border-radius: 3px;
-                color: {tc.SIDEBAR_HEADER_TEXT_HEX};
-                font-weight: bold;
-                min-width: 20px;
-                padding: 0px;
-            }}
-            QPushButton:hover {{
-                background-color: {hb_hover};
-                border-color: {hb_border_hover};
-            }}
-            QPushButton:pressed {{
-                background-color: {hb_pressed};
-                border-color: {hb_border};
-            }}
-        """)
+        self._style_titlebar_chip(self.hide_button)
+        if self.tools_button is not None:
+            self._style_titlebar_chip(self.tools_button)
 
-    def _titlebar_click_excludes_hide_button(self, event: QMouseEvent) -> bool:
-        return self.hide_button is not None and self.hide_button.geometry().contains(
-            event.position().toPoint()
-        )
+    def _titlebar_click_excludes_chrome_buttons(self, event: QMouseEvent) -> bool:
+        pos = event.position().toPoint()
+        for btn in (self.tools_button, self.hide_button):
+            if btn is not None and btn.geometry().contains(pos):
+                return True
+        return False
 
     def _emit_title_clicked(self) -> None:
         self.title_clicked.emit()
@@ -222,7 +258,7 @@ class HeaderWidget(QFrame):
     def mousePressEvent(self, event: QMouseEvent):
         """Defer single-click so double-click on the title bar is not swallowed."""
         self._handle_pane_resize_mouse_press(event)
-        if event.button() == Qt.LeftButton and not self._titlebar_click_excludes_hide_button(event):
+        if event.button() == Qt.LeftButton and not self._titlebar_click_excludes_chrome_buttons(event):
             app = QApplication.instance()
             interval = app.doubleClickInterval() if app else 400
             self._single_click_timer.start(interval)
@@ -241,7 +277,7 @@ class HeaderWidget(QFrame):
 
     def mouseDoubleClickEvent(self, event: QMouseEvent):
         """Emit when the title bar (not the hide button) is double-clicked."""
-        if self._titlebar_click_excludes_hide_button(event):
+        if self._titlebar_click_excludes_chrome_buttons(event):
             super().mouseDoubleClickEvent(event)
             return
         self._single_click_timer.stop()
@@ -254,6 +290,10 @@ class HeaderWidget(QFrame):
         text = (text or "").strip()
         self.status_label.setText(text)
         self.status_label.setVisible(bool(text))
+
+    def set_title_suffix(self, suffix: str) -> None:
+        """Append *suffix* to the base title (e.g. ' - HOLD')."""
+        self.title_label.setText(f"{self.title}{suffix or ''}")
 
     def configure_pane_drag_resize(
         self,
@@ -338,7 +378,7 @@ class HeaderWidget(QFrame):
         if (
             event.button() == Qt.MouseButton.LeftButton
             and self._pane_resize_active()
-            and not self._titlebar_click_excludes_hide_button(event)
+            and not self._titlebar_click_excludes_chrome_buttons(event)
         ):
             self._pane_resize_press_global_y = event.globalPosition().y()
 

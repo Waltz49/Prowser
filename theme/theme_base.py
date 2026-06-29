@@ -23,6 +23,24 @@ def asset_path(filename: str) -> str:
     return os.path.abspath(os.path.join(_ASSETS_DIR, filename)).replace("\\", "/")
 
 
+def invalid_job_preview_path() -> str:
+    """X'd-out preview graphic for queue jobs with missing reference files."""
+    for name in ("job_invalid_ref_preview.png", "job_invalid_ref_preview.svg"):
+        path = asset_path(name)
+        if os.path.isfile(path):
+            return path
+    return asset_path("job_invalid_ref_preview.svg")
+
+
+def job_pane_tools_icon_path() -> str:
+    """Titlebar tools menu icon for the Job Control pane."""
+    for name in ("job_pane_tools_icon.png", "job_pane_tools_icon.svg"):
+        path = asset_path(name)
+        if os.path.isfile(path):
+            return path
+    return asset_path("job_pane_tools_icon.svg")
+
+
 def asset_file_url(filename: str) -> str:
     """Return file:// URL for an asset, for use in HTML img src (e.g. QLabel RichText)."""
     return f"file://{asset_path(filename)}"

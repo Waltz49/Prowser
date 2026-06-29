@@ -605,6 +605,8 @@ class RightSidebarCombinedWidget(QWidget):
             want_compact = self._jobs_pane_compact and self._jobs_strip_compact_available()
             self._set_jobs_pane_compact(want_compact, persist=False)
             self.jobs_widget.show()
+            if hasattr(self.jobs_widget, "attach_titlebar_tools"):
+                self.jobs_widget.attach_titlebar_tools()
             if hasattr(self.jobs_widget, "refresh_header_status"):
                 self.jobs_widget.refresh_header_status()
 

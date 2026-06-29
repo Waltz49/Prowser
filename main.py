@@ -965,17 +965,14 @@ def main():
                     elif last_directory and os.path.exists(last_directory):
                         args.paths = [last_directory]
                     # args.no_fullscreen already set by explicit flag handling above
-                    print(f"Last directory: {last_directory}")
 
                     # Use utility function for directory image checking
                     dir_has_supported_files = directory_has_images
 
                     # If the last saved file does not exist, but the last directory exists and has supported files, just show the directory
                     if not (last_file and os.path.exists(last_file)) and os.path.exists(last_directory) and dir_has_supported_files(last_directory):
-                        print(f"Last file does not exist, but last directory has supported image files, using directory: {last_directory}")
                         args.paths = [last_directory]
                     elif dir_has_supported_files(last_directory):
-                        print(f"Last directory has supported image files, using it")
                         args.paths = [last_directory]
                     else:
                         # Open the system directory dialog and set args.paths from the result, or exit if canceled

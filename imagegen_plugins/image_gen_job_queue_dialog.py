@@ -105,42 +105,6 @@ def _apply_job_queue_action_bar_background(widget: QWidget) -> None:
     widget.setAutoFillBackground(True)
 
 
-def _build_preview_cell(main_window, paths: list[str]) -> tuple[QWidget, int]:
-    """Preview column cell: one full thumbnail per path; returns (widget, width)."""
-    preview_wrap = QWidget()
-    _apply_job_queue_cell_background(preview_wrap)
-    preview_layout = QHBoxLayout(preview_wrap)
-    preview_layout.setContentsMargins(4, 4, 4, 4)
-    preview_layout.setSpacing(_THUMB_CELL_GAP)
-    valid = _valid_preview_paths(paths)
-    row_preview_w = _preview_column_width(len(valid) or 1)
-    preview_wrap.setMinimumWidth(row_preview_w)
-    preview_wrap.setMaximumWidth(row_preview_w)
-    preview_wrap.setMinimumHeight(_preview_cell_height())
-    preview_wrap.setSizePolicy(
-        QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Expanding
-    )
-    if valid:
-        for path in valid:
-            thumb = _make_clickable_thumbnail(main_window, path, _THUMB_SIZE)
-            thumb.setSizePolicy(
-                QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed
-            )
-            preview_layout.addWidget(
-                thumb,
-                0,
-                Qt.AlignmentFlag.AlignVCenter,
-            )
-    else:
-        placeholder = QLabel("—")
-        placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        placeholder.setFixedSize(_THUMB_SIZE, _THUMB_SIZE)
-        _apply_job_queue_cell_background(placeholder)
-        preview_layout.addWidget(placeholder)
-    preview_layout.addStretch(1)
-    return preview_wrap, row_preview_w
-
-
 def _make_clickable_thumbnail(main_window, file_path: str, size: int) -> QLabel:
     thumb = create_job_status_thumbnail_label(file_path, size)
     thumb.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -166,6 +130,28 @@ def _valid_preview_paths(paths: list[str]) -> list[str]:
     return out
 
 
+def create_invalid_job_preview_label(size: int) -> QLabel:
+    from PySide6.QtGui import QPixmap
+
+    from theme.theme_base import invalid_job_preview_path
+
+    thumb = QLabel()
+    thumb.setFixedSize(size, size)
+    thumb.setAlignment(Qt.AlignmentFlag.AlignCenter)
+    thumb.setStyleSheet(_job_queue_cell_background_stylesheet())
+    px = QPixmap(invalid_job_preview_path())
+    if not px.isNull():
+        thumb.setPixmap(
+            px.scaled(
+                size,
+                size,
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+        )
+    return thumb
+
+
 def _preview_column_width(num_thumbs: int) -> int:
     """Preview column width for *num_thumbs* full-size (_THUMB_SIZE) thumbnails."""
     n = max(1, int(num_thumbs))
@@ -176,8 +162,66 @@ def _preview_column_width(num_thumbs: int) -> int:
     )
 
 
+def _build_preview_cell(
+    main_window,
+    paths: list[str],
+    *,
+    references_invalid: bool = False,
+) -> tuple[QWidget, int]:
+    """Preview column cell: one full thumbnail per path; returns (widget, width)."""
+    preview_wrap = QWidget()
+    _apply_job_queue_cell_background(preview_wrap)
+    preview_layout = QHBoxLayout(preview_wrap)
+    preview_layout.setContentsMargins(4, 4, 4, 4)
+    preview_layout.setSpacing(_THUMB_CELL_GAP)
+    if references_invalid:
+        valid: list[str] = []
+        row_preview_w = _preview_column_width(1)
+    else:
+        valid = _valid_preview_paths(paths)
+        row_preview_w = _preview_column_width(len(valid) or 1)
+    preview_wrap.setMinimumWidth(row_preview_w)
+    preview_wrap.setMaximumWidth(row_preview_w)
+    preview_wrap.setMinimumHeight(_preview_cell_height())
+    preview_wrap.setSizePolicy(
+        QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Expanding
+    )
+    if references_invalid:
+        thumb = create_invalid_job_preview_label(_THUMB_SIZE)
+        thumb.setToolTip("Reference files for this job are missing")
+        preview_layout.addWidget(
+            thumb,
+            0,
+            Qt.AlignmentFlag.AlignVCenter,
+        )
+    elif valid:
+        for path in valid:
+            thumb = _make_clickable_thumbnail(main_window, path, _THUMB_SIZE)
+            thumb.setSizePolicy(
+                QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed
+            )
+            preview_layout.addWidget(
+                thumb,
+                0,
+                Qt.AlignmentFlag.AlignVCenter,
+            )
+    else:
+        placeholder = QLabel("—")
+        placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        placeholder.setFixedSize(_THUMB_SIZE, _THUMB_SIZE)
+        _apply_job_queue_cell_background(placeholder)
+        preview_layout.addWidget(placeholder)
+    preview_layout.addStretch(1)
+    return preview_wrap, row_preview_w
+
+
 def _max_preview_column_width(rows) -> int:
-    widths = [_preview_column_width(len(_valid_preview_paths(r.thumbnail_paths))) for r in rows]
+    widths = []
+    for r in rows:
+        if getattr(r, "references_invalid", False):
+            widths.append(_preview_column_width(1))
+        else:
+            widths.append(_preview_column_width(len(_valid_preview_paths(r.thumbnail_paths))))
     return max(_preview_column_width(1), *widths) if widths else _preview_column_width(1)
 
 
@@ -638,7 +682,9 @@ class ImageGenJobQueueDialog(QDialog):
         preview_col_w = _max_preview_column_width(rows)
         self._table.setColumnWidth(2, preview_col_w)
         preview_wrap, _row_w = _build_preview_cell(
-            self.main_window, rows[row_idx].thumbnail_paths
+            self.main_window,
+            rows[row_idx].thumbnail_paths,
+            references_invalid=rows[row_idx].references_invalid,
         )
         self._table.setCellWidget(row_idx, 2, preview_wrap)
         browser = self._table.cellWidget(row_idx, 1)
@@ -690,7 +736,9 @@ class ImageGenJobQueueDialog(QDialog):
             self._table.setCellWidget(row_idx, 1, info_browser)
 
             preview_wrap, _row_preview_w = _build_preview_cell(
-                self.main_window, row.thumbnail_paths
+                self.main_window,
+                row.thumbnail_paths,
+                references_invalid=row.references_invalid,
             )
             self._table.setCellWidget(row_idx, 2, preview_wrap)
 
