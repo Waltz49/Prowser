@@ -1027,24 +1027,31 @@ class MenuManager:
         search_menu.addAction(self.main_window.clip_search_action)
 
         # Search by person: single action that opens a dialog (avoids native submenu issues on macOS)
-        self.main_window.search_by_person_action = QAction("Search by Person...", self.main_window)
-        self.main_window.search_by_person_action.setShortcut(QKeySequence("Ctrl+P"))
-        def _show_filter_by_person_with_focus():
-            tree_had_focus = self.main_window._tree_has_focus() if hasattr(self.main_window, '_tree_has_focus') else False
-            self.main_window._tree_had_focus_when_invoked = tree_had_focus
-            try:
-                self.main_window.show_filter_by_person_dialog()
-            finally:
-                self.main_window._tree_had_focus_when_invoked = False
-        self.main_window.search_by_person_action.triggered.connect(_show_filter_by_person_with_focus)
-        search_menu.addAction(self.main_window.search_by_person_action)
+        try:
+            from bundle_capabilities import faces_ui_enabled
 
-        self.main_window.quick_person_search_action = QAction("Quick Person Search", self.main_window)
-        self.main_window.quick_person_search_action.setShortcut(QKeySequence("Meta+Ctrl+P"))
-        self.main_window.quick_person_search_action.triggered.connect(
-            lambda: run_quick_person_search(self.main_window)
-        )
-        search_menu.addAction(self.main_window.quick_person_search_action)
+            _faces_ui = faces_ui_enabled()
+        except ImportError:
+            _faces_ui = True
+        if _faces_ui:
+            self.main_window.search_by_person_action = QAction("Search by Person...", self.main_window)
+            self.main_window.search_by_person_action.setShortcut(QKeySequence("Ctrl+P"))
+            def _show_filter_by_person_with_focus():
+                tree_had_focus = self.main_window._tree_has_focus() if hasattr(self.main_window, '_tree_has_focus') else False
+                self.main_window._tree_had_focus_when_invoked = tree_had_focus
+                try:
+                    self.main_window.show_filter_by_person_dialog()
+                finally:
+                    self.main_window._tree_had_focus_when_invoked = False
+            self.main_window.search_by_person_action.triggered.connect(_show_filter_by_person_with_focus)
+            search_menu.addAction(self.main_window.search_by_person_action)
+
+            self.main_window.quick_person_search_action = QAction("Quick Person Search", self.main_window)
+            self.main_window.quick_person_search_action.setShortcut(QKeySequence("Meta+Ctrl+P"))
+            self.main_window.quick_person_search_action.triggered.connect(
+                lambda: run_quick_person_search(self.main_window)
+            )
+            search_menu.addAction(self.main_window.quick_person_search_action)
        
         # search_menu.addSeparator()
        
@@ -1349,18 +1356,25 @@ class MenuManager:
         tools_menu.addAction(self.main_window.prepopulate_cache_action)
 
         # Cache Faces (Cmd+=)
-        self.main_window.cache_faces_action = QAction("Cache Subdirectories' Faces", self.main_window)
-        self.main_window.cache_faces_action.setShortcut(QKeySequence("Ctrl+="))
-        self.main_window.cache_faces_action.setShortcutContext(Qt.ShortcutContext.WindowShortcut)
-        def _cache_faces_with_focus():
-            tree_had_focus = self.main_window._tree_has_focus() if hasattr(self.main_window, '_tree_has_focus') else False
-            self.main_window._tree_had_focus_when_invoked = tree_had_focus
-            try:
-                self.main_window.cache_faces()
-            finally:
-                self.main_window._tree_had_focus_when_invoked = False
-        self.main_window.cache_faces_action.triggered.connect(_cache_faces_with_focus)
-        tools_menu.addAction(self.main_window.cache_faces_action)
+        try:
+            from bundle_capabilities import faces_ui_enabled
+
+            _tools_faces_ui = faces_ui_enabled()
+        except ImportError:
+            _tools_faces_ui = True
+        if _tools_faces_ui:
+            self.main_window.cache_faces_action = QAction("Cache Subdirectories' Faces", self.main_window)
+            self.main_window.cache_faces_action.setShortcut(QKeySequence("Ctrl+="))
+            self.main_window.cache_faces_action.setShortcutContext(Qt.ShortcutContext.WindowShortcut)
+            def _cache_faces_with_focus():
+                tree_had_focus = self.main_window._tree_has_focus() if hasattr(self.main_window, '_tree_has_focus') else False
+                self.main_window._tree_had_focus_when_invoked = tree_had_focus
+                try:
+                    self.main_window.cache_faces()
+                finally:
+                    self.main_window._tree_had_focus_when_invoked = False
+            self.main_window.cache_faces_action.triggered.connect(_cache_faces_with_focus)
+            tools_menu.addAction(self.main_window.cache_faces_action)
 
         # Save Custom Sort Order
         # Developer note: This action is disabled for now but should remain in the codebase.
@@ -2023,11 +2037,18 @@ class MenuManager:
         pf_keys_action.triggered.connect(self.main_window.show_pf_help)
         help_menu.addAction(pf_keys_action)
 
-        downloading_models_action = QAction("Downloading AI Models...", self.main_window)
-        downloading_models_action.triggered.connect(
-            self.main_window.show_downloading_models_help
-        )
-        help_menu.addAction(downloading_models_action)
+        try:
+            from bundle_capabilities import imagegen_ui_enabled
+
+            _imagegen_help_ui = imagegen_ui_enabled()
+        except ImportError:
+            _imagegen_help_ui = True
+        if _imagegen_help_ui:
+            downloading_models_action = QAction("Downloading AI Models...", self.main_window)
+            downloading_models_action.triggered.connect(
+                self.main_window.show_downloading_models_help
+            )
+            help_menu.addAction(downloading_models_action)
 
         # Modifier+click actions — update browser_window/dialogs/help_hidden_gems.py when adding new ones
         hidden_gems_action = QAction("Hidden Gems...", self.main_window)
@@ -2530,8 +2551,13 @@ class MenuManager:
         # Cache Faces: enable only when face_engine is available
         if hasattr(mw, 'cache_faces_action'):
             try:
-                from faces.face_engine import is_available as face_available
-                mw.cache_faces_action.setEnabled(face_available())
+                from bundle_capabilities import faces_ui_enabled
+
+                if not faces_ui_enabled():
+                    mw.cache_faces_action.setEnabled(False)
+                else:
+                    from faces.face_engine import is_available as face_available
+                    mw.cache_faces_action.setEnabled(face_available())
             except ImportError:
                 mw.cache_faces_action.setEnabled(False)
         

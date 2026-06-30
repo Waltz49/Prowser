@@ -8,12 +8,18 @@ import os
 os.environ.setdefault("PYTHON_JIT", "1")
 
 try:
+    import importlib.util
     import sys
 
     if getattr(sys, "frozen", False):
         from pyinstaller_frozen_support import configure_frozen_native_paths, log_frozen_diagnostic
 
         configure_frozen_native_paths()
+        try:
+            if importlib.util.find_spec("imagegen_plugins") is None:
+                os.environ.setdefault("PROWSER_MIN_BUNDLE", "1")
+        except Exception:
+            os.environ.setdefault("PROWSER_MIN_BUNDLE", "1")
         try:
             from pyinstaller_frozen_support import diffusers_is_installed, mflux_is_installed
 

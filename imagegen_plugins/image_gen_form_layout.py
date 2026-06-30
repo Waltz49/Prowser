@@ -24,7 +24,13 @@ from theme.theme_service import get_active_theme
 
 IMAGE_GEN_FIELD_RESET_BTN_SIZE = 26
 _IMAGE_GEN_TRASH_ICON_PX = 16
-_IMAGE_GEN_PROMPT_CLEAR_ICON_PX = 16
+IMAGE_GEN_PROMPT_CLEAR_BTN_SCALE = 0.8
+IMAGE_GEN_PROMPT_CLEAR_BTN_SIZE = round(
+    IMAGE_GEN_FIELD_RESET_BTN_SIZE * IMAGE_GEN_PROMPT_CLEAR_BTN_SCALE
+)
+_IMAGE_GEN_PROMPT_CLEAR_ICON_PX = round(
+    _IMAGE_GEN_TRASH_ICON_PX * IMAGE_GEN_PROMPT_CLEAR_BTN_SCALE
+)
 IMAGE_GEN_DIM_HELPER_BTN_SIZE = 20 #DGN: 26
 
 IMAGE_GEN_FIELD_GROUP_SPACING = 10
@@ -657,7 +663,7 @@ def image_gen_prompt_clear_btn_stylesheet(
 
     t = get_active_theme()
     chrome_bg = image_gen_preview_client_background_hex()
-    sz = IMAGE_GEN_FIELD_RESET_BTN_SIZE
+    sz = IMAGE_GEN_PROMPT_CLEAR_BTN_SIZE
     return f"""
         {selector} {{
             background-color: {chrome_bg};
@@ -692,6 +698,24 @@ def image_gen_prompt_clear_btn_dialog_stylesheet() -> str:
     )
 
 
+def image_gen_system_prompt_copy_btn_dialog_stylesheet() -> str:
+    return image_gen_prompt_copy_btn_stylesheet(
+        selector="#imageGenDialog QPushButton#imageGenSystemPromptCopyBtn"
+    )
+
+
+def image_gen_system_prompt_clear_btn_dialog_stylesheet() -> str:
+    return image_gen_prompt_clear_btn_stylesheet(
+        selector="#imageGenDialog QPushButton#imageGenSystemPromptClearBtn"
+    )
+
+
+def image_gen_system_prompt_voice_mic_btn_dialog_stylesheet() -> str:
+    return image_gen_prompt_voice_mic_btn_stylesheet(
+        selector="#imageGenDialog QPushButton#imageGenSystemPromptVoiceMicBtn"
+    )
+
+
 class _ImageGenPromptClearButton(QPushButton):
     """Boxed clear icon for the image prompt field label row."""
 
@@ -699,20 +723,28 @@ class _ImageGenPromptClearButton(QPushButton):
         self,
         edit: QPlainTextEdit,
         parent: Optional[QWidget] = None,
+        *,
+        object_name: str = "imageGenPromptClearBtn",
     ) -> None:
         super().__init__("", parent)
         self._edit = edit
-        self.setObjectName("imageGenPromptClearBtn")
+        self.setObjectName(object_name)
         self.setToolTip("Clear prompt")
         self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._normal_icon = QIcon(asset_path("clear_icon.webp"))
+        self._normal_icon = QIcon(asset_path("trash_icon.png"))
+        self._hover_icon = QIcon(asset_path("trash_icon_hover.png"))
         self._apply_icon()
+        clear_selector = (
+            f"QPushButton#{object_name}"
+            if object_name
+            else "QPushButton"
+        )
         self.setStyleSheet(
-            image_gen_prompt_clear_btn_stylesheet(selector="QPushButton")
+            image_gen_prompt_clear_btn_stylesheet(selector=clear_selector)
         )
         self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         self.setFixedSize(
-            IMAGE_GEN_FIELD_RESET_BTN_SIZE, IMAGE_GEN_FIELD_RESET_BTN_SIZE
+            IMAGE_GEN_PROMPT_CLEAR_BTN_SIZE, IMAGE_GEN_PROMPT_CLEAR_BTN_SIZE
         )
         self.clicked.connect(self._clear_prompt)
 
@@ -729,25 +761,32 @@ class _ImageGenPromptClearButton(QPushButton):
 def create_image_gen_prompt_clear_button(
     edit: QPlainTextEdit,
     parent: Optional[QWidget] = None,
+    *,
+    object_name: str = "imageGenPromptClearBtn",
 ) -> QPushButton:
-    return _ImageGenPromptClearButton(edit, parent)
+    return _ImageGenPromptClearButton(edit, parent, object_name=object_name)
 
 
 def make_image_gen_prompt_label_row(
     label_text: str,
     edit: QPlainTextEdit,
     parent: Optional[QWidget] = None,
+    *,
+    label_row_object_name: str = "imageGenPromptLabelRow",
+    clear_object_name: str = "imageGenPromptClearBtn",
 ) -> QWidget:
-    """Image Prompt heading with a clear button to the right of the label."""
+    """Field heading with a clear button to the right of the label."""
     row = QWidget(parent)
-    row.setObjectName("imageGenPromptLabelRow")
+    row.setObjectName(label_row_object_name)
     row.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
     layout = QHBoxLayout(row)
     layout.setContentsMargins(0, 0, 0, 0)
     layout.setSpacing(6)
     layout.addWidget(make_image_gen_field_label(label_text, row), 0)
     layout.addWidget(
-        create_image_gen_prompt_clear_button(edit, row),
+        create_image_gen_prompt_clear_button(
+            edit, row, object_name=clear_object_name
+        ),
         0,
         Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
     )
@@ -802,17 +841,30 @@ def image_gen_prompt_voice_mic_btn_dialog_stylesheet() -> str:
 def create_image_gen_prompt_voice_mic_button(
     edit: QPlainTextEdit,
     parent: Optional[QWidget] = None,
+    *,
+    object_name: str = "imageGenPromptVoiceMicBtn",
 ) -> Optional[QPushButton]:
-    from whisper_voice_input import create_sidebar_voice_mic_button
+    try:
+        from bundle_capabilities import voice_input_ui_enabled
+
+        if not voice_input_ui_enabled():
+            return None
+    except ImportError:
+        pass
+    try:
+        from whisper_voice_input import create_sidebar_voice_mic_button
+    except ImportError:
+        return None
 
     btn = create_sidebar_voice_mic_button(
         edit, parent, size=IMAGE_GEN_FIELD_RESET_BTN_SIZE
     )
     if btn is None:
         return None
+    btn.setObjectName(object_name)
     btn.setStyleSheet(
         image_gen_prompt_voice_mic_btn_stylesheet(
-            selector="QPushButton#imageGenPromptVoiceMicBtn"
+            selector=f"QPushButton#{object_name}"
         )
     )
     btn.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
@@ -822,16 +874,18 @@ def create_image_gen_prompt_voice_mic_button(
 def create_image_gen_prompt_copy_button(
     edit: QPlainTextEdit,
     parent: Optional[QWidget] = None,
+    *,
+    object_name: str = "imageGenPromptCopyBtn",
 ) -> QPushButton:
     from thumbnails.thumbnail_constants import COPY_SYMBOL
 
     btn = QPushButton(COPY_SYMBOL, parent)
-    btn.setObjectName("imageGenPromptCopyBtn")
+    btn.setObjectName(object_name)
     btn.setToolTip("Copy to clipboard")
     btn.setCursor(Qt.CursorShape.PointingHandCursor)
     btn.setStyleSheet(
         image_gen_prompt_copy_btn_stylesheet(
-            selector="QPushButton#imageGenPromptCopyBtn"
+            selector=f"QPushButton#{object_name}"
         )
     )
     btn.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
@@ -846,9 +900,47 @@ def create_image_gen_prompt_copy_button(
     return btn
 
 
+def build_image_gen_prompt_field_action_column(
+    edit: QPlainTextEdit,
+    parent: QWidget,
+    *,
+    copy_object_name: str = "imageGenPromptCopyBtn",
+    mic_object_name: str = "imageGenPromptVoiceMicBtn",
+    action_column_object_name: str = "imageGenPromptActionCol",
+) -> tuple[QWidget, QVBoxLayout, QPushButton, Optional[QPushButton]]:
+    """Copy and optional mic buttons stacked to the right of a prompt field."""
+    action_col = QWidget(parent)
+    action_col.setObjectName(action_column_object_name)
+    action_layout = QVBoxLayout(action_col)
+    action_layout.setContentsMargins(0, 0, 0, 0)
+    action_layout.setSpacing(4)
+    copy_btn = create_image_gen_prompt_copy_button(
+        edit, action_col, object_name=copy_object_name
+    )
+    action_layout.addWidget(
+        copy_btn,
+        0,
+        Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignHCenter,
+    )
+    mic_btn = create_image_gen_prompt_voice_mic_button(
+        edit, action_col, object_name=mic_object_name
+    )
+    if mic_btn is not None:
+        action_layout.addWidget(
+            mic_btn,
+            0,
+            Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignHCenter,
+        )
+    return action_col, action_layout, copy_btn, mic_btn
+
+
 def wrap_image_gen_prompt_row_with_copy(
     display_control: QWidget,
     edit: QPlainTextEdit,
+    *,
+    copy_object_name: str = "imageGenPromptCopyBtn",
+    mic_object_name: str = "imageGenPromptVoiceMicBtn",
+    action_column_object_name: str = "imageGenPromptActionCol",
 ) -> QWidget:
     """Prompt editor with copy and optional voice-input buttons to the right."""
     row_w = QWidget()
@@ -856,22 +948,13 @@ def wrap_image_gen_prompt_row_with_copy(
     row.setContentsMargins(0, 0, 0, 0)
     row.setSpacing(4)
     row.addWidget(display_control, 1)
-    action_col = QWidget(row_w)
-    action_layout = QVBoxLayout(action_col)
-    action_layout.setContentsMargins(0, 0, 0, 0)
-    action_layout.setSpacing(4)
-    action_layout.addWidget(
-        create_image_gen_prompt_copy_button(edit, action_col),
-        0,
-        Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignHCenter,
+    action_col, _, _, _ = build_image_gen_prompt_field_action_column(
+        edit,
+        row_w,
+        copy_object_name=copy_object_name,
+        mic_object_name=mic_object_name,
+        action_column_object_name=action_column_object_name,
     )
-    mic_btn = create_image_gen_prompt_voice_mic_button(edit, action_col)
-    if mic_btn is not None:
-        action_layout.addWidget(
-            mic_btn,
-            0,
-            Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignHCenter,
-        )
     row.addWidget(
         action_col,
         0,
@@ -1748,6 +1831,6 @@ def image_gen_field_label_stylesheet() -> str:
     #imageGenDialog QLineEdit {{
         padding: 5px 8px;
     }}
-    """ + image_gen_field_reset_btn_dialog_stylesheet() + image_gen_prompt_copy_btn_dialog_stylesheet() + image_gen_prompt_clear_btn_dialog_stylesheet() + image_gen_prompt_voice_mic_btn_dialog_stylesheet()
+    """ + image_gen_field_reset_btn_dialog_stylesheet() + image_gen_prompt_copy_btn_dialog_stylesheet() + image_gen_prompt_clear_btn_dialog_stylesheet() + image_gen_prompt_voice_mic_btn_dialog_stylesheet() + image_gen_system_prompt_copy_btn_dialog_stylesheet() + image_gen_system_prompt_clear_btn_dialog_stylesheet() + image_gen_system_prompt_voice_mic_btn_dialog_stylesheet()
 
 

@@ -22,6 +22,7 @@ from pyinstaller_optional_packages import (
     MIN_EXTRA_COLLECT_SUBMODULES,
     MIN_SPEC_COLLECT_PACKAGES,
     MIN_SPEC_COPY_METADATA,
+    filter_collect_all,
     filter_hidden_imports,
     is_min_build,
 )
@@ -94,6 +95,12 @@ def merged_directives() -> tuple[list[str], list[str], list[str]]:
     hidden.update(MANDATORY_HIDDEN)
 
     local_hidden, imagegen_hidden = _load_local_hidden()
+    if is_min_build():
+        imagegen_hidden = []
+        local_hidden = [
+            n for n in local_hidden
+            if not (n == "imagegen_plugins" or n.startswith("imagegen_plugins."))
+        ]
     hidden.update(local_hidden)
     hidden.update(imagegen_hidden)
 
@@ -106,6 +113,9 @@ def merged_directives() -> tuple[list[str], list[str], list[str]]:
         collect_all.update(FULL_BUILD_COLLECT_ALL)
 
     hidden = set(filter_hidden_imports(hidden))
+    collect_all = set(filter_collect_all(collect_all))
+    if is_min_build():
+        collect_all.discard("transformers")
     excludes.update(_WINDOWS_EXCLUDES)
     excludes.update(ALWAYS_EXCLUDE_IMPORT_ROOTS)
     excludes.update({"skimage", "imagehash"})

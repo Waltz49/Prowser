@@ -210,7 +210,10 @@ install_project_dependencies() {
     source "$VENV_DIR/bin/activate"
     
     # Check if simplified requirements file exists and install from it
-    if [ -f "$SCRIPT_DIR/requirements_build.txt" ]; then
+    if [ "$MIN_BUILD" = "true" ] && [ -f "$SCRIPT_DIR/requirements_min.txt" ]; then
+        print_status "Minimal build: installing from requirements_min.txt..."
+        pip install -r "$SCRIPT_DIR/requirements_min.txt"
+    elif [ -f "$SCRIPT_DIR/requirements_build.txt" ]; then
         print_status "Installing from requirements_build.txt (simplified)..."
         pip install -r "$SCRIPT_DIR/requirements_build.txt"
     elif [ -f "$SCRIPT_DIR/requirements.txt" ]; then
@@ -533,6 +536,20 @@ class PyInstallerDependencyAnalyzer:
         # Skip virtual environments and cache directories
         if any(part in str(file_path) for part in ['venv', '__pycache__', '.git', 'build', 'dist']):
             return set()
+
+        # Minimal build: skip imagegen, demo, and optional AI modules in import analysis
+        if os.environ.get('PYINSTALLER_MIN_BUILD', '').strip() in ('1', 'true', 'yes'):
+            rel = str(file_path.relative_to(self.root_dir))
+            if rel.startswith('imagegen_plugins' + os.sep) or rel == 'imagegen_plugins':
+                return set()
+            skip_names = {
+                'gemma4_voice_vision_demo.py',
+                'list_models.py',
+                'hfmodels.py',
+                'whisper_voice_input.py',
+            }
+            if file_path.name in skip_names:
+                return set()
         
         self.analyzed_files.add(file_path)
         local_imports = set()
@@ -921,6 +938,12 @@ def is_stdlib_module(module_name):
 
 # Get script directory from environment or use current directory
 script_dir = os.environ.get('SCRIPT_DIR', os.getcwd())
+sys.path.insert(0, script_dir)
+try:
+    from pyinstaller_optional_packages import package_name_is_excluded
+except ImportError:
+    def package_name_is_excluded(_name, *, min_build=None):
+        return False
 
 # Read analysis results
 with open(os.path.join(script_dir, 'pyinstaller_directives.json'), 'r') as f:
@@ -956,6 +979,9 @@ for package in detected_packages:
     # Double-check it's not stdlib
     if is_stdlib_module(package):
         print(f'Skipping standard library module: {package}')
+        continue
+    if package_name_is_excluded(package):
+        print(f'Skipping excluded package: {package}')
         continue
     # Check if installed (case-insensitive)
     package_lower = package.lower()
@@ -1249,8 +1275,9 @@ customize_spec_file() {
     print_status "Bundling $(echo "$RUNTIME_ASSET_DATAS" | wc -l | tr -d ' ') runtime asset(s)"
 
     WHISPER_MODEL_DATAS=""
+    FACE_MODEL_DATAS=""
     if [ "$MIN_BUILD" = "true" ]; then
-        print_status "Minimal build: skipping bundled whisper model"
+        print_status "Minimal build: skipping bundled whisper model and face models"
         LS_ENVIRONMENT_BLOCK="'LSEnvironment': {
             'PYTHON_JIT': '1',
             'PROWSER_MIN_BUNDLE': '1',
@@ -1259,6 +1286,10 @@ customize_spec_file() {
         LS_ENVIRONMENT_BLOCK="'LSEnvironment': {
             'PYTHON_JIT': '1',
         },"
+        FACE_MODEL_DATAS="        ('.pyinstaller_face_models/dlib_face_recognition_resnet_model_v1.dat', 'face_recognition_models/models'),
+        ('.pyinstaller_face_models/mmod_human_face_detector.dat', 'face_recognition_models/models'),
+        ('.pyinstaller_face_models/shape_predictor_5_face_landmarks.dat', 'face_recognition_models/models'),
+        ('.pyinstaller_face_models/shape_predictor_68_face_landmarks.dat', 'face_recognition_models/models'),"
         WHISPER_MODEL_DATAS=$("$PYTHON_CMD" "$WHISPER_MODEL_SCRIPT" --format pyinstaller)
         if [ -z "$WHISPER_MODEL_DATAS" ]; then
             print_error "pyinstaller_whisper_models.py produced no whisper model datas entries"
@@ -1300,10 +1331,7 @@ a = Analysis(
     binaries=_imagegen_collect_binaries,
     datas=[
         ('Prowser.icns', '.'),
-        ('.pyinstaller_face_models/dlib_face_recognition_resnet_model_v1.dat', 'face_recognition_models/models'),
-        ('.pyinstaller_face_models/mmod_human_face_detector.dat', 'face_recognition_models/models'),
-        ('.pyinstaller_face_models/shape_predictor_5_face_landmarks.dat', 'face_recognition_models/models'),
-        ('.pyinstaller_face_models/shape_predictor_68_face_landmarks.dat', 'face_recognition_models/models'),
+$FACE_MODEL_DATAS
 $RUNTIME_ASSET_DATAS
 $WHISPER_MODEL_DATAS
     ] + _imagegen_collect_datas,
@@ -1718,7 +1746,7 @@ cleanup() {
 main() {
     echo "PyInstaller Build Script for Prowser (with Dynamic Dependencies)"
     if [ "$MIN_BUILD" = "true" ]; then
-        echo "Minimal build (--min): browse + similarity/CLIP + faces; no imagegen or audio"
+        echo "Minimal build (--min): browse + similarity/CLIP; no imagegen, faces, or audio"
     fi
     echo "==============================================================="
     echo
@@ -1745,8 +1773,8 @@ main() {
         echo "  --fix-entitlements, -f    Fix entitlements for existing app without rebuilding"
         echo "  --reuse, -r               Reuse existing venv if present (implies --keep)"
         echo "  --keep, -k                Keep temporary build files (default: delete them)"
-        echo "  --min, -m                 Minimal bundle: browse + similarity/CLIP + faces only"
-        echo "                            (omits imagegen, LM Studio SDK, voice/audio)"
+        echo "  --min, -m                 Minimal bundle: browse + similarity/CLIP only"
+        echo "                            (omits imagegen, faces, LM Studio, voice/audio)"
         echo "  --help, -h                Show this help message"
         echo ""
         echo "Examples:"
@@ -1772,7 +1800,11 @@ main() {
     analyze_dependencies
     install_missing_dependencies
     create_entitlements
-    download_face_recognition_models
+    if [ "$MIN_BUILD" = "true" ]; then
+        print_status "Minimal build: skipping face recognition model download"
+    else
+        download_face_recognition_models
+    fi
     if [ "$MIN_BUILD" = "true" ]; then
         print_status "Minimal build: skipping whisper model download"
     else

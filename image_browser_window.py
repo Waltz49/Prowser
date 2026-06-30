@@ -1436,10 +1436,7 @@ class ImageBrowserWindow(QMainWindow):
             else:
                 self.sidebar_jobs_widget = None
         except ImportError:
-            from browser_window.sidebar.sidebar_jobs_widget import SidebarJobsWidget
-
-            self.sidebar_jobs_widget = SidebarJobsWidget(self)
-            self.sidebar_jobs_widget.setFocusPolicy(Qt.NoFocus)
+            self.sidebar_jobs_widget = None
         
         # Set widgets in combined sidebar
         self.combined_sidebar.set_tree_widget(self.tree_container)
@@ -3867,6 +3864,13 @@ class ImageBrowserWindow(QMainWindow):
         directory_override: when set (e.g. from tree), use this dir instead of get_current_search_directory.
         Uses same directory resolution and get_image_list as cmd-P (filter_by_person) for identical cache scope."""
         try:
+            from bundle_capabilities import faces_ui_enabled
+
+            if not faces_ui_enabled():
+                return
+        except ImportError:
+            pass
+        try:
             from faces.face_engine import is_available
             if not is_available():
                 from utils import show_styled_warning
@@ -4174,6 +4178,13 @@ class ImageBrowserWindow(QMainWindow):
         Uses same scope controls as cmd-K (directory checkbox, browse, recursive).
         When directory_override is provided (e.g. from tree context menu), pre-fills the directory
         field with that path (checked) and uses existing recursion setting."""
+        try:
+            from bundle_capabilities import faces_ui_enabled
+
+            if not faces_ui_enabled():
+                return
+        except ImportError:
+            pass
         try:
             from faces.known_faces_manager import list_subjects
             subjects = list_subjects()

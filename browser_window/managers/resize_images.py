@@ -27,9 +27,6 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
-from imagegen_plugins.image_gen_form_layout import create_image_gen_dim_helper_icon_button
-from imagegen_plugins.imagegen_control_tooltips import apply_dim_helper_tooltips
-
 from config import get_config
 from exif.exif_utils import (
     format_supports_exif,
@@ -342,36 +339,44 @@ class ResizeImagesDialog(QDialog):
         row_h.addWidget(self.height_spin, 1)
         layout.addLayout(row_h)
 
-        dim_btn_layout = QHBoxLayout()
-        dim_btn_layout.setContentsMargins(0, 0, 0, 0)
-        dim_btn_layout.setSpacing(4)
-        dim_btn_layout.addStretch(1)
-        square_btn = create_image_gen_dim_helper_icon_button(
-            "dim_square_icon.png",
-            hover_icon_name="dim_square_icon_hover.png",
-            parent=self,
-        )
-        square_btn.clicked.connect(self._on_square_dims)
-        reverse_btn = create_image_gen_dim_helper_icon_button(
-            "dim_reverse_icon.png",
-            hover_icon_name="dim_reverse_icon_hover.png",
-            parent=self,
-        )
-        reverse_btn.clicked.connect(self._on_reverse_dims)
-        screen_btn = create_image_gen_dim_helper_icon_button(
-            "dim_screen_icon.png",
-            hover_icon_name="dim_screen_icon_hover.png",
-            parent=self,
-        )
-        screen_btn.clicked.connect(self._on_screen_size_dims)
-        apply_dim_helper_tooltips(
-            screen_btn=screen_btn,
-            square_btn=square_btn,
-            reverse_btn=reverse_btn,
-        )
-        for btn in (square_btn, reverse_btn, screen_btn):
-            dim_btn_layout.addWidget(btn)
-        layout.addLayout(dim_btn_layout)
+        try:
+            from imagegen_plugins.image_gen_form_layout import (
+                create_image_gen_dim_helper_icon_button,
+            )
+            from imagegen_plugins.imagegen_control_tooltips import apply_dim_helper_tooltips
+
+            dim_btn_layout = QHBoxLayout()
+            dim_btn_layout.setContentsMargins(0, 0, 0, 0)
+            dim_btn_layout.setSpacing(4)
+            dim_btn_layout.addStretch(1)
+            square_btn = create_image_gen_dim_helper_icon_button(
+                "dim_square_icon.png",
+                hover_icon_name="dim_square_icon_hover.png",
+                parent=self,
+            )
+            square_btn.clicked.connect(self._on_square_dims)
+            reverse_btn = create_image_gen_dim_helper_icon_button(
+                "dim_reverse_icon.png",
+                hover_icon_name="dim_reverse_icon_hover.png",
+                parent=self,
+            )
+            reverse_btn.clicked.connect(self._on_reverse_dims)
+            screen_btn = create_image_gen_dim_helper_icon_button(
+                "dim_screen_icon.png",
+                hover_icon_name="dim_screen_icon_hover.png",
+                parent=self,
+            )
+            screen_btn.clicked.connect(self._on_screen_size_dims)
+            apply_dim_helper_tooltips(
+                screen_btn=screen_btn,
+                square_btn=square_btn,
+                reverse_btn=reverse_btn,
+            )
+            for btn in (square_btn, reverse_btn, screen_btn):
+                dim_btn_layout.addWidget(btn)
+            layout.addLayout(dim_btn_layout)
+        except ImportError:
+            pass
 
         self.preserve_cb = QCheckBox("Preserve aspect ratio")
         self.preserve_cb.setChecked(self.preserve_aspect)

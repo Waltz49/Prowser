@@ -7,8 +7,6 @@ from typing import Any, Optional
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QPushButton, QVBoxLayout, QWidget
-
-from imagegen_plugins.image_gen_form_layout import ImageGenFieldsPanel
 from imagegen_plugins.image_gen_persistence import (
     load_flux_prompt_system_prompt_settings,
     save_flux_prompt_system_prompt_settings,
@@ -16,6 +14,81 @@ from imagegen_plugins.image_gen_persistence import (
 from imagegen_plugins.imagegen_flux_prompt_ai import ImageGenFluxPromptAi
 from imagegen_plugins.lmstudio_instructions_pane import LmStudioInstructionsPane
 from imagegen_plugins.lmstudio_caption import is_lmstudio_services_available
+
+
+def _image_prompt_action_column(
+    owner: Any,
+) -> Optional[tuple[QVBoxLayout, QWidget, QPushButton]]:
+    """VBox to the right of the image prompt field (copy button column)."""
+    from imagegen_plugins.image_gen_form_layout import ImageGenFieldsPanel
+
+    panel: Optional[ImageGenFieldsPanel] = getattr(owner, "_fields_panel", None)
+    if panel is None or panel._prompt_group is None:
+        return None
+    copy_btn = panel._prompt_group.findChild(QPushButton, "imageGenPromptCopyBtn")
+    if copy_btn is None:
+        return None
+    action_col = copy_btn.parentWidget()
+    if action_col is None:
+        return None
+    layout = action_col.layout()
+    if not isinstance(layout, QVBoxLayout):
+        return None
+    return layout, action_col, copy_btn
+
+
+def _remove_button_from_layout(layout: QVBoxLayout, btn: QPushButton) -> None:
+    for i in range(layout.count()):
+        item = layout.itemAt(i)
+        if item is not None and item.widget() is btn:
+            layout.removeWidget(btn)
+            return
+
+
+def sync_flux_prompt_system_toggle_location(owner: Any) -> None:
+    """System-prompt action column when open; image-prompt column when collapsed."""
+    pane = getattr(owner, "_flux_system_prompt_pane", None)
+    btn = getattr(owner, "_flux_system_prompt_toggle_btn", None)
+    if pane is None or btn is None:
+        return
+    try:
+        from shiboken6 import isValid
+
+        if not isValid(btn):
+            return
+    except Exception:
+        return
+
+    parent = btn.parentWidget()
+    if parent is not None:
+        layout = parent.layout()
+        if isinstance(layout, QVBoxLayout):
+            _remove_button_from_layout(layout, btn)
+
+    if pane.is_visible():
+        pane.mount_toggle_in_action_column(btn)
+        return
+
+    found = _image_prompt_action_column(owner)
+    if found is None:
+        return
+    action_layout, action_col, copy_btn = found
+    btn.setParent(action_col)
+    insert_at = 0
+    for i in range(action_layout.count()):
+        item = action_layout.itemAt(i)
+        if item is not None and item.widget() is copy_btn:
+            insert_at = i + 1
+            break
+    action_layout.insertWidget(
+        insert_at,
+        btn,
+        0,
+        Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignHCenter,
+    )
+
+
+from imagegen_plugins.image_gen_form_layout import ImageGenFieldsPanel
 
 
 def _persist_flux_prompt_system_prompt(owner: Any) -> None:
@@ -65,34 +138,11 @@ def ensure_flux_prompt_system_pane(owner: Any) -> Optional[LmStudioInstructionsP
     return pane
 
 
-def _prompt_action_column_layout(
-    owner: Any,
-) -> Optional[tuple[QVBoxLayout, QWidget]]:
-    """VBox to the right of the prompt field (copy button column)."""
-    panel: Optional[ImageGenFieldsPanel] = getattr(owner, "_fields_panel", None)
-    if panel is None or panel._prompt_group is None:
-        return None
-    copy_btn = panel._prompt_group.findChild(QPushButton, "imageGenPromptCopyBtn")
-    if copy_btn is None:
-        return None
-    action_col = copy_btn.parentWidget()
-    if action_col is None:
-        return None
-    layout = action_col.layout()
-    if not isinstance(layout, QVBoxLayout):
-        return None
-    return layout, action_col
-
-
 def mount_flux_prompt_system_toggle(owner: Any) -> None:
-    """Place the system-prompt toggle under the prompt copy button."""
+    """Place the system-prompt AI toggle in the system prompt action column."""
     pane = ensure_flux_prompt_system_pane(owner)
     if pane is None:
         return
-    found = _prompt_action_column_layout(owner)
-    if found is None:
-        return
-    action_layout, action_col = found
 
     old = getattr(owner, "_flux_system_prompt_toggle_btn", None)
     if old is not None:
@@ -100,27 +150,14 @@ def mount_flux_prompt_system_toggle(owner: Any) -> None:
             from shiboken6 import isValid
 
             if isValid(old):
-                action_layout.removeWidget(old)
                 old.deleteLater()
         except Exception:
             pass
+        owner._flux_system_prompt_toggle_btn = None
 
     btn = pane.toggle_button(recreate=True)
-    btn.setParent(action_col)
-    copy_idx = 0
-    for i in range(action_layout.count()):
-        item = action_layout.itemAt(i)
-        if item is not None and item.widget() is not None:
-            if item.widget().objectName() == "imageGenPromptCopyBtn":
-                copy_idx = i
-                break
-    action_layout.insertWidget(
-        copy_idx + 1,
-        btn,
-        0,
-        Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignHCenter,
-    )
     owner._flux_system_prompt_toggle_btn = btn
+    sync_flux_prompt_system_toggle_location(owner)
     pane.sync_toggle_highlight()
 
 

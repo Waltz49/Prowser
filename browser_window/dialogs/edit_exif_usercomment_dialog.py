@@ -23,25 +23,117 @@ from thumbnails.thumbnail_constants import (
 from config import get_config
 from exif.exif_utils import truncate_usercomment_before_prompt
 from theme.theme_service import get_active_theme
-from imagegen_plugins.lmstudio_caption import is_lmstudio_services_available
-from imagegen_plugins.lmstudio_instructions_pane import LmStudioInstructionsPane
-from speech_utils import speak_or_stop
 from utils import create_gear_icon, get_main_window
-from whisper_voice_input import (
-    maybe_wrap_plain_text_edit_with_voice_mic,
-    stop_whisper_dictation,
-)
 
-try:
-    from imagegen_plugins.image_gen_menu import (
-        imagegen_create_from_text_available,
-        initial_prompt_from_usercomment,
-        open_imagegen_create_from_text_dialog,
-    )
-except ImportError:
-    imagegen_create_from_text_available = lambda: False  # type: ignore[misc, assignment]
-    initial_prompt_from_usercomment = None  # type: ignore[misc, assignment]
-    open_imagegen_create_from_text_dialog = None  # type: ignore[misc, assignment]
+
+def _lmstudio_ui_enabled() -> bool:
+    try:
+        from bundle_capabilities import lmstudio_ui_enabled
+
+        return lmstudio_ui_enabled()
+    except ImportError:
+        return True
+
+
+def _voice_input_ui_enabled() -> bool:
+    try:
+        from bundle_capabilities import voice_input_ui_enabled
+
+        return voice_input_ui_enabled()
+    except ImportError:
+        return True
+
+
+def _imagegen_ui_enabled() -> bool:
+    try:
+        from bundle_capabilities import imagegen_ui_enabled
+
+        return imagegen_ui_enabled()
+    except ImportError:
+        return True
+
+
+def _audio_output_ui_enabled() -> bool:
+    try:
+        from bundle_capabilities import audio_output_ui_enabled
+
+        return audio_output_ui_enabled()
+    except ImportError:
+        return True
+
+
+def _is_lmstudio_services_available() -> bool:
+    if not _lmstudio_ui_enabled():
+        return False
+    try:
+        from imagegen_plugins.lmstudio_caption import is_lmstudio_services_available
+
+        return is_lmstudio_services_available()
+    except ImportError:
+        return False
+
+
+def _imagegen_create_from_text_available() -> bool:
+    if not _imagegen_ui_enabled():
+        return False
+    try:
+        from imagegen_plugins.image_gen_menu import imagegen_create_from_text_available
+
+        return imagegen_create_from_text_available()
+    except ImportError:
+        return False
+
+
+def _initial_prompt_from_usercomment(text: str):
+    if not _imagegen_ui_enabled():
+        return text.strip()
+    try:
+        from imagegen_plugins.image_gen_menu import initial_prompt_from_usercomment
+
+        return initial_prompt_from_usercomment(text)
+    except ImportError:
+        return text.strip()
+
+
+def _open_imagegen_create_from_text_dialog(main_window, *, user_comment: str) -> None:
+    if not _imagegen_ui_enabled():
+        return
+    try:
+        from imagegen_plugins.image_gen_menu import open_imagegen_create_from_text_dialog
+
+        open_imagegen_create_from_text_dialog(main_window, user_comment=user_comment)
+    except ImportError:
+        return
+
+
+def _maybe_wrap_plain_text_edit_with_voice_mic(edit):
+    if not _voice_input_ui_enabled():
+        return edit
+    try:
+        from whisper_voice_input import maybe_wrap_plain_text_edit_with_voice_mic
+
+        return maybe_wrap_plain_text_edit_with_voice_mic(edit)
+    except ImportError:
+        return edit
+
+
+def _stop_whisper_dictation() -> None:
+    if not _voice_input_ui_enabled():
+        return
+    try:
+        from whisper_voice_input import stop_whisper_dictation
+
+        stop_whisper_dictation()
+    except ImportError:
+        pass
+
+
+def _speak_or_stop(text: str) -> bool:
+    if not _audio_output_ui_enabled():
+        return False
+    from speech_utils import speak_or_stop
+
+    return speak_or_stop(text)
 
 
 def _qtcolor_to_hex(color):
@@ -295,6 +387,8 @@ class EditExifUserCommentDialog(QDialog):
         self.ear_btn.setToolTip("Read text aloud (click again to stop)")
         self.ear_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.ear_btn.clicked.connect(self._on_read_aloud)
+        if not _audio_output_ui_enabled():
+            self.ear_btn.hide()
         btn_stack.addWidget(self.ear_btn, 0, Qt.AlignmentFlag.AlignRight)
         self.copy_btn = QPushButton()
         self.copy_btn.setObjectName("copy_btn")
@@ -317,9 +411,13 @@ class EditExifUserCommentDialog(QDialog):
         self.settings_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.settings_btn.clicked.connect(self._on_open_captioning_settings)
         self.settings_btn.installEventFilter(self)
+        if not _lmstudio_ui_enabled():
+            self.settings_btn.hide()
         btn_stack.addWidget(self.settings_btn, 0, Qt.AlignmentFlag.AlignRight)
-        self._instructions_pane: LmStudioInstructionsPane | None = None
-        if is_lmstudio_services_available():
+        self._instructions_pane = None
+        if _is_lmstudio_services_available():
+            from imagegen_plugins.lmstudio_instructions_pane import LmStudioInstructionsPane
+
             self._instructions_pane = LmStudioInstructionsPane(
                 self,
                 toggle_tooltip=(
@@ -341,10 +439,10 @@ class EditExifUserCommentDialog(QDialog):
         self.text_edit.setMinimumHeight(80)
         self.text_edit.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.text_edit.textChanged.connect(self._sync_generate_btn_enabled)
-        self._text_edit_display = maybe_wrap_plain_text_edit_with_voice_mic(self.text_edit)
+        self._text_edit_display = _maybe_wrap_plain_text_edit_with_voice_mic(self.text_edit)
         text_edit_widget = self._wrap_text_edit_with_overlays()
 
-        if is_lmstudio_services_available() and self._instructions_pane is not None:
+        if _is_lmstudio_services_available() and self._instructions_pane is not None:
             self._instructions_widget = self._instructions_pane.widget()
             self.instructions_edit = self._instructions_pane.instructions_edit()
 
@@ -393,8 +491,8 @@ class EditExifUserCommentDialog(QDialog):
 
     def _wrap_text_edit_with_overlays(self) -> QWidget:
         """Wrap the comment editor so action chips can overlay the lower-right corner."""
-        has_generate = imagegen_create_from_text_available()
-        has_recaption = is_lmstudio_services_available()
+        has_generate = _imagegen_create_from_text_available()
+        has_recaption = _is_lmstudio_services_available()
         if not has_generate and not has_recaption:
             return self._text_edit_display
 
@@ -534,18 +632,18 @@ class EditExifUserCommentDialog(QDialog):
         super().showEvent(event)
 
     def reject(self):
-        stop_whisper_dictation()
+        _stop_whisper_dictation()
         self._cancel_active_ai_caption()
         super().reject()
 
     def accept(self):
-        stop_whisper_dictation()
+        _stop_whisper_dictation()
         self._cancel_active_ai_caption()
         super().accept()
 
     def closeEvent(self, event):
         """Save geometry when closed via X button (accept/reject use finished signal)."""
-        stop_whisper_dictation()
+        _stop_whisper_dictation()
         self._cancel_active_ai_caption()
         self._save_geometry()
         super().closeEvent(event)
@@ -565,9 +663,7 @@ class EditExifUserCommentDialog(QDialog):
         self._sync_generate_btn_enabled()
 
     def _has_caption_for_generate(self) -> bool:
-        if initial_prompt_from_usercomment is None:
-            return bool(self.text_edit.toPlainText().strip())
-        return bool(initial_prompt_from_usercomment(self.text_edit.toPlainText()))
+        return bool(_initial_prompt_from_usercomment(self.text_edit.toPlainText()))
 
     def _sync_generate_btn_enabled(self) -> None:
         if self.generate_btn is None:
@@ -579,9 +675,9 @@ class EditExifUserCommentDialog(QDialog):
 
     def _on_generate_image_from_caption(self):
         main_window = get_main_window() or self.parent()
-        if main_window is None or open_imagegen_create_from_text_dialog is None:
+        if main_window is None:
             return
-        open_imagegen_create_from_text_dialog(
+        _open_imagegen_create_from_text_dialog(
             main_window, user_comment=self.text_edit.toPlainText()
         )
 
@@ -593,7 +689,7 @@ class EditExifUserCommentDialog(QDialog):
     def _on_read_aloud(self):
         text = self.text_edit.toPlainText().strip()
         text = truncate_usercomment_before_prompt(text)
-        speak_or_stop(text)
+        _speak_or_stop(text)
 
     def _on_copy_to_clipboard(self):
         mods = QApplication.keyboardModifiers()

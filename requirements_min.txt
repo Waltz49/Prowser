@@ -1,0 +1,17 @@
+# PyInstaller --min bundle: browse + CLIP/similarity only (no imagegen, faces, LM Studio, audio).
+numpy
+piexif
+pillow
+exifread
+rawpy
+pillow_heif
+psutil
+pyobjc-core
+pyobjc-framework-Cocoa
+pyobjc-framework-CoreServices
+pyobjc-framework-LaunchServices
+PySide6
+torch
+torchvision
+transformers
+requests

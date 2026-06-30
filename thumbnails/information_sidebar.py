@@ -51,20 +51,14 @@ _INFO_VIEWPORT_MARGIN_RIGHT = 18
 _INFO_VIEWPORT_MARGIN_BOTTOM = 15
 _INFO_CONTENT_WIDTH_INSET = _INFO_VIEWPORT_MARGIN_LEFT + _INFO_VIEWPORT_MARGIN_RIGHT
 
-_INFO_AI_ICON_SIZE = 16  # display size; source assets are 40x40
+from theme.ai_info_icon import AI_INFO_ICON_DISPLAY_PX, ai_info_icon_asset_name
 
 
 def _information_ai_icon_html() -> str:
     """Theme-aware 'AI' label icon for File Information imagegen actions."""
-    th = get_active_theme()
-    asset = (
-        "ai_icon_info_light.png"
-        if getattr(th, "theme_id", "dark") == "light"
-        else "ai_icon_info_dark.png"
-    )
-    url = asset_file_url(asset)
+    url = asset_file_url(ai_info_icon_asset_name())
     return (
-        f'<img src="{url}" width="{_INFO_AI_ICON_SIZE}" height="{_INFO_AI_ICON_SIZE}" '
+        f'<img src="{url}" width="{AI_INFO_ICON_DISPLAY_PX}" height="{AI_INFO_ICON_DISPLAY_PX}" '
         f'style="display:block;margin:0 auto;padding:0;border:none;vertical-align:bottom;">'
     )
 

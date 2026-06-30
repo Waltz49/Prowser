@@ -850,6 +850,15 @@ class SettingsDialog(QDialog):
         self.captioning_settings_tab = QWidget()
         self.lora_settings_tab = QWidget()
         self.faces_tab = QWidget()
+        try:
+            from bundle_capabilities import imagegen_ui_enabled, lmstudio_ui_enabled, faces_ui_enabled
+        except ImportError:
+            imagegen_ui_enabled = lambda: True  # type: ignore[misc, assignment]
+            lmstudio_ui_enabled = lambda: True  # type: ignore[misc, assignment]
+            faces_ui_enabled = lambda: True  # type: ignore[misc, assignment]
+        self._show_faces_settings_tab = faces_ui_enabled()
+        self._show_captioning_settings_tab = lmstudio_ui_enabled()
+        self._show_lora_settings_tab = imagegen_ui_enabled()
         # Add tabs to widget in alphabetical order (column first)
         self.tab_widget.addTab(self.app_settings_tab, "General", "⚙️")
         self.tab_widget.addTab(self.favorites_tab, "Favorites", "❤️")
@@ -857,14 +866,8 @@ class SettingsDialog(QDialog):
         self.tab_widget.addTab(self.extensions_tab, "File Types", "🏞️")
         self.tab_widget.addTab(self.move_destinations_tab, "Destinations", "⤵️")
         self.tab_widget.addTab(self.exclude_destinations_tab, "Excludes", "🚫")
-        self.tab_widget.addTab(self.faces_tab, "Face Recognition", "🧑🏼‍🦱")
-        try:
-            from bundle_capabilities import imagegen_ui_enabled, lmstudio_ui_enabled
-        except ImportError:
-            imagegen_ui_enabled = lambda: True  # type: ignore[misc, assignment]
-            lmstudio_ui_enabled = lambda: True  # type: ignore[misc, assignment]
-        self._show_captioning_settings_tab = lmstudio_ui_enabled()
-        self._show_lora_settings_tab = imagegen_ui_enabled()
+        if self._show_faces_settings_tab:
+            self.tab_widget.addTab(self.faces_tab, "Face Recognition", "🧑🏼‍🦱")
         if self._show_captioning_settings_tab:
             self.tab_widget.addTab(self.captioning_settings_tab, "Captioning", "📝")
         if self._show_lora_settings_tab:
@@ -5310,13 +5313,19 @@ class SettingsDialog(QDialog):
     def _apply_min_bundle_settings_visibility(self) -> None:
         """Hide settings for features omitted from --min PyInstaller bundles."""
         try:
-            from bundle_capabilities import imagegen_ui_enabled
+            from bundle_capabilities import imagegen_ui_enabled, faces_ui_enabled
         except ImportError:
             return
         if not imagegen_ui_enabled():
             group = getattr(self, "_imagegen_general_settings_group", None)
             if group is not None:
                 group.setVisible(False)
+        if not faces_ui_enabled():
+            if hasattr(self, "clear_face_cache_button"):
+                self.clear_face_cache_button.setVisible(False)
+            container = getattr(self, "background_clip_extract_faces_container", None)
+            if container is not None:
+                container.setVisible(False)
 
     def setup_lora_settings_tab(self):
         """LoRA catalog tab: per base model dropdown, enable / install / hide."""
@@ -7453,11 +7462,18 @@ class SettingsDialog(QDialog):
             else True
         )
         # Get "Extract faces" setting
-        settings['background_clip_extract_faces'] = (
-            self.background_clip_extract_faces_checkbox.isChecked() 
-            if hasattr(self, 'background_clip_extract_faces_checkbox') 
-            else False
-        )
+        if (
+            hasattr(self, "background_clip_extract_faces_checkbox")
+            and getattr(self, "background_clip_extract_faces_container", None) is not None
+            and self.background_clip_extract_faces_container.isVisible()
+        ):
+            settings['background_clip_extract_faces'] = (
+                self.background_clip_extract_faces_checkbox.isChecked()
+            )
+        else:
+            settings['background_clip_extract_faces'] = self.original_settings.get(
+                'background_clip_extract_faces', False
+            )
         
         # Get ResNet model from radio buttons
         if hasattr(self, 'resnet_model_button_group'):

@@ -11,7 +11,8 @@ from prowser_temp_files import prowser_mkstemp_path
 from PIL import Image
 
 SCREEN_SIZE_EXPERIMENTAL_PROMPT_SUFFIX = (
-    ". If the image you recieve has white borders, fill white borders with newly generated image content."
+    # ". If the image you recieve has white borders, fill white borders with newly generated image content."
+    ". "
 )
 
 

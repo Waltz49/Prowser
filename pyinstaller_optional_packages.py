@@ -29,7 +29,7 @@ ANALYZER_SKIP_FILENAMES: frozenset[str] = frozenset(
     }
 )
 
-# Omitted from --min bundles (AI generation, LM Studio SDK, audio in/out).
+# Omitted from --min bundles (AI generation, LM Studio SDK, audio, faces, orphans).
 MIN_EXCLUDE_IMPORT_ROOTS: frozenset[str] = frozenset(
     {
         "mflux",
@@ -46,6 +46,19 @@ MIN_EXCLUDE_IMPORT_ROOTS: frozenset[str] = frozenset(
         "openai",
         "pyinstaller_whisper_models",
         "whisper_voice_input",
+        "face_recognition",
+        "face_recognition_models",
+        "dlib",
+        "onnxruntime",
+        "cv2",
+        "scipy",
+        "matplotlib",
+        "av",
+        "piper",
+        "fastapi",
+        "uvicorn",
+        "starlette",
+        "imagegen_plugins",
     }
 )
 
@@ -62,6 +75,19 @@ MIN_EXCLUDE_MODULES: tuple[str, ...] = (
     "sounddevice",
     "pocket_tts",
     "openai",
+    "face_recognition",
+    "face_recognition_models",
+    "dlib",
+    "onnxruntime",
+    "cv2",
+    "scipy",
+    "matplotlib",
+    "av",
+    "piper",
+    "fastapi",
+    "uvicorn",
+    "starlette",
+    "imagegen_plugins",
     "skimage",
     "imagehash",
 )
@@ -84,10 +110,8 @@ FULL_BUILD_COLLECT_ALL: tuple[str, ...] = (
     "ctranslate2",
 )
 
-# collect_all targets for --min (similarity / CLIP / faces; no imagegen or audio).
+# collect_all targets for --min (CLIP / similarity only; transformers via hook).
 MIN_BUILD_COLLECT_ALL: tuple[str, ...] = (
-    "face_recognition_models",
-    "transformers",
     "requests",
     "huggingface_hub",
     "safetensors",
@@ -113,13 +137,20 @@ FULL_SPEC_COLLECT_PACKAGES: tuple[str, ...] = (
 )
 
 MIN_SPEC_COLLECT_PACKAGES: tuple[str, ...] = (
-    "face_recognition_models",
-    "transformers",
     "requests",
     "huggingface_hub",
     "safetensors",
     "regex",
     "tokenizers",
+)
+
+# dist-info dirs required by transformers.dependency_versions_check at import.
+TRANSFORMERS_RUNTIME_METADATA: tuple[str, ...] = (
+    "packaging",
+    "filelock",
+    "tqdm",
+    "regex",
+    "PyYAML",
 )
 
 FULL_SPEC_COPY_METADATA: tuple[str, ...] = (
@@ -129,24 +160,31 @@ FULL_SPEC_COPY_METADATA: tuple[str, ...] = (
     "huggingface_hub",
     "accelerate",
     "tokenizers",
-)
+    "safetensors",
+) + TRANSFORMERS_RUNTIME_METADATA
 
 MIN_SPEC_COPY_METADATA: tuple[str, ...] = (
     "transformers",
     "requests",
     "huggingface_hub",
     "tokenizers",
-)
+    "safetensors",
+) + TRANSFORMERS_RUNTIME_METADATA
 
-# Similarity / CLIP / faces — included in all bundles (including --min).
+# Similarity / CLIP — included in all bundles (including --min).
 SIMILARITY_EXTRA_HIDDEN: tuple[str, ...] = (
     "torch",
     "torchvision",
     "transformers",
+    "transformers.models.clip",
+    "transformers.models.clip.modeling_clip",
+    "transformers.models.clip.processing_clip",
 )
 
 # Extra hidden imports merged into the spec (full builds only).
 FULL_BUILD_EXTRA_HIDDEN: tuple[str, ...] = SIMILARITY_EXTRA_HIDDEN + (
+    "face_recognition",
+    "face_recognition_models",
     "mflux",
     "mlx",
     "mlx._reprlib_fix",
@@ -165,11 +203,8 @@ FULL_BUILD_EXTRA_HIDDEN: tuple[str, ...] = SIMILARITY_EXTRA_HIDDEN + (
     "pyinstaller_whisper_models",
 )
 
-# Similarity / CLIP / faces — always bundled (--min keeps these, drops imagegen/audio).
-MIN_BUILD_EXTRA_HIDDEN: tuple[str, ...] = SIMILARITY_EXTRA_HIDDEN + (
-    "face_recognition",
-    "face_recognition_models",
-)
+# Similarity / CLIP only (--min drops imagegen, audio, faces).
+MIN_BUILD_EXTRA_HIDDEN: tuple[str, ...] = SIMILARITY_EXTRA_HIDDEN
 
 MANDATORY_PYOBJC_HIDDEN: tuple[str, ...] = (
     "AppKit",
@@ -179,8 +214,6 @@ MANDATORY_PYOBJC_HIDDEN: tuple[str, ...] = (
 )
 
 MANDATORY_HIDDEN: tuple[str, ...] = (
-    "face_recognition",
-    "face_recognition_models",
     "pyinstaller_frozen_support",
 )
 
@@ -193,7 +226,7 @@ FULL_EXTRA_COLLECT_SUBMODULES: tuple[str, ...] = (
     "accelerate",
 )
 
-MIN_EXTRA_COLLECT_SUBMODULES: tuple[str, ...] = ("imagegen_plugins",)
+MIN_EXTRA_COLLECT_SUBMODULES: tuple[str, ...] = ()
 
 
 def is_min_build() -> bool:
@@ -221,6 +254,19 @@ def filter_hidden_imports(names: list[str] | set[str], *, min_build: bool | None
         if import_root_is_excluded(root, min_build=min_flag):
             continue
         if root in ALWAYS_EXCLUDE_IMPORT_ROOTS:
+            continue
+        out.add(name)
+    return sorted(out)
+
+
+def filter_collect_all(names: list[str] | set[str], *, min_build: bool | None = None) -> list[str]:
+    min_flag = min_build if min_build is not None else is_min_build()
+    out: set[str] = set()
+    for name in names:
+        pkg = name.replace("-", "_").split(".")[0]
+        if import_root_is_excluded(pkg, min_build=min_flag):
+            continue
+        if pkg in ALWAYS_EXCLUDE_IMPORT_ROOTS:
             continue
         out.add(name)
     return sorted(out)

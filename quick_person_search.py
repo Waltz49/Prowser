@@ -235,6 +235,13 @@ def _replace_all_samples(subject_id: str, path_embeddings: list[tuple[str, list]
 
 def run_quick_person_search(main_window) -> None:
     """Entry point from Search > Quick Person Search."""
+    try:
+        from bundle_capabilities import faces_ui_enabled
+
+        if not faces_ui_enabled():
+            return
+    except ImportError:
+        pass
     from utils import show_styled_warning
     from faces.face_engine import is_available, get_faces_with_locations_and_rgb_from_path
 
