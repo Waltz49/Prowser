@@ -78,6 +78,7 @@ from imagegen_plugins.image_gen_registry import ImageGenModelPlugin
 from imagegen_plugins.imagegen_control_tooltips import (
     apply_dialog_button_tooltips,
     apply_edit_import_all_button_tooltip,
+    apply_edit_import_size_button_tooltip,
     apply_edit_import_text_button_tooltip,
     apply_field_control_tooltips,
     apply_model_combo_tooltip,
@@ -485,6 +486,18 @@ def configure_image_gen_prompt_import_button(button: QPushButton) -> None:
 
     configure_flux_prompt_toolbar_button(button)
     button.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+
+
+def append_image_gen_import_size_button(
+    owner: Any,
+    buttons: List[QPushButton],
+) -> None:
+    if not owner._has_dim_fields():
+        return
+    import_size_btn = QPushButton("Import Size")
+    import_size_btn.clicked.connect(owner._on_import_size)
+    apply_edit_import_size_button_tooltip(import_size_btn)
+    buttons.append(import_size_btn)
 
 
 def create_image_gen_prompt_import_row(buttons: List[QPushButton]) -> QWidget:
@@ -999,6 +1012,14 @@ class ImageGenDimensionAspectMixin:
         finally:
             self._aspect_lock_updating = False
 
+    def _on_import_size(self) -> None:
+        image_path = self._image_path_for_import_size()
+        if not image_path:
+            return
+        self._apply_import_dims_from_image(image_path)
+        if getattr(self, "_panel_mode", False):
+            self.state_changed.emit()
+
     def _connect_dim_aspect_lock(self) -> None:
         if not self._has_dim_fields():
             return
@@ -1035,10 +1056,14 @@ class ImageGenDimensionAspectMixin:
             sh,
             effective_max_side=self._effective_max_side(),
         )
-        self._set_int_slider("width", w)
-        self._set_int_slider("height", h)
-        if self._aspect_lock_enabled():
-            self._refresh_aspect_ratio_from_sliders()
+        self._aspect_lock_updating = True
+        try:
+            self._set_int_slider("width", w)
+            self._set_int_slider("height", h)
+            if self._aspect_lock_enabled():
+                self._refresh_aspect_ratio_from_sliders()
+        finally:
+            self._aspect_lock_updating = False
 
     def _on_square_dims(self) -> None:
         width = self._get_int_slider("width")
@@ -1051,20 +1076,28 @@ class ImageGenDimensionAspectMixin:
         step = self._dim_align_step()
         side = _snap_nearest_multiple(width, step)
         side = max(lo, min(hi, side))
-        self._set_int_slider("width", side)
-        self._set_int_slider("height", side)
-        if self._aspect_lock_enabled():
-            self._aspect_ratio = 1.0
+        self._aspect_lock_updating = True
+        try:
+            if self._aspect_lock_enabled():
+                self._aspect_ratio = 1.0
+            self._set_int_slider("width", side)
+            self._set_int_slider("height", side)
+        finally:
+            self._aspect_lock_updating = False
 
     def _on_reverse_dims(self) -> None:
         width = self._get_int_slider("width")
         height = self._get_int_slider("height")
         if width is None or height is None:
             return
-        self._set_int_slider("width", height)
-        self._set_int_slider("height", width)
-        if self._aspect_lock_enabled() and height > 0:
-            self._aspect_ratio = height / width
+        self._aspect_lock_updating = True
+        try:
+            if self._aspect_lock_enabled() and width > 0:
+                self._aspect_ratio = height / width
+            self._set_int_slider("width", height)
+            self._set_int_slider("height", width)
+        finally:
+            self._aspect_lock_updating = False
 
 
 IMAGE_GEN_PREVIEW_CLIENT_OBJECT_NAME = "imageGenPreviewClient"
@@ -1623,6 +1656,7 @@ class ImageGenDialog(ImageGenDimensionAspectMixin, QDialog):
         import_text_btn.clicked.connect(self._on_import_prompt_text)
         apply_edit_import_text_button_tooltip(import_text_btn)
         buttons.append(import_text_btn)
+        append_image_gen_import_size_button(self, buttons)
         import_all_btn = QPushButton("Import Rest")
         import_all_btn.clicked.connect(self._on_import_available)
         apply_edit_import_all_button_tooltip(import_all_btn)
@@ -1655,6 +1689,22 @@ class ImageGenDialog(ImageGenDimensionAspectMixin, QDialog):
         )
 
         return active_image_path_for_browse_or_thumbnail(self._main_window())
+
+    def _image_path_for_import_size(self) -> Optional[str]:
+        mw = self._main_window()
+        if mw is not None and mw.current_view_mode not in ("browse", "thumbnail"):
+            show_styled_warning(
+                self,
+                "Import Size",
+                "Select an image in browse view, or select a single thumbnail, "
+                "before importing.",
+            )
+            return None
+        image_path = self._active_image_path_for_ai()
+        if not image_path:
+            show_styled_warning(self, "Import Size", "No image selected.")
+            return None
+        return image_path
 
     def _active_image_path_for_import(self) -> Optional[str]:
         """Same image resolution as copy/edit EXIF user comment (browse or single thumbnail)."""
@@ -1706,8 +1756,6 @@ class ImageGenDialog(ImageGenDimensionAspectMixin, QDialog):
         image_path = self._active_image_path_for_import()
         if not image_path:
             return
-        if self._has_dim_fields():
-            self._apply_import_dims_from_image(image_path)
         apply_import_extras_from_image_path(self, image_path)
         if self._panel_mode:
             self.state_changed.emit()

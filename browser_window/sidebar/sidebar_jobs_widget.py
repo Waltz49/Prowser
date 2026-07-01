@@ -34,7 +34,6 @@ from config import job_queue_cell_background_hex
 from imagegen_plugins.job_prompt_tooltip import install_delayed_prompt_tooltip
 from imagegen_plugins.model_task_status_info import (
     build_active_job_timing_cell_html,
-    strip_references_from_status_html,
     wrap_active_job_timing_table_html,
 )
 from status_bar_config import (
@@ -52,6 +51,22 @@ from utils import create_job_status_thumbnail_label
 _THUMB_SIZE = 55
 _THUMB_GAP = 14
 _ACTIVE_JOB_STRIP_MARGIN = 8  # left + right margins on the strip layout
+_JOB_CARD_ROW_MARGIN_LEFT = 2
+_JOB_CARD_ACTION_TEXT_SPACING = 4
+_JOB_QUEUE_BROWSER_LEFT_PAD = 4
+_JOBS_PANE_ACTIVE_JOB_BORDER_W = 1
+# Align strip label text with job-card status HTML (card margin + actions + spacing + browser pad).
+_JOB_CARD_TEXT_LEFT_INSET = (
+    _JOB_CARD_ROW_MARGIN_LEFT
+    + _ACTION_COL_WIDTH
+    + _JOB_CARD_ACTION_TEXT_SPACING
+    + _JOB_QUEUE_BROWSER_LEFT_PAD
+)
+_ACTIVE_JOB_STRIP_LEFT_SPACER = (
+    _JOB_CARD_TEXT_LEFT_INSET
+    - _JOBS_PANE_ACTIVE_JOB_BORDER_W
+    - _JOB_QUEUE_BROWSER_LEFT_PAD
+)
 
 # When scroll viewport width exceeds this and a row has 1–2 reference images, show
 # them in a vertical column beside the text instead of below it.
@@ -138,6 +153,13 @@ def _show_jobs_pane_tools_menu(main_window, controller, anchor: QPushButton) -> 
     hold_action.triggered.connect(
         lambda checked: controller.set_hold_job_queue(bool(checked))
     )
+
+    skip_copy_action = menu.addAction("Skip This Copy")
+    skip_copy_action.setEnabled(controller.can_skip_active_series_copy())
+    skip_copy_action.setToolTip(
+        "End the current copy and start the next one in this series."
+    )
+    skip_copy_action.triggered.connect(controller.skip_active_series_copy)
 
     menu.exec(anchor.mapToGlobal(QPoint(0, anchor.height())))
 
@@ -504,11 +526,10 @@ class _JobCard(QFrame):
         self._scroll_width = sw
         self._ensure_content_layout(self._use_inline_refs_layout(sw))
         self._last_info_html = info_html or ""
-        display_html = strip_references_from_status_html(self._last_info_html)
         text_w = self._browser_content_width(content_width, sw)
         browser_h = _apply_task_info_html_to_browser(
             self._info_browser,
-            display_html,
+            self._last_info_html,
             content_width=text_w,
             job_queue_cell=True,
             max_height=None,
@@ -606,9 +627,10 @@ class SidebarJobsWidget(QWidget):
         )
 
         self._active_job_strip = QWidget()
-        active_job_layout = QVBoxLayout(self._active_job_strip)
+        active_job_layout = QHBoxLayout(self._active_job_strip)
         active_job_layout.setContentsMargins(4, 4, 4, 0)
         active_job_layout.setSpacing(0)
+        active_job_layout.addSpacing(_ACTIVE_JOB_STRIP_LEFT_SPACER)
         self._active_job_browser = QTextBrowser()
         self._active_job_browser.setReadOnly(True)
         self._active_job_browser.setOpenExternalLinks(False)
@@ -781,7 +803,10 @@ class SidebarJobsWidget(QWidget):
 
     def _active_job_content_width(self) -> int:
         w = self.width() if self.width() > 0 else self._viewport_width()
-        return max(120, w - _ACTIVE_JOB_STRIP_MARGIN)
+        return max(
+            120,
+            w - _ACTIVE_JOB_STRIP_MARGIN - _ACTIVE_JOB_STRIP_LEFT_SPACER,
+        )
 
     def _should_show_active_job_strip(self) -> bool:
         return self._controller.is_running()
@@ -798,11 +823,10 @@ class SidebarJobsWidget(QWidget):
             if self._active_job_strip.isVisible():
                 return
         table_w = self._active_job_content_width()
-        cell_content_w = max(120, table_w - 16)
         hovered = self._active_job_hovered_anchor
         cell_html = build_active_job_timing_cell_html(
             self._controller,
-            content_width_px=cell_content_w,
+            content_width_px=table_w,
             cancel_hovered=hovered == "cancelgen://",
             skip_hovered=hovered == "skipcooldown://",
         )
@@ -937,10 +961,9 @@ class SidebarJobsWidget(QWidget):
         ):
             return self._active_job_strip.height()
         table_w = self._active_job_content_width()
-        cell_content_w = max(120, table_w - 16)
         cell_html = build_active_job_timing_cell_html(
             self._controller,
-            content_width_px=cell_content_w,
+            content_width_px=table_w,
         )
         if not cell_html:
             return 0

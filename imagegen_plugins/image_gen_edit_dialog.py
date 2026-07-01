@@ -44,6 +44,7 @@ from imagegen_plugins.image_gen_dialog import (
     apply_image_gen_preview_client_background,
     image_gen_preview_workarea_fill,
     apply_import_extras_from_image_path,
+    append_image_gen_import_size_button,
     load_import_prompt_from_path,
     configure_image_gen_side_checkbox,
     create_image_gen_side_button_column,
@@ -1325,12 +1326,16 @@ class ImageGenEditDialog(ImageGenDimensionAspectMixin, QDialog):
     def _on_import_text(self) -> None:
         self._import_prompt_text_from_source()
 
+    def _image_path_for_import_size(self) -> Optional[str]:
+        if not self.source_path:
+            show_styled_warning(self, "Import Size", "No image selected.")
+            return None
+        return self.source_path
+
     def _on_import_all(self) -> None:
         if not self.source_path:
             show_styled_warning(self, "Import Rest", "No image selected.")
             return
-        if self._has_dim_fields():
-            self._apply_import_dims_from_image(self.source_path)
         apply_import_extras_from_image_path(self, self.source_path)
         ref_paths = valid_exif_reference_paths_for_image(
             self.source_path, max_count=MAX_EDIT_SOURCE_IMAGES
@@ -1392,6 +1397,7 @@ class ImageGenEditDialog(ImageGenDimensionAspectMixin, QDialog):
         import_text_btn.clicked.connect(self._on_import_text)
         apply_edit_import_text_button_tooltip(import_text_btn)
         buttons.append(import_text_btn)
+        append_image_gen_import_size_button(self, buttons)
         import_all_btn = QPushButton("Import Rest")
         import_all_btn.clicked.connect(self._on_import_all)
         apply_edit_import_all_button_tooltip(import_all_btn, include_prompt=False)

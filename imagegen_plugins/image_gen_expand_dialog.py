@@ -32,6 +32,7 @@ from imagegen_plugins.image_gen_dialog import (
     ImageGenPreviewSplitter,
     apply_image_gen_dialog_shell,
     apply_import_extras_from_image_path,
+    append_image_gen_import_size_button,
     create_image_gen_side_button_column,
     finalize_image_gen_side_button_column,
     load_import_prompt_from_path,
@@ -478,6 +479,7 @@ class ImageGenExpandDialog(ImageGenDimensionAspectMixin, QDialog):
         import_text_btn.clicked.connect(self._on_import_prompt_text)
         apply_edit_import_text_button_tooltip(import_text_btn)
         buttons.append(import_text_btn)
+        append_image_gen_import_size_button(self, buttons)
         import_all_btn = QPushButton("Import Rest")
         import_all_btn.clicked.connect(self._on_import_available)
         apply_edit_import_all_button_tooltip(import_all_btn)
@@ -512,13 +514,17 @@ class ImageGenExpandDialog(ImageGenDimensionAspectMixin, QDialog):
     def _on_import_prompt_text(self) -> None:
         self._import_prompt_text_from_source()
 
+    def _image_path_for_import_size(self) -> Optional[str]:
+        if not self.source_path:
+            show_styled_warning(self, "Import Size", "No image selected.")
+            return None
+        return self.source_path
+
     def _on_import_available(self) -> None:
         if not self._import_prompt_text_from_source():
             return
         if not self.source_path:
             return
-        if self._has_dim_fields():
-            self._apply_import_dims_from_image(self.source_path)
         apply_import_extras_from_image_path(self, self.source_path)
 
     def get_prompt_text(self) -> str:

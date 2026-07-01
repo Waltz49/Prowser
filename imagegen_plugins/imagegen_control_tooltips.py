@@ -154,15 +154,21 @@ _EDIT_IMPORT_TEXT_TOOLTIP = (
     "of the selected image."
 )
 
+_EDIT_IMPORT_SIZE_TOOLTIP = (
+    "Set width and height from the\n"
+    "pixel dimensions of the selected image."
+)
+
 _EDIT_IMPORT_ALL_TOOLTIP = (
-    "Load all settings except prompt text\n"
+    "Load settings except prompt text and size\n"
     "saved in the EXIF user comment\n"
     "of the selected image."
 )
 
 _EDIT_IMPORT_ALL_SETTINGS_TOOLTIP = (
     "Load settings and reference images\n"
-    "saved with the selected image's\nEXIF user comment."
+    "saved with the selected image's EXIF user comment\n"
+    "(not prompt or size)."
 )
 
 
@@ -172,6 +178,10 @@ def apply_import_button_tooltip(import_btn: QPushButton) -> None:
 
 def apply_edit_import_text_button_tooltip(import_btn: QPushButton) -> None:
     import_btn.setToolTip(_EDIT_IMPORT_TEXT_TOOLTIP)
+
+
+def apply_edit_import_size_button_tooltip(import_btn: QPushButton) -> None:
+    import_btn.setToolTip(_EDIT_IMPORT_SIZE_TOOLTIP)
 
 
 def apply_edit_import_all_button_tooltip(

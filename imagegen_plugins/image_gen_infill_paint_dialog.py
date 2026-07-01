@@ -157,6 +157,12 @@ class InfillPaintSettingsDialog(ImageGenDialog):
     def _active_image_path_for_import(self) -> Optional[str]:
         return self._source_path
 
+    def _image_path_for_import_size(self) -> Optional[str]:
+        if not self._source_path:
+            show_styled_warning(self, "Import Size", "No image selected.")
+            return None
+        return self._source_path
+
     def _on_generate(self) -> None:
         if self.plugin is None:
             return

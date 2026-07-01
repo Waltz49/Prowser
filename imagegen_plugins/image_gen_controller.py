@@ -144,6 +144,7 @@ class ImageGenController(QObject):
         self._copies_done = 0
         self._copy_batch_active = False
         self._copy_batch_cancelled = False
+        self._skip_series_copy_requested = False
         self._cooldown_timer: Optional[QTimer] = None
         self._cooldown_deadline: Optional[float] = None
         self._frozen_elapsed_seconds: Optional[float] = None
@@ -471,6 +472,7 @@ class ImageGenController(QObject):
         self._copies_done = 0
         self._copy_batch_active = copies > 1
         self._copy_batch_cancelled = False
+        self._skip_series_copy_requested = False
         self._stop_copy_cooldown_timer()
 
         self._active_plugin = plugin
@@ -736,6 +738,25 @@ class ImageGenController(QObject):
             return
         self._stop_copy_cooldown_timer()
         self._on_copy_cooldown_elapsed()
+
+    def can_skip_active_series_copy(self) -> bool:
+        """True when an in-flight series copy may be ended early for the next copy."""
+        if self._copies_total <= 1:
+            return False
+        if self.active_series_remaining_after() <= 0:
+            return False
+        if not self._tasks.is_running() or self._tasks.active_kind != "generate":
+            return False
+        if self._is_in_copy_cooldown():
+            return False
+        return True
+
+    def skip_active_series_copy(self) -> None:
+        """End the current series copy and advance to the next in the same job."""
+        if not self.can_skip_active_series_copy():
+            return
+        self._skip_series_copy_requested = True
+        self._tasks.cancel_task()
 
     def active_series_remaining_after(self) -> int:
         """Images in the active batch still to run after the current cycle."""
@@ -1354,6 +1375,7 @@ class ImageGenController(QObject):
         self._copies_total = 0
         self._copies_done = 0
         self._copy_batch_cancelled = False
+        self._skip_series_copy_requested = False
         self._active_queue_job_id = ""
         self._active_thumbnail_paths = []
         self._reset_generation_state()
@@ -1472,6 +1494,35 @@ class ImageGenController(QObject):
         worker_result = self._tasks.pop_worker_result()
         if worker_result is None and not success:
             worker_result = parse_worker_stdout(self._tasks.stderr_text())
+
+        if self._skip_series_copy_requested:
+            self._skip_series_copy_requested = False
+            self._remove_partial_output()
+            if plugin and plugin.pipeline_id == "mflux_fill_expand":
+                remove_expand_base_temp(self._expand_base_path)
+                self._expand_base_path = ""
+            self._remove_aspect_pad_temps()
+            self._copies_done += 1
+            self.generation_finished.emit(False, output_path, "")
+            remaining = self._copies_total - self._copies_done
+            if (
+                remaining > 0
+                and self._copy_batch_active
+                and not self._copy_batch_cancelled
+            ):
+                self._reset_live_queue_progress()
+                self._step_progress_start_time = None
+                self._frozen_elapsed_seconds = None
+                self.queue_changed.emit()
+                self.task_status_info_changed.emit()
+                self._schedule_persist_job_queue()
+                self._emit_jobs_pane_title_changed()
+                if self._hold_job_queue:
+                    return
+                QTimer.singleShot(0, self._launch_generation_job)
+                return
+            self._finish_copy_batch()
+            return
 
         if success and plugin and output_path:
             try:

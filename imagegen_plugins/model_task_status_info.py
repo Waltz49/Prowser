@@ -128,18 +128,8 @@ def _table_row_primary_plus_inline(
     )
 
 
-def _exif_style_link(label: str, href: str = "reflevel://") -> str:
-    from theme.theme_service import get_active_theme
-
-    accent = get_active_theme().accent_color_hex
-    return (
-        f'<a href="{href}" style="color:{accent};text-decoration:underline;">'
-        f"{_escape(label)}</a>"
-    )
-
-
 def _normalize_reference_paths(*path_groups: list[str] | str | None) -> list[str]:
-    """Unique existing paths in order (for status-bar / queue reference rows)."""
+    """Unique existing paths in order (for task reference thumbnails)."""
     out: list[str] = []
     seen: set[str] = set()
     for group in path_groups:
@@ -156,10 +146,6 @@ def _normalize_reference_paths(*path_groups: list[str] | str | None) -> list[str
     return out
 
 
-def _reference_labels_for_paths(paths: list[str]) -> list[str]:
-    return [os.path.basename(p) for p in paths if p and os.path.isfile(p)]
-
-
 _EXPAND_ELAPSED_ROW_RE = re.compile(
     r"(<tr><td><b>Elapsed:</b></td><td>)(.*?)(</td></tr>)",
     re.DOTALL,
@@ -172,18 +158,6 @@ _QUEUE_ELAPSED_ROW_RE = re.compile(
     r"<tr><td><b>Elapsed:</b></td><td>(.*?)</td></tr>",
     re.DOTALL,
 )
-_EXPAND_REFERENCES_ROW_RE = re.compile(
-    r"<tr><td><b>References:</b></td><td>.*?</td></tr>"
-)
-
-
-def strip_references_from_status_html(html_text: str) -> str:
-    """Remove the References table row (sidebar jobs pane hides text links)."""
-    if not html_text:
-        return ""
-    return _EXPAND_REFERENCES_ROW_RE.sub("", html_text)
-
-
 def _table_title_row(title: str, *, running: bool = False) -> str:
     display = f"{title} (Running)" if running else title
     return (
@@ -260,10 +234,10 @@ def _generation_status_table_rows(
     return rows
 
 
-# File Information active-job layout (pixel widths — Qt rich text ignores CSS %).
-_INFO_PANEL_ACTIVE_JOB_CELL_H_PAD = 16
+# Jobs-pane active-job strip (pixel widths — Qt rich text ignores CSS %).
+_INFO_PANEL_ACTIVE_JOB_CELL_H_PAD = 8  # 4px left + 4px right (matches job-queue browser pad)
 _INFO_PANEL_CANCEL_ICON_W = 22
-_INFO_PANEL_LABEL_W = 56
+_INFO_PANEL_LABEL_W = 52  # ~Elapsed: at 12px bold; aligns with queue status label column
 _INFO_PANEL_PREFIX_W = 40
 _INFO_PANEL_POSTFIX_W = 48
 _INFO_PANEL_BAR_MIN_W = 48
@@ -299,6 +273,50 @@ def _information_panel_nowrap_td(
     align_attr = f' align="{align}"' if align else ""
     return (
         f'<td width="{width}" {_INFO_PANEL_NOWRAP}{align_attr}>{content}</td>'
+    )
+
+
+def _queue_table_row(label: str, value: str) -> str:
+    """Job-queue status row with fixed label column (matches active-job strip)."""
+    return (
+        f"<tr>{_information_panel_nowrap_td(_INFO_PANEL_LABEL_W, f'<b>{_escape(label)}</b>')}"
+        f"<td><b>{_escape(value)}</b></td></tr>"
+    )
+
+
+def _queue_table_row_html_value(label: str, value_html: str) -> str:
+    return (
+        f"<tr>{_information_panel_nowrap_td(_INFO_PANEL_LABEL_W, f'<b>{_escape(label)}</b>')}"
+        f"<td>{value_html}</td></tr>"
+    )
+
+
+def _queue_table_row_prompt(label: str, value: str) -> str:
+    m = TASK_STATUS_PROMPT_MARGIN_PX
+    pad = f"padding-top:{m}px;padding-bottom:{m}px;"
+    label_td = (
+        f'<td width="{_INFO_PANEL_LABEL_W}" {_INFO_PANEL_NOWRAP} '
+        f'style="{pad}"><b>{_escape(label)}</b></td>'
+    )
+    return (
+        f"<tr>{label_td}"
+        f'<td style="{pad}">{_escape(value)}</td></tr>'
+    )
+
+
+def _queue_table_row_primary_plus_inline(
+    label: str, value: str, inline_parts: list[tuple[str, str]]
+) -> str:
+    cell = f"<b>{_escape(value)}</b>"
+    previous: str | None = None
+    for extra_label, extra_value in inline_parts:
+        cell += _inline_field_suffix(
+            extra_label, extra_value, previous_label=previous
+        )
+        previous = extra_label
+    return (
+        f"<tr>{_information_panel_nowrap_td(_INFO_PANEL_LABEL_W, f'<b>{_escape(label)}</b>')}"
+        f"<td>{cell}</td></tr>"
     )
 
 
@@ -381,12 +399,12 @@ def _series_progress_row(
         remaining_series = series_total - series_done
         fill_percent = int(round(100.0 * series_done / series_total))
         return (
-            "Series:",
+            "Copies:",
             str(series_done),
             str(remaining_series),
             str(fill_percent),
         )
-    return ("Series:", str(series_total), "(total)", "0")
+    return ("Copies:", str(series_total), "(total)", "0")
 
 
 def format_information_generation_timing_cell_html(
@@ -624,7 +642,7 @@ def wrap_active_job_timing_table_html(
     return (
         f'<table width="{table_w}" cellspacing="0" cellpadding="0" '
         f'style="border: {active_border}; border-collapse: collapse;">'
-        f'<tr><td style="border: {active_border}; padding: 4px 8px; color: {text_hex}; '
+        f'<tr><td style="border: {active_border}; padding: 4px; color: {text_hex}; '
         f'vertical-align: middle; line-height: 16px;">'
         f"{cell_html}</td></tr></table>"
     )
@@ -656,23 +674,23 @@ def _generation_status_queue_table_rows(
     """Compact job-queue rows: combine short fields on one line where possible."""
     rows: list[str] = []
     if fields.get("model"):
-        rows.append(_table_row("Model:", fields["model"]))
+        rows.append(_queue_table_row("Model:", fields["model"]))
 
     if fields.get("lora"):
-        rows.append(_table_row("LoRA:", fields["lora"]))
+        rows.append(_queue_table_row("LoRA:", fields["lora"]))
 
     quant = fields.get("quant")
     quant_on_size = False
     if fields.get("size"):
         if quant:
             rows.append(
-                _table_row_primary_plus_inline(
+                _queue_table_row_primary_plus_inline(
                     "Size:", fields["size"], [(_QUANT_STATUS_LABEL, quant)]
                 )
             )
             quant_on_size = True
         else:
-            rows.append(_table_row("Size:", fields["size"]))
+            rows.append(_queue_table_row("Size:", fields["size"]))
 
     if not omit_live_steps_row:
         steps_display = steps_value if steps_value is not None else fields.get("steps", "")
@@ -683,18 +701,18 @@ def _generation_status_queue_table_rows(
         )
         if steps_display and steps_inline:
             rows.append(
-                _table_row_primary_plus_inline("Steps:", steps_display, steps_inline)
+                _queue_table_row_primary_plus_inline("Steps:", steps_display, steps_inline)
             )
         elif steps_display:
-            rows.append(_table_row("Steps:", steps_display))
+            rows.append(_queue_table_row("Steps:", steps_display))
 
     if quant and not quant_on_size:
-        rows.append(_table_row(_QUANT_STATUS_LABEL, quant))
+        rows.append(_queue_table_row(_QUANT_STATUS_LABEL, quant))
 
     if fields.get("prompt"):
-        rows.append(_table_row_prompt(fields["prompt_label"], fields["prompt"]))
+        rows.append(_queue_table_row_prompt(fields["prompt_label"], fields["prompt"]))
     if fields.get("neg"):
-        rows.append(_table_row("Neg:", fields["neg"]))
+        rows.append(_queue_table_row("Neg:", fields["neg"]))
     return rows
 
 
@@ -731,7 +749,7 @@ def refresh_expand_task_status_html_for_display(
     base_path: str = "",
     reference_paths: list[str] | None = None,
 ) -> tuple[str, list[str]]:
-    """Insert elapsed + reference links when the task status menu is shown."""
+    """Refresh elapsed timing and resolve reference paths for thumbnails."""
     if not html_text:
         return html_text, []
 
@@ -740,32 +758,14 @@ def refresh_expand_task_status_html_for_display(
         html_text = _set_steps_row_timing(
             html_text, elapsed_seconds, estimate_seconds=estimate_seconds
         )
-    html_text = _EXPAND_REFERENCES_ROW_RE.sub("", html_text)
-
-    insert_rows: list[str] = []
     ref_paths = _normalize_reference_paths(reference_paths, source_path)
     base_norm = (
         os.path.normpath(base_path)
         if base_path and os.path.isfile(base_path)
         else ""
     )
-    source_paths = [p for p in ref_paths if p != base_norm]
-    ref_links = [_exif_style_link(os.path.basename(p)) for p in source_paths]
-    if base_norm:
+    if base_norm and base_norm not in ref_paths:
         ref_paths.append(base_norm)
-        ref_links.append(_exif_style_link("base"))
-    if ref_links:
-        insert_rows.append(
-            _table_row_html_value(
-                "References:",
-                f'<span style="white-space:normal;">{", ".join(ref_links)}</span>',
-            )
-        )
-
-    if insert_rows and "</table>" in html_text:
-        html_text = html_text.replace(
-            "</table>", "".join(insert_rows) + "</table>", 1
-        )
     return html_text, ref_paths
 
 
@@ -862,37 +862,6 @@ def _collect_generation_status_fields(
     return fields
 
 
-def _references_row_for_values(
-    plugin: ImageGenModelPlugin,
-    values: Dict[str, Any],
-    *,
-    source_path: str = "",
-    base_path: str = "",
-) -> Optional[str]:
-    """References table row (one comma-separated line) when the job has sources."""
-    pipeline_id = plugin.pipeline_id
-    ref_paths: list[str] = []
-    if get_pipeline(pipeline_id).requires_source_image:
-        from imagegen_plugins.image_gen_naming import resolve_source_image_paths
-
-        ref_paths = resolve_source_image_paths(values)
-        if not ref_paths and source_path:
-            ref_paths = _normalize_reference_paths(source_path)
-    elif source_path:
-        ref_paths = _normalize_reference_paths(source_path)
-    base_norm = (
-        os.path.normpath(base_path)
-        if base_path and os.path.isfile(base_path)
-        else ""
-    )
-    labels = _reference_labels_for_paths([p for p in ref_paths if p != base_norm])
-    if base_norm:
-        labels.append("base")
-    if not labels:
-        return None
-    return _table_row("References:", ", ".join(labels))
-
-
 def format_image_generation_status_html(
     plugin: ImageGenModelPlugin,
     values: Dict[str, Any],
@@ -902,9 +871,6 @@ def format_image_generation_status_html(
     pipeline_id = plugin.pipeline_id
     fields = _collect_generation_status_fields(plugin, values, payload)
     rows = _generation_status_table_rows(fields)
-    ref_row = _references_row_for_values(plugin, values)
-    if ref_row:
-        rows.append(ref_row)
     return _table_html(rows, title=_task_menu_title_for_pipeline(pipeline_id))
 
 
@@ -945,15 +911,9 @@ def format_image_generation_queue_status_html(
         omit_live_steps_row=omit_live_steps_row,
     )
 
-    ref_row = _references_row_for_values(
-        plugin, values, source_path=source_path, base_path=base_path
-    )
-    if ref_row:
-        rows.append(ref_row)
-
     if series_copies_total is not None and series_copies_total > 1:
         rows.append(
-            _table_row(
+            _queue_table_row(
                 "Copies:",
                 format_series_line_value(
                     _series_queued_value(series_copies_total), values

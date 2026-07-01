@@ -365,13 +365,13 @@ _TASK_INSTRUCTIONS: dict[str, str] = {
         "Create a new image description based on the incoming image(s) and the user's instructions."
     ),
     FUNCTION_EXPAND: (
-        "Activity: Expand an existing image.\n\nCreate a new image description based on the incoming image(s) and the user's instructions."
+        "Create a new image description based on the incoming image(s) and the user's instructions."
     ),
     FUNCTION_INFILL: (
-        "Activity: Infill an existing image using a mask.\n\nCreate a description of changes to the image based on the user's instructions."
+        "Create a description of changes to the image based on the user's instructions."
     ),
     FUNCTION_INFILL_PAINT: (
-        "Activity: Infill an existing image using a mask.\n\nCreate a description of changes to the image based on the user's instructions."
+        "Create a description of changes to the image based on the user's instructions."
     ),
 }
 
@@ -407,11 +407,11 @@ def flux_prompt_user_message(user_prompt: str, *, with_image: bool) -> str:
     if with_image:
         if user_text:
             return (
-                "Activity: Edit an existing image.\n\nCreate a new image description based on the incoming image(s) and the user's instructions."
+                "Create a new image description based on the incoming image(s) and the user's instructions."
                 f"\n\nUser instructions:\n{user_text}"
             )
         return (
-            "Activity: Edit an existing image.\n\nCreate a new image description based on the incoming image(s) and the user's instructions."
+            "Create a new image description based on the incoming image(s) and the user's instructions."
         )
     if user_text:
         return user_text
