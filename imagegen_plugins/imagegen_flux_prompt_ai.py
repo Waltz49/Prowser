@@ -55,7 +55,7 @@ _FLUX_PROMPT_GEN_TOOLTIP = (
 )
 _FLUX_PROMPT_CANCEL_TOOLTIP = "Stop the in-progress prompt refinement"
 _FLUX_PROMPT_TOOLBAR_SPACING = 16
-_FLUX_PROMPT_PRIMARY_BTN_WIDTH = 100
+_FLUX_PROMPT_PRIMARY_BTN_WIDTH = 65
 
 
 def apply_flux_prompt_primary_button_width(button: QPushButton) -> None:
@@ -130,20 +130,14 @@ class ImageGenFluxPromptAi:
         if not is_lmstudio_services_available():
             return None
         row = QWidget()
-        row.setSizePolicy(
-            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum
-        )
+        row.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         layout = QHBoxLayout(row)
-        layout.setContentsMargins(
-            IMAGE_GEN_FIELD_BORDER_PAD, 0, IMAGE_GEN_FIELD_BORDER_PAD, 0
-        )
+        layout.setContentsMargins(0, 4, 0, 0)
         layout.setSpacing(_FLUX_PROMPT_TOOLBAR_SPACING)
-        layout.setAlignment(
-            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
-        )
+        layout.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
 
-        controls_label = make_image_gen_field_label("AI Controls:", row)
-        layout.addWidget(controls_label, 0)
+        # controls_label = make_image_gen_field_label("AI Controls:", row)
+        # layout.addWidget(controls_label, 0)
 
         self._ai_btn = QPushButton(_FLUX_PROMPT_GEN_LABEL)
         self._ai_btn.setObjectName("flux_prompt_ai_btn")
