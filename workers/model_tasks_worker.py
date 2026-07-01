@@ -376,7 +376,12 @@ _TASK_INSTRUCTIONS: dict[str, str] = {
 }
 
 
-def flux_prompt_system_message(task_kind: str, *, with_image: bool = False) -> str:
+def flux_prompt_system_message(
+    task_kind: str,
+    *,
+    with_image: bool = False,
+    image_count: int = 0,
+) -> str:
     """System prompt for FLUX prompt refinement for a Create-menu function."""
     max_words = _get_caption_settings()["max_words"]
     flux_realism = (
@@ -387,9 +392,13 @@ def flux_prompt_system_message(task_kind: str, *, with_image: bool = False) -> s
     base = f"{flux_realism} {task}"
     if not with_image:
         return base
+    if image_count > 1:
+        photo_phrase = f"{image_count} reference photographs"
+    else:
+        photo_phrase = "a reference photograph"
     return (
         f"{base} "
-        "The user message includes a reference photograph. Use it as visual context, "
+        f"The user message includes {photo_phrase}. Use them as visual context, "
         "but treat the user's text as the edit goal—refine their instructions into the "
         "FLUX prompt; do not ignore them in favor of a generic image description."
     )
@@ -418,15 +427,34 @@ def flux_prompt_user_message(user_prompt: str, *, with_image: bool) -> str:
     return _FLUX_PROMPT_EMPTY_USER_TEXT
 
 
+def _normalize_flux_prompt_image_paths(
+    image_path: str | None = None,
+    image_paths: list[str] | None = None,
+) -> list[str]:
+    paths: list[str] = []
+    if image_paths:
+        for raw in image_paths:
+            path = (raw or "").strip()
+            if path and os.path.isfile(path) and path not in paths:
+                paths.append(path)
+    else:
+        path = (image_path or "").strip()
+        if path and os.path.isfile(path):
+            paths.append(path)
+    return paths
+
+
 def get_flux_prompt_stream(
     system_prompt: str,
     user_prompt: str,
     image_path: str | None = None,
+    image_paths: list[str] | None = None,
 ):
     """
     Yield text chunks from LM Studio for FLUX prompt refinement.
 
-    When image_path is set, the image is sent with the user prompt (vision model).
+    When image_path or image_paths is set, the images are sent with the user
+    prompt (vision model).
 
     Raises RuntimeError with a user-friendly message on failure.
     """
@@ -454,12 +482,18 @@ def get_flux_prompt_stream(
             "Please start LMStudio and enable the local API server."
         )
 
-    image_file = (image_path or "").strip()
-    use_image = bool(image_file)
+    image_files = _normalize_flux_prompt_image_paths(
+        image_path=image_path, image_paths=image_paths
+    )
+    use_image = bool(image_files)
 
     system_prompt = (system_prompt or "").strip()
     if not system_prompt:
-        system_prompt = flux_prompt_system_message(FUNCTION_CREATE, with_image=use_image)
+        system_prompt = flux_prompt_system_message(
+            FUNCTION_CREATE,
+            with_image=use_image,
+            image_count=len(image_files),
+        )
 
     user_text = flux_prompt_user_message(user_prompt, with_image=use_image)
 
@@ -475,20 +509,22 @@ def get_flux_prompt_stream(
                 f"Could not retrieve or load a model from LMStudio.\n\nDetail: {e}"
             )
 
+        image_handles = []
         if use_image:
             from imagegen_plugins.lmstudio_caption import _require_vision_capable_model
 
             _require_vision_capable_model(model)
-            try:
-                image_handle = client.files.prepare_image(image_file)
-            except Exception as e:
-                raise RuntimeError(
-                    f"Could not prepare image for the model.\n\nDetail: {e}"
-                ) from e
+            for image_file in image_files:
+                try:
+                    image_handles.append(client.files.prepare_image(image_file))
+                except Exception as e:
+                    raise RuntimeError(
+                        f"Could not prepare image for the model.\n\nDetail: {e}"
+                    ) from e
 
         chat = lms.Chat(system_prompt)
         if use_image:
-            chat.add_user_message(user_text, images=[image_handle])
+            chat.add_user_message(user_text, images=image_handles)
         else:
             chat.add_user_message(user_text)
 
@@ -525,6 +561,7 @@ def _run_flux_prompt(
     user_prompt: str,
     job_id: str,
     image_path: str | None = None,
+    image_paths: list[str] | None = None,
 ) -> None:
     global _LOADED_KIND
     _emit({"type": "job_started", "job_id": job_id, "command": "flux_prompt"})
@@ -534,7 +571,10 @@ def _run_flux_prompt(
     accumulated = []
     try:
         for chunk in get_flux_prompt_stream(
-            system_prompt, user_prompt, image_path=image_path
+            system_prompt,
+            user_prompt,
+            image_path=image_path,
+            image_paths=image_paths,
         ):
             if chunk:
                 accumulated.append(chunk)
@@ -626,11 +666,16 @@ def _handle_command(cmd: Dict[str, Any]) -> Any:
         image_path = cmd.get("image_path")
         if image_path is not None and not str(image_path).strip():
             image_path = None
+        raw_paths = cmd.get("image_paths")
+        image_paths = None
+        if isinstance(raw_paths, list):
+            image_paths = [str(p) for p in raw_paths if str(p or "").strip()]
         _run_flux_prompt(
             system_prompt,
             user_prompt,
             job_id,
             str(image_path) if image_path else None,
+            image_paths=image_paths,
         )
         return
 

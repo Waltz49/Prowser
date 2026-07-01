@@ -1417,7 +1417,7 @@ class ImageGenEditDialog(ImageGenDimensionAspectMixin, QDialog):
                 get_prompt_text=self.get_prompt_text,
                 set_prompt_text=self.set_prompt_text,
                 get_pass_image=lambda: pass_image_to_ai_checked(self),
-                get_image_path=lambda: self.source_path,
+                get_image_paths=lambda: list(self._source_paths),
                 get_prompt_edit=self._prompt_edit_widget,
                 get_system_prompt_override=lambda: flux_prompt_system_override_for(
                     self

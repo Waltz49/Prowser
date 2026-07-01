@@ -110,6 +110,8 @@ def _load_flux_prompt_system_prompt_into_pane(pane: LmStudioInstructionsPane) ->
 
 
 def _flux_pass_image_noun(owner: Any) -> str:
+    if getattr(owner, "_multi_source", False):
+        return "source images"
     if getattr(owner, "source_path", None):
         return "source image"
     return "active image"

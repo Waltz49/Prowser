@@ -89,6 +89,7 @@ class ImageGenFluxPromptAi:
         set_prompt_text: Callable[[str], None],
         get_pass_image: Optional[Callable[[], bool]] = None,
         get_image_path: Optional[Callable[[], str]] = None,
+        get_image_paths: Optional[Callable[[], list[str]]] = None,
         get_prompt_edit: Optional[Callable[[], Optional[QPlainTextEdit]]] = None,
         get_system_prompt_override: Optional[Callable[[], Optional[str]]] = None,
     ):
@@ -98,6 +99,7 @@ class ImageGenFluxPromptAi:
         self._set_prompt_text = set_prompt_text
         self._get_pass_image = get_pass_image
         self._get_image_path = get_image_path
+        self._get_image_paths = get_image_paths
         self._get_prompt_edit = get_prompt_edit
         self._get_system_prompt_override = get_system_prompt_override
         self._ai_btn: Optional[QPushButton] = None
@@ -309,7 +311,7 @@ class ImageGenFluxPromptAi:
             self._connected = True
 
         user_prompt = self._prompt_before_ai.strip()
-        image_path = self._resolve_image_path_for_refine()
+        image_paths = self._resolve_image_paths_for_refine()
         override = None
         if self._get_system_prompt_override is not None:
             override = self._get_system_prompt_override()
@@ -317,16 +319,18 @@ class ImageGenFluxPromptAi:
             system_prompt = override
         else:
             system_prompt = flux_prompt_system_message(
-                self._task_kind, with_image=bool(image_path)
+                self._task_kind,
+                with_image=bool(image_paths),
+                image_count=len(image_paths),
             )
         self._streaming_started = False
         if foreground:
             started = controller.start_flux_prompt_refine_foreground(
-                system_prompt, user_prompt, image_path=image_path
+                system_prompt, user_prompt, image_paths=image_paths
             )
         else:
             started = controller.start_flux_prompt_refine(
-                system_prompt, user_prompt, image_path=image_path
+                system_prompt, user_prompt, image_paths=image_paths
             )
         if not started:
             self._on_finished()
@@ -336,15 +340,22 @@ class ImageGenFluxPromptAi:
                 window_title="AI Prompt Error",
             )
 
-    def _resolve_image_path_for_refine(self) -> str | None:
+    def _resolve_image_paths_for_refine(self) -> list[str]:
         if not self._pass_image_checked():
-            return None
-        if self._get_image_path is None:
-            return None
-        path = (self._get_image_path() or "").strip()
-        if path and os.path.isfile(path):
-            return path
-        return None
+            return []
+        raw_paths: list[str] = []
+        if self._get_image_paths is not None:
+            raw_paths = list(self._get_image_paths() or [])
+        elif self._get_image_path is not None:
+            single = (self._get_image_path() or "").strip()
+            if single:
+                raw_paths = [single]
+        paths: list[str] = []
+        for raw in raw_paths:
+            path = (raw or "").strip()
+            if path and os.path.isfile(path) and path not in paths:
+                paths.append(path)
+        return paths
 
     def _preflight_ai_refine(self) -> Optional[str]:
         """Return an error message when refine cannot start, else None."""
@@ -353,7 +364,7 @@ class ImageGenFluxPromptAi:
             return None
         if not self._pass_image_checked():
             return None
-        if self._resolve_image_path_for_refine():
+        if self._resolve_image_paths_for_refine():
             return None
         return (
             "Pass image is checked but no image is available.\n\n"

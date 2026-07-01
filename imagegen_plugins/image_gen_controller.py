@@ -1310,6 +1310,7 @@ class ImageGenController(QObject):
         system_prompt: str,
         user_prompt: str,
         image_path: str | None = None,
+        image_paths: list[str] | None = None,
     ) -> bool:
         # IMPORTANT: Keep this background-worker path on the primary _tasks worker.
         # start_flux_prompt_refine_foreground covers concurrent use during generation,
@@ -1318,7 +1319,10 @@ class ImageGenController(QObject):
         if self.has_pending_work():
             return False
         if not self._tasks.start_flux_prompt_job(
-            system_prompt, user_prompt, image_path=image_path
+            system_prompt,
+            user_prompt,
+            image_path=image_path,
+            image_paths=image_paths,
         ):
             return False
         return True
@@ -1328,12 +1332,16 @@ class ImageGenController(QObject):
         system_prompt: str,
         user_prompt: str,
         image_path: str | None = None,
+        image_paths: list[str] | None = None,
     ) -> bool:
         """Refine prompt via a second worker while generation may be running."""
         if self._foreground_tasks.is_running():
             return False
         return self._foreground_tasks.start_flux_prompt_job(
-            system_prompt, user_prompt, image_path=image_path
+            system_prompt,
+            user_prompt,
+            image_path=image_path,
+            image_paths=image_paths,
         )
 
     def cancel_generation(self) -> None:

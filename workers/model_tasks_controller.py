@@ -170,6 +170,7 @@ class ModelTasksController(QObject):
         system_prompt: str,
         user_prompt: str,
         image_path: str | None = None,
+        image_paths: list[str] | None = None,
     ) -> bool:
         if self.is_running():
             return False
@@ -183,8 +184,11 @@ class ModelTasksController(QObject):
             "system_prompt": system_prompt,
             "user_prompt": user_prompt,
         }
-        if image_path:
-            cmd["image_path"] = image_path
+        paths = list(image_paths) if image_paths else []
+        if not paths and image_path:
+            paths = [image_path]
+        if paths:
+            cmd["image_paths"] = paths
         return self._start_job("flux_prompt", cmd)
 
     def cancel_task(self) -> None:
