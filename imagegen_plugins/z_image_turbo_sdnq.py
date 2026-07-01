@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any, Tuple
 
 from imagegen_plugins.hf_model_ids import Z_IMAGE_TURBO_SDNQ_INT8
 from imagegen_plugins.image_gen_field_blocks import (
+    copies_slider_block,
     dim_slider_block,
     seed_row_block,
     steps_slider_block,
@@ -53,6 +54,7 @@ def z_image_turbo_sdnq_field_layout(
             pipeline_id=plugin.pipeline_id,
             model_defaults=model_defaults,
         ),
+        copies_slider_block(values, model_defaults=model_defaults),
     )
 
 
@@ -71,5 +73,6 @@ Z_IMAGE_TURBO_SDNQ_PLUGIN = ImageGenModelPlugin(
         "steps": 4,
         "seed": 0,
         "random_seed": True,
+        "copies": 1,
     },
 )

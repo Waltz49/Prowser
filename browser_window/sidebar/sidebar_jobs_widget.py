@@ -51,22 +51,6 @@ from utils import create_job_status_thumbnail_label
 _THUMB_SIZE = 55
 _THUMB_GAP = 14
 _ACTIVE_JOB_STRIP_MARGIN = 8  # left + right margins on the strip layout
-_JOB_CARD_ROW_MARGIN_LEFT = 2
-_JOB_CARD_ACTION_TEXT_SPACING = 4
-_JOB_QUEUE_BROWSER_LEFT_PAD = 4
-_JOBS_PANE_ACTIVE_JOB_BORDER_W = 1
-# Align strip label text with job-card status HTML (card margin + actions + spacing + browser pad).
-_JOB_CARD_TEXT_LEFT_INSET = (
-    _JOB_CARD_ROW_MARGIN_LEFT
-    + _ACTION_COL_WIDTH
-    + _JOB_CARD_ACTION_TEXT_SPACING
-    + _JOB_QUEUE_BROWSER_LEFT_PAD
-)
-_ACTIVE_JOB_STRIP_LEFT_SPACER = (
-    _JOB_CARD_TEXT_LEFT_INSET
-    - _JOBS_PANE_ACTIVE_JOB_BORDER_W
-    - _JOB_QUEUE_BROWSER_LEFT_PAD
-)
 
 # When scroll viewport width exceeds this and a row has 1–2 reference images, show
 # them in a vertical column beside the text instead of below it.
@@ -630,7 +614,6 @@ class SidebarJobsWidget(QWidget):
         active_job_layout = QHBoxLayout(self._active_job_strip)
         active_job_layout.setContentsMargins(4, 4, 4, 0)
         active_job_layout.setSpacing(0)
-        active_job_layout.addSpacing(_ACTIVE_JOB_STRIP_LEFT_SPACER)
         self._active_job_browser = QTextBrowser()
         self._active_job_browser.setReadOnly(True)
         self._active_job_browser.setOpenExternalLinks(False)
@@ -803,10 +786,7 @@ class SidebarJobsWidget(QWidget):
 
     def _active_job_content_width(self) -> int:
         w = self.width() if self.width() > 0 else self._viewport_width()
-        return max(
-            120,
-            w - _ACTIVE_JOB_STRIP_MARGIN - _ACTIVE_JOB_STRIP_LEFT_SPACER,
-        )
+        return max(120, w - _ACTIVE_JOB_STRIP_MARGIN)
 
     def _should_show_active_job_strip(self) -> bool:
         return self._controller.is_running()

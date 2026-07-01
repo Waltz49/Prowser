@@ -1417,7 +1417,7 @@ class ImageGenEditDialog(ImageGenDimensionAspectMixin, QDialog):
                 get_prompt_text=self.get_prompt_text,
                 set_prompt_text=self.set_prompt_text,
                 get_pass_image=lambda: pass_image_to_ai_checked(self),
-                get_image_paths=lambda: list(self._source_paths),
+                get_image_path=lambda: self.source_path,
                 get_prompt_edit=self._prompt_edit_widget,
                 get_system_prompt_override=lambda: flux_prompt_system_override_for(
                     self
@@ -1435,16 +1435,25 @@ class ImageGenEditDialog(ImageGenDimensionAspectMixin, QDialog):
         out["source_image_paths"] = list(self._source_paths)
         return out
 
-    def _prepare_run_values(self) -> Optional[Dict[str, Any]]:
+    def _prepare_run_values(
+        self, *, force_flux_ai_job: bool = False
+    ) -> Optional[Dict[str, Any]]:
         if self.plugin is None:
             return None
         values = finalize_run_values(
             self.plugin.pipeline_id, self.collect_values()
         )
+        from imagegen_plugins.flux_prompt_job import (
+            allow_empty_prompt_for_flux_ai_job,
+            apply_flux_prompt_job_to_prepare_run_values,
+        )
+
         prompt_spec = next((s for s in self._specs if s.key == "prompt"), None)
         if prompt_spec is not None and prompt_spec.required:
             prompt = (values.get("prompt") or "").strip()
-            if not prompt:
+            if not prompt and not allow_empty_prompt_for_flux_ai_job(
+                self, force=force_flux_ai_job
+            ):
                 label = prompt_spec.label or "Edit prompt"
                 show_styled_warning(
                     self,
@@ -1460,6 +1469,15 @@ class ImageGenEditDialog(ImageGenDimensionAspectMixin, QDialog):
 
         values = validate_lora_trigger_before_generate(self, values)
         if values is None:
+            return None
+        if not apply_flux_prompt_job_to_prepare_run_values(
+            self, values, force=force_flux_ai_job
+        ):
+            show_styled_warning(
+                self,
+                "AI prompt job",
+                "Could not attach AI prompt data to the job.",
+            )
             return None
         return values
 

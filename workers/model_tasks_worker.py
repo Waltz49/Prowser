@@ -358,20 +358,20 @@ def _run_generate(payload: Dict[str, Any], job_id: str) -> None:
 
 _TASK_INSTRUCTIONS: dict[str, str] = {
     FUNCTION_CREATE: (
-        "The user is creating a brand-new image from text only (text-to-image). "
-        "Refine their notes into one cohesive scene description for FLUX Schnell or a similar FLUX model."
+      "", # "The user is creating a brand-new image from text only (text-to-image). "
+      # "Refine their notes into one cohesive scene description for FLUX Schnell or a similar FLUX model."
     ),
     FUNCTION_EDIT: (
-        "Create a new image description based on the incoming image(s) and the user's instructions."
+       "", # "Create a new image description based on the incoming image(s) and the user's instructions."
     ),
     FUNCTION_EXPAND: (
-        "Create a new image description based on the incoming image(s) and the user's instructions."
+       "", # "Create a new image description based on the incoming image(s) and the user's instructions."
     ),
     FUNCTION_INFILL: (
-        "Create a description of changes to the image based on the user's instructions."
+       "", # "Create a description of changes to the image based on the user's instructions."
     ),
     FUNCTION_INFILL_PAINT: (
-        "Create a description of changes to the image based on the user's instructions."
+       "", # "Create a description of changes to the image based on the user's instructions."
     ),
 }
 

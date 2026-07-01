@@ -194,3 +194,13 @@ def flux_prompt_system_override_for(owner: Any) -> Optional[str]:
     if pane is None:
         return None
     return pane.effective_override_text()
+
+
+def flux_prompt_ai_controls_visible(owner: Any) -> bool:
+    """True when the flux system-prompt pane (AI controls) is shown."""
+    if not is_lmstudio_services_available():
+        return False
+    pane = getattr(owner, "_flux_system_prompt_pane", None)
+    if pane is None:
+        return False
+    return pane.is_visible()

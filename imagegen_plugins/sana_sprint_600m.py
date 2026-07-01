@@ -6,6 +6,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, Tuple
 
 from imagegen_plugins.image_gen_field_blocks import (
+    copies_slider_block,
     dim_slider_block,
     guidance_slider_block,
     sana_extra_fields,
@@ -62,6 +63,7 @@ def sana_sprint_600m_field_layout(
             guidance_default=mode.guidance_default,
             model_defaults=model_defaults,
         ),
+        copies_slider_block(values, model_defaults=model_defaults),
         *sana_extra_fields(values, model_defaults=model_defaults),
     )
 
@@ -82,6 +84,7 @@ SANA_SPRINT_600M_PLUGIN = ImageGenModelPlugin(
         "guidance_scale": 4.5,
         "seed": 0,
         "random_seed": True,
+        "copies": 1,
         "use_resolution_binning": True,
         "max_sequence_length": 300,
         "clean_caption": True,

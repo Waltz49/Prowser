@@ -584,20 +584,57 @@ class ImageGenExpandDialog(ImageGenDimensionAspectMixin, QDialog):
         self._stash_aspect_lock_in_values(out)
         return out
 
-    def run_generate(self) -> bool:
+    def _prepare_run_values(
+        self, *, force_flux_ai_job: bool = False
+    ) -> Optional[Dict[str, Any]]:
         if self.plugin is None:
-            return False
+            return None
         values = finalize_run_values(
             self.plugin.pipeline_id, self.collect_values()
         )
+        from imagegen_plugins.flux_prompt_job import (
+            allow_empty_prompt_for_flux_ai_job,
+            apply_flux_prompt_job_to_prepare_run_values,
+        )
+
+        prompt_spec = next((s for s in self._specs if s.key == "prompt"), None)
+        if prompt_spec is not None and prompt_spec.required:
+            prompt = (values.get("prompt") or "").strip()
+            if not prompt and not allow_empty_prompt_for_flux_ai_job(
+                self, force=force_flux_ai_job
+            ):
+                label = prompt_spec.label or "Prompt"
+                show_styled_warning(
+                    self,
+                    f"{label} required",
+                    f"Enter {label.lower()} before generating.",
+                )
+                return None
         from imagegen_plugins.lora_trigger_prompt_guard import (
             validate_lora_trigger_before_generate,
         )
 
         values = validate_lora_trigger_before_generate(self, values)
         if values is None:
-            return False
+            return None
         if not validate_copies_require_random_seed(self, values):
+            return None
+        if not apply_flux_prompt_job_to_prepare_run_values(
+            self, values, force=force_flux_ai_job
+        ):
+            show_styled_warning(
+                self,
+                "AI prompt job",
+                "Could not attach AI prompt data to the job.",
+            )
+            return None
+        return values
+
+    def run_generate(self) -> bool:
+        if self.plugin is None:
+            return False
+        values = self._prepare_run_values()
+        if values is None:
             return False
         save_plugin_dialog_settings(
             self._function, self.plugin.plugin_id, values

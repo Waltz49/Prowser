@@ -13,6 +13,10 @@ from imagegen_plugins.image_gen_pipeline_modes import get_pipeline
 from imagegen_plugins.image_gen_registry import ImageGenModelPlugin
 
 
+# Rough target length for streaming AI prompt refinement progress (characters).
+_AI_REFINE_PROGRESS_TOTAL = 800
+
+
 def _escape(text: str) -> str:
     return html.escape(text or "", quote=True)
 
@@ -417,6 +421,7 @@ def format_information_generation_timing_cell_html(
     completed_steps: int | None = None,
     total_steps: int | None = None,
     content_width_px: int = 0,
+    steps_label: str = "Steps:",
 ) -> str:
     """Elapsed/Est, series, and step progress for the active-job timing strip."""
     from theme.theme_service import get_active_theme
@@ -466,11 +471,11 @@ def format_information_generation_timing_cell_html(
             remaining_steps = total_i - step_i
             fill_percent = int(round(100.0 * step_i / total_i))
             progress_rows.append(
-                ("Steps:", str(step_i), str(remaining_steps), str(fill_percent))
+                (steps_label, str(step_i), str(remaining_steps), str(fill_percent))
             )
         else:
             progress_rows.append(
-                ("Steps:", str(total_i), "(total)", "0")
+                (steps_label, str(total_i), "(total)", "0")
             )
 
     if completed_series is not None and total_series is not None:
@@ -622,6 +627,7 @@ def build_active_job_timing_cell_html(
         completed_steps=step,
         total_steps=step_total,
         content_width_px=content_width_px,
+        steps_label=controller.active_job_timing_steps_label(),
     )
 
 
@@ -888,8 +894,14 @@ def format_image_generation_queue_status_html(
     running: bool = False,
     series_copies_total: int | None = None,
     omit_live_steps_row: bool = False,
+    with_ai: bool = False,
 ) -> str:
     """Rich-text block for the job queue — same field order as the status-bar menu."""
+    from imagegen_plugins.flux_prompt_job import (
+        has_flux_prompt_ai_job,
+        job_title_with_ai_suffix,
+    )
+
     pipeline_id = plugin.pipeline_id
     fields = _collect_generation_status_fields(plugin, values, payload)
     steps_value = _steps_display_with_progress(
@@ -921,11 +933,64 @@ def format_image_generation_queue_status_html(
             )
         )
 
+    title = _task_menu_title_for_pipeline(pipeline_id)
+    if with_ai or has_flux_prompt_ai_job(values):
+        title = job_title_with_ai_suffix(title)
+
     return _table_html(
         rows,
-        title=_task_menu_title_for_pipeline(pipeline_id),
+        title=title,
         running=running,
     )
+
+
+def format_job_ai_stage_queue_status_html(
+    plugin: ImageGenModelPlugin,
+    values: Dict[str, Any],
+    *,
+    running: bool = False,
+    step: int | None = None,
+    step_total: int | None = None,
+    elapsed_seconds: float | None = None,
+    estimate_seconds: float | None = None,
+) -> str:
+    """Job queue status while the LM Studio prompt-refinement stage runs."""
+    from imagegen_plugins.flux_prompt_job import (
+        flux_prompt_ai_user_prompt,
+        job_title_with_ai_suffix,
+    )
+
+    pipeline_id = plugin.pipeline_id
+    title = job_title_with_ai_suffix(_task_menu_title_for_pipeline(pipeline_id))
+    rows: list[str] = []
+    prompt = _truncate(flux_prompt_ai_user_prompt(values))
+    if prompt:
+        rows.append(
+            _queue_table_row_prompt(
+                get_pipeline(pipeline_id).prompt_status_label,
+                prompt,
+            )
+        )
+    ai_steps_value = _steps_display_with_progress(
+        "",
+        step=step,
+        step_total=step_total,
+    )
+    if ai_steps_value and step_total is not None and step_total > 0:
+        show_timing = step is not None and step > 0 and elapsed_seconds is not None
+        ai_inline = _steps_row_inline_parts(
+            {},
+            elapsed_seconds=elapsed_seconds if show_timing else None,
+            estimate_seconds=estimate_seconds if show_timing else None,
+        )
+        if ai_inline:
+            rows.append(
+                _queue_table_row_primary_plus_inline("AI:", ai_steps_value, ai_inline)
+            )
+        else:
+            rows.append(_queue_table_row("AI:", ai_steps_value))
+    rows.append(_queue_table_row("Stage:", "AI prompt refinement"))
+    return _table_html(rows, title=title, running=running)
 
 
 def _format_duration(seconds: float) -> str:

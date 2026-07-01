@@ -108,9 +108,9 @@ class ImageGenController(QObject):
         self._tasks.caption_chunk.connect(self.caption_chunk.emit)
         self._tasks.caption_ready.connect(self.caption_ready.emit)
         self._tasks.caption_error.connect(self._on_caption_error)
-        self._tasks.flux_prompt_chunk.connect(self.flux_prompt_chunk.emit)
-        self._tasks.flux_prompt_ready.connect(self.flux_prompt_ready.emit)
-        self._tasks.flux_prompt_error.connect(self._on_flux_prompt_error)
+        self._tasks.flux_prompt_chunk.connect(self._on_flux_prompt_chunk_from_worker)
+        self._tasks.flux_prompt_ready.connect(self._on_flux_prompt_ready_from_worker)
+        self._tasks.flux_prompt_error.connect(self._on_flux_prompt_error_from_worker)
         self._tasks.task_started.connect(self._on_task_started)
         self._tasks.job_processing_started.connect(self._on_job_processing_started)
         self._tasks.task_finished.connect(self._on_task_finished)
@@ -155,6 +155,9 @@ class ImageGenController(QObject):
         self._live_estimate_seconds: Optional[float] = None
         # Seconds per step, frozen when a diffusion step completes (for live ETA).
         self._step_seconds_per_step: Optional[float] = None
+        self._job_ai_stage_active = False
+        self._active_job_with_ai = False
+        self._job_ai_chars_received = 0
         self._hold_job_queue = load_hold_job_queue()
         self._queue_advance_suppressed = False
         self._exit_queue_persisted = False
@@ -229,6 +232,11 @@ class ImageGenController(QObject):
         return self._active_queue_job_id
 
     def active_job_full_prompt(self) -> str:
+        from imagegen_plugins.flux_prompt_job import flux_prompt_ai_user_prompt
+
+        pre_ai = flux_prompt_ai_user_prompt(self._pending_values)
+        if pre_ai:
+            return pre_ai
         return str(self._pending_values.get("prompt") or "").strip()
 
     def queue_snapshot(self) -> list[QueueRowSnapshot]:
@@ -282,6 +290,9 @@ class ImageGenController(QObject):
         copies = self._normalize_copies(values.get("copies", 1))
         values = dict(values)
         values["copies"] = copies
+        from imagegen_plugins.flux_prompt_job import strip_flux_prompt_ai_job_if_ui_inactive
+
+        strip_flux_prompt_ai_job_if_ui_inactive(self._imagegen_submit_owner(), values)
         if copies > 1 and not values.get("random_seed"):
             if not prompt_enable_random_seed_for_copies(self.main_window):
                 return False
@@ -296,10 +307,23 @@ class ImageGenController(QObject):
 
         return self._start_generation_now(plugin, values)
 
+    def _imagegen_submit_owner(self) -> Any | None:
+        """Open image-gen dialog or active unified panel (for flux AI UI gating)."""
+        dlg = getattr(self.main_window, "_imagegen_function_dialog", None)
+        if dlg is None:
+            return None
+        panel = getattr(dlg, "_current_panel", None)
+        return panel if panel is not None else dlg
+
     def enqueue_generation(
         self, plugin: ImageGenModelPlugin, values: Dict[str, Any]
     ) -> bool:
         copies = self._normalize_copies(values.get("copies", 1))
+        values = dict(values)
+        values["copies"] = copies
+        from imagegen_plugins.flux_prompt_job import strip_flux_prompt_ai_job_if_ui_inactive
+
+        strip_flux_prompt_ai_job_if_ui_inactive(self._imagegen_submit_owner(), values)
         try:
             job = make_queued_generate_job(
                 plugin, values, copies_total=copies
@@ -324,6 +348,8 @@ class ImageGenController(QObject):
         self, job_id: str, plugin: ImageGenModelPlugin, values: Dict[str, Any]
     ) -> bool:
         """Update a pending queue entry in place (same job_id and position)."""
+        from imagegen_plugins.flux_prompt_job import flux_prompt_ai_user_prompt
+
         job = self._queued_job_by_id(job_id)
         if job is None:
             return False
@@ -342,7 +368,9 @@ class ImageGenController(QObject):
         job.values = values
         job.copies_total = copies
         job.thumbnail_paths = thumbnail_paths_for_values(plugin, values)
-        job.full_prompt = str(values.get("prompt") or "").strip()
+        job.full_prompt = flux_prompt_ai_user_prompt(values) or str(
+            values.get("prompt") or ""
+        ).strip()
         job.references_invalid = job_references_invalid(plugin, values)
         refresh_queued_job_status(job)
         self.queue_changed.emit()
@@ -483,7 +511,146 @@ class ImageGenController(QObject):
             pass  # queue pane rebuilds compact HTML from live controller state
 
         self.queue_changed.emit()
+        if self._pending_job_needs_ai_stage():
+            return self._begin_job_ai_stage()
         return self._launch_generation_job()
+
+    def _pending_job_needs_ai_stage(self) -> bool:
+        from imagegen_plugins.flux_prompt_job import has_flux_prompt_ai_job
+
+        return has_flux_prompt_ai_job(self._pending_values)
+
+    def active_job_timing_steps_label(self) -> str:
+        return "AI:" if self._job_ai_stage_active else "Steps:"
+
+    def _start_job_ai_progress_tracking(self) -> None:
+        from imagegen_plugins.model_task_status_info import _AI_REFINE_PROGRESS_TOTAL
+
+        self._job_ai_chars_received = 0
+        self._step_progress_start_time = time.perf_counter()
+        self._live_step = 0
+        self._live_step_total = _AI_REFINE_PROGRESS_TOTAL
+        self._live_elapsed_seconds = None
+        self._live_estimate_seconds = None
+        self._step_seconds_per_step = None
+
+    def _refresh_job_ai_stage_status_html(self, *, running: bool) -> None:
+        from imagegen_plugins.model_task_status_info import (
+            format_job_ai_stage_queue_status_html,
+        )
+
+        plugin = self._active_plugin
+        if plugin is None:
+            return
+        elapsed, estimate = self._snapshot_live_timing(in_cooldown=False)
+        if elapsed is None:
+            elapsed = self._wall_clock_elapsed_seconds(in_cooldown=False)
+        step = self._live_step if self._live_step_total > 0 else None
+        step_total = self._live_step_total if self._live_step_total > 0 else None
+        self._task_status_info_html = format_job_ai_stage_queue_status_html(
+            plugin,
+            self._pending_values,
+            running=running,
+            step=step,
+            step_total=step_total,
+            elapsed_seconds=elapsed,
+            estimate_seconds=estimate,
+        )
+        self.task_status_info_changed.emit()
+        self.queue_changed.emit()
+
+    def _begin_job_ai_stage(self) -> bool:
+        from imagegen_plugins.flux_prompt_job import flux_prompt_ai_job_meta
+
+        meta = flux_prompt_ai_job_meta(self._pending_values)
+        plugin = self._active_plugin
+        if meta is None or plugin is None:
+            return self._launch_generation_job()
+
+        self._job_ai_stage_active = True
+        self._active_job_with_ai = True
+        self._start_job_ai_progress_tracking()
+        self._refresh_job_ai_stage_status_html(running=False)
+        self.generation_started.emit()
+
+        system_prompt = str(meta.get("system_prompt") or "")
+        user_prompt = str(meta.get("user_prompt") or "")
+        image_paths = list(meta.get("image_paths") or [])
+        if image_paths:
+            from imagegen_plugins.image_gen_naming import resolve_source_image_paths
+
+            refreshed = [
+                p
+                for p in resolve_source_image_paths(self._pending_values)
+                if p and os.path.isfile(p)
+            ]
+            if refreshed:
+                image_paths = refreshed
+        if not self._tasks.start_flux_prompt_job(
+            system_prompt,
+            user_prompt,
+            image_paths=image_paths,
+        ):
+            self._fail_job_ai_stage("Could not start AI prompt refinement for the job.")
+            return False
+        return True
+
+    def _complete_job_ai_stage(self, refined_prompt: str) -> None:
+        from imagegen_plugins.model_task_status_info import (
+            format_image_generation_queue_status_html,
+        )
+
+        self._job_ai_stage_active = False
+        text = (refined_prompt or "").strip()
+        if text:
+            self._pending_values["prompt"] = text
+        plugin = self._active_plugin
+        if plugin is not None:
+            try:
+                from imagegen_plugins.model_task_queue import _preview_output_path
+
+                preview_path = _preview_output_path()
+                payload = plugin.build_payload(self._pending_values, preview_path)
+            except Exception:
+                payload = None
+            self._task_status_info_html = format_image_generation_queue_status_html(
+                plugin,
+                self._pending_values,
+                payload,
+                series_copies_total=self._copies_total if self._copies_total > 1 else None,
+                with_ai=self._active_job_with_ai,
+            )
+            self.task_status_info_changed.emit()
+            self.queue_changed.emit()
+        QTimer.singleShot(0, self._launch_generation_after_job_ai)
+
+    def _launch_generation_after_job_ai(self) -> None:
+        if self._active_plugin is None:
+            self._finish_copy_batch()
+            return
+        if not self._launch_generation_job():
+            self._finish_copy_batch()
+
+    def _start_next_copy_cycle(self) -> bool:
+        """Run AI prompt refinement (when configured) then the next generation copy."""
+        if self._pending_job_needs_ai_stage():
+            return self._begin_job_ai_stage()
+        return self._launch_generation_job()
+
+    def _fail_job_ai_stage(self, error_message: str) -> None:
+        self._job_ai_stage_active = False
+        if (
+            not self._suppress_task_failure_ui
+            and error_message
+            and error_message != "Cancelled"
+        ):
+            show_styled_critical(
+                self.main_window,
+                "AI prompt job failed",
+                error_message[:4000],
+            )
+        self.generation_finished.emit(False, "", error_message)
+        self._finish_copy_batch(cancelled=True)
 
     def _launch_generation_job(self) -> bool:
         plugin = self._active_plugin
@@ -551,8 +718,16 @@ class ImageGenController(QObject):
             self._pending_values["steps"] = int(payload["steps"])
         apply_payload_model_fields_to_values(self._pending_values, payload)
         if self._copies_done == 0:
-            self._task_status_info_html = format_image_generation_status_html(
-                plugin, values, payload
+            from imagegen_plugins.model_task_status_info import (
+                format_image_generation_queue_status_html,
+            )
+
+            self._task_status_info_html = format_image_generation_queue_status_html(
+                plugin,
+                values,
+                payload,
+                series_copies_total=self._copies_total if self._copies_total > 1 else None,
+                with_ai=self._active_job_with_ai,
             )
             self.task_status_info_changed.emit()
 
@@ -1073,6 +1248,29 @@ class ImageGenController(QObject):
         if plugin is None:
             return ""
 
+        if self._job_ai_stage_active:
+            from imagegen_plugins.model_task_status_info import (
+                format_job_ai_stage_queue_status_html,
+            )
+
+            elapsed, estimate = self._snapshot_live_timing(in_cooldown=False)
+            if elapsed is None:
+                elapsed = self._wall_clock_elapsed_seconds(in_cooldown=False)
+            step = None
+            step_total = None
+            if not omit_live_steps_row and self._live_step_total > 0:
+                step = self._live_step
+                step_total = self._live_step_total
+            return format_job_ai_stage_queue_status_html(
+                plugin,
+                self._pending_values,
+                running=self._tasks.is_running(),
+                step=step,
+                step_total=step_total,
+                elapsed_seconds=elapsed,
+                estimate_seconds=estimate,
+            )
+
         in_cooldown = self._is_in_copy_cooldown()
         elapsed, estimate = self._snapshot_live_timing(in_cooldown=in_cooldown)
         step = self._live_step if self._live_step_total > 0 else None
@@ -1089,6 +1287,7 @@ class ImageGenController(QObject):
             estimate_seconds=estimate,
             running=self._tasks.is_running(),
             omit_live_steps_row=omit_live_steps_row,
+            with_ai=self._active_job_with_ai,
         )
         if not html:
             return ""
@@ -1429,6 +1628,34 @@ class ImageGenController(QObject):
         elif kind == "flux_prompt":
             self.flux_prompt_finished.emit()
 
+    def _on_flux_prompt_chunk_from_worker(self, chunk: str) -> None:
+        if self._job_ai_stage_active:
+            self._job_ai_chars_received += len(chunk or "")
+            if self._live_step_total > 0:
+                self._live_step = min(
+                    self._live_step_total - 1,
+                    self._job_ai_chars_received,
+                )
+            self._refresh_job_ai_stage_status_html(running=True)
+            return
+        self.flux_prompt_chunk.emit(chunk)
+
+    def _on_flux_prompt_ready_from_worker(self, text: str) -> None:
+        if self._job_ai_stage_active:
+            self._complete_job_ai_stage(text)
+            return
+        self.flux_prompt_ready.emit(text)
+
+    def _on_flux_prompt_error_from_worker(self, error_message: str) -> None:
+        if self._job_ai_stage_active:
+            cancelled = error_message == "Cancelled" or self._copy_batch_cancelled
+            if cancelled:
+                self._fail_job_ai_stage("Cancelled")
+            else:
+                self._fail_job_ai_stage(error_message)
+            return
+        self._on_flux_prompt_error(error_message)
+
     def _on_caption_error(self, error_message: str) -> None:
         if self._suppress_task_failure_ui:
             return
@@ -1446,6 +1673,10 @@ class ImageGenController(QObject):
         self._sync_cancel_menu()
 
     def _on_job_processing_started(self, kind: str) -> None:
+        if kind == "flux_prompt" and self._job_ai_stage_active:
+            self._refresh_job_ai_stage_status_html(running=True)
+            self._update_status_bar_indicator(kind)
+            return
         if kind == "generate":
             if self._task_status_info_html:
                 self._task_status_info_html = strip_cooldown_from_status_html(
@@ -1477,6 +1708,15 @@ class ImageGenController(QObject):
             self._emit_jobs_pane_title_changed()
 
     def _on_task_finished(self, kind: str, _success: bool, _err: str) -> None:
+        if kind == "flux_prompt" and self._job_ai_stage_active:
+            if not _success:
+                cancelled = _err == "Cancelled" or self._copy_batch_cancelled
+                if cancelled:
+                    self._fail_job_ai_stage("Cancelled")
+                else:
+                    self._fail_job_ai_stage(_err or "AI prompt job failed")
+            self._sync_cancel_menu()
+            return
         if kind == "caption":
             self.caption_finished.emit()
         if kind == "flux_prompt":
@@ -1527,7 +1767,7 @@ class ImageGenController(QObject):
                 self._emit_jobs_pane_title_changed()
                 if self._hold_job_queue:
                     return
-                QTimer.singleShot(0, self._launch_generation_job)
+                QTimer.singleShot(0, self._launch_next_copy_after_cooldown)
                 return
             self._finish_copy_batch()
             return
@@ -1936,7 +2176,7 @@ class ImageGenController(QObject):
             return
         if self._tasks.is_running():
             return
-        if not self._launch_generation_job():
+        if not self._start_next_copy_cycle():
             self._finish_copy_batch()
 
     def _remove_aspect_pad_temps(self) -> None:
@@ -1966,7 +2206,10 @@ class ImageGenController(QObject):
         remove_persisted_pixelmator_batch(self._pending_values)
 
     def _finish_copy_batch(self, *, cancelled: bool = False) -> None:
+        from imagegen_plugins.flux_prompt_job import clear_flux_prompt_ai_job
+
         self._stop_copy_cooldown_timer()
+        clear_flux_prompt_ai_job(self._pending_values)
         if cancelled:
             self._cleanup_cancelled_generation_temps()
         self._remove_aspect_pad_temps()
@@ -2021,6 +2264,9 @@ class ImageGenController(QObject):
 
     def _reset_generation_state(self) -> None:
         self._suppress_task_failure_ui = False
+        self._job_ai_stage_active = False
+        self._active_job_with_ai = False
+        self._job_ai_chars_received = 0
         self._active_plugin = None
         self._output_path = ""
         self._pending_values = {}

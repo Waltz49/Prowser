@@ -63,8 +63,15 @@ _PLUGIN_SPECIFIC_DIALOG_KEYS = frozenset(
 _SHARED_FUNCTION_KEYS = frozenset({"prompt"})
 
 # Global image-gen prefs (not per function, model, or dialog field values).
-_GLOBAL_DIALOG_PREF_KEYS = frozenset({"pass_image_to_ai_with_prompt"})
+_GLOBAL_DIALOG_PREF_KEYS = frozenset(
+    {
+        "pass_image_to_ai_with_prompt",
+        "flux_prompt_job_with_generate",
+        "flux_prompt_ai_job",
+    }
+)
 _PASS_IMAGE_TO_AI_KEY = "pass_image_to_ai_with_prompt"
+_FLUX_PROMPT_JOB_WITH_GENERATE_KEY = "flux_prompt_job_with_generate"
 _FLUX_PROMPT_SYSTEM_PROMPT_TEXT_KEY = "flux_prompt_system_prompt_text"
 _FLUX_PROMPT_SYSTEM_PROMPT_VISIBLE_KEY = "flux_prompt_system_prompt_visible"
 _FLUX_PROMPT_SYSTEM_PROMPT_SPLITTER_SIZES_KEY = (
@@ -399,6 +406,20 @@ def save_pass_image_to_ai_with_prompt(enabled: bool) -> None:
     def mutate(imagegen: dict) -> None:
         imagegen[_PASS_IMAGE_TO_AI_KEY] = bool(enabled)
         _strip_legacy_pass_image_to_ai_from_imagegen(imagegen)
+
+    _mutate_imagegen_settings(mutate)
+
+
+def load_flux_prompt_job_with_generate() -> bool:
+    """Whether Generate should queue an AI prompt-refinement stage with the job."""
+    settings = get_config().load_settings()
+    imagegen = settings.get("imagegen") or {}
+    return bool(imagegen.get(_FLUX_PROMPT_JOB_WITH_GENERATE_KEY, False))
+
+
+def save_flux_prompt_job_with_generate(enabled: bool) -> None:
+    def mutate(imagegen: dict) -> None:
+        imagegen[_FLUX_PROMPT_JOB_WITH_GENERATE_KEY] = bool(enabled)
 
     _mutate_imagegen_settings(mutate)
 

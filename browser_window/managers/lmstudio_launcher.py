@@ -77,18 +77,32 @@ def show_ai_caption_error_dialog(
     error_msg: str,
     *,
     window_title: str = "AI Caption Error",
+    cancel_label: str = "Ok",
     on_run_foreground=None,
+    on_run_now=None,
     run_foreground_tooltip: str = (
         "Run AI captioning concurrent with image generation. May be slow."
     ),
+    run_now_tooltip: str | None = None,
+    on_queue_job=None,
+    queue_job_tooltip: str = (
+        "Queue image generation with AI prompt refinement as the first stage."
+    ),
 ) -> None:
     """
-    Show an AI / LM Studio error dialog with Ok and LM Studio... buttons.
-    LM Studio... verifies installation, launches if installed, and dismisses the dialog.
+    Show an AI / LM Studio error dialog with dismiss, optional run-now, queue, LM Studio.
 
-    When *on_run_foreground* is provided, adds a Run Foreground button that invokes it
-    and dismisses the dialog (for captioning while image generation is active).
+    When *on_run_foreground* or *on_run_now* is provided, adds a concurrent-run button.
+    When *on_queue_job* is provided, adds a Queue Job button.
     """
+    run_callback = on_run_now if on_run_now is not None else on_run_foreground
+    run_tooltip = (
+        run_now_tooltip
+        if run_now_tooltip is not None
+        else run_foreground_tooltip
+    )
+    run_label = "Run Now" if on_run_now is not None else "Run Foreground"
+    lmstudio_label = "LM Studio" if on_queue_job is not None else "LM Studio..."
     from PySide6.QtWidgets import (
         QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
         QMessageBox, QStyle,
@@ -145,31 +159,43 @@ def show_ai_caption_error_dialog(
     def _dismiss():
         dialog.accept()
 
-    ok_btn = QPushButton("Ok")
+    ok_btn = QPushButton(cancel_label)
     ok_btn.setStyleSheet(button_style)
     ok_btn.setFocus()
     ok_btn.clicked.connect(_dismiss)
     button_bar.addWidget(ok_btn)
 
-    if on_run_foreground is not None:
+    if run_callback is not None:
 
-        def _on_run_foreground():
-            on_run_foreground()
+        def _on_run():
+            run_callback()
             _dismiss()
 
-        fg_btn = QPushButton("Run Foreground")
-        fg_btn.setStyleSheet(button_style)
-        fg_btn.setToolTip(run_foreground_tooltip)
-        fg_btn.setDefault(True)
-        fg_btn.clicked.connect(_on_run_foreground)
-        button_bar.addWidget(fg_btn)
+        run_btn = QPushButton(run_label)
+        run_btn.setStyleSheet(button_style)
+        run_btn.setToolTip(run_tooltip)
+        run_btn.setDefault(True)
+        run_btn.clicked.connect(_on_run)
+        button_bar.addWidget(run_btn)
+
+    if on_queue_job is not None:
+
+        def _on_queue():
+            on_queue_job()
+            _dismiss()
+
+        queue_btn = QPushButton("Queue Job")
+        queue_btn.setStyleSheet(button_style)
+        queue_btn.setToolTip(queue_job_tooltip)
+        queue_btn.clicked.connect(_on_queue)
+        button_bar.addWidget(queue_btn)
 
     def _on_lmstudio():
         if is_lmstudio_app_installed():
             launch_lmstudio()
         _dismiss()
 
-    lmstudio_btn = QPushButton("LM Studio...")
+    lmstudio_btn = QPushButton(lmstudio_label)
     lmstudio_btn.setStyleSheet(button_style)
     lmstudio_btn.clicked.connect(_on_lmstudio)
     button_bar.addWidget(lmstudio_btn)

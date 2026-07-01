@@ -472,7 +472,11 @@ def build_worker_payload(
     *,
     effective_max_side: int,
 ) -> Dict[str, Any]:
-    merged = finalize_run_values(pipeline_id, values)
+    from imagegen_plugins.flux_prompt_job import clear_flux_prompt_ai_job
+
+    run_values = dict(values)
+    clear_flux_prompt_ai_job(run_values)
+    merged = finalize_run_values(pipeline_id, run_values)
     merged["pipeline_id"] = pipeline_id
     merged["output_path"] = output_path
     merged["hf_model_id"] = hf_model_id

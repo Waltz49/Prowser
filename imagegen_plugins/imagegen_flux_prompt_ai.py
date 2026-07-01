@@ -25,8 +25,15 @@ from imagegen_plugins.image_gen_form_layout import (
 )
 from imagegen_plugins.lmstudio_caption import is_lmstudio_services_available
 from imagegen_plugins.image_gen_persistence import (
+    load_flux_prompt_job_with_generate,
     load_pass_image_to_ai_with_prompt,
+    save_flux_prompt_job_with_generate,
     save_pass_image_to_ai_with_prompt,
+)
+from imagegen_plugins.flux_prompt_job import (
+    allow_empty_prompt_for_ai_refine,
+    attach_flux_prompt_ai_job_to_values,
+    resolve_flux_prompt_refine_image_paths,
 )
 from workers.model_tasks_worker import flux_prompt_system_message
 from utils import get_main_window
@@ -105,6 +112,7 @@ class ImageGenFluxPromptAi:
         self._ai_btn: Optional[QPushButton] = None
         self._undo_btn: Optional[QPushButton] = None
         self._pass_image_cb: Optional[QCheckBox] = None
+        self._job_cb: Optional[QCheckBox] = None
         self._toolbar: Optional[QWidget] = None
         self._connected = False
         self._streaming_started = False
@@ -158,6 +166,18 @@ class ImageGenFluxPromptAi:
         configure_flux_prompt_toolbar_checkbox(self._pass_image_cb)
         owner._pass_image_to_ai_cb = self._pass_image_cb
 
+        self._job_cb = QCheckBox("Use in jobs")
+        self._job_cb.setObjectName("flux_prompt_job_cb")
+        self._job_cb.setToolTip(
+            "When checked, Generate runs AI prompt refinement as the first stage "
+            "of the image job (queued or immediate)."
+        )
+        self._job_cb.setChecked(load_flux_prompt_job_with_generate())
+        self._job_cb.toggled.connect(
+            lambda checked, o=owner: self._on_job_toggled(o, checked)
+        )
+        configure_flux_prompt_toolbar_checkbox(self._job_cb)
+
         self._undo_btn = QPushButton("Undo AI")
         self._undo_btn.setObjectName("flux_prompt_undo_ai_btn")
         self._undo_btn.setToolTip(
@@ -169,10 +189,26 @@ class ImageGenFluxPromptAi:
 
         layout.addWidget(self._ai_btn, 0)
         layout.addWidget(self._pass_image_cb, 0)
+        layout.addWidget(self._job_cb, 0)
         layout.addWidget(self._undo_btn, 0)
 
         self._toolbar = row
         return row
+
+    def ai_controls_mounted(self) -> bool:
+        """True when the flux prompt AI toolbar was created."""
+        return self._job_cb is not None
+
+    def ai_controls_active(self, owner: Any | None = None) -> bool:
+        """True when AI toolbar exists and the system-prompt pane is visible."""
+        if not self.ai_controls_mounted():
+            return False
+        from imagegen_plugins.flux_prompt_system_mount import (
+            flux_prompt_ai_controls_visible,
+        )
+
+        o = owner if owner is not None else self._dialog
+        return flux_prompt_ai_controls_visible(o)
 
     def _on_pass_image_toggled(self, owner: Any, checked: bool) -> None:
         try:
@@ -182,12 +218,31 @@ class ImageGenFluxPromptAi:
         if getattr(owner, "_panel_mode", False) and hasattr(owner, "state_changed"):
             owner.state_changed.emit()
 
+    def _on_job_toggled(self, owner: Any, checked: bool) -> None:
+        try:
+            save_flux_prompt_job_with_generate(bool(checked))
+        except Exception:
+            pass
+        if getattr(owner, "_panel_mode", False) and hasattr(owner, "state_changed"):
+            owner.state_changed.emit()
+
+    def job_checkbox_checked(self, owner: Any | None = None) -> bool:
+        if not self.ai_controls_active(owner):
+            return False
+        return self._job_cb.isChecked()
+
+    def attach_job_ai_meta_to_values(self, owner: Any, values: dict) -> bool:
+        return attach_flux_prompt_ai_job_to_values(owner, values, force=False)
+
+    def attach_job_ai_meta_for_queue(self, owner: Any, values: dict) -> bool:
+        return attach_flux_prompt_ai_job_to_values(owner, values, force=True)
+
     def _pass_image_checked(self) -> bool:
+        from imagegen_plugins.flux_prompt_job import pass_image_checked_for_owner
+
         if self._pass_image_cb is not None:
             return self._pass_image_cb.isChecked()
-        if self._get_pass_image is not None:
-            return self._get_pass_image()
-        return load_pass_image_to_ai_with_prompt()
+        return pass_image_checked_for_owner(self._dialog)
 
     def _update_action_buttons(self) -> None:
         if self._undo_btn is not None:
@@ -254,14 +309,69 @@ class ImageGenFluxPromptAi:
                 "Wait for the job queue to finish or cancel queued jobs "
                 "before refining a prompt with AI.",
                 window_title="AI Prompt Error",
-                on_run_foreground=lambda: self._start_ai_refine(foreground=True),
-                run_foreground_tooltip=(
+                cancel_label="Cancel",
+                on_run_now=lambda: self._start_ai_refine(foreground=True),
+                run_now_tooltip=(
                     "Run AI prompt refinement concurrent with image generation. "
                     "May be slow."
+                ),
+                on_queue_job=self._queue_generate_with_ai,
+                queue_job_tooltip=(
+                    "Queue image generation with AI prompt refinement as the first stage."
                 ),
             )
             return
         self._start_ai_refine(foreground=False)
+
+    def _resolve_generate_owner(self) -> Any:
+        owner = self._dialog
+        panel = getattr(owner, "_current_panel", None)
+        if panel is not None:
+            return panel
+        return owner
+
+    def _queue_generate_with_ai(self) -> None:
+        owner = self._resolve_generate_owner()
+        prepare = getattr(owner, "_prepare_run_values", None)
+        plugin = getattr(owner, "plugin", None)
+        if prepare is None or plugin is None:
+            _show_ai_caption_error_dialog(
+                self._dialog,
+                "Could not queue a job from this dialog.",
+                window_title="AI Prompt Error",
+                cancel_label="Cancel",
+            )
+            return
+        try:
+            values = prepare(force_flux_ai_job=True)
+        except TypeError:
+            values = prepare()
+        if values is None:
+            return
+        controller = self._imagegen_controller()
+        if controller is None:
+            return
+        from imagegen_plugins.image_gen_active_model import set_active_plugin_for_function
+        from imagegen_plugins.image_gen_model_availability import (
+            confirm_model_download_if_needed,
+        )
+        from imagegen_plugins.image_gen_persistence import save_plugin_dialog_settings
+
+        function = getattr(owner, "_function", None)
+        mw = get_main_window() or self._dialog.parent()
+        if mw is None or function is None:
+            return
+        if not confirm_model_download_if_needed(plugin, mw):
+            return
+        save_plugin_dialog_settings(function, plugin.plugin_id, values)
+        set_active_plugin_for_function(mw, function, plugin)
+        if not controller.enqueue_generation(plugin, values):
+            _show_ai_caption_error_dialog(
+                self._dialog,
+                "Could not queue the job.",
+                window_title="AI Prompt Error",
+                cancel_label="Cancel",
+            )
 
     def _start_ai_refine(self, *, foreground: bool = False) -> None:
         if self._ai_btn is None:
@@ -274,6 +384,7 @@ class ImageGenFluxPromptAi:
                 self._dialog,
                 "A foreground AI text task is already running.",
                 window_title="AI Prompt Error",
+                cancel_label="Cancel",
             )
             return
 
@@ -283,6 +394,7 @@ class ImageGenFluxPromptAi:
                 self._dialog,
                 preflight_error,
                 window_title="AI Prompt Error",
+                cancel_label="Cancel",
             )
             return
 
@@ -332,11 +444,15 @@ class ImageGenFluxPromptAi:
                 self._dialog,
                 "Could not start AI prompt refinement (another task may be running).",
                 window_title="AI Prompt Error",
+                cancel_label="Cancel",
             )
 
     def _resolve_image_paths_for_refine(self) -> list[str]:
         if not self._pass_image_checked():
             return []
+        paths = resolve_flux_prompt_refine_image_paths(self._dialog)
+        if paths:
+            return paths
         raw_paths: list[str] = []
         if self._get_image_paths is not None:
             raw_paths = list(self._get_image_paths() or [])
@@ -344,26 +460,23 @@ class ImageGenFluxPromptAi:
             single = (self._get_image_path() or "").strip()
             if single:
                 raw_paths = [single]
-        paths: list[str] = []
+        resolved: list[str] = []
         for raw in raw_paths:
             path = (raw or "").strip()
-            if path and os.path.isfile(path) and path not in paths:
-                paths.append(path)
-        return paths
+            if path and os.path.isfile(path) and path not in resolved:
+                resolved.append(path)
+        return resolved
 
     def _preflight_ai_refine(self) -> Optional[str]:
         """Return an error message when refine cannot start, else None."""
-        prompt = (self._get_prompt_text() or "").strip()
-        if prompt:
+        if allow_empty_prompt_for_ai_refine(self, self._dialog):
             return None
-        if not self._pass_image_checked():
-            return None
-        if self._resolve_image_paths_for_refine():
-            return None
-        return (
-            "Pass image is checked but no image is available.\n\n"
-            "Select an image or enter a prompt."
-        )
+        if self._pass_image_checked():
+            return (
+                "Pass image is checked but no image is available.\n\n"
+                "Select an image or enter a prompt."
+            )
+        return None
 
     def _prompt_edit_widget(self) -> QPlainTextEdit | None:
         if self._get_prompt_edit is None:
@@ -388,6 +501,8 @@ class ImageGenFluxPromptAi:
         self._set_prompt_text(text)
 
     def _on_dot_tick(self) -> None:
+        if not self._running:
+            return
         self._dot_phase = (self._dot_phase + 1) % 4
         dots = "." * (self._dot_phase + 1)
         self._set_streaming_prompt_text(dots)
@@ -396,6 +511,8 @@ class ImageGenFluxPromptAi:
         self._dot_timer.stop()
 
     def _on_chunk(self, chunk: str) -> None:
+        if not self._running:
+            return
         if not self._streaming_started:
             self._streaming_started = True
             self._stop_dots()
@@ -404,9 +521,13 @@ class ImageGenFluxPromptAi:
             self._set_streaming_prompt_text(self._get_prompt_text() + chunk)
 
     def _on_ready(self, text: str) -> None:
+        if not self._running:
+            return
         self._set_streaming_prompt_text(text)
 
     def _on_error(self, error_msg: str) -> None:
+        if not self._running:
+            return
         self._end_prompt_stream_scroll_session()
         self._set_prompt_text(self._prompt_before_ai)
         self._prompt_before_ai = ""
@@ -416,10 +537,12 @@ class ImageGenFluxPromptAi:
         self._update_action_buttons()
         self._set_ai_button_idle()
         _show_ai_caption_error_dialog(
-            self._dialog, error_msg, window_title="AI Prompt Error"
+            self._dialog, error_msg, window_title="AI Prompt Error", cancel_label="Cancel"
         )
 
     def _on_finished(self) -> None:
+        if not self._running and not self._user_cancelled:
+            return
         self._stop_dots()
         self._end_prompt_stream_scroll_session()
         self._set_ai_button_idle()
