@@ -249,18 +249,27 @@ _INFO_PANEL_BAR_H = 10
 _INFO_PANEL_PROGRESS_BAR_FILL_HEX = "#3478F6"
 _INFO_PANEL_ACTIVE_JOB_TABLE_BORDER_W = 1
 _INFO_PANEL_NOWRAP = 'nowrap="1" style="white-space:nowrap;"'
+# QFrame border (2) + stylesheet padding 4px top/bottom (8).
+_ACTIVE_JOB_STRIP_FRAME_CHROME_V = (
+    2 * _INFO_PANEL_ACTIVE_JOB_TABLE_BORDER_W + 8
+)
 
 
-def _information_panel_inner_cell_width(content_width_px: int) -> int:
-    """Width inside the bordered active-job cell (outer table width minus td padding)."""
-    return max(120, int(content_width_px) - _INFO_PANEL_ACTIVE_JOB_CELL_H_PAD)
+def active_job_strip_layout_widths(
+    strip_content_width_px: int,
+) -> tuple[int, int]:
+    """Return (frame_outer_w, browser_content_w) for the bordered QFrame strip."""
+    frame_w = max(120, int(strip_content_width_px))
+    chrome_h = 2 * _INFO_PANEL_ACTIVE_JOB_TABLE_BORDER_W + _INFO_PANEL_ACTIVE_JOB_CELL_H_PAD
+    browser_w = max(120, frame_w - chrome_h)
+    return frame_w, browser_w
 
 
 def _information_panel_row_content_width(
-    content_width_px: int, *, has_icon: bool
+    td_content_width_px: int, *, has_icon: bool
 ) -> int:
     """Usable row width for label / prefix / bar / postfix columns."""
-    inner = _information_panel_inner_cell_width(content_width_px)
+    inner = max(120, int(td_content_width_px))
     if has_icon:
         inner -= _INFO_PANEL_CANCEL_ICON_W
     return inner
@@ -268,7 +277,8 @@ def _information_panel_row_content_width(
 
 def _information_panel_bar_width(row_width: int) -> int:
     reserved = _INFO_PANEL_LABEL_W + _INFO_PANEL_PREFIX_W + _INFO_PANEL_POSTFIX_W
-    return max(_INFO_PANEL_BAR_MIN_W, row_width - reserved)
+    # Nested progress bar table uses border=1 (2px horizontal in QTextBrowser).
+    return max(_INFO_PANEL_BAR_MIN_W, row_width - reserved - 2)
 
 
 def _information_panel_nowrap_td(
@@ -347,7 +357,7 @@ def _information_panel_progress_bar_html(
         cells.append(f'<td width="{bar_width_px}" bgcolor="{bg_hex}" height="{h}"></td>')
     return (
         f'<table width="{bar_width_px}" cellspacing="0" cellpadding="0" '
-        f'border="1" bordercolor="{border_hex}"><tr>'
+        f'style="border:1px solid {border_hex}; table-layout:fixed;"><tr>'
         f'{"".join(cells)}</tr></table>'
     )
 
@@ -386,7 +396,8 @@ def _information_panel_progress_rows_html(
             + "</tr>"
         )
     return (
-        f'<table width="{row_width}" cellspacing="0" cellpadding="0">'
+        f'<table width="{row_width}" cellspacing="0" cellpadding="0" '
+        f'style="table-layout:fixed;">'
         f'{"".join(tr_parts)}</table>'
     )
 
@@ -431,9 +442,9 @@ def format_information_generation_timing_cell_html(
     border_hex = th.progress_bar_border_hex
     bg_hex = th.progress_bar_bg_hex
     has_icon = bool(cancel_icon_html)
-    inner_w = _information_panel_inner_cell_width(content_width_px or 250)
+    td_content_w = max(120, int(content_width_px or 250))
     row_width = _information_panel_row_content_width(
-        content_width_px or 250, has_icon=has_icon
+        td_content_w, has_icon=has_icon
     )
     bar_w = _information_panel_bar_width(row_width)
 
@@ -496,7 +507,8 @@ def format_information_generation_timing_cell_html(
     if not has_icon:
         return body
     return (
-        f'<table width="{inner_w}" cellspacing="0" cellpadding="0">'
+        f'<table width="{td_content_w}" cellspacing="0" cellpadding="0" '
+        f'style="table-layout:fixed;">'
         f"<tr valign=\"middle\">"
         f'<td width="{row_width}" {_INFO_PANEL_NOWRAP}>{body}</td>'
         f'<td width="{_INFO_PANEL_CANCEL_ICON_W}" {_INFO_PANEL_NOWRAP} '
@@ -596,7 +608,10 @@ def build_active_job_timing_cell_html(
     cancel_hovered: bool = False,
     skip_hovered: bool = False,
 ) -> str | None:
-    """Elapsed/Est progress or cooldown row for the jobs-pane active-job strip."""
+    """Elapsed/Est progress or cooldown row for the jobs-pane active-job strip.
+
+    content_width_px is the QTextBrowser content width inside the bordered QFrame.
+    """
     series_progress = controller.snapshot_series_progress_for_active_job_strip()
     completed_series = None
     total_series = None
@@ -636,21 +651,10 @@ def wrap_active_job_timing_table_html(
     *,
     content_width_px: int,
 ) -> str:
-    """Bordered table wrapping active-job timing/cooldown cell (jobs pane strip)."""
-    from theme.theme_service import get_active_theme
-
-    th = get_active_theme()
-    text_hex = th.sidebar_text_color_hex
-    # active_bdr = th.current_image_border_color_hex
-    active_bdr = th.default_border_color_hex
-    active_border = f"{_INFO_PANEL_ACTIVE_JOB_TABLE_BORDER_W}px solid {active_bdr}"
-    table_w = max(120, int(content_width_px))
+    """Clip cell HTML to browser width; border is drawn by the jobs-pane QFrame."""
+    w = max(120, int(content_width_px))
     return (
-        f'<table width="{table_w}" cellspacing="0" cellpadding="0" '
-        f'style="border: {active_border}; border-collapse: collapse;">'
-        f'<tr><td style="border: {active_border}; padding: 4px; color: {text_hex}; '
-        f'vertical-align: middle; line-height: 16px;">'
-        f"{cell_html}</td></tr></table>"
+        f'<div style="max-width:{w}px; overflow:hidden;">{cell_html}</div>'
     )
 
 

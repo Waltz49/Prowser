@@ -33,6 +33,8 @@ from imagegen_plugins.image_gen_job_queue_dialog import (
 from config import job_queue_cell_background_hex
 from imagegen_plugins.job_prompt_tooltip import install_delayed_prompt_tooltip
 from imagegen_plugins.model_task_status_info import (
+    _ACTIVE_JOB_STRIP_FRAME_CHROME_V,
+    active_job_strip_layout_widths,
     build_active_job_timing_cell_html,
     wrap_active_job_timing_table_html,
 )
@@ -50,7 +52,7 @@ from utils import create_job_status_thumbnail_label
 
 _THUMB_SIZE = 55
 _THUMB_GAP = 14
-_ACTIVE_JOB_STRIP_MARGIN = 8  # left + right margins on the strip layout
+_ACTIVE_JOB_STRIP_MARGIN = 8  # left + right QLayout margins on the strip (4+4)
 
 # When scroll viewport width exceeds this and a row has 1–2 reference images, show
 # them in a vertical column beside the text instead of below it.
@@ -68,6 +70,18 @@ def _active_job_strip_browser_stylesheet() -> str:
             padding: 0;
             margin: 0;
             border: none;
+        }}
+    """
+
+
+def _active_job_strip_frame_stylesheet() -> str:
+    t = get_active_theme()
+    bdr = t.default_border_color_hex
+    return f"""
+        QFrame#activeJobStripFrame {{
+            border: 1px solid {bdr};
+            padding: 4px;
+            background: transparent;
         }}
     """
 
@@ -614,6 +628,12 @@ class SidebarJobsWidget(QWidget):
         active_job_layout = QHBoxLayout(self._active_job_strip)
         active_job_layout.setContentsMargins(4, 4, 4, 0)
         active_job_layout.setSpacing(0)
+        self._active_job_frame = QFrame()
+        self._active_job_frame.setObjectName("activeJobStripFrame")
+        self._active_job_frame.setStyleSheet(_active_job_strip_frame_stylesheet())
+        frame_layout = QVBoxLayout(self._active_job_frame)
+        frame_layout.setContentsMargins(0, 0, 0, 0)
+        frame_layout.setSpacing(0)
         self._active_job_browser = QTextBrowser()
         self._active_job_browser.setReadOnly(True)
         self._active_job_browser.setOpenExternalLinks(False)
@@ -635,8 +655,13 @@ class SidebarJobsWidget(QWidget):
         self._active_job_viewport = self._active_job_browser.viewport()
         self._active_job_viewport.setMouseTracking(True)
         self._active_job_viewport.installEventFilter(self)
-        active_job_layout.addWidget(
+        frame_layout.addWidget(
             self._active_job_browser,
+            0,
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop,
+        )
+        active_job_layout.addWidget(
+            self._active_job_frame,
             0,
             Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop,
         )
@@ -712,6 +737,8 @@ class SidebarJobsWidget(QWidget):
             apply_scroll_area_viewport_background(self._scroll, t.sidebar_background_color_hex)
         if hasattr(self, "_active_job_browser"):
             self._active_job_browser.setStyleSheet(_active_job_strip_browser_stylesheet())
+        if hasattr(self, "_active_job_frame"):
+            self._active_job_frame.setStyleSheet(_active_job_strip_frame_stylesheet())
         card_ss = _job_card_stylesheet()
         for card in self._job_cards:
             card.setStyleSheet(card_ss)
@@ -784,9 +811,9 @@ class SidebarJobsWidget(QWidget):
     def _info_content_width(self) -> int:
         return max(80, self._viewport_width() - _ACTION_COL_WIDTH - 20)
 
-    def _active_job_content_width(self) -> int:
+    def _active_job_strip_layout_widths(self) -> tuple[int, int]:
         w = self.width() if self.width() > 0 else self._viewport_width()
-        return max(120, w - _ACTIVE_JOB_STRIP_MARGIN)
+        return active_job_strip_layout_widths(w - _ACTIVE_JOB_STRIP_MARGIN)
 
     def _should_show_active_job_strip(self) -> bool:
         return self._controller.is_running()
@@ -802,11 +829,11 @@ class SidebarJobsWidget(QWidget):
         if not force and not self._controller.task_status_display_needs_refresh():
             if self._active_job_strip.isVisible():
                 return
-        table_w = self._active_job_content_width()
+        frame_w, browser_w = self._active_job_strip_layout_widths()
         hovered = self._active_job_hovered_anchor
         cell_html = build_active_job_timing_cell_html(
             self._controller,
-            content_width_px=table_w,
+            content_width_px=browser_w,
             cancel_hovered=hovered == "cancelgen://",
             skip_hovered=hovered == "skipcooldown://",
         )
@@ -814,19 +841,21 @@ class SidebarJobsWidget(QWidget):
             self._active_job_strip.hide()
             return
         body_html = wrap_active_job_timing_table_html(
-            cell_html, content_width_px=table_w
+            cell_html, content_width_px=browser_w
         )
         browser_h = _apply_active_job_strip_html(
             self._active_job_browser,
             body_html,
-            content_width=table_w,
+            content_width=browser_w,
         )
+        self._active_job_frame.setFixedWidth(frame_w)
+        self._active_job_frame.setFixedHeight(browser_h + _ACTIVE_JOB_STRIP_FRAME_CHROME_V)
         layout = self._active_job_strip.layout()
         margin_h = 0
         if layout is not None:
             margins = layout.contentsMargins()
             margin_h = margins.top() + margins.bottom()
-        self._active_job_strip.setFixedHeight(browser_h + margin_h)
+        self._active_job_strip.setFixedHeight(self._active_job_frame.height() + margin_h)
         self._active_job_strip.show()
         _disable_tab_focus(self._active_job_strip)
         if self._queue_compact:
@@ -940,26 +969,26 @@ class SidebarJobsWidget(QWidget):
             and self._active_job_strip.height() > 0
         ):
             return self._active_job_strip.height()
-        table_w = self._active_job_content_width()
+        frame_w, browser_w = self._active_job_strip_layout_widths()
         cell_html = build_active_job_timing_cell_html(
             self._controller,
-            content_width_px=table_w,
+            content_width_px=browser_w,
         )
         if not cell_html:
             return 0
         body_html = wrap_active_job_timing_table_html(
-            cell_html, content_width_px=table_w
+            cell_html, content_width_px=browser_w
         )
         browser_h = _apply_active_job_strip_html(
             self._active_job_browser,
             body_html,
-            content_width=table_w,
+            content_width=browser_w,
         )
         layout = self._active_job_strip.layout()
         if layout is None:
-            return browser_h
+            return browser_h + _ACTIVE_JOB_STRIP_FRAME_CHROME_V
         margins = layout.contentsMargins()
-        return browser_h + margins.top() + margins.bottom()
+        return browser_h + _ACTIVE_JOB_STRIP_FRAME_CHROME_V + margins.top() + margins.bottom()
 
     def preferred_content_height(self) -> int:
         """Height needed to show all job rows without vertical scrolling."""
