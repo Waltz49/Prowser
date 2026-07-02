@@ -39,6 +39,7 @@ def missing_reference_paths(
     plugin: ImageGenModelPlugin | None, values: dict[str, Any]
 ) -> list[str]:
     """Paths required for this job that are missing on disk."""
+    from imagegen_plugins.flux_prompt_job import flux_prompt_ai_job_meta
     from imagegen_plugins.image_gen_active_model import (
         FUNCTION_EDIT,
         FUNCTION_EXPAND,
@@ -72,6 +73,14 @@ def missing_reference_paths(
             base_path = str(values.get("pixelmator_base_path") or "")
             mask_path = str(values.get("pixelmator_mask_path") or "")
             for path in (base_path, mask_path):
+                if path and not os.path.isfile(path):
+                    missing.append(path)
+    ai_meta = flux_prompt_ai_job_meta(values)
+    if isinstance(ai_meta, dict):
+        raw_paths = ai_meta.get("image_paths")
+        if isinstance(raw_paths, list):
+            for item in raw_paths:
+                path = str(item or "").strip()
                 if path and not os.path.isfile(path):
                     missing.append(path)
     return missing
@@ -114,16 +123,28 @@ def thumbnail_paths_for_values(
     if plugin is None:
         return []
     paths: list[str] = []
+    seen: set[str] = set()
+
+    def _append_path(raw: str) -> None:
+        normalized = os.path.normpath(str(raw or ""))
+        if normalized and os.path.isfile(normalized) and normalized not in seen:
+            seen.add(normalized)
+            paths.append(normalized)
+
     pipeline = get_pipeline(plugin.pipeline_id)
     if pipeline.requires_source_image:
         from imagegen_plugins.image_gen_naming import resolve_source_image_paths
 
         for src in resolve_source_image_paths(values):
-            paths.append(os.path.normpath(src))
+            _append_path(src)
     if plugin.pipeline_id == "mflux_fill_infill":
         px_path = values.get("pixelmator_doc_path")
-        if px_path and os.path.isfile(str(px_path)):
-            paths.append(os.path.normpath(str(px_path)))
+        if px_path:
+            _append_path(str(px_path))
+    from imagegen_plugins.flux_prompt_job import flux_prompt_ai_reference_image_paths
+
+    for src in flux_prompt_ai_reference_image_paths(values):
+        _append_path(src)
     return paths
 
 

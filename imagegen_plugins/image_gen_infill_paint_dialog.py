@@ -288,7 +288,16 @@ class ImageGenInfillPaintDialog(QDialog):
             initial_prompt=self._initial_prompt,
             initial_values=self._initial_values,
         )
-        splitter.add_controls_pane(self._settings)
+        controls_pane = self._settings
+        if self._panel_mode:
+            from imagegen_plugins.image_gen_panel_shell import (
+                wrap_image_gen_controls_with_unified_intro,
+            )
+
+            controls_pane = wrap_image_gen_controls_with_unified_intro(
+                self._settings, self._function
+            )
+        splitter.add_controls_pane(controls_pane)
         layout.addWidget(splitter, 1)
         refresh_infill_paint_mask_keyboard_shortcuts(self)
 

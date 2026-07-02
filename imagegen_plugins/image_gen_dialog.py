@@ -1465,6 +1465,14 @@ class ImageGenDialog(ImageGenDimensionAspectMixin, QDialog):
         controls = wrap_image_gen_controls_with_side_buttons(
             scroll, self._side_btn_host
         )
+        if self._panel_mode:
+            from imagegen_plugins.image_gen_panel_shell import (
+                wrap_image_gen_controls_with_unified_intro,
+            )
+
+            controls = wrap_image_gen_controls_with_unified_intro(
+                controls, self._function
+            )
         layout.addWidget(controls, 1)
 
         if self._panel_mode:

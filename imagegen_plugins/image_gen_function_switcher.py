@@ -22,8 +22,8 @@ from theme.theme_base import asset_path
 _FUNCTION_SWITCHER_BTN_SIZE = 28
 
 _SWITCHER_ENTRIES = (
-    (FUNCTION_CREATE, "fromText.png", "Create an image from text..."),
     (FUNCTION_EDIT, "editAI.png", "Edit an image with AI..."),
+    (FUNCTION_CREATE, "fromText.png", "Create an image from text..."),
     (FUNCTION_EXPAND, "expand_icon.png", "Expand existing image..."),
     (FUNCTION_INFILL_PAINT, "infill.png", "Infill by painting..."),
 )

@@ -311,6 +311,14 @@ class ImageGenExpandDialog(ImageGenDimensionAspectMixin, QDialog):
         controls = wrap_image_gen_controls_with_side_buttons(
             scroll, self._side_btn_host
         )
+        if self._panel_mode:
+            from imagegen_plugins.image_gen_panel_shell import (
+                wrap_image_gen_controls_with_unified_intro,
+            )
+
+            controls = wrap_image_gen_controls_with_unified_intro(
+                controls, self._function
+            )
         splitter.add_controls_pane(controls)
         layout.addWidget(splitter, 1)
         install_source_nav_keyboard_shortcuts(self, self._source_nav)

@@ -13,8 +13,41 @@ from imagegen_plugins.image_gen_pipeline_modes import get_pipeline
 from imagegen_plugins.image_gen_registry import ImageGenModelPlugin
 
 
-# Rough target length for streaming AI prompt refinement progress (characters).
-_AI_REFINE_PROGRESS_TOTAL = 800
+# Streaming AI prompt refinement progress (display steps 0..total).
+_AI_REFINE_PROGRESS_TOTAL = 100
+# Rough streamed character count that maps to a full progress bar.
+_AI_REFINE_PROGRESS_CHAR_BUDGET = 800
+# Refresh job progress UI when progress advances by this many percent.
+_AI_REFINE_PROGRESS_REFRESH_PERCENT = 20
+
+
+def ai_refine_progress_step_from_chars(chars_received: int) -> int:
+    """Map streamed character count to a 0..total-1 progress step."""
+    total = _AI_REFINE_PROGRESS_TOTAL
+    if total <= 1 or chars_received <= 0:
+        return 0
+    budget = max(total - 1, _AI_REFINE_PROGRESS_CHAR_BUDGET)
+    return min(total - 1, int(chars_received * (total - 1) / budget))
+
+
+def ai_refine_progress_bucket(step: int) -> int:
+    """Progress bucket for throttling UI refresh (0 = 0–19%, 1 = 20–39%, …)."""
+    total = _AI_REFINE_PROGRESS_TOTAL
+    if total <= 0:
+        return 0
+    refresh = max(1, _AI_REFINE_PROGRESS_REFRESH_PERCENT)
+    pct = min(100, int(round(100.0 * max(0, step) / total)))
+    return pct // refresh
+
+
+def ai_refine_progress_display_step(step: int) -> int:
+    """Quantize a raw step to the nearest refresh boundary for display."""
+    total = _AI_REFINE_PROGRESS_TOTAL
+    if total <= 0 or step <= 0:
+        return 0
+    refresh = max(1, _AI_REFINE_PROGRESS_REFRESH_PERCENT)
+    bucket = ai_refine_progress_bucket(step)
+    return min(total - 1, bucket * refresh)
 
 
 def _escape(text: str) -> str:
@@ -290,17 +323,54 @@ def _information_panel_nowrap_td(
     )
 
 
+def _queue_data_dim_color_hex() -> str:
+    from theme.theme_service import get_active_theme
+
+    theme = get_active_theme()
+    return getattr(
+        theme,
+        "file_tree_nav_button_text_dim_hex",
+        theme.information_action_icon_muted_hex,
+    )
+
+
+def _queue_data_bright_color_hex() -> str:
+    from theme.theme_service import get_active_theme
+
+    return get_active_theme().sidebar_text_color_hex
+
+
+def _queue_label_html(label: str) -> str:
+    color = _queue_data_dim_color_hex()
+    return f'<span style="color:{color};">{_escape(label)}</span>'
+
+
+def _queue_value_html(value: str) -> str:
+    color = _queue_data_bright_color_hex()
+    return f'<span style="color:{color};">{_escape(value)}</span>'
+
+
+def _queue_inline_field_suffix(
+    label: str, value: str, *, previous_label: str | None = None
+) -> str:
+    prefix = _inline_field_sep_before(label, previous_label)
+    return (
+        f"{prefix}{_queue_label_html(label)}{_LABEL_VALUE_NBSP}"
+        f"{_queue_value_html(value)}\u00A0 "
+    )
+
+
 def _queue_table_row(label: str, value: str) -> str:
     """Job-queue status row with fixed label column (matches active-job strip)."""
     return (
-        f"<tr>{_information_panel_nowrap_td(_INFO_PANEL_LABEL_W, f'<b>{_escape(label)}</b>')}"
-        f"<td><b>{_escape(value)}</b></td></tr>"
+        f"<tr>{_information_panel_nowrap_td(_INFO_PANEL_LABEL_W, _queue_label_html(label))}"
+        f"<td>{_queue_value_html(value)}</td></tr>"
     )
 
 
 def _queue_table_row_html_value(label: str, value_html: str) -> str:
     return (
-        f"<tr>{_information_panel_nowrap_td(_INFO_PANEL_LABEL_W, f'<b>{_escape(label)}</b>')}"
+        f"<tr>{_information_panel_nowrap_td(_INFO_PANEL_LABEL_W, _queue_label_html(label))}"
         f"<td>{value_html}</td></tr>"
     )
 
@@ -310,26 +380,26 @@ def _queue_table_row_prompt(label: str, value: str) -> str:
     pad = f"padding-top:{m}px;padding-bottom:{m}px;"
     label_td = (
         f'<td width="{_INFO_PANEL_LABEL_W}" {_INFO_PANEL_NOWRAP} '
-        f'style="{pad}"><b>{_escape(label)}</b></td>'
+        f'style="{pad}">{_queue_label_html(label)}</td>'
     )
     return (
         f"<tr>{label_td}"
-        f'<td style="{pad}">{_escape(value)}</td></tr>'
+        f'<td style="{pad}">{_queue_value_html(value)}</td></tr>'
     )
 
 
 def _queue_table_row_primary_plus_inline(
     label: str, value: str, inline_parts: list[tuple[str, str]]
 ) -> str:
-    cell = f"<b>{_escape(value)}</b>"
+    cell = _queue_value_html(value)
     previous: str | None = None
     for extra_label, extra_value in inline_parts:
-        cell += _inline_field_suffix(
+        cell += _queue_inline_field_suffix(
             extra_label, extra_value, previous_label=previous
         )
         previous = extra_label
     return (
-        f"<tr>{_information_panel_nowrap_td(_INFO_PANEL_LABEL_W, f'<b>{_escape(label)}</b>')}"
+        f"<tr>{_information_panel_nowrap_td(_INFO_PANEL_LABEL_W, _queue_label_html(label))}"
         f"<td>{cell}</td></tr>"
     )
 
@@ -1023,13 +1093,14 @@ def _format_elapsed_cell_value(
 
 
 _STEPS_QUANT_SUFFIX_RE = re.compile(
-    rf"((?:\u00A0){{2,}}<b>{re.escape(_QUANT_STATUS_LABEL)}</b>"
+    rf"((?:\u00A0){{2,}}(?:<b>{re.escape(_QUANT_STATUS_LABEL)}</b>"
+    rf"|<span[^>]*>{re.escape(_QUANT_STATUS_LABEL)}</span>)"
     rf"\u00A0\d+)$"
 )
 _STEPS_TIMING_SUFFIX_RE = re.compile(
     r"((?: |\u00A0|\u00A0{2,4})"
-    r"<b>Elapsed:</b>\u00A0[\d:]+"
-    r"(?: (?: |\u00A0{2,5})<b>Est:</b>\u00A0[\d:]+)?"
+    r"(?:<b>Elapsed:</b>|<span[^>]*>Elapsed:</span>)\u00A0[\d:]+"
+    r"(?: (?: |\u00A0{2,5})(?:<b>Est:</b>|<span[^>]*>Est:</span>)\u00A0[\d:]+)?"
     r")"
 )
 _STEPS_ROW_RE = re.compile(
@@ -1051,7 +1122,7 @@ def _steps_cell_timing_suffix(
         elapsed_seconds=elapsed_seconds,
         estimate_seconds=estimate_seconds,
     ):
-        suffix += _inline_field_suffix(label, value, previous_label=previous)
+        suffix += _queue_inline_field_suffix(label, value, previous_label=previous)
         previous = label
     return suffix
 

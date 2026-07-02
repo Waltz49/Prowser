@@ -158,6 +158,7 @@ class ImageGenController(QObject):
         self._job_ai_stage_active = False
         self._active_job_with_ai = False
         self._job_ai_chars_received = 0
+        self._job_ai_last_progress_bucket = -1
         self._hold_job_queue = load_hold_job_queue()
         self._queue_advance_suppressed = False
         self._exit_queue_persisted = False
@@ -522,6 +523,7 @@ class ImageGenController(QObject):
         from imagegen_plugins.model_task_status_info import _AI_REFINE_PROGRESS_TOTAL
 
         self._job_ai_chars_received = 0
+        self._job_ai_last_progress_bucket = -1
         self._step_progress_start_time = time.perf_counter()
         self._live_step = 0
         self._live_step_total = _AI_REFINE_PROGRESS_TOTAL
@@ -552,7 +554,6 @@ class ImageGenController(QObject):
             estimate_seconds=estimate,
         )
         self.task_status_info_changed.emit()
-        self.queue_changed.emit()
 
     def _begin_job_ai_stage(self) -> bool:
         from imagegen_plugins.flux_prompt_job import flux_prompt_ai_job_meta
@@ -565,8 +566,6 @@ class ImageGenController(QObject):
         self._job_ai_stage_active = True
         self._active_job_with_ai = True
         self._start_job_ai_progress_tracking()
-        self._refresh_job_ai_stage_status_html(running=False)
-        self.generation_started.emit()
 
         system_prompt = str(meta.get("system_prompt") or "")
         user_prompt = str(meta.get("user_prompt") or "")
@@ -581,6 +580,16 @@ class ImageGenController(QObject):
             ]
             if refreshed:
                 image_paths = refreshed
+        thumb_paths = [
+            os.path.normpath(p)
+            for p in image_paths
+            if p and os.path.isfile(str(p))
+        ]
+        if thumb_paths:
+            self._active_thumbnail_paths = list(thumb_paths)
+        self._refresh_job_ai_stage_status_html(running=False)
+        self.generation_started.emit()
+
         if not self._tasks.start_flux_prompt_job(
             system_prompt,
             user_prompt,
@@ -616,7 +625,6 @@ class ImageGenController(QObject):
                 with_ai=self._active_job_with_ai,
             )
             self.task_status_info_changed.emit()
-            self.queue_changed.emit()
         QTimer.singleShot(0, self._launch_generation_after_job_ai)
 
     def _launch_generation_after_job_ai(self) -> None:
@@ -1641,13 +1649,20 @@ class ImageGenController(QObject):
 
     def _on_flux_prompt_chunk_from_worker(self, chunk: str) -> None:
         if self._job_ai_stage_active:
+            from imagegen_plugins.model_task_status_info import (
+                ai_refine_progress_bucket,
+                ai_refine_progress_display_step,
+                ai_refine_progress_step_from_chars,
+            )
+
             self._job_ai_chars_received += len(chunk or "")
-            if self._live_step_total > 0:
-                self._live_step = min(
-                    self._live_step_total - 1,
-                    self._job_ai_chars_received,
-                )
-            self._refresh_job_ai_stage_status_html(running=True)
+            raw_step = ai_refine_progress_step_from_chars(self._job_ai_chars_received)
+            bucket = ai_refine_progress_bucket(raw_step)
+            if bucket > self._job_ai_last_progress_bucket:
+                self._job_ai_last_progress_bucket = bucket
+                if self._live_step_total > 0:
+                    self._live_step = ai_refine_progress_display_step(raw_step)
+                self._refresh_job_ai_stage_status_html(running=True)
             return
         self.flux_prompt_chunk.emit(chunk)
 
@@ -2291,6 +2306,7 @@ class ImageGenController(QObject):
         self._job_ai_stage_active = False
         self._active_job_with_ai = False
         self._job_ai_chars_received = 0
+        self._job_ai_last_progress_bucket = -1
         self._active_plugin = None
         self._output_path = ""
         self._pending_values = {}
