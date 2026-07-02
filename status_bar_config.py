@@ -1302,6 +1302,9 @@ class ClickableImageGenIndicatorLabel(QLabel):
             return
         try:
             from imagegen_plugins.image_gen_controller import get_imagegen_controller
+            from imagegen_plugins.job_prompt_tooltip import (
+                update_delayed_prompt_tooltip,
+            )
 
             controller = get_imagegen_controller(self.main_window)
             if not force and not controller.task_status_display_needs_refresh():
@@ -1312,6 +1315,12 @@ class ClickableImageGenIndicatorLabel(QLabel):
         if not info_html:
             return
         _apply_task_info_html_to_browser(browser, info_html)
+        try:
+            update_delayed_prompt_tooltip(
+                browser, controller.active_job_full_prompt()
+            )
+        except Exception:
+            pass
 
     def _refresh_live_task_info_on_signal(self) -> None:
         self._refresh_live_task_info(force=True)

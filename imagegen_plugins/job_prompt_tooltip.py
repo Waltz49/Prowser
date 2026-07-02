@@ -209,14 +209,26 @@ def notify_job_prompt_tooltip_content_updating(widget: QWidget) -> None:
         filt.brief_suppress_dismiss()
 
 
-def install_delayed_prompt_tooltip(
+def update_delayed_prompt_tooltip(
     widget: QWidget,
     full_prompt: str,
     *,
     delay_ms: int = 1000,
 ) -> None:
-    """Attach a 1s-delay tooltip when ``full_prompt`` is truncated for display."""
+    """Install or refresh the delayed prompt tooltip for ``full_prompt``."""
     tip = full_prompt_tooltip_text(full_prompt)
+    filt: _DelayedPromptTooltipFilter | None = getattr(
+        widget, "_job_prompt_tooltip_filter", None
+    )
+    if filt is not None:
+        filt._text = tip or ""
+        if filt._popup is not None:
+            if tip:
+                filt._popup.setText(tip)
+                filt._popup.adjustSize()
+            else:
+                filt._dismiss()
+        return
     if not tip:
         return
     filt = _DelayedPromptTooltipFilter(
@@ -227,3 +239,13 @@ def install_delayed_prompt_tooltip(
     if viewport is not None:
         viewport.installEventFilter(filt)
     widget._job_prompt_tooltip_filter = filt  # type: ignore[attr-defined]
+
+
+def install_delayed_prompt_tooltip(
+    widget: QWidget,
+    full_prompt: str,
+    *,
+    delay_ms: int = 1000,
+) -> None:
+    """Attach a 1s-delay tooltip when ``full_prompt`` is truncated for display."""
+    update_delayed_prompt_tooltip(widget, full_prompt, delay_ms=delay_ms)

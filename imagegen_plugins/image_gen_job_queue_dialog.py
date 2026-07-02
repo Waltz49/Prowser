@@ -26,6 +26,7 @@ from imagegen_plugins.image_gen_source_nav import open_image_in_browse
 from imagegen_plugins.job_prompt_tooltip import (
     install_delayed_prompt_tooltip,
     notify_job_prompt_tooltip_content_updating,
+    update_delayed_prompt_tooltip,
 )
 from imagegen_plugins.image_gen_persistence import (
     load_job_queue_geometry_hex,
@@ -654,6 +655,9 @@ class ImageGenJobQueueDialog(QDialog):
             info_html = self._controller.get_task_queue_status_info_html()
             if info_html:
                 notify_job_prompt_tooltip_content_updating(browser)
+                update_delayed_prompt_tooltip(
+                    browser, rows[0].full_prompt
+                )
                 preview_w = self._table.columnWidth(2)
                 content_width = _info_content_width(
                     self._table, preview_col_width=preview_w

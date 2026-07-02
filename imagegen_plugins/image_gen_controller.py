@@ -232,12 +232,9 @@ class ImageGenController(QObject):
         return self._active_queue_job_id
 
     def active_job_full_prompt(self) -> str:
-        from imagegen_plugins.flux_prompt_job import flux_prompt_ai_user_prompt
+        from imagegen_plugins.flux_prompt_job import effective_job_prompt_for_tooltip
 
-        pre_ai = flux_prompt_ai_user_prompt(self._pending_values)
-        if pre_ai:
-            return pre_ai
-        return str(self._pending_values.get("prompt") or "").strip()
+        return effective_job_prompt_for_tooltip(self._pending_values)
 
     def queue_snapshot(self) -> list[QueueRowSnapshot]:
         rows: list[QueueRowSnapshot] = []
@@ -348,7 +345,7 @@ class ImageGenController(QObject):
         self, job_id: str, plugin: ImageGenModelPlugin, values: Dict[str, Any]
     ) -> bool:
         """Update a pending queue entry in place (same job_id and position)."""
-        from imagegen_plugins.flux_prompt_job import flux_prompt_ai_user_prompt
+        from imagegen_plugins.flux_prompt_job import effective_job_prompt_for_tooltip
 
         job = self._queued_job_by_id(job_id)
         if job is None:
@@ -368,9 +365,7 @@ class ImageGenController(QObject):
         job.values = values
         job.copies_total = copies
         job.thumbnail_paths = thumbnail_paths_for_values(plugin, values)
-        job.full_prompt = flux_prompt_ai_user_prompt(values) or str(
-            values.get("prompt") or ""
-        ).strip()
+        job.full_prompt = effective_job_prompt_for_tooltip(values)
         job.references_invalid = job_references_invalid(plugin, values)
         refresh_queued_job_status(job)
         self.queue_changed.emit()
@@ -702,8 +697,24 @@ class ImageGenController(QObject):
                     self._expand_source_path = ""
                     self._task_reference_paths = []
             else:
-                self._expand_source_path = ""
-                self._task_reference_paths = []
+                from imagegen_plugins.flux_prompt_job import (
+                    flux_prompt_ai_reference_image_paths,
+                )
+
+                ai_ref_paths = flux_prompt_ai_reference_image_paths(values)
+                if ai_ref_paths:
+                    display_paths = source_paths_for_generation_exif(
+                        values, extra_paths=ai_ref_paths
+                    )
+                    if display_paths:
+                        self._expand_source_path = display_paths[0]
+                        self._task_reference_paths = list(display_paths)
+                    else:
+                        self._expand_source_path = ""
+                        self._task_reference_paths = []
+                else:
+                    self._expand_source_path = ""
+                    self._task_reference_paths = []
         except Exception as e:
             show_styled_critical(
                 self.main_window,
@@ -1954,9 +1965,22 @@ class ImageGenController(QObject):
             if resolved is not None:
                 ref_entries = [resolved]
                 allow_cross_dir = True
-        elif get_pipeline(plugin.pipeline_id).requires_source_image:
+        else:
+            from imagegen_plugins.flux_prompt_job import (
+                flux_prompt_ai_reference_image_paths,
+            )
+
+            extra_paths: List[str] = []
+            if fallback_source_paths:
+                extra_paths.extend(fallback_source_paths)
+            extra_paths.extend(flux_prompt_ai_reference_image_paths(values))
+            if not (
+                get_pipeline(plugin.pipeline_id).requires_source_image
+                or extra_paths
+            ):
+                return ref_entries, allow_cross_dir
             source_paths = source_paths_for_generation_exif(
-                values, extra_paths=fallback_source_paths
+                values, extra_paths=extra_paths or None
             )
             ref_entries = reference_entries_for_source_paths(
                 source_paths, output_path

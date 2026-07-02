@@ -11,7 +11,10 @@ from typing import Any
 from imagegen_plugins.image_gen_pipeline_modes import get_pipeline
 from imagegen_plugins.image_gen_registry import ImageGenModelPlugin
 from imagegen_plugins.model_task_status_info import format_image_generation_queue_status_html
-from imagegen_plugins.flux_prompt_job import flux_prompt_ai_user_prompt, has_flux_prompt_ai_job
+from imagegen_plugins.flux_prompt_job import (
+    effective_job_prompt_for_tooltip,
+    has_flux_prompt_ai_job,
+)
 
 _PAINT_INFILL_SOURCE_EXTS = frozenset({".pxd", ".pxm"})
 
@@ -176,8 +179,7 @@ def make_queued_generate_job(
         status_html="",
         thumbnail_paths=thumbnail_paths_for_values(plugin, values),
         copies_total=copies_total,
-        full_prompt=flux_prompt_ai_user_prompt(values)
-        or str(values.get("prompt") or "").strip(),
+        full_prompt=effective_job_prompt_for_tooltip(values),
         plugin_id=plugin.plugin_id,
         function=plugin.function,
     )

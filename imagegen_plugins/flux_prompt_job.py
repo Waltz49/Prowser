@@ -100,8 +100,22 @@ def flux_prompt_ai_job_meta(values: Dict[str, Any] | None) -> dict[str, Any] | N
     return meta
 
 
+def flux_prompt_ai_reference_image_paths(values: Dict[str, Any] | None) -> List[str]:
+    """Original image paths sent to LM Studio for queued Job AI prompt refinement."""
+    meta = flux_prompt_ai_job_meta(values)
+    if meta is None:
+        return []
+    raw = meta.get("image_paths")
+    if not isinstance(raw, list):
+        return []
+    paths: List[str] = []
+    for item in raw:
+        _append_existing_image_path(str(item or ""), paths)
+    return paths
+
+
 def flux_prompt_ai_user_prompt(values: Dict[str, Any] | None) -> str:
-    """Pre-AI user prompt for tooltips and queue display."""
+    """Pre-AI user prompt stored in queued job AI metadata."""
     meta = flux_prompt_ai_job_meta(values)
     if meta is not None:
         user = str(meta.get("user_prompt") or "").strip()
@@ -110,6 +124,16 @@ def flux_prompt_ai_user_prompt(values: Dict[str, Any] | None) -> str:
     if isinstance(values, dict):
         return str(values.get("prompt") or "").strip()
     return ""
+
+
+def effective_job_prompt_for_tooltip(values: Dict[str, Any] | None) -> str:
+    """Current prompt for job hover tooltips (includes post-AI refinement)."""
+    if not isinstance(values, dict):
+        return ""
+    current = str(values.get("prompt") or "").strip()
+    if current:
+        return current
+    return flux_prompt_ai_user_prompt(values)
 
 
 def clear_flux_prompt_ai_job(values: Dict[str, Any]) -> None:

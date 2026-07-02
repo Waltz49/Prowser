@@ -31,7 +31,10 @@ from imagegen_plugins.image_gen_job_queue_dialog import (
     open_reference_thumbnail_paths,
 )
 from config import job_queue_cell_background_hex
-from imagegen_plugins.job_prompt_tooltip import install_delayed_prompt_tooltip
+from imagegen_plugins.job_prompt_tooltip import (
+    install_delayed_prompt_tooltip,
+    update_delayed_prompt_tooltip,
+)
 from imagegen_plugins.model_task_status_info import (
     _ACTIVE_JOB_STRIP_FRAME_CHROME_V,
     active_job_strip_layout_widths,
@@ -934,6 +937,10 @@ class SidebarJobsWidget(QWidget):
         )
         info_w = self._info_content_width()
         viewport_w = self._viewport_width()
+        self._job_cards[0]._full_prompt = row.full_prompt or ""
+        update_delayed_prompt_tooltip(
+            self._job_cards[0]._info_browser, self._job_cards[0]._full_prompt
+        )
         self._job_cards[0].update_info_html(info_html, info_w, scroll_width=viewport_w)
         self._job_cards[0]._replace_refs(
             row.thumbnail_paths, info_w, scroll_width=viewport_w
