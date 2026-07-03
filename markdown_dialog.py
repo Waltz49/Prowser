@@ -13,7 +13,6 @@ from PySide6.QtGui import QFont
 
 from thumbnails.thumbnail_constants import (
     DIALOG_TEXT_COLOR_HEX, BORDER_DEFAULT_HEX,
-    BUTTON_BG_DEFAULT_HEX,
 )
 from theme.theme_service import get_active_theme
 from utils import get_button_style
@@ -99,10 +98,9 @@ class MarkdownDialog(QDialog):
         content_font = QFont()
         content_font.setPointSize(12)
         self.content_area.setFont(content_font)
-        # Style the text area (uses base colors from thumbnail_constants)
+        # Style the text area (background from dialog theme; read-only uses dialog background)
         self.content_area.setStyleSheet(f"""
             QTextEdit {{
-                background-color: {BUTTON_BG_DEFAULT_HEX};
                 color: {DIALOG_TEXT_COLOR_HEX};
                 border: 1px solid {BORDER_DEFAULT_HEX};
                 border-radius: 4px;

@@ -57,6 +57,7 @@ class LightTheme(ThemeStylesMixin):
     tab_button_hover_bg_hex: str = "#e4e4e4"
 
     dialog_text_color_hex: str = general_text_color_hex
+    dialog_input_background_hex: str = "#ffffff"
 
     button_bg_default_hex: str = "#f0f4f8"
     button_text_default_hex: str = "#1a2a3a"
@@ -197,6 +198,7 @@ USER_THEME_COLOR_KEYS = (
     "text_color_hex",
     "dialog_background_hex",
     "dialog_text_color_hex",
+    "dialog_input_background_hex",
     "thumbnail_grid_background_color_hex",
     "thumbnail_text_color_hex",
     "default_image_color_hex",
@@ -248,6 +250,7 @@ THEME_DIALOG_KEYS = frozenset(
     (
         "dialog_background_hex",
         "dialog_text_color_hex",
+        "dialog_input_background_hex",
     )
 )
 
@@ -548,6 +551,7 @@ def build_user_theme_from_colors(colors: Dict[str, Any]) -> DarkTheme:
     bg = c["default_background_color_hex"]
     dialog_bg = c["dialog_background_hex"]
     dialog_text = c["dialog_text_color_hex"]
+    dialog_input_bg = c["dialog_input_background_hex"]
     thumb_grid_bg = c["thumbnail_grid_background_color_hex"]
     thumb_text = c["thumbnail_text_color_hex"]
     sidebar_bg = c["sidebar_background_color_hex"]
@@ -571,6 +575,7 @@ def build_user_theme_from_colors(colors: Dict[str, Any]) -> DarkTheme:
         text_color_hex=text,
         dialog_background_hex=dialog_bg,
         dialog_text_color_hex=dialog_text,
+        dialog_input_background_hex=dialog_input_bg,
         default_image_color_hex=c["default_image_color_hex"],
         default_image_background_color_hex=c["default_image_background_color_hex"],
         current_image_border_color_hex=c["current_image_border_color_hex"],
@@ -625,6 +630,7 @@ def build_dark_theme_from_colors(colors: Dict[str, str]) -> DarkTheme:
     bg = c["default_background_color_hex"]
     dialog_bg = c["dialog_background_hex"]
     dialog_text = c["dialog_text_color_hex"]
+    dialog_input_bg = c["dialog_input_background_hex"]
     thumb_grid_bg = c["thumbnail_grid_background_color_hex"]
     thumb_text = c["thumbnail_text_color_hex"]
     sidebar_bg = c["sidebar_background_color_hex"]
@@ -648,6 +654,7 @@ def build_dark_theme_from_colors(colors: Dict[str, str]) -> DarkTheme:
         text_color_hex=text,
         dialog_background_hex=dialog_bg,
         dialog_text_color_hex=dialog_text,
+        dialog_input_background_hex=dialog_input_bg,
         default_image_color_hex=c["default_image_color_hex"],
         default_image_background_color_hex=c["default_image_background_color_hex"],
         current_image_border_color_hex=c["current_image_border_color_hex"],
@@ -699,6 +706,7 @@ def build_light_theme_from_colors(colors: Dict[str, str]) -> LightTheme:
     bg = c["default_background_color_hex"]
     dialog_bg = c["dialog_background_hex"]
     dialog_text = c["dialog_text_color_hex"]
+    dialog_input_bg = c["dialog_input_background_hex"]
     thumb_grid_bg = c["thumbnail_grid_background_color_hex"]
     thumb_text = c["thumbnail_text_color_hex"]
     sidebar_bg = c["sidebar_background_color_hex"]
@@ -722,6 +730,7 @@ def build_light_theme_from_colors(colors: Dict[str, str]) -> LightTheme:
         text_color_hex=text,
         dialog_background_hex=dialog_bg,
         dialog_text_color_hex=dialog_text,
+        dialog_input_background_hex=dialog_input_bg,
         default_image_color_hex=c["default_image_color_hex"],
         default_image_background_color_hex=c["default_image_background_color_hex"],
         current_image_border_color_hex=c["current_image_border_color_hex"],
@@ -849,6 +858,7 @@ def sync_to_thumbnail_constants(theme: ThemeType) -> None:
     tc.DIALOG_TEXT_COLOR_HEX = t.dialog_text_color_hex
 
     tc.DIALOG_BACKGROUND_HEX = t.dialog_background_hex
+    tc.DIALOG_INPUT_BACKGROUND_HEX = t.dialog_input_background_hex
     tc.WIDGET_BG_HOVER_HEX = t.widget_bg_hover_hex
     tc.WIDGET_BG_PRESSED_HEX = t.widget_bg_pressed_hex
     tc.WIDGET_BG_DISABLED_HEX = t.widget_bg_disabled_hex

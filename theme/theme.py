@@ -96,17 +96,77 @@ def macos_scrollbar_for_surface(t, track_bg_hex: str, *, selector_prefix: str = 
 def global_scrollbar_stylesheet(t) -> str:
     """App-wide scrollbar chrome for common container backgrounds."""
     text_edit_bg = "#ffffff" if t.theme_id == "light" else t.default_background_color_hex
+    dialog_input_bg = t.dialog_input_background_hex
     tree_bg = text_edit_bg
     return (
         macos_scrollbar_for_surface(t, t.default_background_color_hex)
         + macos_scrollbar_for_surface(t, t.dialog_background_hex, selector_prefix="QDialog")
         + macos_scrollbar_for_surface(t, text_edit_bg, selector_prefix="QTextEdit")
         + macos_scrollbar_for_surface(t, text_edit_bg, selector_prefix="QPlainTextEdit")
+        + macos_scrollbar_for_surface(t, dialog_input_bg, selector_prefix="QDialog QLineEdit")
+        + macos_scrollbar_for_surface(t, dialog_input_bg, selector_prefix="QDialog QPlainTextEdit")
+        + macos_scrollbar_for_surface(t, dialog_input_bg, selector_prefix="QDialog QTextEdit")
+        + macos_scrollbar_for_surface(t, dialog_input_bg, selector_prefix="QDialog QSpinBox")
         + macos_scrollbar_for_surface(t, text_edit_bg, selector_prefix="QTextBrowser")
         + macos_scrollbar_for_surface(t, tree_bg, selector_prefix="QTreeView")
         + macos_scrollbar_for_surface(t, t.default_background_color_hex, selector_prefix="QListView")
         + macos_scrollbar_for_surface(t, t.default_background_color_hex, selector_prefix="QListWidget")
     )
+
+
+def dialog_input_stylesheet(t) -> str:
+    """Editable controls inside QDialog (not settings or unified image-gen shell)."""
+    inp = t.dialog_input_background_hex
+    dlg_bg = t.dialog_background_hex
+    return f"""
+    QDialog QLineEdit,
+    QDialog QPlainTextEdit {{
+        background-color: {inp};
+        color: {t.dialog_text_color_hex};
+        border: 1px solid {t.border_default_hex};
+        border-radius: 4px;
+        padding: 6px;
+        font-size: 13px;
+        selection-background-color: {t.accent_color_hex};
+    }}
+    QDialog QLineEdit:focus,
+    QDialog QPlainTextEdit:focus {{
+        background-color: {inp};
+        border: {t.current_image_border_width_index}px solid {t.current_image_border_color_hex};
+        outline: none;
+    }}
+    QDialog QLineEdit:hover,
+    QDialog QPlainTextEdit:hover {{
+        background-color: {inp};
+        border: 1px solid {t.border_hover_hex};
+    }}
+    QDialog QTextEdit {{
+        background-color: {inp};
+        color: {t.dialog_text_color_hex};
+        border: 1px solid {t.border_default_hex};
+        selection-background-color: {t.accent_color_hex};
+    }}
+    QDialog QTextEdit[readOnly="true"],
+    QDialog QPlainTextEdit[readOnly="true"] {{
+        background-color: {dlg_bg};
+    }}
+    QDialog QComboBox {{
+        background-color: {inp};
+        color: {t.dialog_text_color_hex};
+    }}
+    QDialog QComboBox QAbstractItemView {{
+        background-color: {inp};
+        color: {t.dialog_text_color_hex};
+        selection-background-color: {t.accent_color_hex};
+    }}
+    QDialog QSpinBox {{
+        background-color: {inp};
+        color: {t.dialog_text_color_hex};
+    }}
+    QDialog QSpinBox:disabled {{
+        background-color: {dlg_bg};
+    }}
+    """
 
 
 def dialog_context_stylesheet(t) -> str:
@@ -118,15 +178,7 @@ def dialog_context_stylesheet(t) -> str:
     QDialog QTabBar::tab:!selected {{
         background-color: {t.dialog_background_hex};
     }}
-    QDialog QComboBox {{
-        background-color: {t.button_bg_default_hex};
-    }}
-    QDialog QComboBox QAbstractItemView {{
-        background-color: {t.button_bg_default_hex};
-    }}
-    QDialog QTextEdit {{
-        background-color: {t.dialog_background_hex};
-    }}
+    {dialog_input_stylesheet(t)}
     QDialog QSlider::groove:horizontal {{
         border: 1px solid {t.border_default_hex};
         background: {t.dialog_background_hex};

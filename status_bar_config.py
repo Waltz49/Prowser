@@ -57,17 +57,6 @@ class FilterEntryWidget(QWidget):
         self.is_valid = True
         self.error_message = ""
         
-        # Convert QColor constants to hex strings
-        bg_color = DIALOG_BACKGROUND_HEX
-        text_color = DIALOG_TEXT_COLOR_HEX
-        border_color = qtcolor_to_hex(CURRENT_IMAGE_BORDER_COLOR)
-        border_focus_color = qtcolor_to_hex(CURRENT_IMAGE_BORDER_COLOR)
-        # Lighten border for focus (approximate)
-        focus_r = min(255, CURRENT_IMAGE_BORDER_COLOR.red() + 20)
-        focus_g = min(255, CURRENT_IMAGE_BORDER_COLOR.green() + 20)
-        focus_b = min(255, CURRENT_IMAGE_BORDER_COLOR.blue() + 20)
-        border_focus_color = f"#{focus_r:02x}{focus_g:02x}{focus_b:02x}"
-        
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(4)
@@ -77,47 +66,10 @@ class FilterEntryWidget(QWidget):
         input_layout.setContentsMargins(0, 0, 0, 0)
         input_layout.setSpacing(8)
         
-        # Text input field - use standard application colors
+        # Text input field
         self.text_input = QLineEdit()
         self.text_input.setText(pattern)
-        # Standard application colors from thumbnail_constants
-        button_bg_default = BUTTON_BG_DEFAULT_HEX
-        button_text_default = BUTTON_TEXT_DEFAULT_HEX
-        button_border_default = BUTTON_BORDER_DEFAULT_HEX
-        button_bg_hover = BUTTON_BG_HOVER_HEX
-        button_text_hover = BUTTON_TEXT_HOVER_HEX
-        button_border_hover = BUTTON_BORDER_HOVER_HEX
-        text_primary = BUTTON_FOCUS_TEXT_HEX
-        focus_border_hex = qtcolor_to_hex(CURRENT_IMAGE_BORDER_COLOR)
-        selection_bg = ACCENT_COLOR_HEX
-        selection_text = BUTTON_FOCUS_TEXT_HEX
-        
-        self.text_input.setStyleSheet(f"""
-            QLineEdit {{
-                background-color: {button_bg_default};
-                color: {button_text_default};
-                border: 1px solid {button_border_default};
-                border-radius: 5px;
-                padding: 6px 12px;
-                font-size: 13px;
-                font-family: 'Arial Narrow', Arial;
-                letter-spacing: 0.5px;
-                selection-background-color: {selection_bg};
-                selection-color: {selection_text};
-                width: 150px;
-            }}
-            QLineEdit:focus {{
-                background-color: {button_bg_default};
-                color: {text_primary};
-                border: 1px solid {focus_border_hex};
-                outline: none;
-            }}
-            QLineEdit:hover {{
-                background-color: {button_bg_hover};
-                color: {button_text_hover};
-                border: 1px solid {button_border_hover};
-            }}
-        """)
+        self.text_input.setStyleSheet("QLineEdit { min-width: 150px; }")
         input_layout.addWidget(self.text_input)
         
         # Delete button with trash icon - use standard application colors

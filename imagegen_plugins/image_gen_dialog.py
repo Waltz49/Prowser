@@ -387,13 +387,16 @@ def load_import_prompt_from_path(
 IMAGE_GEN_SIDE_BUTTON_WIDTH = 112
 
 
-def _text_input_stylesheet() -> str:
+def _text_input_stylesheet(*, unified_shell: bool = False) -> str:
     """Bordered arbitrary-text fields (prompt, negative prompt, etc.) in the image-gen dialog."""
     t = get_active_theme()
+    input_bg = (
+        t.button_bg_default_hex if unified_shell else t.dialog_input_background_hex
+    )
     return f"""
     #imageGenDialog QPlainTextEdit,
     #imageGenDialog QLineEdit {{
-        background-color: {t.button_bg_default_hex};
+        background-color: {input_bg};
         color: {t.dialog_text_color_hex};
         border: 1px solid {t.border_default_hex};
         border-radius: 4px;
@@ -410,7 +413,7 @@ def _text_input_stylesheet() -> str:
     }}
     #imageGenDialog QComboBox#imageGenModelCombo,
     #imageGenDialog QComboBox#imageGenLoraCombo {{
-        background-color: {t.button_bg_default_hex};
+        background-color: {input_bg};
         color: {t.dialog_text_color_hex};
         border: 1px solid {t.border_default_hex};
         border-radius: 4px;
@@ -421,7 +424,7 @@ def _text_input_stylesheet() -> str:
         min-width: 280px;
     }}
     #imageGenDialog QComboBox {{
-        background-color: {t.button_bg_default_hex};
+        background-color: {input_bg};
         color: {t.dialog_text_color_hex};
         border: 1px solid {t.border_default_hex};
         border-radius: 4px;
@@ -1281,6 +1284,7 @@ def apply_image_gen_dialog_shell(
     window_title: str,
     min_width: int,
     min_height: int,
+    unified_shell: bool = False,
 ) -> None:
     """Shared window chrome for image-gen and expand dialogs."""
     dlg.setWindowTitle(window_title)
@@ -1306,7 +1310,7 @@ def apply_image_gen_dialog_shell(
         (dlg.styleSheet() or "")
         + _image_gen_preview_client_stylesheet()
         + push_button_stylesheet(t, selector="#imageGenDialog QPushButton")
-        + _text_input_stylesheet()
+        + _text_input_stylesheet(unified_shell=unified_shell)
     )
 
 

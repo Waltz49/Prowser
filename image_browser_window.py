@@ -3257,6 +3257,13 @@ class ImageBrowserWindow(QMainWindow):
             self.canvas_manager.refresh_theme_styles()
         if getattr(self, "preview_widget", None) and hasattr(self.preview_widget, "refresh_theme_styles"):
             self.preview_widget.refresh_theme_styles()
+        exif_dlg = getattr(self, "_edit_exif_usercomment_dialog", None)
+        if (
+            exif_dlg is not None
+            and exif_dlg.isVisible()
+            and hasattr(exif_dlg, "refresh_theme_styles")
+        ):
+            exif_dlg.refresh_theme_styles()
 
     def open_directory_dialog(self):
         """Open directory selection dialog"""

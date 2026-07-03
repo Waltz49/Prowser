@@ -11,14 +11,11 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, QSize, QTimer, QByteArray, QEvent
 from PySide6.QtGui import QIcon, QPixmap, QPainter, QPen, QColor, QTextCursor
 from thumbnails.thumbnail_constants import (
-    DIALOG_BACKGROUND_HEX,
-    DIALOG_TEXT_COLOR_HEX,
-    DEFAULT_BORDER_COLOR,
     MULTISELECT_BORDER_COLOR_HEX,
     BUTTON_BG_DEFAULT_HEX, BUTTON_TEXT_DEFAULT_HEX, BUTTON_BORDER_DEFAULT_HEX,
     BUTTON_BG_HOVER_HEX, BUTTON_TEXT_HOVER_HEX, BUTTON_BORDER_HOVER_HEX,
     BUTTON_BG_PRESSED_HEX, BUTTON_FOCUS_TEXT_HEX, CURRENT_IMAGE_BORDER_COLOR_HEX,
-    ACCENT_COLOR_HEX, TEXT_DISABLED_HEX, WIDGET_BG_DISABLED_HEX, VALIDATION_SUCCESS_COLOR_HEX,
+    ACCENT_COLOR_HEX, TEXT_DISABLED_HEX, VALIDATION_SUCCESS_COLOR_HEX,
 )
 from config import get_config
 from exif.exif_utils import truncate_usercomment_before_prompt
@@ -136,10 +133,6 @@ def _speak_or_stop(text: str) -> bool:
     return speak_or_stop(text)
 
 
-def _qtcolor_to_hex(color):
-    return f"#{color.red():02x}{color.green():02x}{color.blue():02x}"
-
-
 def _create_copy_icon(color: str = ACCENT_COLOR_HEX) -> QIcon:
     """Create a copy icon: two small squares offset diagonally (standard copy graphic)."""
     pixmap = QPixmap(18, 18)
@@ -194,51 +187,20 @@ def _overlay_chip_stylesheet() -> str:
     """
 
 
-class EditExifUserCommentDialog(QDialog):
-    """Dialog for viewing and editing the EXIF UserComment of a single image."""
-
-    def __init__(self, file_path: str, original_text: str, parent=None):
-        super().__init__(parent)
-        self.file_path = file_path
-        self.original_text = original_text
-        self._caption_connected = False
-        self._caption_cancelled_on_close = False
-        self._text_before_ai = original_text
-        self._ai_caption_error_dialog_open = False
-        self._base_filename = os.path.basename(file_path)
-        self._dot_phase = 0
-        self._dot_timer = QTimer(self)
-        self._dot_timer.setInterval(400)
-        self._dot_timer.timeout.connect(self._on_dot_tick)
-        self._text_edit_container = None
-        self.generate_btn = None
-        self.ai_btn = None
-
-        bg_color = _qtcolor_to_hex(QColor(DIALOG_BACKGROUND_HEX))
-        text_color = DIALOG_TEXT_COLOR_HEX
-        border_color = _qtcolor_to_hex(DEFAULT_BORDER_COLOR)
-
-        self.setWindowTitle("Edit EXIF User Comment")
-        self.setMinimumWidth(480)
-        self.setMinimumHeight(320)
-        self.setWindowModality(Qt.WindowModality.NonModal)
-
-        self.setStyleSheet(f"""
+def _edit_exif_usercomment_stylesheet() -> str:
+    """Dialog chrome; text fields use global QDialog input rules from theme.py."""
+    th = get_active_theme()
+    bg_color = th.dialog_background_hex
+    text_color = th.dialog_text_color_hex
+    splitter_handle = th.chrome_border_hex
+    splitter_handle_hover = th.splitter_handle_hover_hex
+    return f"""
             QDialog {{
                 background-color: {bg_color};
             }}
             QLabel {{
                 color: {text_color};
                 font-size: 13px;
-            }}
-            QPlainTextEdit {{
-                background-color: {BUTTON_BG_DEFAULT_HEX};
-                color: {text_color};
-                border: 1px solid {border_color};
-                border-radius: 4px;
-                padding: 6px;
-                font-size: 13px;
-                selection-background-color: {ACCENT_COLOR_HEX};
             }}
             QPushButton {{
                 background-color: {BUTTON_BG_DEFAULT_HEX};
@@ -344,17 +306,45 @@ class EditExifUserCommentDialog(QDialog):
                 max-height: 24px;
             }}
             QSplitter::handle {{
-                background-color: #000000;
+                background-color: {splitter_handle};
                 border: none;
             }}
             QSplitter::handle:vertical {{
                 height: 6px;
             }}
-            QSplitter::handle:vertical:hover,
-            QSplitter::handle:vertical:pressed {{
-                background-color: #808080;
+            QSplitter::handle:vertical:hover {{
+                background-color: {splitter_handle_hover};
             }}
-        """)
+            QSplitter::handle:vertical:pressed {{
+                background-color: {splitter_handle_hover};
+            }}
+        """
+
+
+class EditExifUserCommentDialog(QDialog):
+    """Dialog for viewing and editing the EXIF UserComment of a single image."""
+
+    def __init__(self, file_path: str, original_text: str, parent=None):
+        super().__init__(parent)
+        self.file_path = file_path
+        self.original_text = original_text
+        self._caption_connected = False
+        self._caption_cancelled_on_close = False
+        self._text_before_ai = original_text
+        self._ai_caption_error_dialog_open = False
+        self._base_filename = os.path.basename(file_path)
+        self._dot_phase = 0
+        self._dot_timer = QTimer(self)
+        self._dot_timer.setInterval(400)
+        self._dot_timer.timeout.connect(self._on_dot_tick)
+        self._text_edit_container = None
+        self.generate_btn = None
+        self.ai_btn = None
+
+        self.setWindowTitle("Edit EXIF User Comment")
+        self.setMinimumWidth(480)
+        self.setMinimumHeight(320)
+        self.setWindowModality(Qt.WindowModality.NonModal)
 
         main_layout = QVBoxLayout(self)
         main_layout.setSpacing(12)
@@ -392,9 +382,6 @@ class EditExifUserCommentDialog(QDialog):
         btn_stack.addWidget(self.ear_btn, 0, Qt.AlignmentFlag.AlignRight)
         self.copy_btn = QPushButton()
         self.copy_btn.setObjectName("copy_btn")
-        self._copy_icon_normal = _create_copy_icon(TEXT_DISABLED_HEX)
-        self._copy_icon_hover = _create_copy_icon(BUTTON_TEXT_HOVER_HEX)
-        self.copy_btn.setIcon(self._copy_icon_normal)
         self.copy_btn.setIconSize(QSize(16, 16))
         self.copy_btn.setToolTip("Copy user comment to clipboard (UTF-8).\nOption+click to copy raw text.")
         self.copy_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -403,9 +390,6 @@ class EditExifUserCommentDialog(QDialog):
         btn_stack.addWidget(self.copy_btn, 0, Qt.AlignmentFlag.AlignRight)
         self.settings_btn = QPushButton()
         self.settings_btn.setObjectName("settings_btn")
-        self._settings_icon_normal = create_gear_icon(TEXT_DISABLED_HEX)
-        self._settings_icon_hover = create_gear_icon(BUTTON_TEXT_HOVER_HEX)
-        self.settings_btn.setIcon(self._settings_icon_normal)
         self.settings_btn.setIconSize(QSize(16, 16))
         self.settings_btn.setToolTip("Open Captioning settings")
         self.settings_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -487,7 +471,42 @@ class EditExifUserCommentDialog(QDialog):
         # Save geometry when dialog finishes (closeEvent is NOT called for accept/reject)
         self.finished.connect(self._save_geometry)
 
+        self._apply_theme_styles()
         self.text_edit.setFocus()
+
+    def _repolish_theme_text_inputs(self) -> None:
+        """Pick up global QDialog input rules after dialog chrome stylesheet changes."""
+        for edit in (self.text_edit, self.instructions_edit):
+            if edit is None:
+                continue
+            style = edit.style()
+            style.unpolish(edit)
+            style.polish(edit)
+            edit.update()
+
+    def _apply_theme_styles(self) -> None:
+        self.setStyleSheet(_edit_exif_usercomment_stylesheet())
+        self._copy_icon_normal = _create_copy_icon(TEXT_DISABLED_HEX)
+        self._copy_icon_hover = _create_copy_icon(BUTTON_TEXT_HOVER_HEX)
+        self._settings_icon_normal = create_gear_icon(TEXT_DISABLED_HEX)
+        self._settings_icon_hover = create_gear_icon(BUTTON_TEXT_HOVER_HEX)
+        self.copy_btn.setIcon(self._copy_icon_normal)
+        self.settings_btn.setIcon(self._settings_icon_normal)
+        self.thumb_label.setStyleSheet(
+            f"border: 1px solid {MULTISELECT_BORDER_COLOR_HEX}; border-radius: 5px;"
+        )
+        chip_style = _overlay_chip_stylesheet()
+        if self.generate_btn is not None:
+            self.generate_btn.setStyleSheet(chip_style)
+        if self.ai_btn is not None:
+            self.ai_btn.setStyleSheet(chip_style)
+        if self._instructions_pane is not None:
+            self._instructions_pane.sync_toggle_highlight()
+        self._repolish_theme_text_inputs()
+
+    def refresh_theme_styles(self) -> None:
+        """Re-apply palette while the dialog stays open across a theme change."""
+        self._apply_theme_styles()
 
     def _wrap_text_edit_with_overlays(self) -> QWidget:
         """Wrap the comment editor so action chips can overlay the lower-right corner."""

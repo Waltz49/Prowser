@@ -97,6 +97,7 @@ _THEME_SYNC_CONSTANTS = (
     "TAB_BUTTON_FOCUS_BACKGROUND_COLOR_HEX",
     "TAB_BUTTON_FOCUS_BORDER_COLOR_HEX",
     "DIALOG_BACKGROUND_HEX",
+    "DIALOG_INPUT_BACKGROUND_HEX",
     "BORDER_DEFAULT_HEX",
     "BORDER_HOVER_HEX",
     "WIDGET_BG_HOVER_HEX",
@@ -152,6 +153,7 @@ THEME_COLOR_SWATCH_TOOLTIPS = {
     "text_color_hex": "Browse view and other main-window information (not dialogs or menus).",
     "dialog_background_hex": "Background for modal and modeless dialog windows.",
     "dialog_text_color_hex": "Text color for dialog labels and general dialog content.",
+    "dialog_input_background_hex": "Background for text fields, combo boxes, and other typed-in controls inside dialogs.",
     "thumbnail_grid_background_color_hex": "Background behind the thumbnail and list grids (margins and empty areas).",
     "thumbnail_text_color_hex": "Text on thumbnail overlays, list rows, and in-grid labels.",
     "status_bar_background_color_hex": "Background fill for the main status bar, context menus, and menu-bar dropdowns.",
@@ -2461,6 +2463,7 @@ class SettingsDialog(QDialog):
         for label_text, key in (
             ("Dialog background:", "dialog_background_hex"),
             ("Dialog text:", "dialog_text_color_hex"),
+            ("Input backgrounds:", "dialog_input_background_hex"),
         ):
             self._add_theme_color_swatch_row(v_dialogs, label_text, key)
         outer.addWidget(gb_dialogs)

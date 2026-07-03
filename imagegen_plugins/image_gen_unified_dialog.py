@@ -163,6 +163,7 @@ class ImageGenUnifiedDialog(QDialog):
             window_title=_FUNCTION_TITLES[FUNCTION_CREATE],
             min_width=800,
             min_height=600,
+            unified_shell=True,
         )
 
         root = QVBoxLayout(self)

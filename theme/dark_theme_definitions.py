@@ -50,6 +50,7 @@ class DarkTheme(ThemeStylesMixin):
     tab_button_hover_bg_hex: str = "#3a3a3a"
 
     dialog_text_color_hex: str = "#b6b6b6"
+    dialog_input_background_hex: str = "#000000"
 
     button_bg_default_hex: str = "#16181c"
     button_text_default_hex: str = "#b0bfd6"

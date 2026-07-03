@@ -682,26 +682,6 @@ class CNNSimilarityUIHelper:
     def _container_stylesheet(self) -> str:
         return f"QWidget {{ background-color: {self._theme_values()['dialog_bg']}; }}"
 
-    def _dir_input_stylesheet(self) -> str:
-        t = self._theme_values()
-        return f"""
-            QLineEdit {{
-                background-color: {t["button_bg"]};
-                color: {t["button_fg"]};
-                border: 1px solid {t["button_border"]};
-                border-radius: 4px;
-                padding: 5px;
-            }}
-            QLineEdit:focus {{
-                border-color: {t["focus_border"]};
-                color: {t["button_focus_fg"]};
-            }}
-            QLineEdit:disabled {{
-                color: {t["text_disabled"]};
-                background-color: {t["dialog_bg"]};
-            }}
-        """
-
     def _small_browse_button_stylesheet(self) -> str:
         t = self._theme_values()
         return f"""
@@ -868,8 +848,6 @@ class CNNSimilarityUIHelper:
         dir_input = QLineEdit()
         dir_input.setPlaceholderText("Enter directory path for search")
         dir_input.setMinimumHeight(28)
-        # Set QLineEdit background to match theme
-        dir_input.setStyleSheet(self._dir_input_stylesheet())
         # Prioritize saved directory path if enabled, otherwise use directory parameter
         # If saved_dir_enabled is True, use saved path; otherwise use directory parameter if valid
         # Match CNN dialog logic exactly
@@ -1279,8 +1257,6 @@ class CNNSimilarityUIHelper:
         dir_input = QLineEdit()
         dir_input.setPlaceholderText("Enter directory path for search")
         dir_input.setMinimumHeight(28)
-        # Set QLineEdit background to match theme
-        dir_input.setStyleSheet(self._dir_input_stylesheet())
         # Prioritize saved directory path if enabled, otherwise use directory parameter
         # If saved_dir_enabled is True, use saved path; otherwise use directory parameter if valid
         if  saved_dir_path :
@@ -1727,7 +1703,6 @@ class CNNSimilarityUIHelper:
         dir_input = QLineEdit()
         dir_input.setPlaceholderText("Enter directory path for search")
         dir_input.setMinimumHeight(28)
-        dir_input.setStyleSheet(self._dir_input_stylesheet())
         if saved_dir_path:
             dir_input.setText(saved_dir_path)
         elif directory and os.path.isdir(directory):

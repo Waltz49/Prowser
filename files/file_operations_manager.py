@@ -2398,16 +2398,6 @@ class FileOperationsManager:
         QLabel:disabled {
             color: """ + TEXT_DISABLED_HEX + """;
         }
-        QLineEdit {
-            background-color: """ + BUTTON_BG_DEFAULT_HEX + """;
-            color: """ + BUTTON_TEXT_DEFAULT_HEX + """;
-            border: 1px solid """ + BUTTON_BORDER_DEFAULT_HEX + """;
-            border-radius: 4px;
-            padding: 5px;
-        }
-        QLineEdit:focus {
-            border-color: """ + CURRENT_IMAGE_BORDER_COLOR_HEX + """;
-        }
         QRadioButton:disabled {
             color: """ + TEXT_DISABLED_HEX + """;
         }
