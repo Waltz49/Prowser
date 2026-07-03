@@ -23,7 +23,7 @@ from imagegen_plugins.image_gen_form_layout import (
     image_gen_prompt_stream_session_end,
     make_image_gen_field_label,
 )
-from imagegen_plugins.lmstudio_caption import is_lmstudio_services_available
+from thumbnails.thumbnail_constants import ALT_SYMBOL, ENTER_SYMBOL, SHIFT_SYMBOL
 from imagegen_plugins.image_gen_persistence import (
     load_flux_prompt_job_with_generate,
     load_pass_image_to_ai_with_prompt,
@@ -35,8 +35,87 @@ from imagegen_plugins.flux_prompt_job import (
     attach_flux_prompt_ai_job_to_values,
     resolve_flux_prompt_refine_image_paths,
 )
+from imagegen_plugins.lmstudio_caption import is_lmstudio_services_available
 from workers.model_tasks_worker import flux_prompt_system_message
 from utils import get_main_window
+
+
+def _flux_prompt_shortcut_owner(host: Any) -> Any:
+    panel = getattr(host, "_current_panel", None)
+    if panel is not None:
+        return panel
+    return host
+
+
+def flux_prompt_gen_shortcut_active(owner: Any) -> bool:
+    """True when Option+Enter should trigger the Gen Prompt button."""
+    flux_ai = getattr(owner, "_flux_prompt_ai", None)
+    if flux_ai is None:
+        return False
+    if not flux_ai.ai_controls_active(owner):
+        return False
+    btn = flux_ai._ai_btn
+    return btn is not None and btn.isVisible() and btn.isEnabled()
+
+
+def click_flux_prompt_gen_if_active(host: Any) -> bool:
+    """Click Gen Prompt / Cancel when AI controls are active. Returns True if handled."""
+    owner = _flux_prompt_shortcut_owner(host)
+    if not flux_prompt_gen_shortcut_active(owner):
+        return False
+    flux_ai = owner._flux_prompt_ai
+    btn = flux_ai._ai_btn if flux_ai is not None else None
+    if btn is None or not btn.isEnabled():
+        return False
+    btn.click()
+    return True
+
+
+def flux_prompt_undo_shortcut_active(owner: Any) -> bool:
+    """True when Shift+Option+Enter should trigger Undo AI."""
+    flux_ai = getattr(owner, "_flux_prompt_ai", None)
+    if flux_ai is None:
+        return False
+    if not flux_ai.ai_controls_active(owner):
+        return False
+    btn = flux_ai._undo_btn
+    return btn is not None and btn.isVisible() and btn.isEnabled()
+
+
+def click_flux_prompt_undo_if_active(host: Any) -> bool:
+    """Click Undo AI when shown. Returns True if handled."""
+    owner = _flux_prompt_shortcut_owner(host)
+    if not flux_prompt_undo_shortcut_active(owner):
+        return False
+    flux_ai = owner._flux_prompt_ai
+    btn = flux_ai._undo_btn if flux_ai is not None else None
+    if btn is None or not btn.isEnabled():
+        return False
+    btn.click()
+    return True
+
+
+def _host_image_gen_dialog(widget: QWidget) -> QWidget | None:
+    host: QWidget | None = widget
+    while host is not None:
+        if getattr(host, "_image_gen_footer_key_filter", None) is not None:
+            return host
+        host = host.parentWidget()
+    return None
+
+
+def refresh_flux_prompt_keyboard_shortcuts(owner: Any) -> None:
+    """Attach footer key filter to flux-prompt widgets added after initial dialog setup."""
+    dialog = _host_image_gen_dialog(owner if isinstance(owner, QWidget) else None)
+    if dialog is None and isinstance(owner, QWidget):
+        dialog = _host_image_gen_dialog(owner.window())
+    if dialog is None:
+        return
+    from imagegen_plugins.image_gen_function_switcher import (
+        refresh_image_gen_footer_keyboard_shortcuts,
+    )
+
+    refresh_image_gen_footer_keyboard_shortcuts(dialog)
 
 
 def _show_ai_caption_error_dialog(*args, **kwargs):
@@ -55,14 +134,24 @@ def configure_flux_prompt_toolbar_checkbox(checkbox: QCheckBox) -> None:
 
 
 _FLUX_PROMPT_GEN_LABEL = "Gen Prompt"
+_FLUX_PROMPT_GEN_BUTTON_LABEL = f"{_FLUX_PROMPT_GEN_LABEL} {ALT_SYMBOL}{ENTER_SYMBOL}"
 _FLUX_PROMPT_CANCEL_LABEL = "Cancel"
 _FLUX_PROMPT_GEN_TOOLTIP = (
     "Refine the image prompt for FLUX using LMStudio\n"
+    f"({ALT_SYMBOL}{ENTER_SYMBOL})\n"
     "(requires a text model loaded in LM Studio)"
 )
 _FLUX_PROMPT_CANCEL_TOOLTIP = "Stop the in-progress prompt refinement"
+_FLUX_PROMPT_UNDO_TOOLTIP = (
+    "Restore the prompt from before the last AI refinement\n"
+    f"({SHIFT_SYMBOL}{ALT_SYMBOL}{ENTER_SYMBOL})"
+)
+_FLUX_PROMPT_UNDO_LABEL = "Undo AI"
+_FLUX_PROMPT_UNDO_BUTTON_LABEL = (
+    f"{_FLUX_PROMPT_UNDO_LABEL} {SHIFT_SYMBOL}{ALT_SYMBOL}{ENTER_SYMBOL}"
+)
 _FLUX_PROMPT_TOOLBAR_SPACING = 16
-_FLUX_PROMPT_PRIMARY_BTN_WIDTH = 65
+_FLUX_PROMPT_PRIMARY_BTN_WIDTH = 88
 
 
 def apply_flux_prompt_primary_button_width(button: QPushButton) -> None:
@@ -147,14 +236,14 @@ class ImageGenFluxPromptAi:
         # controls_label = make_image_gen_field_label("AI Controls:", row)
         # layout.addWidget(controls_label, 0)
 
-        self._ai_btn = QPushButton(_FLUX_PROMPT_GEN_LABEL)
+        self._ai_btn = QPushButton(_FLUX_PROMPT_GEN_BUTTON_LABEL)
         self._ai_btn.setObjectName("flux_prompt_ai_btn")
         self._ai_btn.setToolTip(_FLUX_PROMPT_GEN_TOOLTIP)
         configure_flux_prompt_toolbar_button(self._ai_btn)
         apply_flux_prompt_primary_button_width(self._ai_btn)
         self._ai_btn.clicked.connect(self._on_primary_ai_clicked)
 
-        self._pass_image_cb = QCheckBox("Pass image")
+        self._pass_image_cb = QCheckBox("Pass image to Prompt Generator")
         self._pass_image_cb.setToolTip(
             f"Include the {image_noun} when refining the prompt with AI "
             "(requires a vision-capable model in LM Studio)."
@@ -178,11 +267,9 @@ class ImageGenFluxPromptAi:
         )
         configure_flux_prompt_toolbar_checkbox(self._job_cb)
 
-        self._undo_btn = QPushButton("Undo AI")
+        self._undo_btn = QPushButton(_FLUX_PROMPT_UNDO_BUTTON_LABEL)
         self._undo_btn.setObjectName("flux_prompt_undo_ai_btn")
-        self._undo_btn.setToolTip(
-            "Restore the prompt from before the last AI refinement"
-        )
+        self._undo_btn.setToolTip(_FLUX_PROMPT_UNDO_TOOLTIP)
         configure_flux_prompt_toolbar_button(self._undo_btn)
         self._undo_btn.clicked.connect(self._on_undo_clicked)
         self._undo_btn.setVisible(False)
@@ -193,6 +280,7 @@ class ImageGenFluxPromptAi:
         layout.addWidget(self._undo_btn, 0)
 
         self._toolbar = row
+        refresh_flux_prompt_keyboard_shortcuts(owner)
         return row
 
     def ai_controls_mounted(self) -> bool:
@@ -254,7 +342,7 @@ class ImageGenFluxPromptAi:
         if self._ai_btn is None:
             return
         self._ai_btn.setEnabled(True)
-        self._ai_btn.setText(_FLUX_PROMPT_GEN_LABEL)
+        self._ai_btn.setText(_FLUX_PROMPT_GEN_BUTTON_LABEL)
         self._ai_btn.setToolTip(_FLUX_PROMPT_GEN_TOOLTIP)
 
     def _set_ai_button_running(self) -> None:

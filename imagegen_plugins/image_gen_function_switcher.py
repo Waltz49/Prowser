@@ -345,7 +345,7 @@ def _neighbor_switcher_function(current_function: str, delta: int) -> str:
 
 
 class _FunctionFooterKeyFilter(QObject):
-    """Cmd+Left/Right — prev/next footer function; Cmd+Return — Generate; Cmd+W — Close."""
+    """Cmd+Left/Right — prev/next footer function; Cmd+Return — Generate; Option+Return — Gen Prompt; Shift+Option+Return — Undo AI; Cmd+W — Close."""
 
     def __init__(self, dialog: QDialog, parent: QObject | None = None) -> None:
         super().__init__(parent or dialog)
@@ -369,6 +369,24 @@ class _FunctionFooterKeyFilter(QObject):
             and mods == Qt.KeyboardModifier.ControlModifier
         ):
             return self._click_close_button()
+        if key in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+            from imagegen_plugins.imagegen_flux_prompt_ai import (
+                click_flux_prompt_gen_if_active,
+                click_flux_prompt_undo_if_active,
+            )
+
+            mods_no_keypad = mods & ~Qt.KeyboardModifier.KeypadModifier
+            shift_alt = (
+                Qt.KeyboardModifier.AltModifier | Qt.KeyboardModifier.ShiftModifier
+            )
+            # Shift+Option+Enter (⇧⌥↩) — Undo AI when the button is shown.
+            if mods_no_keypad == shift_alt:
+                if click_flux_prompt_undo_if_active(self._dialog):
+                    return True
+            # Option+Enter (⌥↩) — Gen Prompt when AI toolbar is active.
+            if mods_no_keypad == Qt.KeyboardModifier.AltModifier:
+                if click_flux_prompt_gen_if_active(self._dialog):
+                    return True
         if not (mods & Qt.KeyboardModifier.ControlModifier):
             return False
         if key in (Qt.Key.Key_Left, Qt.Key.Key_Right):
@@ -402,7 +420,7 @@ def _attach_footer_key_filter(host: QWidget) -> None:
 
 
 def install_image_gen_footer_keyboard_shortcuts(dialog: QDialog) -> None:
-    """Cmd+Left/Right — cycle footer function icons; Cmd+Return — Generate; Cmd+W — Close."""
+    """Cmd+Left/Right — cycle footer function icons; Cmd+Return — Generate; Option+Return — Gen Prompt; Shift+Option+Return — Undo AI; Cmd+W — Close."""
     filt = getattr(dialog, "_image_gen_footer_key_filter", None)
     if filt is None:
         filt = _FunctionFooterKeyFilter(dialog, parent=dialog)
