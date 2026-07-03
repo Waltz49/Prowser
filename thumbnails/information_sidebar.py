@@ -46,7 +46,7 @@ def _info_action_icon_html(icon_name: str) -> str:
     px = _INFO_ACTION_ICON_PX
     return (
         f'<img src="{url}" width="{px}" height="{px}" '
-        f'style="display:block;margin:0 auto;padding:0;border:none;vertical-align:middle;">'
+        f'style="display:block;margin:0;padding:0;border:none;">'
     )
 
 
@@ -361,14 +361,14 @@ class InformationSidebar(QWidget):
                 "fromText_hover.png" if hovered_anchor == "create://" else "fromText.png"
             )
             cells += spacer_box() + icon_box(
-                "create://", create_icon, "Create an image from text..."
+                "create://", create_icon, "Create an image from text...", image=True
             )
         if imagegen_edit_plugins_available():
             edit_icon = _info_action_icon_html(
                 "editAI_hover.png" if hovered_anchor == "editai://" else "editAI.png"
             )
             cells += spacer_box() + icon_box(
-                "editai://", edit_icon, "Edit an image with AI..."
+                "editai://", edit_icon, "Edit an image with AI...", image=True
             )
         return cells
 
@@ -1062,14 +1062,22 @@ class InformationSidebar(QWidget):
         ACTION_ICON_COLOR = _th.information_action_icon_muted_hex
         ACTION_ICON_HOVER_COLOR = getattr(_th, "button_border_hover_hex", _th.accent_color_hex)
         SPEAK_ICON = "꡴"
-        EDIT_ICON = "✚"
+        edit_icon = _info_action_icon_html(
+            "comment_icon_hover.png" if hovered_anchor == "edit://" else "comment_icon.png"
+        )
         delete_icon = _info_action_icon_html(
             "trash_icon_hover.png" if hovered_anchor == "delete://" else "trash_icon.png"
         )
 
         # Edit button (always shown); speak/copy/delete only when description is long enough
         # Render each button as a boxed icon using a table with borders on <td>
-        def icon_button_anchor(href, icon, title):
+        def icon_button_anchor(href, icon, title, *, image=False):
+            if image:
+                return (
+                    f'<a href="{href}" '
+                    f'style="display:block;line-height:0;text-decoration:none;cursor:pointer;" '
+                    f'title="{title}">{icon}</a>'
+                )
             color = ACTION_ICON_HOVER_COLOR if href == hovered_anchor else ACTION_ICON_COLOR
             return (
                 f'<a href="{href}" '
@@ -1078,9 +1086,18 @@ class InformationSidebar(QWidget):
                 f'title="{title}">{icon}</a>'
             )
 
-        def icon_box(href, icon, title):
+        def icon_box(href, icon, title, *, image=False):
             is_hovered = href == hovered_anchor
             border_color = ACTION_ICON_HOVER_COLOR if is_hovered else _th.information_icon_cell_border_muted_hex
+            if image:
+                px = _INFO_ACTION_ICON_PX
+                return (
+                    f'<td style="border:1px solid {border_color}; border-radius:6px; padding:0;'
+                    f' width:{px}px; height:{px}px; text-align:center; vertical-align:middle;'
+                    f' background:{_th.information_action_chip_bg_hex};">'
+                    f'{icon_button_anchor(href, icon, title, image=True)}'
+                    f'</td>'
+                )
             return (
                 f'<td style="border:1px solid {border_color}; border-radius:6px; padding:0 6px; text-align:center;'
                 f' background:{_th.information_action_chip_bg_hex}; min-width:26px;">'
@@ -1113,16 +1130,16 @@ class InformationSidebar(QWidget):
             action_icons += (
                 icon_box("copy://", COPY_SYMBOL, "Copy to clipboard")
                 + spacer_box()
-                + icon_box("edit://", EDIT_ICON, "Edit user comment")
+                + icon_box("edit://", edit_icon, "Edit user comment", image=True)
                 + create_cells
                 + spacer_box()
-                + icon_box("delete://", delete_icon, "Delete user comment")
+                + icon_box("delete://", delete_icon, "Delete user comment", image=True)
                 + '</tr></table><br><br>'
             )
         else:
             action_icons = (
                 '<table cellpadding="0" cellspacing="0" style="margin-bottom:3px;"><tr>'
-                + icon_box("edit://", EDIT_ICON, "Edit user comment")
+                + icon_box("edit://", edit_icon, "Edit user comment", image=True)
                 + create_cells
                 + '</tr></table><br><br>'
             )

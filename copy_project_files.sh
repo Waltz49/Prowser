@@ -189,6 +189,22 @@ make_scripts_executable() {
     done
 }
 
+resolve_python_cmd() {
+    if command -v python3.14 &>/dev/null; then
+        echo "python3.14"
+    elif command -v python3.13 &>/dev/null; then
+        echo "python3.13"
+    else
+        echo "python3"
+    fi
+}
+
+list_runtime_asset_paths() {
+    local python_cmd
+    python_cmd="$(resolve_python_cmd)"
+    "$python_cmd" "$SCRIPT_DIR/list_runtime_assets.py" --from-main
+}
+
 verify_copy() {
     print_info "Verifying copied project..."
     local missing=0
@@ -203,11 +219,19 @@ verify_copy() {
         return 1
     fi
 
-    local python_cmd="python3"
-    if command -v python3.14 &>/dev/null; then
-        python_cmd="python3.14"
-    elif command -v python3.13 &>/dev/null; then
-        python_cmd="python3.13"
+    local python_cmd
+    python_cmd="$(resolve_python_cmd)"
+    local asset_rel
+    while IFS= read -r asset_rel; do
+        [ -n "$asset_rel" ] || continue
+        if [ ! -f "$TARGET_DIR/$asset_rel" ]; then
+            print_error "Missing runtime asset: $asset_rel"
+            missing=1
+        fi
+    done < <(list_runtime_asset_paths)
+
+    if [ "$missing" -ne 0 ]; then
+        return 1
     fi
 
     if ! "$python_cmd" -m compileall -q "$TARGET_DIR" 2>/dev/null; then
@@ -312,11 +336,11 @@ do
     copy_and_count "$py"
 done
 
-print_info "Copying runtime asset files..."
+print_info "Copying runtime asset files (referenced from main.py)..."
 while IFS= read -r asset_rel; do
     [ -n "$asset_rel" ] || continue
     copy_and_count "$asset_rel"
-done < <(python3 "$SCRIPT_DIR/list_runtime_assets.py")
+done < <(list_runtime_asset_paths)
 
 print_info "Copying resource files..."
 for res in Prowser.icns document.icns background.png Info.plist; do
