@@ -84,8 +84,22 @@ if [ ! -f "$SOURCE_STAGING/main.py" ] || [ ! -f "$SOURCE_STAGING/setup.sh" ] || 
 fi
 
 # PyInstaller --min needs the same helper modules as a full bundle build.
-for req in pyInstallerBuild.sh pyinstaller_build_directives.py pyinstaller_optional_packages.py \
-    bundle_capabilities.py pyinstaller_hooks/hook-imagegen_plugins.py; do
+PYINSTALLER_MIN_BUILD_PATHS=(
+    pyInstallerBuild.sh
+    pyinstaller_dependencies.py
+    pyinstaller_build_directives.py
+    pyinstaller_optional_packages.py
+    pyinstaller_frozen_support.py
+    pyinstaller_imagegen_paths.py
+    pyinstaller_runtime_hook.py
+    bundle_capabilities.py
+    list_runtime_assets.py
+    requirements_min.txt
+    pyinstaller_hooks/hook-imagegen_plugins.py
+    pyinstaller_hooks/hook-transformers.py
+    pyinstaller_hooks/hook-requests.py
+)
+for req in "${PYINSTALLER_MIN_BUILD_PATHS[@]}"; do
     if [ ! -e "$SOURCE_STAGING/$req" ]; then
         echo "❌ Error: source folder missing $req (required for ./pyInstallerBuild.sh --min)"
         exit 1
