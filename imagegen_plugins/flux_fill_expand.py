@@ -12,7 +12,6 @@ from imagegen_plugins.image_gen_field_blocks import (
     guidance_slider_block,
     low_ram_bool,
     model_reset_default,
-    progressive_images_bool,
     seed_row_block,
     steps_quant_row_block,
 )
@@ -90,7 +89,6 @@ def flux_fill_expand_field_layout(
         ),
         bool_run_block(
             low_ram_bool(values, default=True),
-            progressive_images_bool(values),
         ),
     )
 

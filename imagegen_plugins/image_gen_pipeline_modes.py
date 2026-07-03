@@ -458,6 +458,10 @@ def finalize_run_values(pipeline_id: str, values: Dict[str, Any]) -> Dict[str, A
     """Dialog/saved settings aligned with what build_worker_payload will run."""
     out = dict(values)
     out["steps"] = resolve_steps_for_run(pipeline_id, out)
+    if get_pipeline(pipeline_id).supports_progressive_images:
+        from imagegen_plugins.image_gen_persistence import load_show_progressive_images
+
+        out["show_progressive_images"] = load_show_progressive_images()
     return out
 
 
@@ -478,7 +482,6 @@ def merge_defaults(
         "random_seed": True,
         "copies": 1,
         "low_ram": False,
-        "show_progressive_images": False,
         "mflux_lora": "none",
     }
     if mode.includes_output_dimensions:

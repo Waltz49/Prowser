@@ -242,15 +242,6 @@ def bool_run_block(*specs: FieldSpec) -> FieldGroup:
     return FieldGroup(layout="bool_run", children=specs)
 
 
-def progressive_images_bool(values: dict[str, Any]) -> FieldSpec:
-    return FieldSpec(
-        key="show_progressive_images",
-        label="Show intermediate images",
-        kind="bool",
-        default=bool(values.get("show_progressive_images", False)),
-    )
-
-
 def low_ram_bool(values: dict[str, Any], *, default: bool) -> FieldSpec:
     return FieldSpec(
         key="low_ram",

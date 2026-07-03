@@ -39,12 +39,6 @@ _FIELD_TOOLTIPS: dict[str, str] = {
         "May run slower."
     ),
     "overlap_percentage": "Overlap between expand tiles when blending (percent).",
-    "show_progressive_images": (
-        "View intermediate previews while the image\n"
-        "is being generated. Turn off to avoid interruptions.\n"
-        "Progress may still be seen in job status or File Information\n"
-        "pane for images used as source for the current generation."
-    ),
     "aspect_ratio_test": (
         "When you use several images,\n"
         "use copies to preserve the aspect ratio.\n"

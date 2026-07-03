@@ -31,10 +31,10 @@ from imagegen_plugins.image_gen_naming import (
 from imagegen_plugins.image_gen_persistence import (
     load_hold_job_queue,
     load_job_queue_records,
-    load_plugin_dialog_settings,
+    load_show_progressive_images,
     save_hold_job_queue,
     save_job_queue_records,
-    save_plugin_dialog_settings,
+    save_show_progressive_images,
     serialize_queued_job_record,
 )
 from imagegen_plugins.image_gen_pipeline_modes import get_pipeline
@@ -1376,30 +1376,23 @@ class ImageGenController(QObject):
             return None
         if not get_pipeline(plugin.pipeline_id).supports_progressive_images:
             return None
-        values = dict(self._pending_values)
-        if "show_progressive_images" not in values:
-            values.update(
-                load_plugin_dialog_settings(plugin.function, plugin.plugin_id)
-            )
-        return True, bool(values.get("show_progressive_images", False))
+        return True, load_show_progressive_images()
 
     def set_show_progressive_images(self, enabled: bool) -> None:
-        """Persist show_progressive_images for the active function dialog."""
+        """Persist global show_progressive_images for supported pipelines."""
         plugin = self._active_plugin
         if plugin is None:
             return
         if not get_pipeline(plugin.pipeline_id).supports_progressive_images:
             return
         enabled = bool(enabled)
+        save_show_progressive_images(enabled)
         self._pending_values["show_progressive_images"] = enabled
-        saved = load_plugin_dialog_settings(plugin.function, plugin.plugin_id)
-        saved["show_progressive_images"] = enabled
-        save_plugin_dialog_settings(plugin.function, plugin.plugin_id, saved)
         if enabled and self._tasks.is_running() and self._output_path:
             self._refresh_progressive_image(self._output_path)
 
     def _show_progressive_images_enabled(self) -> bool:
-        return bool(self._pending_values.get("show_progressive_images", False))
+        return load_show_progressive_images()
 
     def _active_generation_in_progress_or_cooldown(self) -> bool:
         return self._tasks.is_running() or (

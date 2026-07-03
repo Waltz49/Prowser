@@ -834,6 +834,7 @@ IMAGEGEN_DEFAULTS = {
             "create": "flux_schnell_mflux",
         },
         "last_function": "edit",
+        "show_progressive_images": False,
         "lora_catalog": {
             "by_model": {
                 "black-forest-labs/FLUX.1-schnell": {"enabled_ids": [], "hidden_ids": []},
@@ -865,7 +866,6 @@ IMAGEGEN_DEFAULTS = {
                 "seed": 0,
                 "random_seed": True,
                 "low_ram": False,
-                "show_progressive_images": False,
             },
             "z_image_turbo_sdnq_int8": {
                 "prompt": "",

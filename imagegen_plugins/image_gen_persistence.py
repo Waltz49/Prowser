@@ -68,9 +68,11 @@ _GLOBAL_DIALOG_PREF_KEYS = frozenset(
         "pass_image_to_ai_with_prompt",
         "flux_prompt_job_with_generate",
         "flux_prompt_ai_job",
+        "show_progressive_images",
     }
 )
 _PASS_IMAGE_TO_AI_KEY = "pass_image_to_ai_with_prompt"
+_SHOW_PROGRESSIVE_IMAGES_KEY = "show_progressive_images"
 _FLUX_PROMPT_JOB_WITH_GENERATE_KEY = "flux_prompt_job_with_generate"
 _FLUX_PROMPT_SYSTEM_PROMPT_TEXT_KEY = "flux_prompt_system_prompt_text"
 _FLUX_PROMPT_SYSTEM_PROMPT_VISIBLE_KEY = "flux_prompt_system_prompt_visible"
@@ -406,6 +408,52 @@ def save_pass_image_to_ai_with_prompt(enabled: bool) -> None:
     def mutate(imagegen: dict) -> None:
         imagegen[_PASS_IMAGE_TO_AI_KEY] = bool(enabled)
         _strip_legacy_pass_image_to_ai_from_imagegen(imagegen)
+
+    _mutate_imagegen_settings(mutate)
+
+
+def _legacy_show_progressive_images_from_imagegen(imagegen: dict) -> Optional[bool]:
+    dialogs = imagegen.get(_DIALOGS_KEY) or {}
+    for func_saved in dialogs.values():
+        if isinstance(func_saved, dict) and _SHOW_PROGRESSIVE_IMAGES_KEY in func_saved:
+            return bool(func_saved[_SHOW_PROGRESSIVE_IMAGES_KEY])
+    models = imagegen.get(_LEGACY_MODELS_KEY) or {}
+    for model_saved in models.values():
+        if isinstance(model_saved, dict) and _SHOW_PROGRESSIVE_IMAGES_KEY in model_saved:
+            return bool(model_saved[_SHOW_PROGRESSIVE_IMAGES_KEY])
+    return None
+
+
+def _strip_legacy_show_progressive_images_from_imagegen(imagegen: dict) -> None:
+    dialogs = imagegen.get(_DIALOGS_KEY)
+    if isinstance(dialogs, dict):
+        for func_saved in dialogs.values():
+            if isinstance(func_saved, dict):
+                func_saved.pop(_SHOW_PROGRESSIVE_IMAGES_KEY, None)
+    models = imagegen.get(_LEGACY_MODELS_KEY)
+    if isinstance(models, dict):
+        for model_saved in models.values():
+            if isinstance(model_saved, dict):
+                model_saved.pop(_SHOW_PROGRESSIVE_IMAGES_KEY, None)
+
+
+def load_show_progressive_images() -> bool:
+    """Whether intermediate previews are shown during supported image generation."""
+    settings = get_config().load_settings()
+    imagegen = settings.get("imagegen") or {}
+    if _SHOW_PROGRESSIVE_IMAGES_KEY in imagegen:
+        return bool(imagegen[_SHOW_PROGRESSIVE_IMAGES_KEY])
+    legacy = _legacy_show_progressive_images_from_imagegen(imagegen)
+    if legacy is not None:
+        save_show_progressive_images(legacy)
+        return legacy
+    return False
+
+
+def save_show_progressive_images(enabled: bool) -> None:
+    def mutate(imagegen: dict) -> None:
+        imagegen[_SHOW_PROGRESSIVE_IMAGES_KEY] = bool(enabled)
+        _strip_legacy_show_progressive_images_from_imagegen(imagegen)
 
     _mutate_imagegen_settings(mutate)
 

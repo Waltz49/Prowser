@@ -10,7 +10,6 @@ from imagegen_plugins.image_gen_field_blocks import (
     copies_slider_block,
     guidance_slider_block,
     low_ram_bool,
-    progressive_images_bool,
     seed_row_block,
     steps_quant_row_block,
 )
@@ -62,7 +61,6 @@ def flux_fill_infill_field_layout(
         copies_slider_block(values, model_defaults=model_defaults),
         bool_run_block(
             low_ram_bool(values, default=True),
-            progressive_images_bool(values),
         ),
     )
 
