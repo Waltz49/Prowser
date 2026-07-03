@@ -166,7 +166,7 @@ class ImageGenFluxPromptAi:
         configure_flux_prompt_toolbar_checkbox(self._pass_image_cb)
         owner._pass_image_to_ai_cb = self._pass_image_cb
 
-        self._job_cb = QCheckBox("Use in jobs")
+        self._job_cb = QCheckBox("Include AI Prompt Refinement in jobs")
         self._job_cb.setObjectName("flux_prompt_job_cb")
         self._job_cb.setToolTip(
             "When checked, Generate runs AI prompt refinement as the first stage "

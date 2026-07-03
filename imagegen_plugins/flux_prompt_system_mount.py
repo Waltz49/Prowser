@@ -82,7 +82,7 @@ def _remove_button_from_layout(layout: QVBoxLayout, btn: QPushButton) -> None:
 
 
 def sync_flux_prompt_system_toggle_location(owner: Any) -> None:
-    """System-prompt action column when open; image-prompt column when collapsed."""
+    """Keep the AI toggle in the image-prompt action column (copy / mic / AI)."""
     pane = getattr(owner, "_flux_system_prompt_pane", None)
     btn = getattr(owner, "_flux_system_prompt_toggle_btn", None)
     if pane is None or btn is None:
@@ -100,11 +100,6 @@ def sync_flux_prompt_system_toggle_location(owner: Any) -> None:
         layout = parent.layout()
         if isinstance(layout, QVBoxLayout):
             _remove_button_from_layout(layout, btn)
-
-    if pane.is_visible():
-        pane.mount_toggle_in_action_column(btn)
-        btn.show()
-        return
 
     if not _flux_lmstudio_ui_entry_allowed(pane):
         btn.hide()
@@ -202,7 +197,7 @@ def ensure_flux_prompt_system_pane(owner: Any) -> Optional[LmStudioInstructionsP
 
 
 def mount_flux_prompt_system_toggle(owner: Any) -> None:
-    """Place the system-prompt AI toggle in the system prompt action column."""
+    """Place the AI toggle beside the image prompt field."""
     pane = ensure_flux_prompt_system_pane(owner)
     if pane is None:
         return
@@ -241,12 +236,12 @@ def mount_flux_prompt_ai_toolbar(owner: Any, flux_ai: ImageGenFluxPromptAi) -> N
 
 
 def remount_flux_prompt_system_splitter(owner: Any) -> None:
-    """Place system prompt above Image Prompt label; mount toggle and AI toolbar."""
+    """Place system prompt below image prompt; mount toggle and AI toolbar."""
     pane = ensure_flux_prompt_system_pane(owner)
     panel: Optional[ImageGenFieldsPanel] = getattr(owner, "_fields_panel", None)
     if pane is None or panel is None or panel._prompt_group is None:
         return
-    panel.mount_system_prompt_above_image_prompt(pane.widget())
+    panel.mount_system_prompt_below_image_prompt(pane.widget())
     _load_flux_prompt_system_prompt_into_pane(pane)
     if not _flux_lmstudio_ui_entry_allowed(pane):
         _hide_flux_system_prompt_toggle(owner)

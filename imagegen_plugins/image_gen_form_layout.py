@@ -1590,8 +1590,8 @@ class ImageGenFieldsPanel:
             return None
         return self._prompt_group.findChild(QWidget, "imageGenPromptLabelRow")
 
-    def mount_system_prompt_above_image_prompt(self, system_prompt_widget: QWidget) -> None:
-        """System prompt block first, then Image Prompt label, then prompt editor."""
+    def mount_system_prompt_below_image_prompt(self, system_prompt_widget: QWidget) -> None:
+        """Image Prompt first (label, editor, import row), then system prompt block."""
         if self._prompt_group is None:
             return
         col = self._prompt_group.layout()
@@ -1604,14 +1604,21 @@ class ImageGenFieldsPanel:
         if prompt_label_row is None or prompt_editor is None:
             return
 
+        image_section: list[QWidget] = [prompt_label_row, prompt_editor]
+        if (
+            self._prompt_import_host is not None
+            and col.indexOf(self._prompt_import_host) >= 0
+        ):
+            image_section.append(self._prompt_import_host)
+
         system_prompt_widget.setParent(self._prompt_group)
-        for widget in (system_prompt_widget, prompt_label_row, prompt_editor):
+        for widget in image_section + [system_prompt_widget]:
             if col.indexOf(widget) >= 0:
                 col.removeWidget(widget)
 
-        col.insertWidget(0, system_prompt_widget, 0)
-        col.insertWidget(1, prompt_label_row, 0)
-        col.insertWidget(2, prompt_editor, 0)
+        for i, widget in enumerate(image_section):
+            col.insertWidget(i, widget, 0)
+        col.insertWidget(len(image_section), system_prompt_widget, 0)
 
     def mount_prompt_import_row(self, row: Optional[QWidget]) -> None:
         """Import buttons directly under the image prompt editor."""
