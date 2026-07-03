@@ -664,6 +664,12 @@ def handle_application_quit():
             if current_directory or current_file:
                 # Save macOS Space vs windowed display mode
                 macos_space_mode = getattr(main_window, 'isFullScreen', lambda: False)()
+                if not macos_space_mode:
+                    try:
+                        from utils import is_macos_space_mode
+                        macos_space_mode = is_macos_space_mode()
+                    except Exception:
+                        pass
                 config.save_restore_state(
                     current_file, current_directory, current_view_mode, macos_space_mode
                 )
@@ -1242,7 +1248,7 @@ def main():
             restore_state = args._restore_state
             last_view_mode = restore_state.get('last_view_mode', 'thumbnail')
             configuration['restore_view_mode'] = last_view_mode
-            
+            configuration['restore_last_file'] = restore_state.get('last_file')
             # Check if explicit flags override saved state
             if getattr(args, '_explicit_fullscreen_flag', False):
                 # --fullscreen explicitly passed: force OS fullscreen
@@ -1306,15 +1312,11 @@ def main():
             directory_from_command_line = getattr(args, '_directory_from_command_line', False)
             explicit_fullscreen = getattr(args, '_explicit_fullscreen_flag', False)
             
-            # Check if we're restoring from saved state by checking if args.no_fullscreen was set from saved state
-            # We know we're restoring if:
-            # 1. We don't have explicit flags (no --fullscreen or --no-fullscreen)
-            # 2. args.no_fullscreen exists and was set (it's set from saved state at lines 454-457)
-            # 3. directory_from_command_line is False (meaning it came from restoration, not command line)
-            is_restoring_state = (not explicit_fullscreen and 
-                                not getattr(args, '_explicit_no_fullscreen_flag', False) and
-                                not directory_from_command_line and
-                                hasattr(args, 'no_fullscreen'))
+            is_restoring_state = (
+                not directory_from_command_line
+                and hasattr(args, '_restore_state')
+                and args._restore_state
+            )
             
             if directory_from_command_line:
                 # Directory from command line: prevent browse view, ensure thumbnail mode
@@ -1422,24 +1424,31 @@ def main():
                         last_file = restore_state.get('last_file')
                         
                         # Wait a bit more for directory/images to load
-                        def restore_view_mode():
+                        def restore_view_mode(attempt: int = 0):
                             try:
+                                from browser_window.managers.directory_loader import (
+                                    resolve_restore_image_index,
+                                )
+
                                 # Ensure we have displayed_images before proceeding
                                 if not hasattr(window, 'displayed_images') or not window.displayed_images:
+                                    if attempt < 40:
+                                        QTimer.singleShot(50, lambda: restore_view_mode(attempt + 1))
                                     return
-                                
-                                # Find the image index if last_file exists and is in displayed_images
-                                image_index = None
-                                if last_file and os.path.exists(last_file):
-                                    try:
-                                        image_index = window.displayed_images.index(last_file)
-                                    except (ValueError, IndexError):
-                                        image_index = 0 if window.displayed_images else None
-                                else:
-                                    image_index = 0 if window.displayed_images else None
+
+                                if getattr(window, '_browse_startup_restore_done', False):
+                                    return
+
+                                image_index = resolve_restore_image_index(
+                                    window.displayed_images,
+                                    last_file=last_file,
+                                    target_file=getattr(window, 'target_file', None),
+                                    current_index=getattr(window, 'current_index', 0),
+                                    image_indices=getattr(window, 'image_indices', None),
+                                )
                                 
                                 # Don't try to set highlight/current_index if displayed_images is empty
-                                if image_index is None or not window.displayed_images or len(window.displayed_images) == 0:
+                                if not window.displayed_images:
                                     # On a new machine or empty directory, displayed_images is empty.
                                     # Avoid index errors. Optionally, may show a "No images found" popup here.
                                     return
@@ -1459,15 +1468,14 @@ def main():
                                     # This allows restoring browse view when restoring from saved state,
                                     # but prevents it when user explicitly opens a directory from command line
                                     if not is_directory_only or not directory_from_command_line:
-                                        if not args.no_fullscreen:
-                                            window.view_mode_manager.open_browse_view(image_index)
-                                        else:
-                                            if window.current_view_mode != 'thumbnail':
-                                                window.view_manager.close_browse_view()
-                                            window.highlight_index = image_index
-                                            window.current_index = image_index
-                                            window.current_image_path = window.displayed_images[image_index]
-                                            window.highlight_image()
+                                        target_path = window.displayed_images[image_index]
+                                        if (
+                                            window.current_view_mode == 'browse'
+                                            and window.current_image_path == target_path
+                                            and window.current_index == image_index
+                                        ):
+                                            return
+                                        window.view_mode_manager.open_browse_view(image_index)
                                     else:
                                         # Opening a directory from command line: stay in thumbnail mode
                                         if window.current_view_mode != 'thumbnail':
@@ -1481,16 +1489,23 @@ def main():
                                 else:  # thumbnail
                                     if window.current_view_mode != 'thumbnail':
                                         window.view_manager.close_browse_view()
+                                    target_path = window.displayed_images[image_index]
+                                    if (
+                                        window.highlight_index == image_index
+                                        and window.current_image_path == target_path
+                                    ):
+                                        return
                                     window.highlight_index = image_index
                                     window.current_index = image_index
-                                    window.current_image_path = window.displayed_images[image_index]
+                                    window.current_image_path = target_path
                                     window.highlight_image()
                             except Exception:
                                 import traceback
                                 traceback.print_exc()
                                 pass
                         
-                        QTimer.singleShot(300, restore_view_mode)
+                        if not getattr(window, '_browse_startup_restore_done', False):
+                            QTimer.singleShot(300, restore_view_mode)
                     elif is_directory_only:
                         # When opening a directory from command line (not restoration), ensure we stay in thumbnail mode
                         # But if it's from restoration, the restore logic above will handle it

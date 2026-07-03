@@ -53,6 +53,22 @@ def installed_plugins(
     return [p for p in plugins if plugin_model_is_installed(p)]
 
 
+def build_installed_plugin_maps(
+    plugins: List[ImageGenModelPlugin],
+) -> Tuple[List[ImageGenModelPlugin], Dict[str, ImageGenModelPlugin], Dict[str, bool]]:
+    """Single HF scan pass: installed list, id map, and per-plugin flags."""
+    installed: List[ImageGenModelPlugin] = []
+    by_id: Dict[str, ImageGenModelPlugin] = {}
+    flags: Dict[str, bool] = {}
+    for plugin in plugins:
+        ok = plugin_model_is_installed(plugin)
+        flags[plugin.plugin_id] = ok
+        if ok:
+            installed.append(plugin)
+            by_id[plugin.plugin_id] = plugin
+    return installed, by_id, flags
+
+
 def sync_model_combo_width(combo: QComboBox) -> None:
     """Keep the closed model combo wide enough for every plugin label."""
     if combo.count() < 1:
@@ -217,12 +233,16 @@ def build_plugin_model_combo(
     *,
     selected_plugin_id: Optional[str],
     parent: Optional[QWidget] = None,
+    installed: Optional[List[ImageGenModelPlugin]] = None,
+    plugins_by_id: Optional[Dict[str, ImageGenModelPlugin]] = None,
 ) -> Tuple[QComboBox, Dict[str, ImageGenModelPlugin]]:
     """Combo listing only plugins whose model weights are installed locally."""
     combo = QComboBox(parent)
     configure_model_combo(combo)
-    plugins_by_id: Dict[str, ImageGenModelPlugin] = {}
-    installed = installed_plugins(plugins)
+    if installed is None:
+        installed = installed_plugins(plugins)
+    if plugins_by_id is None:
+        plugins_by_id = {p.plugin_id: p for p in installed}
     if not installed:
         combo.addItem(NO_INSTALLED_MODELS_LABEL, _NO_INSTALLED_MODELS_PLUGIN_ID)
         combo.setEnabled(False)
@@ -255,13 +275,17 @@ def sync_image_gen_generate_enabled(
     host: QWidget,
     *,
     panel: Optional[Any] = None,
+    plugin_installed: Optional[bool] = None,
 ) -> None:
     """Enable Generate only when the panel has an installed model selected."""
     from PySide6.QtWidgets import QPushButton
 
     target = panel if panel is not None else host
     plugin = resolve_image_gen_panel_plugin(target)
-    enabled = plugin is not None and plugin_model_is_installed(plugin)
+    if plugin_installed is None:
+        enabled = plugin is not None and plugin_model_is_installed(plugin)
+    else:
+        enabled = plugin is not None and bool(plugin_installed)
     root = host
     while root.parentWidget() is not None:
         root = root.parentWidget()
@@ -294,12 +318,16 @@ def build_model_selector_row(
     *,
     selected_plugin_id: Optional[str],
     parent: Optional[QWidget] = None,
+    installed: Optional[List[ImageGenModelPlugin]] = None,
+    plugins_by_id: Optional[Dict[str, ImageGenModelPlugin]] = None,
 ) -> Tuple[QWidget, QComboBox, QLabel, Dict[str, ImageGenModelPlugin]]:
     """Block widget: model pulldown and optional model notes."""
     combo, plugins_by_id = build_plugin_model_combo(
         plugins,
         selected_plugin_id=selected_plugin_id,
         parent=parent,
+        installed=installed,
+        plugins_by_id=plugins_by_id,
     )
     comment_label = QLabel(parent)
     comment_label.setWordWrap(True)
@@ -325,20 +353,26 @@ def resolve_initial_plugin(
     *,
     function: str,
     initial_plugin_id: Optional[str] = None,
+    installed: Optional[List[ImageGenModelPlugin]] = None,
+    plugins_by_id: Optional[Dict[str, ImageGenModelPlugin]] = None,
 ) -> Optional[ImageGenModelPlugin]:
     """Pick the plugin to show first in a function dialog."""
     from imagegen_plugins.image_gen_active_model import load_active_plugin_id_for_function
 
-    usable = installed_plugins(plugins)
-    if not usable:
+    if installed is None:
+        installed = installed_plugins(plugins)
+    if not installed:
         return None
-    by_id = {p.plugin_id: p for p in usable}
+    if plugins_by_id is None:
+        by_id = {p.plugin_id: p for p in installed}
+    else:
+        by_id = plugins_by_id
     if initial_plugin_id and initial_plugin_id in by_id:
         return by_id[initial_plugin_id]
     saved_id = load_active_plugin_id_for_function(function, plugins)
     if saved_id and saved_id in by_id:
         return by_id[saved_id]
-    return usable[0]
+    return installed[0]
 
 
 def values_after_plugin_switch(

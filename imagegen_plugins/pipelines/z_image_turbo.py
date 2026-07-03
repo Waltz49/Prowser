@@ -33,19 +33,10 @@ def diffusers_is_installed() -> bool:
 
 
 def z_image_turbo_is_installed() -> bool:
-    """True when diffusers ZImagePipeline and SDNQ are available."""
-    if not diffusers_is_installed():
-        return False
-    from pyinstaller_frozen_support import sdnq_is_installed
+    """True when diffusers Z-Image pipeline module and SDNQ are available (no import)."""
+    from pyinstaller_frozen_support import sdnq_is_installed, z_image_pipeline_is_installed
 
-    if not sdnq_is_installed():
-        return False
-    try:
-        from diffusers import ZImagePipeline  # noqa: F401
-
-        return True
-    except ImportError:
-        return False
+    return z_image_pipeline_is_installed() and sdnq_is_installed()
 
 
 def align_z_image_dims(w: int, h: int, *, max_side: int = 1024) -> Tuple[int, int]:

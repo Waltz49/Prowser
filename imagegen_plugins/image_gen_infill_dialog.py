@@ -33,6 +33,9 @@ class ImageGenInfillDialog(ImageGenDialog):
         initial_values: Optional[Dict[str, Any]] = None,
         window_title: str = INFILL_IMAGE_DIALOG_TITLE,
         panel_mode: bool = False,
+        installed: Optional[List[ImageGenModelPlugin]] = None,
+        plugins_by_id: Optional[Dict[str, ImageGenModelPlugin]] = None,
+        installed_flags: Optional[Dict[str, bool]] = None,
     ):
         super().__init__(
             plugins,
@@ -44,6 +47,9 @@ class ImageGenInfillDialog(ImageGenDialog):
             window_title=window_title,
             persistent_panel=True,
             panel_mode=panel_mode,
+            installed=installed,
+            plugins_by_id=plugins_by_id,
+            installed_flags=installed_flags,
         )
 
     def _prepare_pixelmator_values(self) -> Optional[Dict[str, Any]]:

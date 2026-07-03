@@ -79,6 +79,17 @@ def _z_image_pipeline_bundled() -> bool:
     return False
 
 
+def _module_file_on_sys_path(module_name: str) -> bool:
+    """True when module_name.py exists on sys.path (no importlib / parent imports)."""
+    rel = module_name.replace(".", os.sep) + ".py"
+    for entry in sys.path:
+        if not entry:
+            continue
+        if os.path.isfile(os.path.join(entry, rel)):
+            return True
+    return False
+
+
 def _pipeline_module_on_disk(module_name: str) -> bool:
     """True if module_name resolves to a real file (dev / non-frozen)."""
     if getattr(sys, "frozen", False):
@@ -90,6 +101,8 @@ def _pipeline_module_on_disk(module_name: str) -> bool:
             if os.path.isfile(os.path.join(root, rel)):
                 return True
         return False
+    if module_name.startswith("diffusers."):
+        return _module_file_on_sys_path(module_name)
     try:
         spec = importlib.util.find_spec(module_name)
     except (ImportError, ModuleNotFoundError, AttributeError, ValueError):
@@ -107,20 +120,20 @@ def _pipeline_module_on_disk(module_name: str) -> bool:
 
 
 def _package_importable(module_name: str) -> bool:
-    """True when module_name is importable (find_spec + import for frozen bundles)."""
+    """True when module_name is present (find_spec; import only in frozen when needed)."""
     if _pipeline_module_on_disk(module_name):
         return True
-    if not getattr(sys, "frozen", False):
+    if getattr(sys, "frozen", False):
         try:
             importlib.import_module(module_name)
-            return True
         except ImportError:
             return False
+        return True
     try:
-        importlib.import_module(module_name)
-    except ImportError:
+        spec = importlib.util.find_spec(module_name)
+    except (ImportError, ModuleNotFoundError, AttributeError, ValueError):
         return False
-    return True
+    return spec is not None
 
 
 def mflux_is_installed() -> bool:
@@ -133,21 +146,43 @@ def sdnq_is_installed() -> bool:
     return _package_importable("sdnq")
 
 
-def diffusers_is_installed() -> bool:
-    """True when diffusers SANA Sprint backend is present (menu + worker)."""
+_SANA_PIPELINE_MODULE = "diffusers.pipelines.sana.pipeline_sana_sprint"
+_Z_IMAGE_PIPELINE_MODULE = "diffusers.pipelines.z_image.pipeline_z_image"
+_SD15_PIPELINE_MODULE = "diffusers.pipelines.stable_diffusion.pipeline_stable_diffusion"
+
+
+def sana_sprint_pipeline_is_installed() -> bool:
+    """True when the SANA Sprint pipeline module is present (no diffusers import)."""
     if getattr(sys, "frozen", False):
-        return _sana_sprint_pipeline_bundled() or _z_image_pipeline_bundled()
-    if _pipeline_module_on_disk("diffusers.pipelines.sana.pipeline_sana_sprint"):
-        return True
-    try:
-        importlib.import_module("diffusers")
-        from diffusers import SanaSprintPipeline  # noqa: F401
-        return True
-    except Exception as exc:
-        log_frozen_diagnostic(
-            f"[imagegen] diffusers/SANA availability check failed: {exc!r}"
-        )
+        return _sana_sprint_pipeline_bundled()
+    return _pipeline_module_on_disk(_SANA_PIPELINE_MODULE)
+
+
+def z_image_pipeline_is_installed() -> bool:
+    """True when the Z-Image pipeline module is present (no diffusers import)."""
+    if getattr(sys, "frozen", False):
+        return _z_image_pipeline_bundled()
+    return _pipeline_module_on_disk(_Z_IMAGE_PIPELINE_MODULE)
+
+
+def sd15_diffusers_pipeline_is_installed() -> bool:
+    """True when the SD 1.5 diffusers pipeline module is present (no import)."""
+    if getattr(sys, "frozen", False):
+        rel = _SD15_PIPELINE_MODULE.replace(".", os.sep) + ".py"
+        for root in frozen_bundle_roots():
+            if os.path.isfile(os.path.join(root, rel)):
+                return True
         return False
+    return _pipeline_module_on_disk(_SD15_PIPELINE_MODULE)
+
+
+def diffusers_is_installed() -> bool:
+    """True when a supported diffusers pipeline backend is present (menu + worker)."""
+    return (
+        sana_sprint_pipeline_is_installed()
+        or z_image_pipeline_is_installed()
+        or sd15_diffusers_pipeline_is_installed()
+    )
 
 
 def log_frozen_diagnostic(message: str) -> None:

@@ -3,11 +3,18 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from PySide6.QtCore import QEvent, QObject, QTimer, Qt
 from PySide6.QtGui import QGuiApplication
-from PySide6.QtWidgets import QDialog, QVBoxLayout, QWidget
+from PySide6.QtWidgets import (
+    QDialog,
+    QPlainTextEdit,
+    QPushButton,
+    QStackedWidget,
+    QVBoxLayout,
+    QWidget,
+)
 
 from imagegen_plugins import plugins_for_function
 from imagegen_plugins.image_gen_active_model import (
@@ -58,8 +65,10 @@ from imagegen_plugins.image_gen_source_nav import (
 )
 from imagegen_plugins.image_gen_model_selector import (
     available_plugins,
+    build_installed_plugin_maps,
     sync_image_gen_generate_enabled,
 )
+from imagegen_plugins.image_gen_registry import ImageGenModelPlugin
 from imagegen_plugins.image_gen_panel_shell import IMAGE_GEN_UNIFIED_SHELL_MARGINS
 from imagegen_plugins.image_gen_persistence import (
     load_close_dialog_on_generate,
@@ -142,6 +151,12 @@ class ImageGenUnifiedDialog(QDialog):
         self._dirty_recheck_timer.timeout.connect(self._recheck_cancel_visibility)
         self._replace_job_id = ""
         self._replace_queue_signal_connected = False
+        self._panel_load_token = 0
+        self._pending_panel_load: Optional[Dict[str, Any]] = None
+        self._function_plugins: Dict[str, List[ImageGenModelPlugin]] = {}
+        self._installed_context_by_function: Dict[
+            str, Tuple[List[ImageGenModelPlugin], Dict[str, ImageGenModelPlugin], Dict[str, bool]]
+        ] = {}
 
         apply_image_gen_dialog_shell(
             self,
@@ -158,6 +173,8 @@ class ImageGenUnifiedDialog(QDialog):
         apply_image_gen_preview_client_background(self._content_host)
         self._content_layout = QVBoxLayout(self._content_host)
         self._content_layout.setContentsMargins(0, 0, 0, 0)
+        self._panel_stack = QStackedWidget(self._content_host)
+        self._content_layout.addWidget(self._panel_stack)
         root.addWidget(self._content_host, 1)
 
         self._actions = create_image_gen_action_buttons(
@@ -191,6 +208,53 @@ class ImageGenUnifiedDialog(QDialog):
         install_image_gen_footer_keyboard_shortcuts(self)
         self.finished.connect(self._save_geometry)
         self.finished.connect(self._disconnect_replace_queue_signal)
+
+    def _cancel_pending_panel_load(self) -> None:
+        self._panel_load_token += 1
+        self._pending_panel_load = None
+
+    def set_function_plugins(
+        self,
+        function: str,
+        plugins: List[ImageGenModelPlugin],
+    ) -> None:
+        self._function_plugins[function] = list(plugins)
+        installed, by_id, flags = build_installed_plugin_maps(plugins)
+        self._installed_context_by_function[function] = (installed, by_id, flags)
+
+    def finish_panel_load(
+        self,
+        function: str,
+        *,
+        initial_prompt: Optional[str] = None,
+        auto_import_available: bool = False,
+        seed_state: Optional[FunctionSessionState] = None,
+        replace_job_id: Optional[str] = None,
+    ) -> bool:
+        """Build the first function panel before the shell is shown."""
+        if self._dismissing:
+            return False
+        self._panel_load_token += 1
+        token = self._panel_load_token
+        try:
+            if not self.switch_to_function(
+                function,
+                initial_prompt=initial_prompt,
+                auto_import_available=auto_import_available,
+                seed_state=seed_state,
+            ):
+                if token == self._panel_load_token:
+                    self._cancel_pending_panel_load()
+                    self._dismiss_discarding_current()
+                return False
+            self.set_queue_replace_context(replace_job_id)
+            self._update_chrome()
+            return True
+        finally:
+            from imagegen_plugins.image_gen_menu import end_imagegen_dialog_build
+
+            if token == self._panel_load_token:
+                end_imagegen_dialog_build(self._main_window)
 
     def set_queue_replace_context(self, job_id: Optional[str] = None) -> None:
         self._replace_job_id = (job_id or "").strip()
@@ -252,26 +316,70 @@ class ImageGenUnifiedDialog(QDialog):
         panel = self._panels[function]
         state = self._session.get(function)
         restore = getattr(panel, "restore_state", None)
-        if restore is not None:
-            prompt = initial_prompt if state is None else None
-            restore(state, initial_prompt=prompt)
 
-        self._swap_panel(panel)
-        self._function = function
-        self._visited.add(function)
-        self._baselines[function] = panel.snapshot_state()
-        self._reset_cancel_dirty_fast_path()
+        paint_updates = self.isVisible()
+        if paint_updates:
+            self.setUpdatesEnabled(False)
+        try:
+            if restore is not None:
+                prompt = initial_prompt if state is None else None
+                restore(state, initial_prompt=prompt)
 
-        from imagegen_plugins.image_gen_menu import remember_imagegen_last_function
+            self._swap_panel(panel)
+            self._function = function
+            self._visited.add(function)
+            self._baselines[function] = panel.snapshot_state()
+            self._reset_cancel_dirty_fast_path()
 
-        remember_imagegen_last_function(self._main_window, function)
+            from imagegen_plugins.image_gen_menu import remember_imagegen_last_function
 
-        self._update_chrome()
-        if function == FUNCTION_CREATE and hasattr(panel, "_repopulate_side_buttons"):
-            panel._repopulate_side_buttons()
-        if auto_import_available and hasattr(panel, "_on_import_available"):
-            QTimer.singleShot(0, panel._on_import_available)
+            remember_imagegen_last_function(self._main_window, function)
+
+            self._update_chrome()
+            if auto_import_available and hasattr(panel, "_on_import_available"):
+                panel._on_import_available()
+            self._activate_panel_layouts()
+            self._attach_dialog_event_filters(panel)
+        finally:
+            if paint_updates:
+                self.setUpdatesEnabled(True)
+        self._schedule_retain_panel_keyboard_focus()
         return True
+
+    def _schedule_retain_panel_keyboard_focus(self) -> None:
+        QTimer.singleShot(0, self._retain_panel_keyboard_focus)
+
+    def _retain_panel_keyboard_focus(self) -> None:
+        """Swapping stacked panels hides the old focus widget; keep keys in the shell."""
+        from utils import raise_dialog_without_space_hop
+
+        raise_dialog_without_space_hop(self)
+        panel = self._current_panel
+        if panel is not None:
+            getter = getattr(panel, "_prompt_edit_widget", None)
+            if callable(getter):
+                edit = getter()
+                if (
+                    isinstance(edit, QPlainTextEdit)
+                    and edit.isVisible()
+                    and edit.isEnabled()
+                ):
+                    edit.setFocus(Qt.FocusReason.OtherFocusReason)
+                    return
+        gen = self.findChild(QPushButton, "imageGenGenerateButton")
+        if gen is not None and gen.isVisible() and gen.isEnabled():
+            gen.setFocus(Qt.FocusReason.OtherFocusReason)
+
+    def _activate_panel_layouts(self) -> None:
+        """Size preview splitters before the shell is shown or after a mode switch."""
+        from imagegen_plugins.image_gen_dialog import ImageGenPreviewSplitter
+
+        layout = self.layout()
+        if layout is not None:
+            layout.activate()
+        for panel in self._panels.values():
+            for splitter in panel.findChildren(ImageGenPreviewSplitter):
+                splitter._ensure_initial_sizes()
 
     def _save_current_to_session(self) -> None:
         if self._current_panel is None:
@@ -282,14 +390,9 @@ class ImageGenUnifiedDialog(QDialog):
         self._session[self._function] = snapshot()
 
     def _swap_panel(self, panel: QWidget) -> None:
-        while self._content_layout.count():
-            item = self._content_layout.takeAt(0)
-            widget = item.widget()
-            if widget is not None:
-                widget.setParent(None)
-                widget.hide()
-        self._content_layout.addWidget(panel, 1)
-        panel.show()
+        if self._panel_stack.indexOf(panel) < 0:
+            self._panel_stack.addWidget(panel)
+        self._panel_stack.setCurrentWidget(panel)
         self._current_panel = panel
         if self._state_changed_panel is not panel:
             if self._state_changed_panel is not None:
@@ -304,22 +407,47 @@ class ImageGenUnifiedDialog(QDialog):
                 changed.connect(self._on_panel_state_changed)
             self._state_changed_panel = panel
         nav = getattr(panel, "_source_nav", None)
-        install_source_nav_keyboard_shortcuts(self, nav)
-        refresh_source_nav_keyboard_shortcuts(self)
-        refresh_source_nav_keyboard_shortcuts(panel)
-        refresh_image_gen_footer_keyboard_shortcuts(self)
-        refresh_image_gen_footer_keyboard_shortcuts(panel)
-        self._attach_dismiss_filter()
+        filt = getattr(self, "_image_gen_source_nav_key_filter", None)
+        if filt is not None:
+            filt._source_nav = nav
+
+    def _attach_dialog_event_filters(self, panel: QWidget | None = None) -> None:
+        """One QWidget-tree walk for dismiss, footer, and source-nav filters."""
+        if self._dismissing:
+            return
+        dismiss = self._dismiss_filter
+        footer_filt = getattr(self, "_image_gen_footer_key_filter", None)
+        nav_filt = getattr(self, "_image_gen_source_nav_key_filter", None)
+        footer_tracked: Set[int] = set(
+            getattr(self, "_image_gen_footer_key_filter_widgets", None) or set()
+        )
+        nav_tracked: Set[int] = set(
+            getattr(self, "_image_gen_source_nav_key_filter_widgets", None) or set()
+        )
+        hosts: list[QWidget] = [self]
+        if panel is not None:
+            hosts.append(panel)
+        seen: Set[int] = set()
+        for host in hosts:
+            for widget in (host, *host.findChildren(QWidget)):
+                wid = id(widget)
+                if wid in seen:
+                    continue
+                seen.add(wid)
+                if dismiss is not None and wid not in self._dismiss_filter_widgets:
+                    widget.installEventFilter(dismiss)
+                    self._dismiss_filter_widgets.add(wid)
+                if footer_filt is not None and wid not in footer_tracked:
+                    widget.installEventFilter(footer_filt)
+                    footer_tracked.add(wid)
+                if nav_filt is not None and wid not in nav_tracked:
+                    widget.installEventFilter(nav_filt)
+                    nav_tracked.add(wid)
+        setattr(self, "_image_gen_footer_key_filter_widgets", footer_tracked)
+        setattr(self, "_image_gen_source_nav_key_filter_widgets", nav_tracked)
 
     def _attach_dismiss_filter(self) -> None:
-        if self._dismiss_filter is None:
-            return
-        for widget in (self, *self.findChildren(QWidget)):
-            wid = id(widget)
-            if wid in self._dismiss_filter_widgets:
-                continue
-            widget.installEventFilter(self._dismiss_filter)
-            self._dismiss_filter_widgets.add(wid)
+        self._attach_dialog_event_filters(self._current_panel)
 
     def _on_panel_state_changed(self) -> None:
         # Defer full snapshot/compare so control repaints are not blocked on the
@@ -351,6 +479,12 @@ class ImageGenUnifiedDialog(QDialog):
     def _update_cancel_visibility(self) -> None:
         set_image_gen_cancel_visible(self._actions, self._is_dirty())
 
+    def _plugin_installed_for_chrome(self) -> Optional[bool]:
+        panel = self._current_panel
+        if panel is not None and hasattr(panel, "_selected_plugin_installed"):
+            return bool(panel._selected_plugin_installed())
+        return None
+
     def _update_chrome(self) -> None:
         self.setWindowTitle(
             _FUNCTION_TITLES.get(self._function, DEFAULT_IMAGE_GEN_DIALOG_TITLE)
@@ -359,7 +493,11 @@ class ImageGenUnifiedDialog(QDialog):
             self._footer, self, self._function
         )
         self._update_cancel_visibility()
-        sync_image_gen_generate_enabled(self, panel=self._current_panel)
+        sync_image_gen_generate_enabled(
+            self,
+            panel=self._current_panel,
+            plugin_installed=self._plugin_installed_for_chrome(),
+        )
 
     def _ensure_panel(
         self,
@@ -372,45 +510,63 @@ class ImageGenUnifiedDialog(QDialog):
         if not self._validate_function(function):
             return False
 
-        registered = plugins_for_function(function)
-        if not available_plugins(registered):
+        registered = self._function_plugins.get(function)
+        if not registered:
+            registered = plugins_for_function(function)
+        if not registered:
             return False
-        plugins = registered
+        ctx = self._installed_context_by_function.get(function)
+        if ctx is None:
+            if not available_plugins(registered):
+                return False
+            installed, by_id, flags = build_installed_plugin_maps(registered)
+        else:
+            installed, by_id, flags = ctx
+            if not installed:
+                return False
 
+        panel_kw = dict(
+            installed=installed,
+            plugins_by_id=by_id,
+            installed_flags=flags,
+        )
         panel: QWidget
         if function == FUNCTION_CREATE:
             panel = ImageGenDialog(
-                plugins,
+                registered,
                 function,
                 self._content_host,
                 initial_prompt=initial_prompt,
                 panel_mode=True,
+                **panel_kw,
             )
         elif function == FUNCTION_EDIT:
             source_paths = active_image_paths_for_edit(self._main_window)
             panel = ImageGenEditDialog(
-                plugins,
+                registered,
                 function,
                 source_paths[0],
                 self._content_host,
                 source_paths=source_paths,
                 initial_prompt=initial_prompt,
                 panel_mode=True,
+                **panel_kw,
             )
         elif function == FUNCTION_EXPAND:
             source_path = active_image_path_for_expand(self._main_window)
             panel = ImageGenExpandDialog(
-                plugins,
+                registered,
                 function,
                 source_path,
                 self._content_host,
                 initial_prompt=initial_prompt,
                 panel_mode=True,
+                **panel_kw,
             )
         elif function == FUNCTION_INFILL_PAINT:
             source_path = active_image_path_for_infill(self._main_window)
             panel = ImageGenInfillPaintDialog(
-                plugins,
+                registered,
                 source_path,
                 self._controller,
                 self._main_window,
@@ -420,17 +576,19 @@ class ImageGenUnifiedDialog(QDialog):
             )
         elif function == FUNCTION_INFILL:
             panel = ImageGenInfillDialog(
-                plugins,
+                registered,
                 function,
                 self._content_host,
                 initial_prompt=initial_prompt,
                 panel_mode=True,
+                **panel_kw,
             )
         else:
             return False
 
         self._panels[function] = panel
-        panel.hide()
+        if self._panel_stack.indexOf(panel) < 0:
+            self._panel_stack.addWidget(panel)
         return True
 
     def _validate_function(self, function: str) -> bool:
@@ -579,6 +737,10 @@ class ImageGenUnifiedDialog(QDialog):
         if self._dismissing:
             return
         self._dismissing = True
+        self._cancel_pending_panel_load()
+        from imagegen_plugins.image_gen_menu import end_imagegen_dialog_build
+
+        end_imagegen_dialog_build(self._main_window)
         cancel_dialog_flux_prompt_refine(self)
         current = self._function
         was_dirty = self._is_dirty()
@@ -635,13 +797,14 @@ class ImageGenUnifiedDialog(QDialog):
         restore_dialog_geometry_before_first_show(
             self, load_imagegen_dialog_geometry_hex(), self.parent()
         )
+        if not self._geometry_was_restored:
+            self._apply_initial_geometry()
+        self._activate_panel_layouts()
         super().show()
         self._attach_dismiss_filter()
 
     def showEvent(self, event):
         super().showEvent(event)
-        if not self._geometry_was_restored:
-            QTimer.singleShot(0, self._apply_initial_geometry)
         QTimer.singleShot(0, self._raise_and_activate)
 
     def _apply_initial_geometry(self) -> None:
@@ -655,8 +818,11 @@ class ImageGenUnifiedDialog(QDialog):
         _center_styled_dialog_on_screen(self, self.parent())
 
     def _raise_and_activate(self) -> None:
-        from utils import raise_dialog_without_space_hop
+        from utils import raise_dialog_without_space_hop, should_preserve_window_focus
 
+        if should_preserve_window_focus(self._main_window):
+            self.raise_()
+            return
         raise_dialog_without_space_hop(self)
 
     def resizeEvent(self, event):

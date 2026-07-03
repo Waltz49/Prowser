@@ -612,6 +612,7 @@ class SidebarJobsWidget(QWidget):
         self._active_job_hovered_anchor: str | None = None
         self._queue_compact = False
         self._signal_connected = False
+        self._live_refresh_paused = False
         self._setup_ui()
         self._connect_controller()
 
@@ -719,6 +720,23 @@ class SidebarJobsWidget(QWidget):
         self._live_timer = timer
         self._update_header_status()
 
+    def pause_live_refresh(self) -> None:
+        """Pause periodic refresh while image-gen dialog builds on the GUI thread."""
+        self._live_refresh_paused = True
+        if self._live_timer is not None:
+            self._live_timer.stop()
+
+    def resume_live_refresh(self) -> None:
+        self._live_refresh_paused = False
+        if self.isVisible() and self._live_timer is not None:
+            self._live_timer.start()
+
+    def _imagegen_dialog_building_active(self) -> bool:
+        if getattr(self, "_live_refresh_paused", False):
+            return True
+        main_window = self.main_window
+        return bool(getattr(main_window, "_imagegen_dialog_building", False))
+
     def _update_header_status(self) -> None:
         _update_jobs_header_status(self.main_window, self._controller)
 
@@ -822,6 +840,8 @@ class SidebarJobsWidget(QWidget):
         return self._controller.is_running()
 
     def _refresh_active_job_strip(self, *, force: bool = False) -> None:
+        if not force and self._imagegen_dialog_building_active():
+            return
         if not hasattr(self, "_active_job_strip"):
             return
         visible = self.isVisible() and self._should_show_active_job_strip()
@@ -924,6 +944,8 @@ class SidebarJobsWidget(QWidget):
         return QSize(0, h)
 
     def _refresh_active_row(self, *, force: bool = False) -> None:
+        if not force and self._imagegen_dialog_building_active():
+            return
         if not self.isVisible() or not self._job_cards:
             return
         if not force and not self._controller.task_status_display_needs_refresh():

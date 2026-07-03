@@ -25,6 +25,8 @@ class ThumbnailDisplayManager:
 
     def _on_displayed_images_changed(self, images: list):
         """Handle DISPLAYED_IMAGES_CHANGED event - update thumbnail canvas"""
+        if getattr(self.main_window, '_batch_directory_load', False):
+            return
         self.generate_thumbnails(force_refresh=False)
     
     def generate_thumbnails(self, force_refresh=False):

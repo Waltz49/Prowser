@@ -62,9 +62,8 @@ from imagegen_plugins.image_gen_parameter_panel import (
 from imagegen_plugins.imagegen_flux_prompt_ai import ImageGenFluxPromptAi
 from imagegen_plugins.flux_prompt_system_mount import (
     flux_prompt_system_override_for,
-    remount_flux_prompt_system_splitter,
+    schedule_deferred_flux_prompt_extras,
 )
-from imagegen_plugins.lmstudio_caption import is_lmstudio_services_available
 from imagegen_plugins.image_gen_model_selector import (
     apply_mflux_lora_collection_guard,
     build_model_selector_row,
@@ -131,6 +130,9 @@ class ImageGenExpandDialog(ImageGenDimensionAspectMixin, QDialog):
         initial_values: Optional[Dict[str, Any]] = None,
         window_title: str = EXPAND_IMAGE_DIALOG_TITLE,
         panel_mode: bool = False,
+        installed: Optional[List[ImageGenModelPlugin]] = None,
+        plugins_by_id: Optional[Dict[str, ImageGenModelPlugin]] = None,
+        installed_flags: Optional[Dict[str, bool]] = None,
     ):
         super().__init__(parent)
         self._panel_mode = panel_mode
@@ -151,11 +153,17 @@ class ImageGenExpandDialog(ImageGenDimensionAspectMixin, QDialog):
         self._pass_image_to_ai_cb: Optional[QCheckBox] = None
         self._side_btn_host: Optional[QWidget] = None
         self._side_btn_col: Optional[QVBoxLayout] = None
+        self._installed_list = installed
+        self._prebuilt_plugins_by_id = plugins_by_id
+        self._installed_flags: Dict[str, bool] = dict(installed_flags or {})
+        self._defer_flux_prompt_extras = not self._panel_mode
 
         initial = resolve_initial_plugin(
             self._plugins,
             function=function,
             initial_plugin_id=initial_plugin_id,
+            installed=installed,
+            plugins_by_id=plugins_by_id,
         )
         self.plugin = initial
         if initial is not None:
@@ -174,6 +182,8 @@ class ImageGenExpandDialog(ImageGenDimensionAspectMixin, QDialog):
                 self, window_title=window_title, min_width=880, min_height=520
             )
         self._build_ui()
+        if getattr(self, "_defer_flux_prompt_extras", False):
+            schedule_deferred_flux_prompt_extras(self)
         if initial_prompt:
             self.set_prompt_text(initial_prompt)
         self._apply_initial_placement(initial_values)
@@ -209,6 +219,9 @@ class ImageGenExpandDialog(ImageGenDimensionAspectMixin, QDialog):
             pass
 
     def show(self):
+        if self._panel_mode:
+            super().show()
+            return
         from utils import restore_dialog_geometry_before_first_show
 
         restore_dialog_geometry_before_first_show(
@@ -218,6 +231,8 @@ class ImageGenExpandDialog(ImageGenDimensionAspectMixin, QDialog):
 
     def showEvent(self, event):
         super().showEvent(event)
+        if self._panel_mode:
+            return
         if not self._geometry_was_restored:
             QTimer.singleShot(0, lambda: _center_styled_dialog_on_screen(self, self.parent()))
         QTimer.singleShot(0, self._raise_and_activate)
@@ -296,6 +311,8 @@ class ImageGenExpandDialog(ImageGenDimensionAspectMixin, QDialog):
                 self.plugin.plugin_id if self.plugin is not None else None
             ),
             parent=self._fields_panel.widget,
+            installed=self._installed_list,
+            plugins_by_id=self._prebuilt_plugins_by_id,
         )
         self._model_combo.currentIndexChanged.connect(self._on_model_combo_changed)
         apply_model_combo_tooltip(self._model_combo)
@@ -393,7 +410,12 @@ class ImageGenExpandDialog(ImageGenDimensionAspectMixin, QDialog):
                 build_options=self._param_panel._build_options,
                 optional=False,
             )
-        remount_flux_prompt_system_splitter(self)
+        if not getattr(self, "_defer_flux_prompt_extras", False):
+            from imagegen_plugins.flux_prompt_system_mount import (
+                remount_flux_prompt_system_splitter,
+            )
+
+            remount_flux_prompt_system_splitter(self)
         self._repopulate_side_buttons()
         self._connect_canvas_dimension_fields()
         self._connect_dim_aspect_lock()

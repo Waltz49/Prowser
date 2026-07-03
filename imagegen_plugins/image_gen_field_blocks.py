@@ -198,7 +198,7 @@ def steps_quant_row_block(
 def copies_slider_block(
     values: dict[str, Any],
     *,
-    copies_max: int = 200,
+    copies_max: int = 30,
     model_defaults: Optional[dict[str, Any]] = None,
 ) -> FieldSpec:
     reset_default = int(model_reset_default(model_defaults, "copies", 1))
@@ -217,7 +217,7 @@ def copies_slider_block(
 def klein_edit_copies_group(
     values: dict[str, Any],
     *,
-    copies_max: int = 200,
+    copies_max: int = 30,
     model_defaults: Optional[dict[str, Any]] = None,
 ) -> FieldGroup:
     """Copies slider with Refinement checkbox (edit-only)."""

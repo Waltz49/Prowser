@@ -27,6 +27,26 @@ _FLUX2_KLEIN_WEIGHT_SUBDIRS = ("vae", "transformer", "text_encoder")
 _Z_IMAGE_WEIGHT_SUBDIRS = ("vae", "transformer", "text_encoder")
 _SD15_WEIGHT_SUBDIRS = ("unet", "text_encoder")
 
+_model_local_cache: dict[tuple[str, str], bool] = {}
+
+
+def invalidate_model_local_cache(
+    pipeline_id: str | None = None,
+    hf_model_id: str | None = None,
+) -> None:
+    """Drop cached HF local checks (whole cache or one model)."""
+    if pipeline_id is None and hf_model_id is None:
+        _model_local_cache.clear()
+        return
+    drop = [
+        key
+        for key in _model_local_cache
+        if (pipeline_id is None or key[0] == pipeline_id)
+        and (hf_model_id is None or key[1] == hf_model_id)
+    ]
+    for key in drop:
+        _model_local_cache.pop(key, None)
+
 
 def model_display_name(pipeline_id: str, hf_model_id: str) -> str:
     """User-facing model name for download confirmation text."""
@@ -69,30 +89,40 @@ def model_display_name(pipeline_id: str, hf_model_id: str) -> str:
     return hf_model_id or "model"
 
 
-def pipeline_model_is_local(pipeline_id: str, hf_model_id: str) -> bool:
+def pipeline_model_is_local(
+    pipeline_id: str, hf_model_id: str, *, use_cache: bool = True
+) -> bool:
+    key = (pipeline_id, hf_model_id)
+    if use_cache and key in _model_local_cache:
+        return _model_local_cache[key]
     if pipeline_id == "flux_schnell_mflux_play":
-        return _mflux_flux_weights_are_local(hf_model_id)
-    if pipeline_id in ("mflux_fill_expand", "mflux_fill_infill"):
-        return _hf_repo_snapshot_is_complete(hf_model_id)
-    if pipeline_id in (
+        result = _mflux_flux_weights_are_local(hf_model_id)
+    elif pipeline_id in ("mflux_fill_expand", "mflux_fill_infill"):
+        result = _hf_repo_snapshot_is_complete(hf_model_id)
+    elif pipeline_id in (
         "mflux_flux2_klein_edit",
         "mflux_flux2_klein_create",
         "mflux_flux2_klein_expand",
     ):
-        return _hf_repo_snapshot_is_complete(hf_model_id, _FLUX2_KLEIN_WEIGHT_SUBDIRS)
-    if pipeline_id == "sana_sprint_600m":
-        return _hf_repo_snapshot_has_weights(hf_model_id)
-    if pipeline_id == "z_image_turbo_sdnq":
-        return _hf_repo_snapshot_is_complete(hf_model_id, _Z_IMAGE_WEIGHT_SUBDIRS)
-    if pipeline_id == "sd15_diffusers":
+        result = _hf_repo_snapshot_is_complete(hf_model_id, _FLUX2_KLEIN_WEIGHT_SUBDIRS)
+    elif pipeline_id == "sana_sprint_600m":
+        result = _hf_repo_snapshot_has_weights(hf_model_id)
+    elif pipeline_id == "z_image_turbo_sdnq":
+        result = _hf_repo_snapshot_is_complete(hf_model_id, _Z_IMAGE_WEIGHT_SUBDIRS)
+    elif pipeline_id == "sd15_diffusers":
         from imagegen_plugins.hf_model_ids import SD15_DEFAULT_VAE
 
         if not _hf_repo_snapshot_is_complete(hf_model_id, _SD15_WEIGHT_SUBDIRS):
-            return False
-        if _hf_repo_snapshot_is_complete(hf_model_id, ("vae",)):
-            return True
-        return _hf_repo_snapshot_has_weights(SD15_DEFAULT_VAE)
-    return True
+            result = False
+        elif _hf_repo_snapshot_is_complete(hf_model_id, ("vae",)):
+            result = True
+        else:
+            result = _hf_repo_snapshot_has_weights(SD15_DEFAULT_VAE)
+    else:
+        result = True
+    if use_cache:
+        _model_local_cache[key] = result
+    return result
 
 
 def confirm_model_download_if_needed(
@@ -145,6 +175,7 @@ def confirm_model_download_if_needed(
                 str(e)[:4000],
             )
             return False
+        invalidate_model_local_cache(plugin.pipeline_id, plugin.hf_model_id)
         return pipeline_model_is_local(plugin.pipeline_id, plugin.hf_model_id)
     return True
 
@@ -172,6 +203,7 @@ def ensure_hf_repo_downloaded(
         if app is not None:
             app.restoreOverrideCursor()
 
+    invalidate_model_local_cache(pipeline_id, repo_id)
     if not pipeline_model_is_local(pipeline_id, repo_id):
         raise RuntimeError(
             f"Download finished but {repo_id} still appears incomplete. "

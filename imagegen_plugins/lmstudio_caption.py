@@ -194,8 +194,8 @@ def unload_all_lmstudio_models() -> None:
         pass
 
 
-def is_lmstudio_services_available() -> bool:
-    """Return True if LMStudio SDK is installed, server is reachable, and a model is loaded."""
+def is_lmstudio_sdk_installed() -> bool:
+    """True when the LM Studio Python SDK is importable and UI is enabled."""
     try:
         from bundle_capabilities import lmstudio_ui_enabled
 
@@ -204,9 +204,18 @@ def is_lmstudio_services_available() -> bool:
     except ImportError:
         pass
     try:
-        import lmstudio as lms
+        import lmstudio as lms  # noqa: F401
     except ImportError:
         return False
+    return True
+
+
+def is_lmstudio_services_available() -> bool:
+    """Return True if LMStudio SDK is installed, server is reachable, and a model is loaded."""
+    if not is_lmstudio_sdk_installed():
+        return False
+    import lmstudio as lms
+
     cap_settings = _get_caption_settings()
     lms_host = cap_settings['lms_host']
     try:

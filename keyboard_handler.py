@@ -22,7 +22,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 # Third-party imports
 from PySide6.QtCore import QEvent, QObject, QSize, Qt, QTimer
 from PySide6.QtGui import QKeyEvent, QKeySequence
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QDialog
 
 # Local imports
 from config import get_config
@@ -3063,6 +3063,9 @@ class KeyboardHandlerManager:
         if context_data is None:
             context_data = {}
 
+        if self._handle_imagegen_unified_cmd_arrow(event):
+            return True
+
         # Ensure Cmd+Z (ControlModifier + Z on macOS) passes through to menu action
         # Don't intercept undo shortcut
         if event.key() == Qt.Key_Z and (event.modifiers() & Qt.ControlModifier):
@@ -3094,6 +3097,67 @@ class KeyboardHandlerManager:
                 return True
             return False
         return False
+
+    def _imagegen_unified_dialog_visible(self) -> bool:
+        dlg = getattr(self.main_window, "_imagegen_function_dialog", None)
+        if dlg is None or not dlg.isVisible():
+            return False
+        from imagegen_plugins.image_gen_unified_dialog import ImageGenUnifiedDialog
+
+        return isinstance(dlg, ImageGenUnifiedDialog)
+
+    def _imagegen_dialog_or_tree_owns_focus(self, imagegen_dlg: QDialog) -> bool:
+        """True when Cmd+arrows should not be handled at the main-window level."""
+        app = QApplication.instance()
+        if app is None:
+            return False
+        focus = app.focusWidget()
+        if focus is None:
+            return False
+        if focus is imagegen_dlg or imagegen_dlg.isAncestorOf(focus):
+            return True
+        mw = self.main_window
+        if focus is getattr(mw, 'tree_container', None):
+            return True
+        ft = getattr(getattr(mw, 'file_tree_handler', None), 'file_tree', None)
+        if ft is not None and (focus is ft or ft.isAncestorOf(focus)):
+            return True
+        w = focus
+        while w is not None:
+            if isinstance(w, QDialog) and w.isVisible() and w is not imagegen_dlg:
+                return True
+            w = w.parentWidget()
+        return False
+
+    def _handle_imagegen_unified_cmd_arrow(self, event: QKeyEvent) -> bool:
+        """Route Cmd+Left/Right to the unified dialog when focus leaks to the main window."""
+        if not self._imagegen_unified_dialog_visible():
+            return False
+        if event.key() not in (Qt.Key_Left, Qt.Key_Right, Qt.Key_Up, Qt.Key_Down):
+            return False
+        event_mods = event.modifiers() & ~Qt.KeypadModifier
+        cmd_pressed = bool(event_mods & (Qt.ControlModifier | Qt.MetaModifier))
+        if not cmd_pressed:
+            return False
+        other_mods = event_mods & ~(
+            Qt.ControlModifier | Qt.MetaModifier | Qt.ShiftModifier | Qt.AltModifier
+        )
+        if other_mods not in (Qt.NoModifier, 0):
+            return False
+        dlg = getattr(self.main_window, "_imagegen_function_dialog", None)
+        if dlg is None:
+            return False
+        if self._imagegen_dialog_or_tree_owns_focus(dlg):
+            return False
+        if event.key() in (Qt.Key_Left, Qt.Key_Right):
+            from imagegen_plugins.image_gen_function_switcher import (
+                cycle_imagegen_function_dialog,
+            )
+
+            delta = -1 if event.key() == Qt.Key_Left else 1
+            cycle_imagegen_function_dialog(dlg, delta)
+            return True
+        return True
 
     def _determine_current_mode(self) -> str:
         """Determine the current view mode based on application state."""

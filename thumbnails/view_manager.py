@@ -1346,6 +1346,39 @@ class ViewManager:
         if getattr(self.main_window, 'current_view_mode', '') == 'list':
             self.update_list_view()
 
+    def prepare_early_browse_view(self) -> bool:
+        """Switch to browse shell before thumbnail grid work (startup restore)."""
+        if self.main_window.current_view_mode == 'browse':
+            return False
+        if not hasattr(self.main_window, 'stacked_widget') or self.main_window.stacked_widget is None:
+            return False
+        self.main_window.stacked_widget.setCurrentIndex(1)
+        self.main_window.current_view_mode = 'browse'
+        if getattr(self.main_window, 'combined_sidebar', None):
+            self.main_window.combined_sidebar.hide()
+        if hasattr(self.main_window, 'main_splitter'):
+            total_width = self.main_window.main_splitter.width()
+            if total_width > 0:
+                right_width = 0
+                if getattr(self.main_window, 'right_sidebar_visible', False):
+                    right_width = getattr(self.main_window, 'right_sidebar_width', 0)
+                self.main_window._set_splitter_sizes_safe(
+                    [0, total_width - right_width, right_width]
+                )
+        self.main_window.manage_sidebar_visibility_for_view_mode('browse')
+        if hasattr(self.main_window, 'browse_view_action') and self.main_window.browse_view_action:
+            self.main_window.browse_view_action.setEnabled(False)
+        return True
+
+    def finish_browse_startup_restore(self, image_index: int) -> None:
+        """Show the restored image in browse after directory load."""
+        images = getattr(self.main_window, 'displayed_images', None) or []
+        if not images or image_index < 0 or image_index >= len(images):
+            return
+        self.main_window.view_mode_manager.open_browse_view(image_index)
+        self.main_window._defer_browse_restore = False
+        self.main_window._browse_startup_restore_done = True
+
     def setup_browse_view(self):
         """Setup the browse view widget"""
         browse_view_widget = QWidget()
@@ -2148,19 +2181,24 @@ class ViewManager:
             current_width = current_display_size.width()
             current_height = current_display_size.height()
             
-            # If dimensions changed, rebuild grid - but preserve sort order
+            # If dimensions changed, recalculate grid layout but preserve loaded pixmaps.
             if (current_width != self.main_window.cached_container_width or 
                 current_height != self.main_window.cached_container_height):
-                # CRITICAL: In specific_files_active (e.g. after cmd-K similarity search), do NOT call
-                # refresh_directory - it reloads from disk and applies .prsort, overwriting the
-                # similarity-ordered list. Instead, just force grid recalculation with current order.
-                if getattr(self.main_window, 'specific_files_active', False):
-                    if (self.main_window.displayed_images and
+                if (self.main_window.displayed_images and
                         hasattr(self.main_window, 'thumbnail_container') and
                         self.main_window.thumbnail_container and
                         hasattr(self.main_window.thumbnail_container.canvas, 'reorder_thumbnails')):
-                        self.main_window.thumbnail_container.canvas.reorder_thumbnails(
-                            self.main_window.displayed_images, force_recalculate_grid=True)
+                    self.main_window.current_thumbnail_size, _, _ = (
+                        self.main_window.thumbnail_operations_manager.calculate_grid_for_images(
+                            len(self.main_window.displayed_images)
+                        )
+                    )
+                    canvas = self.main_window.thumbnail_container.canvas
+                    canvas.thumbnail_size = self.main_window.current_thumbnail_size
+                    canvas.reorder_thumbnails(
+                        self.main_window.displayed_images, force_recalculate_grid=True)
+                    self.main_window.cached_container_width = current_width
+                    self.main_window.cached_container_height = current_height
                 else:
                     self.main_window.refresh_directory()
         
@@ -2227,11 +2265,31 @@ class ViewManager:
                 if hasattr(self.main_window, '_emit_view_mode_changed'):
                     self.main_window._emit_view_mode_changed()
                 # Ensure thumbnails are populated when exiting browse mode
-                # This is critical when exiting browse mode after a pipe request - placeholders
-                # need to be created and pixmaps need to be loaded immediately
-                if (self.main_window.displayed_images and
-                    hasattr(self.main_window, 'create_immediate_placeholders')):
-                    self.main_window.create_immediate_placeholders()
+                if self.main_window.displayed_images:
+                    canvas = (
+                        self.main_window.thumbnail_container.canvas
+                        if hasattr(self.main_window, 'thumbnail_container')
+                        and self.main_window.thumbnail_container
+                        else None
+                    )
+                    current_paths = (
+                        [thumb.image_path for thumb in canvas.thumbnails]
+                        if canvas and canvas.thumbnails
+                        else None
+                    )
+                    if current_paths != self.main_window.displayed_images:
+                        if hasattr(self.main_window, 'create_immediate_placeholders'):
+                            self.main_window.create_immediate_placeholders()
+                    elif canvas and canvas.thumbnails:
+                        if not (0 <= self.main_window.highlight_index < len(self.main_window.displayed_images)):
+                            idx = getattr(self.main_window, 'current_index', 0) or 0
+                            self.main_window.highlight_index = min(
+                                idx, len(self.main_window.displayed_images) - 1
+                            )
+                        self.main_window.thumbnail_container.set_highlighted_index(
+                            self.main_window.highlight_index
+                        )
+                        self.main_window.ensure_highlighted_visible()
             self.main_window.browse_view_action.setEnabled(True)
             
             # Reset preview widget state to ensure it works properly after returning from browse mode

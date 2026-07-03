@@ -6,9 +6,17 @@ Missing dependencies or imports fail silently (no Create menu).
 
 from __future__ import annotations
 
-from typing import List
+from typing import List, Optional
 
 from imagegen_plugins.image_gen_registry import ImageGenModelPlugin
+
+_discovered_plugins: Optional[List[ImageGenModelPlugin]] = None
+
+
+def invalidate_discovered_plugins() -> None:
+    """Clear cached plugin list (e.g. after registering new models in dev)."""
+    global _discovered_plugins
+    _discovered_plugins = None
 
 
 def discover_plugins() -> List[ImageGenModelPlugin]:
@@ -21,6 +29,10 @@ def discover_plugins() -> List[ImageGenModelPlugin]:
     (create | edit | expand | infill). The Create menu lists functions; the user picks
     the model in each function's dialog dropdown.
     """
+    global _discovered_plugins
+    if _discovered_plugins is not None:
+        return list(_discovered_plugins)
+
     candidates: List[ImageGenModelPlugin] = []
     try:
         from imagegen_plugins.flux_schnell_mflux import FLUX_SCHNELL_MFLUX_PLUGIN
@@ -109,7 +121,8 @@ def discover_plugins() -> List[ImageGenModelPlugin]:
     except ImportError:
         pass
 
-    return candidates
+    _discovered_plugins = candidates
+    return list(candidates)
 
 
 def plugins_for_function(

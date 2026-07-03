@@ -93,9 +93,9 @@ from imagegen_plugins.image_gen_function_switcher import (
 from imagegen_plugins.imagegen_flux_prompt_ai import ImageGenFluxPromptAi
 from imagegen_plugins.flux_prompt_system_mount import (
     flux_prompt_system_override_for,
-    remount_flux_prompt_system_splitter,
+    schedule_deferred_flux_prompt_extras,
 )
-from imagegen_plugins.lmstudio_caption import is_lmstudio_services_available
+from imagegen_plugins.lmstudio_caption import is_lmstudio_sdk_installed
 from theme.theme_service import apply_view_chrome_splitter_theme, get_active_theme
 from utils import (
     _center_styled_dialog_on_screen,
@@ -631,7 +631,7 @@ def mount_pass_image_to_ai_checkbox(
     image_noun: str = "source image",
 ) -> None:
     owner._pass_image_to_ai_cb = None
-    if not is_lmstudio_services_available():
+    if not is_lmstudio_sdk_installed():
         return
     col = getattr(owner, "_side_btn_col", None)
     if col is None:
@@ -1214,13 +1214,18 @@ class ImageGenPreviewSplitter(QSplitter):
 
     def showEvent(self, event):
         super().showEvent(event)
-        if not self._initial_sizes_applied:
-            self._initial_sizes_applied = True
-            QTimer.singleShot(0, self._apply_initial_sizes)
+        self._ensure_initial_sizes()
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
         self._clamp_left_size()
+        self._ensure_initial_sizes()
+
+    def _ensure_initial_sizes(self) -> None:
+        if self._initial_sizes_applied or self.width() <= 0:
+            return
+        self._initial_sizes_applied = True
+        self._apply_initial_sizes()
 
     def _apply_initial_sizes(self) -> None:
         total = self.width()
@@ -1322,6 +1327,9 @@ class ImageGenDialog(ImageGenDimensionAspectMixin, QDialog):
         window_title: str = DEFAULT_IMAGE_GEN_DIALOG_TITLE,
         persistent_panel: bool = False,
         panel_mode: bool = False,
+        installed: Optional[List[ImageGenModelPlugin]] = None,
+        plugins_by_id: Optional[Dict[str, ImageGenModelPlugin]] = None,
+        installed_flags: Optional[Dict[str, bool]] = None,
     ):
         super().__init__(parent)
         self._panel_mode = panel_mode
@@ -1340,11 +1348,17 @@ class ImageGenDialog(ImageGenDimensionAspectMixin, QDialog):
         self._side_btn_host: Optional[QWidget] = None
         self._side_btn_col: Optional[QVBoxLayout] = None
         self._lora_steps_floor_widget: Optional[QComboBox] = None
+        self._installed_flags: Dict[str, bool] = dict(installed_flags or {})
+        self._defer_flux_prompt_extras = not self._panel_mode
+        self._installed_list = installed
+        self._prebuilt_plugins_by_id = plugins_by_id
 
         initial = resolve_initial_plugin(
             self._plugins,
             function=function,
             initial_plugin_id=initial_plugin_id,
+            installed=installed,
+            plugins_by_id=plugins_by_id,
         )
         self.plugin = initial
         if initial is not None:
@@ -1363,6 +1377,8 @@ class ImageGenDialog(ImageGenDimensionAspectMixin, QDialog):
                 self, window_title=window_title, min_width=520, min_height=480
             )
         self._build_ui()
+        if getattr(self, "_defer_flux_prompt_extras", False):
+            schedule_deferred_flux_prompt_extras(self)
         if initial_prompt:
             self.set_prompt_text(initial_prompt)
 
@@ -1397,6 +1413,9 @@ class ImageGenDialog(ImageGenDimensionAspectMixin, QDialog):
             pass
 
     def show(self):
+        if self._panel_mode:
+            super().show()
+            return
         from utils import restore_dialog_geometry_before_first_show
 
         restore_dialog_geometry_before_first_show(
@@ -1406,6 +1425,8 @@ class ImageGenDialog(ImageGenDimensionAspectMixin, QDialog):
 
     def showEvent(self, event):
         super().showEvent(event)
+        if self._panel_mode:
+            return
         if not self._geometry_was_restored:
             QTimer.singleShot(0, lambda: _center_styled_dialog_on_screen(self, self.parent()))
         QTimer.singleShot(0, self._raise_and_activate)
@@ -1450,11 +1471,15 @@ class ImageGenDialog(ImageGenDimensionAspectMixin, QDialog):
                 self.plugin.plugin_id if self.plugin is not None else None
             ),
             parent=self._fields_panel.widget,
+            installed=self._installed_list,
+            plugins_by_id=self._prebuilt_plugins_by_id,
         )
         self._model_combo.currentIndexChanged.connect(self._on_model_combo_changed)
         apply_model_combo_tooltip(self._model_combo)
         self._fields_panel.add_labeled_field("Model", model_row, to_outer=True)
-        sync_image_gen_generate_enabled(self, panel=self)
+        sync_image_gen_generate_enabled(
+            self, panel=self, plugin_installed=self._selected_plugin_installed()
+        )
         self._lora_group, self._lora_combo = mount_image_gen_lora_field(
             self._fields_panel,
             parent=self._fields_panel.widget,
@@ -1540,7 +1565,12 @@ class ImageGenDialog(ImageGenDimensionAspectMixin, QDialog):
                 build_options=self._param_panel._build_options,
                 optional=False,
             )
-        remount_flux_prompt_system_splitter(self)
+        if not getattr(self, "_defer_flux_prompt_extras", False):
+            from imagegen_plugins.flux_prompt_system_mount import (
+                remount_flux_prompt_system_splitter,
+            )
+
+            remount_flux_prompt_system_splitter(self)
         self._repopulate_side_buttons()
         self._connect_dim_aspect_lock()
         self._restore_aspect_lock_from_values()
@@ -1548,6 +1578,16 @@ class ImageGenDialog(ImageGenDimensionAspectMixin, QDialog):
         self._connect_lora_steps_floor()
         refresh_image_gen_footer_keyboard_shortcuts(self)
         self._connect_panel_dirty_tracking()
+
+    def _selected_plugin_installed(self) -> bool:
+        if self.plugin is None:
+            return False
+        flagged = self._installed_flags.get(self.plugin.plugin_id)
+        if flagged is not None:
+            return bool(flagged)
+        from imagegen_plugins.image_gen_model_selector import plugin_model_is_installed
+
+        return plugin_model_is_installed(self.plugin)
 
     def _connect_panel_dirty_tracking(self) -> None:
         if not getattr(self, "_panel_mode", False):
@@ -1590,7 +1630,9 @@ class ImageGenDialog(ImageGenDimensionAspectMixin, QDialog):
         self._populate_field_rows()
         self.set_prompt_text(preserved_prompt)
         refresh_dialog_mflux_lora_combo(self)
-        sync_image_gen_generate_enabled(self, panel=self)
+        sync_image_gen_generate_enabled(
+            self, panel=self, plugin_installed=self._selected_plugin_installed()
+        )
 
     def _wrap(self, layout: QHBoxLayout) -> QWidget:
         w = QWidget()
@@ -1902,7 +1944,9 @@ class ImageGenDialog(ImageGenDimensionAspectMixin, QDialog):
             if self.plugin is not None:
                 self._load_plugin_state(saved_override=state.values)
                 self._populate_field_rows()
-            sync_image_gen_generate_enabled(self, panel=self)
+            sync_image_gen_generate_enabled(
+                self, panel=self, plugin_installed=self._selected_plugin_installed()
+            )
         elif initial_prompt:
             self.set_prompt_text(initial_prompt)
 

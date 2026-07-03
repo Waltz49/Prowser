@@ -93,6 +93,16 @@ def switch_imagegen_function_dialog(dialog, target_function: str) -> None:
     switch_imagegen_function_dialog_in_place(dialog, target_function, main_window)
 
 
+def cycle_imagegen_function_dialog(dialog, delta: int) -> None:
+    """Cmd+Left/Right — step to the neighboring footer function."""
+    current_function = getattr(dialog, "_function", None)
+    if not current_function:
+        return
+    switch_imagegen_function_dialog(
+        dialog, _neighbor_switcher_function(current_function, delta)
+    )
+
+
 def _make_function_switcher_button(
     dialog,
     function: str,
@@ -362,13 +372,8 @@ class _FunctionFooterKeyFilter(QObject):
         if not (mods & Qt.KeyboardModifier.ControlModifier):
             return False
         if key in (Qt.Key.Key_Left, Qt.Key.Key_Right):
-            current = getattr(self._dialog, "_function", None)
-            if not current:
-                return False
             delta = -1 if key == Qt.Key.Key_Left else 1
-            switch_imagegen_function_dialog(
-                self._dialog, _neighbor_switcher_function(current, delta)
-            )
+            cycle_imagegen_function_dialog(self._dialog, delta)
             return True
         if key in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
             generate_btn = self._dialog.findChild(

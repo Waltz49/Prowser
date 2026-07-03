@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import QPushButton, QVBoxLayout, QWidget
 from imagegen_plugins.image_gen_persistence import (
     load_flux_prompt_system_prompt_settings,
@@ -13,7 +13,10 @@ from imagegen_plugins.image_gen_persistence import (
 )
 from imagegen_plugins.imagegen_flux_prompt_ai import ImageGenFluxPromptAi
 from imagegen_plugins.lmstudio_instructions_pane import LmStudioInstructionsPane
-from imagegen_plugins.lmstudio_caption import is_lmstudio_services_available
+from imagegen_plugins.lmstudio_caption import (
+    is_lmstudio_sdk_installed,
+    is_lmstudio_services_available,
+)
 
 
 def _image_prompt_action_column(
@@ -118,7 +121,7 @@ def _flux_pass_image_noun(owner: Any) -> str:
 
 
 def ensure_flux_prompt_system_pane(owner: Any) -> Optional[LmStudioInstructionsPane]:
-    if not is_lmstudio_services_available():
+    if not is_lmstudio_sdk_installed():
         return None
     pane = getattr(owner, "_flux_system_prompt_pane", None)
     if pane is not None:
@@ -187,6 +190,23 @@ def remount_flux_prompt_system_splitter(owner: Any) -> None:
     ensure_flux = getattr(owner, "_ensure_flux_prompt_ai", None)
     if callable(ensure_flux):
         mount_flux_prompt_ai_toolbar(owner, ensure_flux())
+
+
+def schedule_deferred_flux_prompt_extras(owner: Any) -> None:
+    """Defer LM Studio network probe and flux prompt UI mount until after first paint."""
+    if getattr(owner, "_flux_extras_deferred", False):
+        return
+    owner._flux_extras_deferred = True
+    QTimer.singleShot(50, lambda: _deferred_mount_flux_prompt_extras(owner))
+
+
+def _deferred_mount_flux_prompt_extras(owner: Any) -> None:
+    if not is_lmstudio_sdk_installed():
+        return
+    if not is_lmstudio_services_available():
+        return
+    setattr(owner, "_defer_flux_prompt_extras", False)
+    remount_flux_prompt_system_splitter(owner)
 
 
 def flux_prompt_system_override_for(owner: Any) -> Optional[str]:

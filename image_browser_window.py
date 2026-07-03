@@ -278,6 +278,10 @@ class ImageBrowserWindow(QMainWindow):
         
         # Flag to prevent infinite loops when auto-opening last directory
         self._opening_last_directory = False
+        self._startup_restore_last_file: Optional[str] = None
+        self._defer_browse_restore = False
+        self._browse_startup_restore_done = False
+        self._batch_directory_load = False
         
         # Track the directory of the currently highlighted file for auto-open fallback
         self._current_highlighted_file_directory = None
@@ -871,6 +875,14 @@ class ImageBrowserWindow(QMainWindow):
                 self.is_reversed = False
             fullscreen = configuration.get('fullscreen')
             prevent_browse_view = configuration.get('prevent_browse_view', False)
+            restore_view_mode = configuration.get('restore_view_mode', 'thumbnail')
+            self._startup_restore_last_file = configuration.get('restore_last_file')
+            defer_browse_restore = restore_view_mode == 'browse'
+            self._defer_browse_restore = defer_browse_restore
+            if defer_browse_restore:
+                self._browse_startup_restore_done = False
+            if defer_browse_restore and hasattr(self, 'view_manager'):
+                self.view_manager.prepare_early_browse_view()
             force_specific_files_grid = configuration.get('force_specific_files_grid', False)
             skip_filter_pattern = configuration.get('skip_filter_pattern', False)
             # When specific files are received, resolve the full names and remove duplicates before sending the configuration
@@ -946,10 +958,15 @@ class ImageBrowserWindow(QMainWindow):
             # or when not explicitly entering fullscreen.
             # Also ensure thumbnail view when loading a directory (not specific files)
             if self.current_view_mode in ['browse', 'slideshow']:
-                if is_multiple_files_request or not requested_macos_space_mode or directory:
+                if (
+                    is_multiple_files_request
+                    or (not requested_macos_space_mode and not defer_browse_restore)
+                    or (directory and not defer_browse_restore)
+                ):
                     self.view_manager.close_browse_view()
             
-            self.clear_thumbnails()
+            if not defer_browse_restore:
+                self.clear_thumbnails()
             self.displayed_images = []
             self.image_indices = []
             self.image_indices_sequential = []
@@ -1002,8 +1019,10 @@ class ImageBrowserWindow(QMainWindow):
                     if len(valid_files) == 1 and requested_macos_space_mode:
                         target_file = valid_files[0]
 
-                        def ensure_single_file_browse_view():
+                        def ensure_single_file_browse_view(attempt: int = 0):
                             if target_file not in getattr(self, 'displayed_images', []):
+                                if attempt < 40:
+                                    QTimer.singleShot(50, lambda: ensure_single_file_browse_view(attempt + 1))
                                 return
                             try:
                                 idx = self.displayed_images.index(target_file)
@@ -3153,7 +3172,15 @@ class ImageBrowserWindow(QMainWindow):
             self.cache_manager.background_loader.start()
         user_requested = (hasattr(self, 'file_tree_handler') and self.file_tree_handler and
                          getattr(self.file_tree_handler, 'user_requested_directory', None))
-        if (self.current_view_mode == 'thumbnail' and not getattr(self, 'restoring_from_history', False) and not user_requested):
+        # Directory load already built thumbnails; skip the post-load refresh for
+        # restoration/API loads (external_load) and tree navigation (user_requested).
+        should_simulate_browse_exit_refresh = (
+            self.current_view_mode == 'thumbnail'
+            and not getattr(self, 'restoring_from_history', False)
+            and not user_requested
+            and not external_load
+        )
+        if should_simulate_browse_exit_refresh:
             try:
                 QTimer.singleShot(200, self.simulate_browse_view_exit_for_refresh)
             except Exception:

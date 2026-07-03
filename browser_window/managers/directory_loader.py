@@ -20,6 +20,85 @@ from sort_mode import SortMode
 from event_bus import DIRECTORY_REQUESTED, DIRECTORY_LOADED
 
 
+def normalize_restore_image_path(path: Optional[str]) -> Optional[str]:
+    """Absolute path for a saved restore file, or None if not a file."""
+    if not path:
+        return None
+    try:
+        abs_path = os.path.abspath(os.path.expanduser(path))
+    except Exception:
+        return None
+    return abs_path if os.path.isfile(abs_path) else None
+
+
+def index_of_path_in_displayed(
+    images: List[str], path: Optional[str]
+) -> Optional[int]:
+    """Index in displayed_images for path, matching absolute or list entry form."""
+    if not images or not path:
+        return None
+    normalized = normalize_restore_image_path(path)
+    if normalized is None:
+        try:
+            normalized = os.path.abspath(os.path.expanduser(path))
+        except Exception:
+            return None
+    if normalized in images:
+        return images.index(normalized)
+    for i, img in enumerate(images):
+        try:
+            if os.path.abspath(img) == normalized:
+                return i
+        except Exception:
+            continue
+    return None
+
+
+def resolve_directory_active_path(
+    images: List[str],
+    *,
+    last_file: Optional[str] = None,
+    target_file: Optional[str] = None,
+) -> Optional[str]:
+    """Pick the image path that should be active before the first thumbnail build."""
+    if not images:
+        return None
+    idx = index_of_path_in_displayed(images, last_file)
+    if idx is not None:
+        return images[idx]
+    idx = index_of_path_in_displayed(images, target_file)
+    if idx is not None:
+        return images[idx]
+    return images[0]
+
+
+def resolve_restore_image_index(
+    images: List[str],
+    *,
+    last_file: Optional[str] = None,
+    target_file: Optional[str] = None,
+    current_index: int = 0,
+    image_indices: Optional[List[int]] = None,
+) -> int:
+    """Index of the image to show when restoring browse or view mode at startup."""
+    if not images:
+        return 0
+    idx = index_of_path_in_displayed(images, last_file)
+    if idx is not None:
+        return idx
+    idx = index_of_path_in_displayed(images, target_file)
+    if idx is not None:
+        return idx
+    if image_indices:
+        try:
+            return image_indices.index(current_index)
+        except (ValueError, AttributeError, TypeError):
+            pass
+    if 0 <= current_index < len(images):
+        return current_index
+    return min(max(current_index, 0), len(images) - 1)
+
+
 class DirectoryLoader:
     """Manages directory loading and file scanning operations"""
     
@@ -147,6 +226,25 @@ class DirectoryLoader:
         
         return current_files_list
     
+    def _browse_restore_image_index(self) -> int:
+        """Index of the image to show when restoring browse at startup."""
+        images = getattr(self.main_window, 'displayed_images', None) or []
+        return resolve_restore_image_index(
+            images,
+            last_file=getattr(self.main_window, '_startup_restore_last_file', None),
+            target_file=getattr(self.main_window, 'target_file', None),
+            current_index=getattr(self.main_window, 'current_index', 0),
+            image_indices=getattr(self.main_window, 'image_indices', None),
+        )
+
+    def _resolve_directory_active_path(self, current_files_list: List[str]) -> Optional[str]:
+        """Pick the image that should be active before the first thumbnail build."""
+        return resolve_directory_active_path(
+            current_files_list,
+            last_file=getattr(self.main_window, '_startup_restore_last_file', None),
+            target_file=getattr(self.main_window, 'target_file', None),
+        )
+
     def _on_directory_requested(self, path, external_load=False, refresh_mode=False):
         """Handle DIRECTORY_REQUESTED event - performs the actual directory load"""
         self._do_load_directory(path, external_load, refresh_mode)
@@ -189,7 +287,11 @@ class DirectoryLoader:
             # If we're not in thumbnail mode and loading a directory externally (e.g., from tree click),
             # exit the current mode first so the user can see the thumbnails
             # Note: Preserve list view mode - don't exit it
-            if self.main_window.current_view_mode != 'thumbnail' and self.main_window.current_view_mode != 'list':
+            if (
+                not getattr(self.main_window, '_defer_browse_restore', False)
+                and self.main_window.current_view_mode != 'thumbnail'
+                and self.main_window.current_view_mode != 'list'
+            ):
                 if self.main_window.current_view_mode == 'browse':
                     self.main_window.view_manager.close_browse_view()
                 elif self.main_window.current_view_mode == 'slideshow':
@@ -253,45 +355,61 @@ class DirectoryLoader:
         if hasattr(self.main_window, 'filter_pattern') and self.main_window.filter_pattern:
             current_files_list = self.main_window.sorting_manager.filter_images_by_pattern(current_files_list)
         
-        self.main_window.displayed_images = current_files_list
-        
-        # Clear thumbnails if we have no images to ensure empty state is shown
-        if not self.main_window.displayed_images:
-            self.main_window.clear_thumbnails()
-        
-        # Track the directory of the first displayed file for auto-open fallback
-        if self.main_window.displayed_images:
-            self.main_window._current_highlighted_file_directory = os.path.dirname(self.main_window.displayed_images[0])
-        else:
-            # When directory is empty, track the current directory itself
-            self.main_window._current_highlighted_file_directory = self.main_window.current_directory
-        
-        self.main_window.populate_indices_arrays()
-        self.main_window.highlight_index = 0
-        self.main_window.current_index = 0
-        
-        # Sorting already applied before setting displayed_images (with locked files at top)
-        # No need to re-sort here as it would break locked file ordering
-        
-        # Handle target file positioning after sorting
-        if self.main_window.target_file and self.main_window.target_file in self.main_window.displayed_images:
-            try:
-                target_image_index = self.main_window.displayed_images.index(self.main_window.target_file)
-                self.main_window.highlight_index = self.main_window.image_indices.index(target_image_index)
-                self.main_window.current_index = target_image_index
-                # Set current_image_path using sync method to ensure status bar updates
-                self.main_window._set_current_image_path_with_sync(self.main_window.target_file)
-            except (ValueError, IndexError):
-                pass
-        elif self.main_window.displayed_images:
-            # No target file - set current_image_path to first image using sync method
-            # This ensures status bar updates when opening a directory from tree
-            self.main_window._set_current_image_path_with_sync(self.main_window.displayed_images[0])
-        
+        self.main_window._batch_directory_load = True
+        try:
+            self.main_window.displayed_images = current_files_list
+
+            # Clear thumbnails if we have no images to ensure empty state is shown
+            if not self.main_window.displayed_images:
+                self.main_window.clear_thumbnails()
+
+            # Track the directory of the first displayed file for auto-open fallback
+            if self.main_window.displayed_images:
+                self.main_window._current_highlighted_file_directory = os.path.dirname(
+                    self.main_window.displayed_images[0]
+                )
+            else:
+                # When directory is empty, track the current directory itself
+                self.main_window._current_highlighted_file_directory = self.main_window.current_directory
+
+            self.main_window.populate_indices_arrays()
+
+            active_path = self._resolve_directory_active_path(current_files_list)
+            if active_path and active_path in self.main_window.displayed_images:
+                try:
+                    target_image_index = self.main_window.displayed_images.index(active_path)
+                    self.main_window.highlight_index = self.main_window.image_indices.index(
+                        target_image_index
+                    )
+                    self.main_window.current_index = target_image_index
+                    self.main_window._set_current_image_path_with_sync(active_path)
+                except (ValueError, IndexError):
+                    self.main_window.highlight_index = 0
+                    self.main_window.current_index = 0
+                    self.main_window._set_current_image_path_with_sync(
+                        self.main_window.displayed_images[0]
+                    )
+            elif self.main_window.displayed_images:
+                self.main_window.highlight_index = 0
+                self.main_window.current_index = 0
+                self.main_window._set_current_image_path_with_sync(
+                    self.main_window.displayed_images[0]
+                )
+        finally:
+            self.main_window._batch_directory_load = False
+
         try:
             self.main_window.generate_thumbnails(force_refresh=refresh_mode)
-        except Exception as e:
-            pass
+        except Exception:
+            import traceback
+
+            traceback.print_exc()
+
+        if getattr(self.main_window, '_defer_browse_restore', False):
+            self.main_window._loading_directory_mode = False
+            image_index = self._browse_restore_image_index()
+            if hasattr(self.main_window, 'view_manager'):
+                self.main_window.view_manager.finish_browse_startup_restore(image_index)
         
         # If in list view mode, ensure list view is updated and visible
         if self.main_window.current_view_mode == 'list':

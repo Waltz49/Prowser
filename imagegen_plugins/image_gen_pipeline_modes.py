@@ -7,7 +7,7 @@ import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Iterable, List, Optional
 
 from imagegen_plugins.hf_model_ids import FLUX1_SCHNELL
 from imagegen_plugins.mflux_lora_presets import (
@@ -374,36 +374,65 @@ def generation_status_display_size(
     return w, h
 
 
+_pipeline_available_cache: dict[str, bool] = {}
+
+
+def invalidate_pipeline_availability_cache() -> None:
+    _pipeline_available_cache.clear()
+
+
+def warm_pipeline_availability_cache(
+    plugins: Optional[Iterable[Any]] = None,
+) -> None:
+    """Prime pipeline_is_available once per unique pipeline_id (menu / dialog probes)."""
+    if plugins is None:
+        from imagegen_plugins import discover_plugins
+
+        plugins = discover_plugins()
+    seen: set[str] = set()
+    for plugin in plugins:
+        pipeline_id = getattr(plugin, "pipeline_id", None)
+        if not pipeline_id or pipeline_id in seen:
+            continue
+        seen.add(pipeline_id)
+        pipeline_is_available(pipeline_id)
+
+
 def pipeline_is_available(pipeline_id: str) -> bool:
+    cached = _pipeline_available_cache.get(pipeline_id)
+    if cached is not None:
+        return cached
+    result = False
     if pipeline_id == "flux_schnell_mflux_play":
         from imagegen_plugins.pipelines.mflux_schnell import mflux_is_installed
 
-        return mflux_is_installed()
-    if pipeline_id == "sana_sprint_600m":
-        from imagegen_plugins.pipelines.sana_sprint import diffusers_is_installed
+        result = mflux_is_installed()
+    elif pipeline_id == "sana_sprint_600m":
+        from pyinstaller_frozen_support import sana_sprint_pipeline_is_installed
 
-        return diffusers_is_installed()
-    if pipeline_id == "sd15_diffusers":
-        from imagegen_plugins.pipelines.sd15_diffusers import diffusers_is_installed
+        result = sana_sprint_pipeline_is_installed()
+    elif pipeline_id == "sd15_diffusers":
+        from pyinstaller_frozen_support import sd15_diffusers_pipeline_is_installed
 
-        return diffusers_is_installed()
-    if pipeline_id == "z_image_turbo_sdnq":
+        result = sd15_diffusers_pipeline_is_installed()
+    elif pipeline_id == "z_image_turbo_sdnq":
         from imagegen_plugins.pipelines.z_image_turbo import z_image_turbo_is_installed
 
-        return z_image_turbo_is_installed()
-    if pipeline_id in ("mflux_fill_expand", "mflux_fill_infill"):
+        result = z_image_turbo_is_installed()
+    elif pipeline_id in ("mflux_fill_expand", "mflux_fill_infill"):
         from imagegen_plugins.pipelines.mflux_fill_expand import mflux_is_installed
 
-        return mflux_is_installed()
-    if pipeline_id in (
+        result = mflux_is_installed()
+    elif pipeline_id in (
         "mflux_flux2_klein_edit",
         "mflux_flux2_klein_create",
         "mflux_flux2_klein_expand",
     ):
         from imagegen_plugins.pipelines.mflux_flux2_klein_edit import mflux_is_installed
 
-        return mflux_is_installed()
-    return False
+        result = mflux_is_installed()
+    _pipeline_available_cache[pipeline_id] = result
+    return result
 
 
 def worker_script_path(pipeline_id: str) -> str:

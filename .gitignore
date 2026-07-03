@@ -96,3 +96,4 @@ keyboard_hierarchy.md
 imagegen_plugins/debug_download_models_dialog.py
 imagegen_plugins/debug_download_script_dialog.py
 imagegen_plugins/debug_download_scripts.py
+profile.sh

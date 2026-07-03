@@ -219,6 +219,7 @@ def restore_queued_generate_job(
     copies_total: int,
     full_prompt: str = "",
     plugin_unavailable: bool = False,
+    skip_status_html: bool = False,
 ) -> QueuedGenerateJob:
     job = QueuedGenerateJob(
         job_id=job_id,
@@ -235,5 +236,6 @@ def restore_queued_generate_job(
     job.references_invalid = (
         plugin_unavailable or job_references_invalid(plugin, values)
     )
-    refresh_queued_job_status(job)
+    if not skip_status_html:
+        refresh_queued_job_status(job)
     return job

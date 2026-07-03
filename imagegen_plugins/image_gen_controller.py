@@ -1027,14 +1027,22 @@ class ImageGenController(QObject):
                 copies_total=record["copies_total"],
                 full_prompt=record.get("full_prompt") or "",
                 plugin_unavailable=plugin_unavailable,
+                skip_status_html=True,
             )
             restored.append(job)
         self._queue = restored
         if restored:
             self.queue_changed.emit()
             self._sync_cancel_menu()
+            QTimer.singleShot(0, self._refresh_restored_job_status_html)
         if restored and not self._hold_job_queue:
             QTimer.singleShot(0, self._try_start_next_queued_job)
+
+    def _refresh_restored_job_status_html(self) -> None:
+        for job in self._queue:
+            refresh_queued_job_status(job)
+        if self._queue:
+            self.queue_changed.emit()
 
     def _active_job_persist_record(self) -> dict | None:
         """Serializable queue head for the in-flight job (not stored in _queue)."""

@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 import os
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QAction, QKeySequence
@@ -71,6 +71,20 @@ _PAINT_INFILL_SOURCE_EXTS = frozenset(
 )
 
 
+def begin_imagegen_dialog_build(main_window) -> None:
+    main_window._imagegen_dialog_building = True
+    jobs = getattr(main_window, "sidebar_jobs_widget", None)
+    if jobs is not None and hasattr(jobs, "pause_live_refresh"):
+        jobs.pause_live_refresh()
+
+
+def end_imagegen_dialog_build(main_window) -> None:
+    main_window._imagegen_dialog_building = False
+    jobs = getattr(main_window, "sidebar_jobs_widget", None)
+    if jobs is not None and hasattr(jobs, "resume_live_refresh"):
+        jobs.resume_live_refresh()
+
+
 def _is_paint_infill_job_values(values: Dict[str, Any]) -> bool:
     doc_path = str(values.get("pixelmator_doc_path") or "").strip()
     if not doc_path or not os.path.isfile(doc_path):
@@ -133,6 +147,7 @@ def _on_imagegen_function_dialog_finished(
     if getattr(main_window, "_imagegen_function_dialog", None) is dlg:
         main_window._imagegen_function_dialog = None
     main_window._imagegen_dialog_open = False
+    end_imagegen_dialog_build(main_window)
     if result != QDialog.DialogCode.Accepted:
         return
     if getattr(dlg, "_image_gen_persistent_panel", False):
@@ -225,6 +240,7 @@ def _open_or_switch_unified_dialog(
     geometry_hex: Optional[str] = None,
     seed_state: Optional[FunctionSessionState] = None,
     replace_job_id: Optional[str] = None,
+    function_plugins: Optional[List[ImageGenModelPlugin]] = None,
 ) -> None:
     existing = getattr(main_window, "_imagegen_function_dialog", None)
     if isinstance(existing, ImageGenUnifiedDialog) and existing.isVisible():
@@ -239,17 +255,19 @@ def _open_or_switch_unified_dialog(
         _raise_imagegen_function_dialog(existing)
         return
 
+    begin_imagegen_dialog_build(main_window)
     dlg = ImageGenUnifiedDialog(main_window, controller, main_window)
+    if function_plugins is not None:
+        dlg.set_function_plugins(function, function_plugins)
     apply_preserved_imagegen_dialog_geometry(dlg, geometry_hex)
-    if not dlg.switch_to_function(
+    if not dlg.finish_panel_load(
         function,
         initial_prompt=initial_prompt,
         auto_import_available=auto_import_available,
         seed_state=seed_state,
+        replace_job_id=replace_job_id,
     ):
-        dlg.deleteLater()
         return
-    dlg.set_queue_replace_context(replace_job_id)
     _show_imagegen_function_dialog(main_window, controller, function, dlg)
 
 
@@ -514,8 +532,9 @@ def _open_dialog_for_function(
     auto_import_available: bool = False,
     geometry_hex: Optional[str] = None,
 ) -> None:
-    plugins = plugins_for_function(function)
-    if not plugins:
+    all_plugins = discover_plugins()
+    function_plugins = plugins_for_function(function, all_plugins)
+    if not function_plugins:
         show_styled_information(
             main_window,
             _function_error_title(function),
@@ -523,7 +542,7 @@ def _open_dialog_for_function(
         )
         return
 
-    usable = available_plugins(plugins)
+    usable = available_plugins(function_plugins)
     if not usable:
         show_styled_information(
             main_window,
@@ -579,6 +598,7 @@ def _open_dialog_for_function(
         initial_prompt=initial_prompt,
         auto_import_available=auto_import_available,
         geometry_hex=geometry_hex,
+        function_plugins=function_plugins,
     )
 
 
@@ -610,6 +630,11 @@ def _refresh_create_menu_availability(main_window) -> None:
     actions = getattr(main_window, "imagegen_function_actions", None) or {}
     if not actions:
         return
+    from imagegen_plugins import discover_plugins
+    from imagegen_plugins.image_gen_pipeline_modes import warm_pipeline_availability_cache
+
+    all_plugins = discover_plugins()
+    warm_pipeline_availability_cache(all_plugins)
     any_usable = False
     for function, action in actions.items():
         plugins = plugins_for_function(function)
@@ -628,6 +653,19 @@ def _refresh_create_menu_availability(main_window) -> None:
     primary = getattr(main_window, "imagegen_primary_action", None)
     if primary is not None:
         primary.setEnabled(any_usable)
+
+
+def _run_create_menu_availability_refresh(main_window) -> None:
+    main_window._imagegen_menu_availability_scheduled = False
+    _refresh_create_menu_availability(main_window)
+
+
+def _schedule_create_menu_availability_refresh(main_window) -> None:
+    """Coalesce availability probes onto one deferred GUI-thread pass."""
+    if getattr(main_window, "_imagegen_menu_availability_scheduled", False):
+        return
+    main_window._imagegen_menu_availability_scheduled = True
+    QTimer.singleShot(0, lambda: _run_create_menu_availability_refresh(main_window))
 
 
 def start_active_imagegen_generation(
@@ -715,6 +753,9 @@ def setup_create_menu(menubar, main_window) -> None:
     create_menu.aboutToShow.connect(
         lambda: _sync_function_menu_shortcuts(main_window)
     )
+    create_menu.aboutToShow.connect(
+        lambda: _schedule_create_menu_availability_refresh(main_window)
+    )
 
     create_menu.addSeparator()
     queue_action = QAction("Job Queue...", main_window)
@@ -758,5 +799,4 @@ def setup_create_menu(menubar, main_window) -> None:
     )
     create_menu.addAction(download_loras_action)
 
-    QTimer.singleShot(0, lambda: _refresh_create_menu_availability(main_window))
-    QTimer.singleShot(500, lambda: _refresh_create_menu_availability(main_window))
+    _schedule_create_menu_availability_refresh(main_window)

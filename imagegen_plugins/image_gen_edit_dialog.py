@@ -101,7 +101,7 @@ from imagegen_plugins.image_gen_registry import ImageGenModelPlugin
 from imagegen_plugins.imagegen_flux_prompt_ai import ImageGenFluxPromptAi
 from imagegen_plugins.flux_prompt_system_mount import (
     flux_prompt_system_override_for,
-    remount_flux_prompt_system_splitter,
+    schedule_deferred_flux_prompt_extras,
 )
 from search.reference_graph import valid_exif_reference_paths_for_image
 from imagegen_plugins.image_gen_function_switcher import (
@@ -313,9 +313,10 @@ class _SourceImagePreview(QLabel):
         self._source_path = os.path.abspath(source_path)
         self._on_external_drop = on_external_drop
         self._on_double_click = on_double_click
-        self._pixmap = QPixmap(self._source_path)
+        self._pixmap = QPixmap()
         self._scaled_pixmap: Optional[QPixmap] = None
         self._load_error = False
+        self._pixmap_loaded = False
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.setSizePolicy(
             QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored
@@ -331,6 +332,32 @@ class _SourceImagePreview(QLabel):
             self.setCursor(Qt.CursorShape.PointingHandCursor)
             self.setToolTip("Double-click to open in browse mode")
         apply_image_gen_preview_client_background(self)
+        QTimer.singleShot(0, self._load_pixmap_deferred)
+
+    def _preview_pixmap_cache(self) -> dict[str, QPixmap]:
+        from imagegen_plugins.image_gen_source_nav import resolve_image_gen_main_window
+
+        main_window = resolve_image_gen_main_window(self)
+        if main_window is None:
+            return {}
+        cache = getattr(main_window, "_imagegen_preview_pixmap_cache", None)
+        if cache is None:
+            cache = {}
+            main_window._imagegen_preview_pixmap_cache = cache
+        return cache
+
+    def _load_pixmap_deferred(self) -> None:
+        if self._pixmap_loaded:
+            return
+        self._pixmap_loaded = True
+        cache = self._preview_pixmap_cache()
+        cached = cache.get(self._source_path)
+        if cached is not None and not cached.isNull():
+            self._pixmap = cached
+        else:
+            self._pixmap = QPixmap(self._source_path)
+            if not self._pixmap.isNull():
+                cache[self._source_path] = self._pixmap
         self._refresh_scaled_pixmap()
 
     def sizeHint(self) -> QSize:
@@ -345,8 +372,9 @@ class _SourceImagePreview(QLabel):
 
     def set_source_path(self, source_path: str) -> None:
         self._source_path = os.path.abspath(source_path)
-        self._pixmap = QPixmap(self._source_path)
-        self._refresh_scaled_pixmap()
+        self._pixmap_loaded = False
+        self._pixmap = QPixmap()
+        QTimer.singleShot(0, self._load_pixmap_deferred)
 
     def _refresh_scaled_pixmap(self) -> None:
         if self._pixmap.isNull():
@@ -875,6 +903,9 @@ class ImageGenEditDialog(ImageGenDimensionAspectMixin, QDialog):
         window_title: str = EDIT_IMAGE_DIALOG_TITLE,
         auto_import_available: bool = False,
         panel_mode: bool = False,
+        installed: Optional[List[ImageGenModelPlugin]] = None,
+        plugins_by_id: Optional[Dict[str, ImageGenModelPlugin]] = None,
+        installed_flags: Optional[Dict[str, bool]] = None,
     ):
         super().__init__(parent)
         self._panel_mode = panel_mode
@@ -911,11 +942,17 @@ class ImageGenEditDialog(ImageGenDimensionAspectMixin, QDialog):
         self._auto_import_available = auto_import_available
         self._custom_size_outer = None
         self._init_dim_aspect_state()
+        self._installed_flags: Dict[str, bool] = dict(installed_flags or {})
+        self._defer_flux_prompt_extras = not self._panel_mode
+        self._installed_list = installed
+        self._prebuilt_plugins_by_id = plugins_by_id
 
         initial = resolve_initial_plugin(
             self._plugins,
             function=function,
             initial_plugin_id=initial_plugin_id,
+            installed=installed,
+            plugins_by_id=plugins_by_id,
         )
         self.plugin = initial
         if initial is not None:
@@ -934,6 +971,8 @@ class ImageGenEditDialog(ImageGenDimensionAspectMixin, QDialog):
                 self, window_title=window_title, min_width=880, min_height=520
             )
         self._build_ui()
+        if getattr(self, "_defer_flux_prompt_extras", False):
+            schedule_deferred_flux_prompt_extras(self)
         if initial_prompt:
             self.set_prompt_text(initial_prompt)
 
@@ -970,6 +1009,9 @@ class ImageGenEditDialog(ImageGenDimensionAspectMixin, QDialog):
             pass
 
     def show(self):
+        if self._panel_mode:
+            super().show()
+            return
         from utils import restore_dialog_geometry_before_first_show
 
         restore_dialog_geometry_before_first_show(
@@ -979,6 +1021,8 @@ class ImageGenEditDialog(ImageGenDimensionAspectMixin, QDialog):
 
     def showEvent(self, event):
         super().showEvent(event)
+        if self._panel_mode:
+            return
         if not self._geometry_was_restored:
             QTimer.singleShot(0, lambda: _center_styled_dialog_on_screen(self, self.parent()))
         QTimer.singleShot(0, self._raise_and_activate)
@@ -1188,6 +1232,8 @@ class ImageGenEditDialog(ImageGenDimensionAspectMixin, QDialog):
                 self.plugin.plugin_id if self.plugin is not None else None
             ),
             parent=self._fields_panel.widget,
+            installed=self._installed_list,
+            plugins_by_id=self._prebuilt_plugins_by_id,
         )
         self._model_combo.currentIndexChanged.connect(self._on_model_combo_changed)
         apply_model_combo_tooltip(self._model_combo)
@@ -1275,7 +1321,12 @@ class ImageGenEditDialog(ImageGenDimensionAspectMixin, QDialog):
         self._connect_dim_aspect_lock()
         self._restore_aspect_lock_from_values()
         self._apply_effective_max_to_dim_sliders()
-        remount_flux_prompt_system_splitter(self)
+        if not getattr(self, "_defer_flux_prompt_extras", False):
+            from imagegen_plugins.flux_prompt_system_mount import (
+                remount_flux_prompt_system_splitter,
+            )
+
+            remount_flux_prompt_system_splitter(self)
         self._repopulate_side_buttons()
 
         if self._source_nav is not None:
