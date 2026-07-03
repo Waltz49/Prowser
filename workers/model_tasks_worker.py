@@ -497,6 +497,11 @@ def get_flux_prompt_stream(
 
     user_text = flux_prompt_user_message(user_prompt, with_image=use_image)
 
+    from imagegen_plugins.ai_prompt_exit import apply_text_ai_exit
+
+    system_prompt = apply_text_ai_exit(system_prompt)
+    user_text = apply_text_ai_exit(user_text)
+
     temperature = cap_settings["temperature"]
 
     with lms.Client(lms_host) as client:

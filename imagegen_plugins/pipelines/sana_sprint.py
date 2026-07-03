@@ -138,6 +138,10 @@ def run_from_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     if not prompt:
         raise ValueError("prompt is required")
 
+    from imagegen_plugins.ai_prompt_exit import apply_image_ai_exit
+
+    prompt = apply_image_ai_exit(prompt)
+
     hf_model_id = str(payload.get("hf_model_id") or _DEFAULT_HF_MODEL_ID)
     w, h = align_sana_sprint_dims(
         int(payload["width"]),

@@ -639,7 +639,7 @@ def mount_pass_image_to_ai_checkbox(
     col = getattr(owner, "_side_btn_col", None)
     if col is None:
         return
-    cb = QCheckBox("Pass image")
+    cb = QCheckBox("Pass image to Prompt Generator")
     cb.setObjectName("imageGenPassImageToAiCheckbox")
     cb.setToolTip(
         f"Include the {image_noun} when refining the prompt with AI "

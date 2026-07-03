@@ -9,6 +9,7 @@ LMStudio running on localhost:1234 with a vision-capable model loaded.
 from typing import Optional
 
 from config import get_config, CAPTION_DEFAULTS
+from imagegen_plugins.ai_prompt_exit import apply_text_ai_exit
 from print_call_decorator import log_exception, print_call
 
 
@@ -281,6 +282,8 @@ def get_image_caption_stream(file_path: str, user_prompt_override: str | None = 
         else:
             user_prompt = cap_settings['user_prompt'].format(CAPTION_WORD_COUNT=word_count)
         temperature = cap_settings['temperature']
+        system_prompt = apply_text_ai_exit(system_prompt)
+        user_prompt = apply_text_ai_exit(user_prompt)
 
         try:
             image_handle = client.files.prepare_image(file_path)
@@ -368,6 +371,8 @@ def get_image_caption(file_path: str, user_prompt_override: str | None = None) -
             else:
                 user_prompt = cap_settings['user_prompt'].format(CAPTION_WORD_COUNT=word_count)
             temperature = cap_settings['temperature']
+            system_prompt = apply_text_ai_exit(system_prompt)
+            user_prompt = apply_text_ai_exit(user_prompt)
 
             # Prepare the image handle.
             try:
