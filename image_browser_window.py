@@ -9908,8 +9908,11 @@ class ImageBrowserWindow(QMainWindow):
         if rs is None:
             return
         if rs.isVisible():
-            rs.setMinimumWidth(250)
-            rs.setMaximumWidth(800)
+            if hasattr(rs, "sync_width_limits"):
+                rs.sync_width_limits()
+            else:
+                rs.setMinimumWidth(250)
+                rs.setMaximumWidth(800)
         else:
             rs.setMinimumWidth(0)
             rs.setMaximumWidth(0)

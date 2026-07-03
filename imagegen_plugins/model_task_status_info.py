@@ -134,7 +134,7 @@ _LABEL_VALUE_NBSP = "\u00A0"
 
 
 def _inline_field_sep_before(label: str, previous_label: str | None) -> str:
-    if label in ("Elapsed:", "Est:"):
+    if label in ("Elapsed:", "Time:", "Est:"):
         return " "
     return _QUEUE_FIELD_SEP
 
@@ -290,11 +290,15 @@ _ACTIVE_JOB_STRIP_FRAME_CHROME_V = (
 
 def active_job_strip_layout_widths(
     strip_content_width_px: int,
+    *,
+    min_frame_width_px: int | None = None,
 ) -> tuple[int, int]:
     """Return (frame_outer_w, browser_content_w) for the bordered QFrame strip."""
-    frame_w = max(120, int(strip_content_width_px))
+    if min_frame_width_px is None:
+        min_frame_width_px = 80
+    frame_w = max(min_frame_width_px, int(strip_content_width_px))
     chrome_h = 2 * _INFO_PANEL_ACTIVE_JOB_TABLE_BORDER_W + _INFO_PANEL_ACTIVE_JOB_CELL_H_PAD
-    browser_w = max(120, frame_w - chrome_h)
+    browser_w = max(min_frame_width_px - chrome_h, frame_w - chrome_h)
     return frame_w, browser_w
 
 
@@ -302,7 +306,7 @@ def _information_panel_row_content_width(
     td_content_width_px: int, *, has_icon: bool
 ) -> int:
     """Usable row width for label / prefix / bar / postfix columns."""
-    inner = max(120, int(td_content_width_px))
+    inner = max(80, int(td_content_width_px))
     if has_icon:
         inner -= _INFO_PANEL_CANCEL_ICON_W
     return inner
@@ -512,7 +516,7 @@ def format_information_generation_timing_cell_html(
     border_hex = th.progress_bar_border_hex
     bg_hex = th.progress_bar_bg_hex
     has_icon = bool(cancel_icon_html)
-    td_content_w = max(120, int(content_width_px or 250))
+    td_content_w = max(80, int(content_width_px or 0))
     row_width = _information_panel_row_content_width(
         td_content_w, has_icon=has_icon
     )
@@ -529,7 +533,7 @@ def format_information_generation_timing_cell_html(
         )
         progress_rows.append(
             (
-                "Est:",
+                "Time:",
                 _format_duration(elapsed_seconds),
                 _format_duration(float(estimate_seconds)),
                 str(fill_percent),
@@ -552,11 +556,16 @@ def format_information_generation_timing_cell_html(
             remaining_steps = total_i - step_i
             fill_percent = int(round(100.0 * step_i / total_i))
             progress_rows.append(
-                (steps_label, str(step_i), str(remaining_steps), str(fill_percent))
+                (
+                    steps_label,
+                    f"{step_i}/{total_i}",
+                    str(remaining_steps),
+                    str(fill_percent),
+                )
             )
         else:
             progress_rows.append(
-                (steps_label, str(total_i), "(total)", "0")
+                (steps_label, f"0/{total_i}", "", "0")
             )
 
     if completed_series is not None and total_series is not None:
@@ -734,12 +743,12 @@ def _steps_row_inline_parts(
     elapsed_seconds: float | None = None,
     estimate_seconds: float | None = None,
 ) -> list[tuple[str, str]]:
-    """Inline label/value pairs after the Steps cell (Elapsed, Est)."""
+    """Inline label/value pairs after the Steps cell (Elapsed, Time)."""
     parts: list[tuple[str, str]] = []
     if elapsed_seconds is not None:
         parts.append(("Elapsed:", _format_duration(elapsed_seconds)))
         if estimate_seconds is not None and estimate_seconds > 0:
-            parts.append(("Est:", _format_duration(estimate_seconds)))
+            parts.append(("Time:", _format_duration(estimate_seconds)))
     return parts
 
 
@@ -1086,7 +1095,7 @@ def _format_elapsed_cell_value(
     value = _format_duration(elapsed_seconds)
     if estimate_seconds is not None and estimate_seconds > 0:
         value += (
-            f" Est:{_LABEL_VALUE_NBSP}"
+            f" Time:{_LABEL_VALUE_NBSP}"
             f"{_format_duration(estimate_seconds)}"
         )
     return value
@@ -1100,7 +1109,7 @@ _STEPS_QUANT_SUFFIX_RE = re.compile(
 _STEPS_TIMING_SUFFIX_RE = re.compile(
     r"((?: |\u00A0|\u00A0{2,4})"
     r"(?:<b>Elapsed:</b>|<span[^>]*>Elapsed:</span>)\u00A0[\d:]+"
-    r"(?: (?: |\u00A0{2,5})(?:<b>Est:</b>|<span[^>]*>Est:</span>)\u00A0[\d:]+)?"
+    r"(?: (?: |\u00A0{2,5})(?:<b>(?:Time|Est):</b>|<span[^>]*>(?:Time|Est):</span>)\u00A0[\d:]+)?"
     r")"
 )
 _STEPS_ROW_RE = re.compile(

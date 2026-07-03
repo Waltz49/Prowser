@@ -29,6 +29,14 @@ from thumbnails.sidebar_pane_layout import (
 from theme.theme_service import get_active_theme
 
 try:
+    from imagegen_plugins.job_queue_panel import MIN_JOBS_PANE_WIDTH
+except ImportError:
+    MIN_JOBS_PANE_WIDTH = 250
+
+_RIGHT_SIDEBAR_MIN_WIDTH_NO_JOBS = 250
+_SHORTCUTS_PANE_MIN_WIDTH = 200
+
+try:
     from bundle_capabilities import model_jobs_ui_enabled as _model_jobs_ui_enabled
 except ImportError:
     def _model_jobs_ui_enabled() -> bool:
@@ -87,10 +95,47 @@ class RightSidebarCombinedWidget(QWidget):
         self.setFocusPolicy(Qt.NoFocus)
         self.setup_ui()
 
+    def right_sidebar_minimum_width(self) -> int:
+        if not self._jobs_feature_enabled:
+            return _RIGHT_SIDEBAR_MIN_WIDTH_NO_JOBS
+        mins: list[int] = []
+        if self.information_visible:
+            mins.append(_RIGHT_SIDEBAR_MIN_WIDTH_NO_JOBS)
+        if self.shortcuts_visible:
+            mins.append(_SHORTCUTS_PANE_MIN_WIDTH)
+        if self.jobs_visible:
+            mins.append(MIN_JOBS_PANE_WIDTH)
+        return max(mins) if mins else MIN_JOBS_PANE_WIDTH
+
+    def sync_width_limits(self) -> None:
+        """Apply min/max width for the combined right sidebar and children."""
+        min_w = self.right_sidebar_minimum_width()
+        self.setMinimumWidth(min_w)
+        self.setMaximumWidth(800)
+
+        if not self._jobs_feature_enabled:
+            if self.information_widget is not None:
+                self.information_widget.setMinimumWidth(_RIGHT_SIDEBAR_MIN_WIDTH_NO_JOBS)
+            if self.shortcuts_widget is not None:
+                self.shortcuts_widget.setMinimumWidth(_SHORTCUTS_PANE_MIN_WIDTH)
+            return
+
+        info_min = _RIGHT_SIDEBAR_MIN_WIDTH_NO_JOBS if self.information_visible else 0
+        shortcuts_min = _SHORTCUTS_PANE_MIN_WIDTH if self.shortcuts_visible else 0
+        jobs_min = MIN_JOBS_PANE_WIDTH if self.jobs_visible else 0
+        if self.information_widget is not None:
+            self.information_widget.setMinimumWidth(info_min)
+        if self.shortcuts_widget is not None:
+            self.shortcuts_widget.setMinimumWidth(shortcuts_min)
+        if self.jobs_section is not None:
+            self.jobs_section.setMinimumWidth(jobs_min)
+        if getattr(self, "jobs_content", None) is not None:
+            self.jobs_content.setMinimumWidth(0)
+        if getattr(self, "jobs_widget", None) is not None:
+            self.jobs_widget.setMinimumWidth(0)
+
     def setup_ui(self):
         """Setup the right_sidebar combined widget UI"""
-        self.setMinimumWidth(250)
-        self.setMaximumWidth(800)
         _th = get_active_theme()
         pane_bg = _th.sidebar_background_color_hex
         apply_sidebar_pane_background(self, pane_bg)
@@ -153,6 +198,7 @@ class RightSidebarCombinedWidget(QWidget):
             on_drag_after=self._jobs_pane_drag_after,
         )
         self._update_splitter_sizes()
+        self.sync_width_limits()
 
     def _create_section(self, title, section_type):
         """Create a section with header and content area (for Shortcuts or Jobs)"""
@@ -573,6 +619,7 @@ class RightSidebarCombinedWidget(QWidget):
             self.main_window.config.update_setting('shortcuts_sidebar_visible', visible)
             self.visibility_changed.emit()
             self.widget_resized.emit()
+        self.sync_width_limits()
 
     def is_shortcuts_visible(self):
         """Check if Shortcuts section is visible"""
@@ -588,6 +635,7 @@ class RightSidebarCombinedWidget(QWidget):
             self.main_window.config.update_setting('information_sidebar_visible', visible)
             self.visibility_changed.emit()
             self.widget_resized.emit()
+        self.sync_width_limits()
 
     def is_information_visible(self):
         """Check if Information section is visible"""
@@ -609,6 +657,7 @@ class RightSidebarCombinedWidget(QWidget):
                 self.jobs_widget.attach_titlebar_tools()
             if hasattr(self.jobs_widget, "refresh_header_status"):
                 self.jobs_widget.refresh_header_status()
+            self.sync_width_limits()
 
     def set_jobs_visible(self, visible):
         """Set Jobs visibility programmatically (e.g. from J key)"""
@@ -628,6 +677,7 @@ class RightSidebarCombinedWidget(QWidget):
             self.jobs_widget.show()
             if hasattr(self.jobs_widget, 'refresh_table'):
                 self.jobs_widget.refresh_table()
+        self.sync_width_limits()
 
     def is_jobs_visible(self):
         """Check if Jobs section is visible"""
@@ -755,3 +805,4 @@ class RightSidebarCombinedWidget(QWidget):
             self.information_widget.refresh_theme_styles()
         if self.jobs_widget and hasattr(self.jobs_widget, "refresh_theme_styles"):
             self.jobs_widget.refresh_theme_styles()
+        self.sync_width_limits()

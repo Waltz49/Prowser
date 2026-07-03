@@ -3,498 +3,61 @@
 
 from __future__ import annotations
 
-import os
-
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QDialog,
-    QHBoxLayout,
-    QHeaderView,
     QLabel,
-    QPushButton,
     QSizePolicy,
-    QTableWidget,
-    QTextBrowser,
     QVBoxLayout,
-    QWidget,
 )
 
-from imagegen_plugins.image_gen_controller import get_imagegen_controller
-from imagegen_plugins.image_gen_dialog import connect_import_button_with_option_modifier
-from imagegen_plugins.image_gen_source_nav import open_image_in_browse
-from imagegen_plugins.job_prompt_tooltip import (
-    install_delayed_prompt_tooltip,
-    notify_job_prompt_tooltip_content_updating,
-    update_delayed_prompt_tooltip,
-)
 from imagegen_plugins.image_gen_persistence import (
     load_job_queue_geometry_hex,
     save_job_queue_geometry_hex,
 )
-from config import (
-    job_queue_action_bar_background_hex,
-    job_queue_action_bar_background_qcolor,
-    job_queue_cell_background_hex,
+from imagegen_plugins.job_queue_panel import (
+    JobQueuePanelWidget,
+    job_control_dialog_outer_minimum_width,
 )
-from status_bar_config import (
-    _apply_task_info_html_to_browser,
-    configure_task_info_text_browser,
+# Re-export shared helpers for existing importers.
+from imagegen_plugins.job_queue_common import (  # noqa: F401
+    _ACTION_COL_WIDTH,
+    _apply_job_queue_cell_background,
+    _valid_preview_paths,
+    build_job_queue_action_widget,
+    create_invalid_job_preview_label,
+    info_html_for_queue_row,
+    job_queue_cancel_row,
+    job_queue_edit_row,
+    open_reference_thumbnail_paths,
 )
-from theme.theme_base import asset_path
 from theme.theme_service import get_active_theme
+from thumbnails.combined_sidebar_widget import HeaderWidget
 from utils import (
     _center_styled_dialog_on_screen,
-    create_job_status_thumbnail_label,
-    restore_dialog_geometry_hex,
+    ensure_dialog_fits_screen,
     save_dialog_geometry_hex,
 )
 
-_THUMB_SIZE = 72
-_ROW_PAD = 6
-_THUMB_CELL_MARGIN = 8
-_THUMB_CELL_GAP = 6
-_ACTION_COL_WIDTH = 36
-_ICON_BTN_SIZE = 22
-
-
-def _job_queue_cell_background_stylesheet() -> str:
-    bg = job_queue_cell_background_hex()
-    return f"background-color: {bg};"
-
-
-def _job_queue_action_bar_background_stylesheet() -> str:
-    bg = job_queue_action_bar_background_hex()
-    return f"background-color: {bg};"
-
-
-def _job_queue_table_stylesheet() -> str:
-    t = get_active_theme()
-    bg = job_queue_cell_background_hex()
-    return f"""
-            QTableWidget {{
-                background-color: {bg};
-                color: {t.dialog_text_color_hex};
-                border: 1px solid {t.border_default_hex};
-                gridline-color: {t.border_default_hex};
-                alternate-background-color: {bg};
-            }}
-            QTableWidget::item {{
-                background-color: {bg};
-                padding: 2px;
-            }}
-            QTableCornerButton::section {{
-                background-color: {bg};
-                border: 1px solid {t.border_default_hex};
-            }}
-            QHeaderView::section {{
-                background-color: {bg};
-                color: {t.dialog_text_color_hex};
-                border: 1px solid {t.border_default_hex};
-                padding: 4px;
-            }}
-            """
-
-
-def _apply_job_queue_cell_background(widget: QWidget) -> None:
-    widget.setStyleSheet(_job_queue_cell_background_stylesheet())
-    widget.setAutoFillBackground(True)
-
-
-def _apply_job_queue_action_bar_background(widget: QWidget) -> None:
-    widget.setStyleSheet(_job_queue_action_bar_background_stylesheet())
-    widget.setAutoFillBackground(True)
-
-
-def _make_clickable_thumbnail(main_window, file_path: str, size: int) -> QLabel:
-    thumb = create_job_status_thumbnail_label(file_path, size)
-    thumb.setCursor(Qt.CursorShape.PointingHandCursor)
-    thumb.setToolTip("Click to open in browse mode")
-
-    def _on_mouse_press(event) -> None:
-        if event.button() == Qt.MouseButton.LeftButton:
-            open_image_in_browse(main_window, file_path)
-            event.accept()
-            return
-        QLabel.mousePressEvent(thumb, event)
-
-    thumb.mousePressEvent = _on_mouse_press
-    return thumb
-
-
-def _valid_preview_paths(paths: list[str]) -> list[str]:
-    out: list[str] = []
-    for raw in paths:
-        p = str(raw or "").strip()
-        if p and os.path.isfile(p):
-            out.append(p)
-    return out
-
-
-def create_invalid_job_preview_label(size: int) -> QLabel:
-    from PySide6.QtGui import QPixmap
-
-    from theme.theme_base import invalid_job_preview_path
-
-    thumb = QLabel()
-    thumb.setFixedSize(size, size)
-    thumb.setAlignment(Qt.AlignmentFlag.AlignCenter)
-    thumb.setStyleSheet(_job_queue_cell_background_stylesheet())
-    px = QPixmap(invalid_job_preview_path())
-    if not px.isNull():
-        thumb.setPixmap(
-            px.scaled(
-                size,
-                size,
-                Qt.AspectRatioMode.KeepAspectRatio,
-                Qt.TransformationMode.SmoothTransformation,
-            )
-        )
-    return thumb
-
-
-def _preview_column_width(num_thumbs: int) -> int:
-    """Preview column width for *num_thumbs* full-size (_THUMB_SIZE) thumbnails."""
-    n = max(1, int(num_thumbs))
-    return (
-        _THUMB_CELL_MARGIN
-        + n * _THUMB_SIZE
-        + max(0, n - 1) * _THUMB_CELL_GAP
-    )
-
-
-def _build_preview_cell(
-    main_window,
-    paths: list[str],
-    *,
-    references_invalid: bool = False,
-) -> tuple[QWidget, int]:
-    """Preview column cell: one full thumbnail per path; returns (widget, width)."""
-    preview_wrap = QWidget()
-    _apply_job_queue_cell_background(preview_wrap)
-    preview_layout = QHBoxLayout(preview_wrap)
-    preview_layout.setContentsMargins(4, 4, 4, 4)
-    preview_layout.setSpacing(_THUMB_CELL_GAP)
-    if references_invalid:
-        valid: list[str] = []
-        row_preview_w = _preview_column_width(1)
-    else:
-        valid = _valid_preview_paths(paths)
-        row_preview_w = _preview_column_width(len(valid) or 1)
-    preview_wrap.setMinimumWidth(row_preview_w)
-    preview_wrap.setMaximumWidth(row_preview_w)
-    preview_wrap.setMinimumHeight(_preview_cell_height())
-    preview_wrap.setSizePolicy(
-        QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Expanding
-    )
-    if references_invalid:
-        thumb = create_invalid_job_preview_label(_THUMB_SIZE)
-        thumb.setToolTip("Reference files for this job are missing")
-        preview_layout.addWidget(
-            thumb,
-            0,
-            Qt.AlignmentFlag.AlignVCenter,
-        )
-    elif valid:
-        for path in valid:
-            thumb = _make_clickable_thumbnail(main_window, path, _THUMB_SIZE)
-            thumb.setSizePolicy(
-                QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed
-            )
-            preview_layout.addWidget(
-                thumb,
-                0,
-                Qt.AlignmentFlag.AlignVCenter,
-            )
-    else:
-        placeholder = QLabel("—")
-        placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        placeholder.setFixedSize(_THUMB_SIZE, _THUMB_SIZE)
-        _apply_job_queue_cell_background(placeholder)
-        preview_layout.addWidget(placeholder)
-    preview_layout.addStretch(1)
-    return preview_wrap, row_preview_w
-
-
-def _max_preview_column_width(rows) -> int:
-    widths = []
-    for r in rows:
-        if getattr(r, "references_invalid", False):
-            widths.append(_preview_column_width(1))
-        else:
-            widths.append(_preview_column_width(len(_valid_preview_paths(r.thumbnail_paths))))
-    return max(_preview_column_width(1), *widths) if widths else _preview_column_width(1)
-
-
-def _action_column_min_height(*, has_waiting_cycles: bool = True) -> int:
-    # plus, [minus, refine], edit, cancel
-    series_btn_count = 5 if has_waiting_cycles else 3
-    return (
-        series_btn_count * _ICON_BTN_SIZE
-        + max(0, series_btn_count - 1) * 2
-        + 4
-    )
-
-
-def _preview_cell_height() -> int:
-    return _THUMB_SIZE + 8
-
-
-def _row_height_for_job_cell(
-    *, browser_h: int, has_waiting_cycles: bool = True
-) -> int:
-    return max(
-        _preview_cell_height() + _ROW_PAD,
-        browser_h + _ROW_PAD,
-        _action_column_min_height(has_waiting_cycles=has_waiting_cycles),
-    )
-
-
-def _info_content_width(table: QTableWidget, *, preview_col_width: int) -> int:
-    viewport_w = table.viewport().width()
-    if viewport_w < 80:
-        viewport_w = max(520, table.width()) - 48
-    return max(240, viewport_w - preview_col_width - 36 - 48)
-
-
-def _apply_info_browser_html(
-    info_browser: QTextBrowser, body_html: str, *, content_width: int
-) -> int:
-    if not body_html:
-        return info_browser.height()
-    return _apply_task_info_html_to_browser(
-        info_browser, body_html, content_width=content_width, job_queue_cell=True
-    )
-
-
-def info_html_for_queue_row(
-    controller, row_idx: int, row, *, for_sidebar: bool = False
-) -> str:
-    if row.is_active:
-        return controller.get_task_queue_status_info_html(
-            omit_live_steps_row=for_sidebar
-        )
-    return row.status_html or ""
-
-
-def job_queue_edit_row(main_window, controller, row: int) -> None:
-    rows = controller.queue_snapshot()
-    if row < 0 or row >= len(rows):
-        return
-    entry = rows[row]
-    record = controller.job_record_for_row(row)
-    if record is None:
-        return
-    plugin, values = record
-    from imagegen_plugins.image_gen_menu import open_imagegen_dialog_from_job
-
-    replace_job_id = entry.job_id if not entry.is_active else None
-    open_imagegen_dialog_from_job(
-        main_window, plugin, values, replace_job_id=replace_job_id
-    )
-
-
-def job_queue_cancel_row(
-    main_window, controller, row: int, *, option_held: bool = False
-) -> None:
-    if option_held:
-        controller.cancel_jobs_from_row_and_subsequent(row)
-    else:
-        controller.confirm_cancel_job_at_row(main_window, row)
-
-
-def build_job_queue_action_widget(
-    main_window,
-    controller,
-    row_idx: int,
-    *,
-    is_active: bool,
-) -> QWidget:
-    """Action column: series controls, edit, cancel (active and queued rows)."""
-    _ = is_active
-    edit_btn = QPushButton()
-    edit_btn.setToolTip(
-        "Replicate job settings…\n"
-        "For a pending job, use Replace in the dialog to update it in place."
-    )
-    edit_btn.setStyleSheet(_edit_button_stylesheet())
-    edit_btn.clicked.connect(
-        lambda _checked=False, r=row_idx: job_queue_edit_row(main_window, controller, r)
-    )
-    cancel_btn = QPushButton()
-    cancel_btn.setToolTip(
-        "Cancel job\n"
-        "Option+click to cancel this job and all jobs after it (no confirmation)."
-    )
-    cancel_btn.setStyleSheet(_trash_button_stylesheet())
-    connect_import_button_with_option_modifier(
-        cancel_btn,
-        lambda option_held=False, r=row_idx: job_queue_cancel_row(
-            main_window, controller, r, option_held=option_held
-        ),
-    )
-    action_wrap = QWidget()
-    _apply_job_queue_action_bar_background(action_wrap)
-    action_layout = QVBoxLayout(action_wrap)
-    action_layout.setContentsMargins(2, 0, 2, 0)
-    action_layout.setSpacing(2)
-
-    plus_btn = QPushButton()
-    plus_btn.setToolTip("Add another image to this series")
-    plus_btn.setStyleSheet(_series_plus_button_stylesheet())
-    plus_btn.setEnabled(controller.can_add_series_cycle_for_row(row_idx))
-    plus_btn.clicked.connect(
-        lambda _checked=False, r=row_idx: controller.add_series_cycle_for_row(r)
-    )
-    has_waiting_cycles = controller.series_remaining_after_for_row(row_idx) > 0
-    action_layout.addWidget(plus_btn, alignment=Qt.AlignmentFlag.AlignCenter)
-    if has_waiting_cycles:
-        minus_btn = QPushButton()
-        minus_btn.setToolTip(
-            "Remove one pending image from the series.\n"
-            "Option+click to remove all remaining images."
-        )
-        minus_btn.setStyleSheet(_series_minus_button_stylesheet())
-        connect_import_button_with_option_modifier(
-            minus_btn,
-            lambda option_held=False, r=row_idx: (
-                controller.clear_series_remaining_for_row(r)
-                if option_held
-                else controller.subtract_series_remaining_for_row(r)
-            ),
-        )
-        refine_btn = QPushButton()
-        refine_btn.setCheckable(True)
-        refine_btn.setToolTip(
-            "Refinement: replace the first source image with each new result "
-            "for later copies; other source images keep their order."
-        )
-        refine_btn.setStyleSheet(_series_refinement_button_stylesheet())
-        refine_btn.blockSignals(True)
-        refine_btn.setChecked(controller.series_refinement_enabled_for_row(row_idx))
-        refine_btn.blockSignals(False)
-        refine_btn.toggled.connect(
-            lambda checked, r=row_idx: controller.set_series_refinement_for_row(
-                r, checked
-            )
-        )
-        action_layout.addWidget(minus_btn, alignment=Qt.AlignmentFlag.AlignCenter)
-        action_layout.addWidget(refine_btn, alignment=Qt.AlignmentFlag.AlignCenter)
-    action_layout.addWidget(edit_btn, alignment=Qt.AlignmentFlag.AlignCenter)
-    action_layout.addWidget(cancel_btn, alignment=Qt.AlignmentFlag.AlignCenter)
-    action_wrap.setFixedWidth(_ACTION_COL_WIDTH)
-    return action_wrap
-
-
-def open_reference_thumbnail_paths(main_window, paths: list[str]) -> None:
-    """One image → browse; multiple → new thumbnail level."""
-    valid = _valid_preview_paths(paths)
-    if not valid:
-        return
-    if len(valid) == 1:
-        open_image_in_browse(main_window, valid[0])
-        return
-    if hasattr(main_window, "directory_stack_history_handler"):
-        main_window.directory_stack_history_handler.save_current_state(
-            "open_reference_thumbnail_paths", delay=0.0
-        )
-    if hasattr(main_window, "refresh_from_configuration"):
-        main_window.refresh_from_configuration(
-            {"files": valid, "sort_mode": "custom"}
-        )
-
-
-def _icon_push_button_stylesheet(icon_name: str, *, hover_icon_name: str | None = None) -> str:
-    t = get_active_theme()
-    icon_url = f"url({asset_path(icon_name)})"
-    hover_name = hover_icon_name or icon_name.replace(".png", "_hover.png")
-    hover_url = f"url({asset_path(hover_name)})"
-    sz = _ICON_BTN_SIZE
-    btn_bg = job_queue_action_bar_background_hex()
-    btn_hover = job_queue_cell_background_hex()
-    btn_pressed = job_queue_action_bar_background_qcolor().darker(120).name()
-    return f"""
-        QPushButton {{
-            background-color: {btn_bg};
-            border: 1px solid {t.border_default_hex};
-            border-radius: 3px;
-            padding: 0px;
-            min-width: {sz}px;
-            max-width: {sz}px;
-            min-height: {sz}px;
-            max-height: {sz}px;
-            image: {icon_url};
-        }}
-        QPushButton:focus {{
-            border: 1px solid {t.current_image_border_color_hex};
-            outline: none;
-        }}
-        QPushButton:hover {{
-            background-color: {btn_hover};
-            border: 1px solid {t.border_default_hex};
-            image: {hover_url};
-        }}
-        QPushButton:pressed {{
-            background-color: {btn_pressed};
-        }}
-        QPushButton:disabled {{
-            opacity: 0.35;
-        }}
-    """
-
-
-def _trash_button_stylesheet() -> str:
-    return _icon_push_button_stylesheet(
-        "trash_icon.png", hover_icon_name="trash_icon_hover.png"
-    )
-
-
-def _edit_button_stylesheet() -> str:
-    return _icon_push_button_stylesheet("edit_icon.png")
-
-
-def _series_plus_button_stylesheet() -> str:
-    return _icon_push_button_stylesheet("series_plus_icon.png")
-
-
-def _series_minus_button_stylesheet() -> str:
-    return _icon_push_button_stylesheet("series_minus_icon.png")
-
-
-def _series_refinement_button_stylesheet() -> str:
-    active_url = f"url({asset_path('series_refinement_icon_active.png')})"
-    active_hover_url = f"url({asset_path('series_refinement_icon_active_hover.png')})"
-    btn_hover = job_queue_cell_background_hex()
-    return _icon_push_button_stylesheet("series_refinement_icon.png") + f"""
-        QPushButton:checked:hover {{
-            background-color: {btn_hover};
-            border: 1px solid {get_active_theme().border_default_hex};
-            image: {active_hover_url};
-        }}
-        QPushButton:checked {{
-            image: {active_url};
-        }}
-    """
+_DIALOG_MARGIN = 8
+_NEAR_MAX_HEIGHT_TOLERANCE = 20
 
 
 class ImageGenJobQueueDialog(QDialog):
-    """Scrollable table of active and queued image-generation jobs."""
+    """Floating job control dialog — same cards and progress strip as the jobs pane."""
 
     def __init__(self, main_window, parent=None):
         super().__init__(parent or main_window)
         self.main_window = main_window
-        self._controller = get_imagegen_controller(main_window)
-        self._refresh_timer: QTimer | None = None
-        self._refresh_table_timer: QTimer | None = None
-        self._signal_connected = False
         self._geometry_restore_attempted = False
         self._geometry_was_restored = False
+        self._maximized_height: int | None = None
 
-        self.setWindowTitle("Job Queue")
+        self.setWindowTitle("Job Control")
         self.setModal(False)
-        self.setMinimumWidth(520)
-        self.setMinimumHeight(280)
-        self.resize(560, 360)
+        self._sync_dialog_width_limits()
+        self.setMinimumHeight(120)
 
         t = get_active_theme()
         self.setStyleSheet(
@@ -503,79 +66,118 @@ class ImageGenJobQueueDialog(QDialog):
                 background-color: {t.dialog_background_hex};
                 color: {t.dialog_text_color_hex};
             }}
-            {_job_queue_table_stylesheet()}
             """
         )
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(12, 12, 12, 12)
-        layout.setSpacing(8)
-
-        self._empty_label = QLabel("No jobs in the queue.")
-        self._empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._empty_label.setStyleSheet(
-            f"color: {t.dialog_text_color_hex}; font-size: 13px; padding: 24px;"
+        layout.setContentsMargins(
+            _DIALOG_MARGIN, _DIALOG_MARGIN, _DIALOG_MARGIN, _DIALOG_MARGIN
         )
+        layout.setSpacing(0)
+
+        self._header = HeaderWidget(
+            "Job Control", omit_left_border=True, omit_right_border=True
+        )
+        self._header.hide_button.setText("×")
+        self._header.hide_button.setToolTip("Close job control dialog")
+        self._header.hide_button.clicked.connect(self.hide)
+        self._header.title_double_clicked.connect(self._toggle_maximize_or_compact)
+        layout.addWidget(self._header)
+
+        self._panel = JobQueuePanelWidget(main_window, self)
+        self._panel.set_header_getter(lambda: self._header)
+        self._panel.set_on_compact_geometry_changed(self._sync_dialog_height_to_panel)
+        self._panel.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
+        )
+        layout.addWidget(self._panel, 1)
+
+        self._panel.attach_header_tools()
+
+        empty_label = self._panel.empty_label_widget()
 
         def _on_empty_label_press(event) -> None:
             if (
                 event.button() == Qt.MouseButton.LeftButton
-                and not self._table.isVisible()
+                and self._is_empty_queue_state()
             ):
                 self.hide()
                 event.accept()
                 return
-            QLabel.mousePressEvent(self._empty_label, event)
+            QLabel.mousePressEvent(empty_label, event)
 
-        self._empty_label.mousePressEvent = _on_empty_label_press
-        layout.addWidget(self._empty_label)
-
-        self._table = QTableWidget(0, 3, self)
-        self._table.setHorizontalHeaderLabels(["", "Job", "References"])
-        self._table.horizontalHeader().setSectionResizeMode(
-            0, QHeaderView.ResizeMode.Fixed
-        )
-        self._table.horizontalHeader().setSectionResizeMode(
-            1, QHeaderView.ResizeMode.Stretch
-        )
-        self._table.horizontalHeader().setSectionResizeMode(
-            2, QHeaderView.ResizeMode.Fixed
-        )
-        self._table.setColumnWidth(0, _ACTION_COL_WIDTH)
-        self._table.setColumnWidth(2, _preview_column_width(1))
-        self._table.verticalHeader().setVisible(False)
-        self._table.setSelectionMode(QTableWidget.SelectionMode.NoSelection)
-        self._table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        self._table.setAlternatingRowColors(False)
-        self._table.setShowGrid(True)
-        self._table.viewport().setAutoFillBackground(True)
-        self._table.viewport().setStyleSheet(_job_queue_cell_background_stylesheet())
-        layout.addWidget(self._table, 1)
+        empty_label.mousePressEvent = _on_empty_label_press
 
         dismiss_shortcut = QShortcut(QKeySequence("Ctrl+J"), self)
         dismiss_shortcut.setContext(Qt.ShortcutContext.WindowShortcut)
         dismiss_shortcut.activated.connect(self.hide)
 
-        self._connect_controller()
-        self._do_refresh_table()
+    def _is_empty_queue_state(self) -> bool:
+        return not self._panel.is_queue_list_visible() and not self._panel.has_job_rows()
+
+    def _sync_dialog_width_limits(self) -> None:
+        self.setMinimumWidth(
+            job_control_dialog_outer_minimum_width(margin_px=_DIALOG_MARGIN)
+        )
 
     def _schedule_refresh_table(self) -> None:
-        """Defer table rebuild so queue_changed is safe during button handlers."""
-        timer = self._refresh_table_timer
-        if timer is None:
-            timer = QTimer(self)
-            timer.setSingleShot(True)
-            timer.timeout.connect(self._do_refresh_table)
-            self._refresh_table_timer = timer
-        timer.start(0)
+        self._panel.schedule_refresh()
 
-    def _do_refresh_table(self) -> None:
-        try:
-            self.refresh_table()
-        except Exception:
-            import traceback
+    def _layout_chrome_height(self) -> int:
+        layout = self.layout()
+        margins = layout.contentsMargins() if layout is not None else None
+        margin_h = 0
+        if margins is not None:
+            margin_h = margins.top() + margins.bottom()
+        return self._header.height() + margin_h
 
-            traceback.print_exc()
+    def _max_screen_client_height(self) -> int:
+        from utils import _resolve_screen_for_styled_dialog
+
+        screen = _resolve_screen_for_styled_dialog(self.main_window)
+        if screen is None:
+            return self.height()
+        ag = screen.availableGeometry()
+        return max(self.minimumHeight(), ag.height() - 2 * _DIALOG_MARGIN)
+
+    def _content_height_for_mode(self, *, compact: bool) -> int:
+        if compact:
+            panel_h = self._panel.compact_content_height()
+            if panel_h <= 0 and not self._panel.has_job_rows():
+                panel_h = self._panel.empty_state_height_hint()
+        else:
+            panel_h = self._panel.preferred_content_height()
+        return self._layout_chrome_height() + panel_h
+
+    def _sync_dialog_height_to_panel(self) -> None:
+        if not self.isVisible():
+            return
+        target = self._content_height_for_mode(
+            compact=self._panel.is_queue_compact()
+        )
+        target = max(self.minimumHeight(), target)
+        self.resize(self.width(), target)
+        ensure_dialog_fits_screen(self, self.main_window, margin=_DIALOG_MARGIN)
+
+    def _is_near_maximized_height(self) -> bool:
+        max_h = self._maximized_height
+        if max_h is None:
+            max_h = self._max_screen_client_height()
+        return abs(self.height() - max_h) <= _NEAR_MAX_HEIGHT_TOLERANCE
+
+    def _toggle_maximize_or_compact(self) -> None:
+        if self._is_near_maximized_height():
+            self._panel.set_queue_compact(True)
+            self._sync_dialog_height_to_panel()
+            return
+        self._panel.set_queue_compact(False)
+        self._panel.prepare_expand_layout()
+        needed = self._content_height_for_mode(compact=False)
+        max_h = self._max_screen_client_height()
+        self._maximized_height = max_h
+        target = min(needed, max_h)
+        self.resize(self.width(), max(self.minimumHeight(), target))
+        ensure_dialog_fits_screen(self, self.main_window, margin=_DIALOG_MARGIN)
 
     def _save_geometry(self) -> None:
         try:
@@ -583,25 +185,8 @@ class ImageGenJobQueueDialog(QDialog):
         except Exception:
             pass
 
-    def _connect_controller(self) -> None:
-        if self._signal_connected:
-            return
-        self._controller.queue_changed.connect(self._schedule_refresh_table)
-        self._controller.task_status_info_changed.connect(
-            lambda: self._refresh_active_row_info(force=True)
-        )
-        self._signal_connected = True
-        timer = QTimer(self)
-        timer.setInterval(500)
-        timer.timeout.connect(lambda: self._refresh_active_row_info(force=False))
-        timer.start()
-        self._refresh_timer = timer
-
     def mousePressEvent(self, event) -> None:
-        if (
-            event.button() == Qt.MouseButton.LeftButton
-            and not self._table.isVisible()
-        ):
+        if event.button() == Qt.MouseButton.LeftButton and self._is_empty_queue_state():
             self.hide()
             event.accept()
             return
@@ -609,19 +194,11 @@ class ImageGenJobQueueDialog(QDialog):
 
     def closeEvent(self, event) -> None:
         self._save_geometry()
-        if self._refresh_timer is not None:
-            self._refresh_timer.stop()
-        if self._refresh_table_timer is not None:
-            self._refresh_table_timer.stop()
         event.ignore()
         self.hide()
 
     def hideEvent(self, event) -> None:
         self._save_geometry()
-        if self._refresh_timer is not None:
-            self._refresh_timer.stop()
-        if self._refresh_table_timer is not None:
-            self._refresh_table_timer.stop()
         super().hideEvent(event)
 
     def show(self):
@@ -638,121 +215,11 @@ class ImageGenJobQueueDialog(QDialog):
             QTimer.singleShot(
                 0, lambda: _center_styled_dialog_on_screen(self, self.main_window)
             )
-        if self._refresh_timer is not None:
-            self._refresh_timer.start()
+        self._panel.set_queue_compact(False)
+        self._sync_dialog_width_limits()
         self._schedule_refresh_table()
+        self._panel.refresh_header_status()
 
-    def _refresh_active_row_info(self, *, force: bool = False) -> None:
-        if not self.isVisible():
-            return
-        if not force and not self._controller.task_status_display_needs_refresh():
-            return
-        rows = self._controller.queue_snapshot()
-        if not rows or not rows[0].is_active:
-            return
-        browser = self._table.cellWidget(0, 1)
-        if isinstance(browser, QTextBrowser):
-            info_html = self._controller.get_task_queue_status_info_html()
-            if info_html:
-                notify_job_prompt_tooltip_content_updating(browser)
-                update_delayed_prompt_tooltip(
-                    browser, rows[0].full_prompt
-                )
-                preview_w = self._table.columnWidth(2)
-                content_width = _info_content_width(
-                    self._table, preview_col_width=preview_w
-                )
-                browser_h = _apply_info_browser_html(
-                    browser, info_html, content_width=content_width
-                )
-                self._table.setRowHeight(
-                    0,
-                    _row_height_for_job_cell(
-                        browser_h=browser_h,
-                        has_waiting_cycles=(
-                            self._controller.series_remaining_after_for_row(0) > 0
-                        ),
-                    ),
-                )
-        if force:
-            self._refresh_active_row_preview(row_idx=0)
-
-    def _refresh_active_row_preview(self, row_idx: int = 0) -> None:
-        if not self.isVisible():
-            return
-        rows = self._controller.queue_snapshot()
-        if row_idx < 0 or row_idx >= len(rows):
-            return
-        preview_col_w = _max_preview_column_width(rows)
-        self._table.setColumnWidth(2, preview_col_w)
-        preview_wrap, _row_w = _build_preview_cell(
-            self.main_window,
-            rows[row_idx].thumbnail_paths,
-            references_invalid=rows[row_idx].references_invalid,
-        )
-        self._table.setCellWidget(row_idx, 2, preview_wrap)
-        browser = self._table.cellWidget(row_idx, 1)
-        browser_h = browser.height() if isinstance(browser, QTextBrowser) else 0
-        self._table.setRowHeight(
-            row_idx,
-            _row_height_for_job_cell(
-                browser_h=browser_h,
-                has_waiting_cycles=(
-                    self._controller.series_remaining_after_for_row(row_idx) > 0
-                ),
-            ),
-        )
-
-    def refresh_table(self) -> None:
-        rows = self._controller.queue_snapshot()
-        has_rows = bool(rows)
-        self._empty_label.setVisible(not has_rows)
-        self._table.setVisible(has_rows)
-        layout = self.layout()
-        if layout is not None:
-            layout.setStretchFactor(self._empty_label, 1 if not has_rows else 0)
-            layout.setStretchFactor(self._table, 1 if has_rows else 0)
-        self._table.setRowCount(len(rows))
-        preview_col_w = _max_preview_column_width(rows)
-        self._table.setColumnWidth(2, preview_col_w)
-        content_width = _info_content_width(
-            self._table, preview_col_width=preview_col_w
-        )
-
-        for row_idx, row in enumerate(rows):
-            action_wrap = build_job_queue_action_widget(
-                self.main_window,
-                self._controller,
-                row_idx,
-                is_active=row.is_active,
-            )
-            self._table.setCellWidget(row_idx, 0, action_wrap)
-
-            info_browser = QTextBrowser()
-            configure_task_info_text_browser(
-                info_browser, self.main_window, job_queue_cell=True
-            )
-            info_html = info_html_for_queue_row(self._controller, row_idx, row)
-            browser_h = _apply_info_browser_html(
-                info_browser, info_html or "", content_width=content_width
-            )
-            install_delayed_prompt_tooltip(info_browser, row.full_prompt)
-            self._table.setCellWidget(row_idx, 1, info_browser)
-
-            preview_wrap, _row_preview_w = _build_preview_cell(
-                self.main_window,
-                row.thumbnail_paths,
-                references_invalid=row.references_invalid,
-            )
-            self._table.setCellWidget(row_idx, 2, preview_wrap)
-
-            row_h = _row_height_for_job_cell(
-                browser_h=browser_h,
-                has_waiting_cycles=(
-                    self._controller.series_remaining_after_for_row(row_idx) > 0
-                ),
-            )
-            self._table.setRowHeight(row_idx, row_h)
 
 def open_imagegen_job_queue_dialog(main_window) -> None:
     """Show the full job queue dialog (does not toggle hide)."""
