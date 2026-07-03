@@ -162,7 +162,7 @@ def apply_flux_prompt_primary_button_width(button: QPushButton) -> None:
 
 
 def cancel_dialog_flux_prompt_refine(owner: Any) -> None:
-    """Stop in-progress Gen Prompt refinement (same as the AI toolbar Cancel)."""
+    """Stop in-progress Gen Prompt toolbar refinement (not submitted job AI stages)."""
     panels = getattr(owner, "_panels", None)
     if isinstance(panels, dict):
         for panel in panels.values():
@@ -383,6 +383,8 @@ class ImageGenFluxPromptAi:
 
     def cancel_running(self) -> None:
         """Public entry for dialog dismiss (Close, Cancel, Escape)."""
+        if not self._running:
+            return
         self._on_cancel_clicked()
 
     def _on_ai_clicked(self) -> None:

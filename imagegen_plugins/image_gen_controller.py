@@ -615,6 +615,7 @@ class ImageGenController(QObject):
 
                 preview_path = _preview_output_path()
                 payload = plugin.build_payload(self._pending_values, preview_path)
+                apply_payload_model_fields_to_values(self._pending_values, payload)
             except Exception:
                 payload = None
             self._task_status_info_html = format_image_generation_queue_status_html(
@@ -1522,7 +1523,9 @@ class ImageGenController(QObject):
         self._sync_cancel_menu()
 
     def cancel_flux_prompt_refine(self) -> None:
-        """Stop in-flight FLUX prompt refinement without cancelling image generation."""
+        """Stop dialog Gen Prompt refinement; never cancel a submitted job's AI stage."""
+        if self._job_ai_stage_active:
+            return
         if self._tasks.is_running() and self._tasks.active_kind == "flux_prompt":
             self._tasks.cancel_task()
         if (

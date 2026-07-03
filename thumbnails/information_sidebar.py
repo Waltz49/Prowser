@@ -36,13 +36,19 @@ from search.reference_graph import (
     resolve_reference_path,
 )
 
-# Path to trash icon for delete action (inline image in information HTML)
-_TRASH_ICON_PATH = os.path.join(os.path.dirname(__file__), "assets", "trash_icon.png")
-if os.path.exists(_TRASH_ICON_PATH):
-    _trash_url = "file://" + os.path.abspath(_TRASH_ICON_PATH).replace(" ", "%20")
-    _DELETE_ICON_HTML = f'<img src="{_trash_url}" width="16" height="16" style="margin:0;padding:0;vertical-align:bottom;">'
-else:
-    _DELETE_ICON_HTML = "⊘"
+# Footer function switcher uses 28px; scale the same assets down for info-pane chips.
+_INFO_ACTION_ICON_PX = 18
+
+
+def _info_action_icon_html(icon_name: str) -> str:
+    """HTML img for info-pane action chips (imagegen, trash, etc.)."""
+    url = asset_file_url(icon_name)
+    px = _INFO_ACTION_ICON_PX
+    return (
+        f'<img src="{url}" width="{px}" height="{px}" '
+        f'style="display:block;margin:0 auto;padding:0;border:none;vertical-align:middle;">'
+    )
+
 
 # Content inset via viewport margins so the vertical scrollbar stays flush right.
 _INFO_VIEWPORT_MARGIN_LEFT = 18
@@ -50,17 +56,6 @@ _INFO_VIEWPORT_MARGIN_TOP = 15
 _INFO_VIEWPORT_MARGIN_RIGHT = 18
 _INFO_VIEWPORT_MARGIN_BOTTOM = 15
 _INFO_CONTENT_WIDTH_INSET = _INFO_VIEWPORT_MARGIN_LEFT + _INFO_VIEWPORT_MARGIN_RIGHT
-
-from theme.ai_info_icon import AI_INFO_ICON_DISPLAY_PX, ai_info_icon_asset_name
-
-
-def _information_ai_icon_html() -> str:
-    """Theme-aware 'AI' label icon for File Information imagegen actions."""
-    url = asset_file_url(ai_info_icon_asset_name())
-    return (
-        f'<img src="{url}" width="{AI_INFO_ICON_DISPLAY_PX}" height="{AI_INFO_ICON_DISPLAY_PX}" '
-        f'style="display:block;margin:0 auto;padding:0;border:none;vertical-align:bottom;">'
-    )
 
 
 class InformationSidebar(QWidget):
@@ -173,7 +168,7 @@ class InformationSidebar(QWidget):
         ),
         "edit://": "Edit user comment",
         "create://": "Create an image from text...",
-        "editai://": "Edit with AI",
+        "editai://": "Edit an image with AI...",
         "delete://": "Delete user comment",
         "cancelgen://": "Cancel generation",
         "skipcooldown://": "Skip cooldown",
@@ -362,12 +357,18 @@ class InformationSidebar(QWidget):
             return ""
         cells = ""
         if imagegen_plugins_available():
+            create_icon = _info_action_icon_html(
+                "fromText_hover.png" if hovered_anchor == "create://" else "fromText.png"
+            )
             cells += spacer_box() + icon_box(
-                "create://", "◇", "Create an image from text..."
+                "create://", create_icon, "Create an image from text..."
             )
         if imagegen_edit_plugins_available():
+            edit_icon = _info_action_icon_html(
+                "editAI_hover.png" if hovered_anchor == "editai://" else "editAI.png"
+            )
             cells += spacer_box() + icon_box(
-                "editai://", _information_ai_icon_html(), "Edit with AI"
+                "editai://", edit_icon, "Edit an image with AI..."
             )
         return cells
 
@@ -1062,7 +1063,9 @@ class InformationSidebar(QWidget):
         ACTION_ICON_HOVER_COLOR = getattr(_th, "button_border_hover_hex", _th.accent_color_hex)
         SPEAK_ICON = "꡴"
         EDIT_ICON = "✚"
-        DELETE_ICON = _DELETE_ICON_HTML
+        delete_icon = _info_action_icon_html(
+            "trash_icon_hover.png" if hovered_anchor == "delete://" else "trash_icon.png"
+        )
 
         # Edit button (always shown); speak/copy/delete only when description is long enough
         # Render each button as a boxed icon using a table with borders on <td>
@@ -1113,7 +1116,7 @@ class InformationSidebar(QWidget):
                 + icon_box("edit://", EDIT_ICON, "Edit user comment")
                 + create_cells
                 + spacer_box()
-                + icon_box("delete://", DELETE_ICON, "Delete user comment")
+                + icon_box("delete://", delete_icon, "Delete user comment")
                 + '</tr></table><br><br>'
             )
         else:

@@ -243,10 +243,6 @@ def generate_flux2_klein_create(
     stepwise_dir: str | None,
 ) -> Any:
     """Run one Klein txt2img; returns mflux GeneratedImage."""
-    from imagegen_plugins.ai_prompt_exit import apply_image_ai_exit
-
-    prompt = apply_image_ai_exit(prompt)
-
     with PerfTimer("klein_create_generate", seed=seed, steps=steps):
         model = get_flux2_klein_create(
             model_name=model_name,
@@ -339,10 +335,7 @@ def generate_flux2_klein_edit(
     stepwise_dir: str | None,
 ) -> Any:
     """Run one Klein edit; returns mflux GeneratedImage."""
-    from imagegen_plugins.ai_prompt_exit import apply_image_ai_exit
     from mflux.models.common.config.config import Config
-
-    prompt = apply_image_ai_exit(prompt)
     from mflux.models.flux2.variants.edit.flux2_klein_edit_helpers import (
         _Flux2KleinEditHelpers,
     )

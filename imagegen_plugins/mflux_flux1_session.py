@@ -206,10 +206,7 @@ def generate_flux1(
     image_strength: float | None = None,
     negative_prompt: str = "",
 ) -> Any:
-    from imagegen_plugins.ai_prompt_exit import apply_image_ai_exit
     from mflux.models.flux.latent_creator.flux_latent_creator import FluxLatentCreator
-
-    prompt = apply_image_ai_exit(prompt)
 
     with PerfTimer("flux1_generate", seed=seed, steps=steps, width=width, height=height):
         model = get_flux1(
@@ -258,10 +255,7 @@ def generate_flux1_fill(
     image_path: str,
     masked_image_path: str,
 ) -> Any:
-    from imagegen_plugins.ai_prompt_exit import apply_image_ai_exit
     from mflux.models.flux.latent_creator.flux_latent_creator import FluxLatentCreator
-
-    prompt = apply_image_ai_exit(prompt)
 
     with PerfTimer("flux1_fill_generate", seed=seed, steps=steps):
         model = get_flux1_fill(

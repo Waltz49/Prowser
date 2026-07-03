@@ -500,6 +500,7 @@ def build_worker_payload(
     hf_model_id: str,
     *,
     effective_max_side: int,
+    apply_image_exit: bool = True,
 ) -> Dict[str, Any]:
     from imagegen_plugins.flux_prompt_job import clear_flux_prompt_ai_job
 
@@ -609,4 +610,8 @@ def build_worker_payload(
     merged.pop("aspect_ratio_test", None)
     merged.pop("use_custom_size", None)
     merged.pop("pass_image_to_ai_with_prompt", None)
+    if apply_image_exit:
+        from imagegen_plugins.ai_prompt_exit import apply_image_ai_exit_to_payload
+
+        apply_image_ai_exit_to_payload(merged)
     return merged

@@ -23,6 +23,13 @@ def apply_image_ai_exit(text: str) -> str:
     return _invoke_exit(ENV_IMAGE_AI_EXIT, text)
 
 
+def apply_image_ai_exit_to_payload(payload: dict) -> None:
+    """Apply image exit to a worker generate payload prompt in place."""
+    raw = str(payload.get("prompt") or "")
+    if raw:
+        payload["prompt"] = apply_image_ai_exit(raw)
+
+
 def _invoke_exit(env_var: str, text: str) -> str:
     path = os.environ.get(env_var, "").strip()
     if not path:

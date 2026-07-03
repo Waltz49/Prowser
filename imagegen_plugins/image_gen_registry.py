@@ -92,7 +92,11 @@ class ImageGenModelPlugin:
         return worker_script_path(self.pipeline_id)
 
     def build_payload(
-        self, values: Dict[str, Any], output_path: str
+        self,
+        values: Dict[str, Any],
+        output_path: str,
+        *,
+        apply_image_exit: bool = True,
     ) -> Dict[str, Any]:
         from imagegen_plugins.image_gen_dim_limits import effective_max_for_plugin
 
@@ -103,6 +107,7 @@ class ImageGenModelPlugin:
             output_path,
             self.hf_model_id,
             effective_max_side=effective_max_for_plugin(self),
+            apply_image_exit=apply_image_exit,
         )
 
     def persist_reproducible_seed(

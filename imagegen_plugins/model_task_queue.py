@@ -149,12 +149,17 @@ def thumbnail_paths_for_values(
 
 
 def apply_payload_model_fields_to_values(
-    values: dict[str, Any], payload: dict[str, Any]
+    values: dict[str, Any],
+    payload: dict[str, Any],
+    *,
+    sync_prompt: bool = True,
 ) -> None:
-    """Persist the model identity the worker will run (display + dequeue)."""
+    """Persist worker payload fields used for display, dequeue, and EXIF."""
     hf = payload.get("hf_model_id")
     if hf:
         values["hf_model_id"] = hf
+    if sync_prompt and "prompt" in payload:
+        values["prompt"] = payload["prompt"]
 
 
 def _unavailable_job_status_html(
@@ -179,8 +184,17 @@ def refresh_queued_job_status(job: QueuedGenerateJob) -> None:
             copies_total=job.copies_total,
         )
         return
-    payload = job.plugin.build_payload(job.values, _preview_output_path())
-    apply_payload_model_fields_to_values(job.values, payload)
+    payload = job.plugin.build_payload(
+        job.values,
+        _preview_output_path(),
+        apply_image_exit=not has_flux_prompt_ai_job(job.values),
+    )
+    apply_payload_model_fields_to_values(job.values, payload, sync_prompt=False)
+    exited = str(payload.get("prompt") or "").strip()
+    if exited and not has_flux_prompt_ai_job(job.values):
+        job.full_prompt = exited
+    else:
+        job.full_prompt = effective_job_prompt_for_tooltip(job.values)
     job.status_html = format_image_generation_queue_status_html(
         job.plugin,
         job.values,
