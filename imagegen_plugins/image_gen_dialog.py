@@ -1353,7 +1353,7 @@ class ImageGenDialog(ImageGenDimensionAspectMixin, QDialog):
         self._side_btn_col: Optional[QVBoxLayout] = None
         self._lora_steps_floor_widget: Optional[QComboBox] = None
         self._installed_flags: Dict[str, bool] = dict(installed_flags or {})
-        self._defer_flux_prompt_extras = not self._panel_mode
+        self._defer_flux_prompt_extras = True
         self._installed_list = installed
         self._prebuilt_plugins_by_id = plugins_by_id
 

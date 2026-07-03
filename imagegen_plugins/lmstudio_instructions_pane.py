@@ -346,7 +346,7 @@ class LmStudioInstructionsPane:
         layout.addWidget(toolbar, 0)
 
     def mount_toggle_in_action_column(self, btn: QPushButton) -> None:
-        """Place the AI toggle in the system-prompt action column (copy / AI / mic)."""
+        """Place the AI toggle in the system-prompt action column (copy / mic / AI)."""
         if self._action_col is None or self._action_layout is None:
             return
         if btn.parent() is not self._action_col:
@@ -355,11 +355,12 @@ class LmStudioInstructionsPane:
             item = self._action_layout.itemAt(i)
             if item is not None and item.widget() is btn:
                 return
-        insert_at = 1
-        if self._copy_btn is not None:
+        insert_at = self._action_layout.count()
+        anchor = self._mic_btn if self._mic_btn is not None else self._copy_btn
+        if anchor is not None:
             for i in range(self._action_layout.count()):
                 item = self._action_layout.itemAt(i)
-                if item is not None and item.widget() is self._copy_btn:
+                if item is not None and item.widget() is anchor:
                     insert_at = i + 1
                     break
         self._action_layout.insertWidget(

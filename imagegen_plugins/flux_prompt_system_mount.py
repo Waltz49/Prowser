@@ -21,8 +21,8 @@ from imagegen_plugins.lmstudio_caption import (
 
 def _image_prompt_action_column(
     owner: Any,
-) -> Optional[tuple[QVBoxLayout, QWidget, QPushButton]]:
-    """VBox to the right of the image prompt field (copy button column)."""
+) -> Optional[tuple[QVBoxLayout, QWidget, QPushButton, Optional[QPushButton]]]:
+    """VBox to the right of the image prompt field (copy / mic button column)."""
     from imagegen_plugins.image_gen_form_layout import ImageGenFieldsPanel
 
     panel: Optional[ImageGenFieldsPanel] = getattr(owner, "_fields_panel", None)
@@ -37,7 +37,40 @@ def _image_prompt_action_column(
     layout = action_col.layout()
     if not isinstance(layout, QVBoxLayout):
         return None
-    return layout, action_col, copy_btn
+    mic_btn = panel._prompt_group.findChild(
+        QPushButton, "imageGenPromptVoiceMicBtn"
+    )
+    return layout, action_col, copy_btn, mic_btn
+
+
+def _insert_flux_toggle_below_mic(
+    action_layout: QVBoxLayout,
+    action_col: QWidget,
+    btn: QPushButton,
+    *,
+    copy_btn: Optional[QPushButton],
+    mic_btn: Optional[QPushButton],
+) -> None:
+    """Stack AI toggle under copy and optional mic in a prompt action column."""
+    btn.setParent(action_col)
+    for i in range(action_layout.count()):
+        item = action_layout.itemAt(i)
+        if item is not None and item.widget() is btn:
+            return
+    insert_at = action_layout.count()
+    anchor = mic_btn if mic_btn is not None else copy_btn
+    if anchor is not None:
+        for i in range(action_layout.count()):
+            item = action_layout.itemAt(i)
+            if item is not None and item.widget() is anchor:
+                insert_at = i + 1
+                break
+    action_layout.insertWidget(
+        insert_at,
+        btn,
+        0,
+        Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignHCenter,
+    )
 
 
 def _remove_button_from_layout(layout: QVBoxLayout, btn: QPushButton) -> None:
@@ -70,25 +103,25 @@ def sync_flux_prompt_system_toggle_location(owner: Any) -> None:
 
     if pane.is_visible():
         pane.mount_toggle_in_action_column(btn)
+        btn.show()
+        return
+
+    if not _flux_lmstudio_ui_entry_allowed(pane):
+        btn.hide()
         return
 
     found = _image_prompt_action_column(owner)
     if found is None:
         return
-    action_layout, action_col, copy_btn = found
-    btn.setParent(action_col)
-    insert_at = 0
-    for i in range(action_layout.count()):
-        item = action_layout.itemAt(i)
-        if item is not None and item.widget() is copy_btn:
-            insert_at = i + 1
-            break
-    action_layout.insertWidget(
-        insert_at,
+    action_layout, action_col, copy_btn, mic_btn = found
+    _insert_flux_toggle_below_mic(
+        action_layout,
+        action_col,
         btn,
-        0,
-        Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignHCenter,
+        copy_btn=copy_btn,
+        mic_btn=mic_btn,
     )
+    btn.show()
 
 
 from imagegen_plugins.image_gen_form_layout import ImageGenFieldsPanel
@@ -105,10 +138,35 @@ def _persist_flux_prompt_system_prompt(owner: Any) -> None:
     )
 
 
+def _flux_lmstudio_ui_entry_allowed(pane: Optional[LmStudioInstructionsPane]) -> bool:
+    """Show AI toggle / system-prompt entry when LM Studio is up, or pane already open."""
+    if is_lmstudio_services_available():
+        return True
+    return pane is not None and pane.is_visible()
+
+
+def _hide_flux_system_prompt_toggle(owner: Any) -> None:
+    btn = getattr(owner, "_flux_system_prompt_toggle_btn", None)
+    if btn is None:
+        return
+    try:
+        from shiboken6 import isValid
+
+        if not isValid(btn):
+            return
+    except Exception:
+        return
+    btn.hide()
+
+
 def _load_flux_prompt_system_prompt_into_pane(pane: LmStudioInstructionsPane) -> None:
-    text, visible, sizes = load_flux_prompt_system_prompt_settings()
+    already_open = pane.is_visible()
+    text, saved_visible, sizes = load_flux_prompt_system_prompt_settings()
     pane.set_plain_text(text)
-    pane.set_visible(visible)
+    if is_lmstudio_services_available():
+        pane.set_visible(saved_visible or already_open)
+    else:
+        pane.set_visible(already_open)
     pane.set_splitter_sizes(sizes)
 
 
@@ -148,6 +206,9 @@ def mount_flux_prompt_system_toggle(owner: Any) -> None:
     pane = ensure_flux_prompt_system_pane(owner)
     if pane is None:
         return
+    if not _flux_lmstudio_ui_entry_allowed(pane):
+        _hide_flux_system_prompt_toggle(owner)
+        return
 
     old = getattr(owner, "_flux_system_prompt_toggle_btn", None)
     if old is not None:
@@ -161,6 +222,7 @@ def mount_flux_prompt_system_toggle(owner: Any) -> None:
         owner._flux_system_prompt_toggle_btn = None
 
     btn = pane.toggle_button(recreate=True)
+    btn.show()
     owner._flux_system_prompt_toggle_btn = btn
     sync_flux_prompt_system_toggle_location(owner)
     pane.sync_toggle_highlight()
@@ -186,6 +248,9 @@ def remount_flux_prompt_system_splitter(owner: Any) -> None:
         return
     panel.mount_system_prompt_above_image_prompt(pane.widget())
     _load_flux_prompt_system_prompt_into_pane(pane)
+    if not _flux_lmstudio_ui_entry_allowed(pane):
+        _hide_flux_system_prompt_toggle(owner)
+        return
     mount_flux_prompt_system_toggle(owner)
     ensure_flux = getattr(owner, "_ensure_flux_prompt_ai", None)
     if callable(ensure_flux):
