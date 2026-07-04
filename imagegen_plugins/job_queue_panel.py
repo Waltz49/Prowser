@@ -956,6 +956,7 @@ class JobQueuePanelWidget(QWidget):
         """Re-pin widget height to the strip (compact mode only)."""
         if not self._queue_compact:
             return
+        parent_driven = strip_h is not None
         if strip_h is None:
             strip_h = self.compact_content_height()
         self.setSizePolicy(
@@ -963,6 +964,8 @@ class JobQueuePanelWidget(QWidget):
         )
         self.setFixedHeight(strip_h)
         self.updateGeometry()
+        if parent_driven:
+            return
         cb = self._on_compact_geometry_changed
         if cb is not None:
             cb()
