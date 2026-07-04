@@ -914,13 +914,16 @@ class ImageGenController(QObject):
     def task_status_display_needs_refresh(self) -> bool:
         """False when only the cooldown countdown second is unchanged (timer polls)."""
         if not self._is_in_copy_cooldown():
-            self._last_cooldown_ui_second = None
             return True
         remaining = self._cooldown_seconds_remaining()
-        if remaining == self._last_cooldown_ui_second:
-            return False
-        self._last_cooldown_ui_second = remaining
-        return True
+        return remaining != self._last_cooldown_ui_second
+
+    def mark_task_status_display_refreshed(self) -> None:
+        """Record cooldown countdown after all task-status UI consumers have updated."""
+        if self._is_in_copy_cooldown():
+            self._last_cooldown_ui_second = self._cooldown_seconds_remaining()
+        else:
+            self._last_cooldown_ui_second = None
 
     def skip_copy_cooldown(self) -> None:
         """End the inter-copy cooldown early and start the next generation."""

@@ -922,6 +922,15 @@ class SettingsDialog(QDialog):
         
         # Buttons
         button_layout = QHBoxLayout()
+
+        self._lora_add_button = QPushButton()
+        self._lora_add_button.setObjectName("loraAddDownloadedButton")
+        self._lora_add_button.setToolTip("Add downloaded LoRA (.safetensors)…")
+        self._lora_add_button.setFixedSize(34, 34)
+        self._lora_add_button.setStyleSheet(self._lora_add_button_style())
+        self._lora_add_button.clicked.connect(self._open_add_downloaded_lora_dialog)
+        self._lora_add_button.setVisible(False)
+        button_layout.addWidget(self._lora_add_button)
         
         # Reset to defaults button (now resets only the current tab)
         self.reset_button = QPushButton("Reset to Defaults")
@@ -983,6 +992,12 @@ class SettingsDialog(QDialog):
         initial_index = self.tab_widget.currentIndex()
         if initial_index >= 0:
             self.on_tab_changed(initial_index)
+        if getattr(self, "_lora_add_button", None):
+            lora_idx = self.tab_widget.indexOf(self.lora_settings_tab)
+            self._lora_add_button.setVisible(
+                getattr(self, "_show_lora_settings_tab", False)
+                and initial_index == lora_idx
+            )
         self._settings_tab_prev_index = self.tab_widget.currentIndex()
         self._settings_dialog_initializing = False
 
@@ -5283,6 +5298,36 @@ class SettingsDialog(QDialog):
         layout.addWidget(caption_group)
         layout.addStretch()
 
+    def _lora_add_button_style(self) -> str:
+        _plus_url = f"url({asset_path('series_plus_icon.png')})"
+        _plus_hover_url = f"url({asset_path('series_plus_icon_hover.png')})"
+        c = self._settings_chrome()
+        return f"""
+            QPushButton#loraAddDownloadedButton {{
+                background-color: {c.control_bg_hex};
+                border: 1px solid {BORDER_DEFAULT_HEX};
+                border-radius: 4px;
+                padding: 5px;
+                min-width: 34px;
+                max-width: 34px;
+                min-height: 34px;
+                max-height: 34px;
+                image: {_plus_url};
+            }}
+            QPushButton#loraAddDownloadedButton:focus {{
+                border: 1px solid {CURRENT_IMAGE_BORDER_COLOR_HEX};
+                outline: none;
+            }}
+            QPushButton#loraAddDownloadedButton:hover {{
+                background-color: {TAB_BUTTON_HOVER_BG_HEX};
+                border: 1px solid {TAB_BUTTON_HOVER_BG_HEX};
+                image: {_plus_hover_url};
+            }}
+            QPushButton#loraAddDownloadedButton:pressed {{
+                background-color: {SIDEBAR_SPLITTER_HANDLE_HEX};
+            }}
+        """
+
     def _lora_trash_button_style(self) -> str:
         _trash_url = f"url({asset_path('trash_icon.png')})"
         _trash_hover_url = f"url({asset_path('trash_icon_hover.png')})"
@@ -5675,8 +5720,53 @@ class SettingsDialog(QDialog):
         worker.finished_ok.connect(on_done)
         worker.start()
 
+    def _open_add_downloaded_lora_dialog(self) -> None:
+        from imagegen_plugins.lora_import_dialog import run_add_downloaded_lora_dialog
+
+        self._ensure_lora_tab_ready()
+        model_key = self._current_lora_model_key()
+        if run_add_downloaded_lora_dialog(self, model_key=model_key):
+            self._reload_lora_drafts_and_grid()
+            mw = self.parent()
+            if mw is not None and hasattr(mw, "refresh_open_imagegen_lora_combos"):
+                mw.refresh_open_imagegen_lora_combos()
+
+    def _reload_lora_drafts_and_grid(self) -> None:
+        from config import get_config
+
+        self._load_lora_drafts_from_settings(get_config().load_settings())
+        self._show_lora_draft_for_model(self._current_lora_model_key())
+
     def _hide_lora_catalog_entry(self, lora_id: str) -> None:
-        """Hide a LoRA row for the current base model."""
+        """Hide a curated LoRA row, or remove a user-imported LoRA entirely."""
+        from imagegen_plugins.lora_user_entries import is_user_lora_id
+
+        if is_user_lora_id(lora_id):
+            entry = None
+            try:
+                from imagegen_plugins.lora_catalog import get_lora_entry
+
+                entry = get_lora_entry(lora_id)
+            except Exception:
+                pass
+            label = entry.display_name if entry is not None else lora_id
+            reply = QMessageBox.question(
+                self,
+                "Remove LoRA",
+                f"Remove imported LoRA «{label}» and delete its cached copy?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                return
+            from imagegen_plugins.image_gen_persistence import remove_user_lora
+
+            remove_user_lora(lora_id)
+            self._reload_lora_drafts_and_grid()
+            mw = self.parent()
+            if mw is not None and hasattr(mw, "refresh_open_imagegen_lora_combos"):
+                mw.refresh_open_imagegen_lora_combos()
+            return
         row = getattr(self, "_lora_row_widgets", {}).get(lora_id)
         if row is None:
             return
@@ -5748,6 +5838,10 @@ class SettingsDialog(QDialog):
                 status_parts.append("MFLUX verified")
             elif entry.mflux_compatible is None:
                 status_parts.append("untested")
+            from imagegen_plugins.lora_user_entries import is_user_lora_id
+
+            if is_user_lora_id(entry.lora_id):
+                status_parts.append("imported")
             status_parts.append("installed" if installed else "not installed")
             status_lbl = QLabel(" · ".join(status_parts))
             status_lbl.setStyleSheet(f"color: {TEXT_DISABLED_HEX}; font-size: 11px;")
@@ -5774,9 +5868,16 @@ class SettingsDialog(QDialog):
                 )
 
             del_btn = QPushButton()
-            del_btn.setToolTip(
-                f"Hide {lora_choice_label(entry, model_key=model_key)} for this base model"
-            )
+            from imagegen_plugins.lora_user_entries import is_user_lora_id
+
+            if is_user_lora_id(entry.lora_id):
+                del_btn.setToolTip(
+                    f"Remove imported LoRA {lora_choice_label(entry, model_key=model_key)}"
+                )
+            else:
+                del_btn.setToolTip(
+                    f"Hide {lora_choice_label(entry, model_key=model_key)} for this base model"
+                )
             del_btn.setStyleSheet(self._lora_trash_button_style())
             del_btn.clicked.connect(
                 lambda checked=False, lid=entry.lora_id: self._hide_lora_catalog_entry(lid)
@@ -7852,6 +7953,12 @@ class SettingsDialog(QDialog):
         # Lazy-load Faces tab on first visit (face_recognition import is slow)
         is_faces_tab = index == self.tab_widget.indexOf(self.faces_tab)
         is_cache_tab = index == self.tab_widget.indexOf(self.cache_management_tab)
+        is_lora_tab = (
+            getattr(self, "_show_lora_settings_tab", False)
+            and index == self.tab_widget.indexOf(self.lora_settings_tab)
+        )
+        if getattr(self, "_lora_add_button", None):
+            self._lora_add_button.setVisible(is_lora_tab)
         # Hide reset button and option note on cache tab and faces tab (before early return)
         hide_reset_row = is_cache_tab or is_faces_tab
         if getattr(self, 'reset_button', None):

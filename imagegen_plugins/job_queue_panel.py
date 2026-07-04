@@ -749,11 +749,19 @@ class JobQueuePanelWidget(QWidget):
         self._signal_connected = True
         timer = QTimer(self)
         timer.setInterval(500)
-        timer.timeout.connect(lambda: self._refresh_active_row(force=False))
-        timer.timeout.connect(lambda: self._refresh_active_job_strip(force=False))
+        timer.timeout.connect(self._on_live_refresh_timer)
         timer.start()
         self._live_timer = timer
         self._update_header_status()
+
+    def _on_live_refresh_timer(self) -> None:
+        if self._imagegen_dialog_building_active():
+            return
+        if not self._controller.task_status_display_needs_refresh():
+            return
+        self._refresh_active_row(force=True)
+        self._refresh_active_job_strip(force=True)
+        self._controller.mark_task_status_display_refreshed()
 
     def pause_live_refresh(self) -> None:
         """Pause periodic refresh while image-gen dialog builds on the GUI thread."""

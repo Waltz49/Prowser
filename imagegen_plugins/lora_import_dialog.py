@@ -1,0 +1,341 @@
+#!/usr/bin/env python3
+"""Import a downloaded .safetensors LoRA, probe compatibility, and register in settings."""
+
+from __future__ import annotations
+
+from pathlib import Path
+from typing import List, Optional
+
+from PySide6.QtCore import Qt, QThread, Signal
+from PySide6.QtGui import QDragEnterEvent, QDropEvent
+from PySide6.QtWidgets import (
+    QApplication,
+    QDialog,
+    QDoubleSpinBox,
+    QFormLayout,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QProgressDialog,
+    QPushButton,
+    QSizePolicy,
+    QVBoxLayout,
+    QWidget,
+)
+
+from imagegen_plugins.hf_model_ids import lora_model_display_name
+from imagegen_plugins.lora_compatibility_checker import probe_lora_on_model
+from imagegen_plugins.lora_model_registry import lora_probe_model_is_local
+from imagegen_plugins.lora_user_entries import (
+    build_user_lora_entry,
+    display_name_from_path,
+    validate_safetensors_source,
+)
+from utils import show_styled_information, show_styled_warning
+
+_FORM_CONTROL_HEIGHT = 32
+
+
+def _pin_row_height(widget: QWidget, *, width_policy=QSizePolicy.Policy.Expanding) -> None:
+    widget.setFixedHeight(_FORM_CONTROL_HEIGHT)
+    widget.setSizePolicy(width_policy, QSizePolicy.Policy.Fixed)
+
+
+class _SafetensorsPathLineEdit(QLineEdit):
+    """Path field that accepts a single .safetensors file via drag and drop."""
+
+    def __init__(self, parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+        self.setAcceptDrops(True)
+        _pin_row_height(self)
+        self.setPlaceholderText("Drop a .safetensors file here or paste a path…")
+
+    def dragEnterEvent(self, event: QDragEnterEvent) -> None:
+        path = _path_from_mime(event.mimeData())
+        if path is not None:
+            event.acceptProposedAction()
+            return
+        event.ignore()
+
+    def dragMoveEvent(self, event: QDragEnterEvent) -> None:
+        path = _path_from_mime(event.mimeData())
+        if path is not None:
+            event.acceptProposedAction()
+            return
+        event.ignore()
+
+    def dropEvent(self, event: QDropEvent) -> None:
+        path = _path_from_mime(event.mimeData())
+        if path is None:
+            event.ignore()
+            return
+        self.setText(str(path))
+        event.acceptProposedAction()
+
+
+def _path_from_mime(mime) -> Optional[Path]:
+    if not mime.hasUrls():
+        return None
+    for url in mime.urls():
+        if not url.isLocalFile():
+            continue
+        path = Path(url.toLocalFile())
+        if path.suffix.lower() == ".safetensors" and path.is_file():
+            return path
+    return None
+
+
+class _ImportLoraWorker(QThread):
+    finished_result = Signal(bool, str, object)
+
+    def __init__(
+        self,
+        *,
+        source_path: str,
+        display_name: str,
+        model_key: str,
+        trigger_word: str,
+        scale: float,
+        cancel_flag: List[bool],
+    ) -> None:
+        super().__init__()
+        self._source_path = source_path
+        self._display_name = display_name
+        self._model_key = model_key
+        self._trigger_word = trigger_word
+        self._scale = scale
+        self._cancel_flag = cancel_flag
+
+    def _cancelled(self) -> bool:
+        return bool(self._cancel_flag[0])
+
+    def run(self) -> None:
+        entry = None
+        try:
+            if self._cancelled():
+                self.finished_result.emit(False, "Cancelled", None)
+                return
+            source = validate_safetensors_source(self._source_path)
+            if not lora_probe_model_is_local(self._model_key):
+                raise RuntimeError(
+                    f"The base model ({lora_model_display_name(self._model_key)}) "
+                    "is not installed locally. Download it first, then import the LoRA."
+                )
+            entry = build_user_lora_entry(
+                source_path=source,
+                display_name=self._display_name,
+                model_key=self._model_key,
+                trigger_word=self._trigger_word or None,
+                scale=self._scale,
+            )
+            from imagegen_plugins.mflux_lora_presets import _assert_mflux_compatible_lora
+
+            _assert_mflux_compatible_lora(
+                entry.local_path or "",
+                host_id=entry.host_id,
+            )
+            ok = probe_lora_on_model(
+                self._model_key,
+                entry.local_path or "",
+                entry.scale,
+                self._cancelled,
+                entry=entry,
+            )
+            if self._cancelled():
+                self.finished_result.emit(False, "Cancelled", entry)
+                return
+            if not ok:
+                self.finished_result.emit(
+                    False,
+                    f"LoRA «{entry.display_name}» failed the compatibility test for "
+                    f"{lora_model_display_name(self._model_key)}.",
+                    entry,
+                )
+                return
+            from imagegen_plugins.image_gen_persistence import register_user_lora
+
+            register_user_lora(
+                entry,
+                model_key=self._model_key,
+                supported_models=[self._model_key],
+            )
+            self.finished_result.emit(True, "", entry)
+        except Exception as exc:
+            self.finished_result.emit(False, str(exc), entry)
+
+
+class AddDownloadedLoraDialog(QDialog):
+    def __init__(
+        self,
+        parent: Optional[QWidget],
+        *,
+        model_key: str,
+    ) -> None:
+        super().__init__(parent)
+        self._model_key = model_key
+        self.setWindowTitle("Add Downloaded LoRA")
+        self.setWindowModality(Qt.WindowModality.WindowModal)
+        self.resize(580, 280)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(16, 14, 16, 14)
+        layout.setSpacing(12)
+        intro = QLabel(
+            f"Import a .safetensors LoRA for <b>{lora_model_display_name(model_key)}</b>. "
+            "The file is copied into the app cache and tested before it is added."
+        )
+        intro.setWordWrap(True)
+        layout.addWidget(intro)
+
+        form = QFormLayout()
+        form.setVerticalSpacing(12)
+        form.setHorizontalSpacing(12)
+        form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
+        form.setLabelAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        form.setFormAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+
+        self._path_edit = _SafetensorsPathLineEdit(self)
+        self._path_edit.textChanged.connect(self._on_path_changed)
+        browse_btn = QPushButton("Browse…")
+        browse_btn.setObjectName("loraImportBrowseButton")
+        browse_btn.setFixedWidth(96)
+        _pin_row_height(browse_btn, width_policy=QSizePolicy.Policy.Fixed)
+        browse_btn.setStyleSheet(
+            "QPushButton#loraImportBrowseButton { min-width: 96px; padding: 4px 10px; }"
+        )
+        browse_btn.clicked.connect(self._browse)
+        path_row = QHBoxLayout()
+        path_row.setContentsMargins(0, 0, 0, 0)
+        path_row.setSpacing(8)
+        path_row.addWidget(self._path_edit, 1)
+        path_row.addWidget(browse_btn)
+        path_wrap = QWidget()
+        path_wrap.setLayout(path_row)
+        path_wrap.setFixedHeight(_FORM_CONTROL_HEIGHT)
+        form.addRow("File:", path_wrap)
+
+        self._name_edit = QLineEdit()
+        _pin_row_height(self._name_edit)
+        self._name_edit.setPlaceholderText("Display name in LoRA menus")
+        form.addRow("Name:", self._name_edit)
+
+        self._trigger_edit = QLineEdit()
+        _pin_row_height(self._trigger_edit)
+        self._trigger_edit.setPlaceholderText("Optional trigger word for prompts")
+        form.addRow("Trigger:", self._trigger_edit)
+
+        self._scale_spin = QDoubleSpinBox()
+        _pin_row_height(self._scale_spin, width_policy=QSizePolicy.Policy.Fixed)
+        self._scale_spin.setRange(0.1, 2.0)
+        self._scale_spin.setSingleStep(0.1)
+        self._scale_spin.setValue(1.0)
+        form.addRow("Scale:", self._scale_spin)
+        layout.addLayout(form)
+
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(10)
+        btn_row.addStretch()
+        cancel_btn = QPushButton("Cancel")
+        _pin_row_height(cancel_btn, width_policy=QSizePolicy.Policy.Fixed)
+        cancel_btn.clicked.connect(self.reject)
+        self._add_btn = QPushButton("Test && Add")
+        _pin_row_height(self._add_btn, width_policy=QSizePolicy.Policy.Fixed)
+        self._add_btn.setDefault(True)
+        self._add_btn.clicked.connect(self._start_import)
+        btn_row.addWidget(cancel_btn)
+        btn_row.addWidget(self._add_btn)
+        layout.addLayout(btn_row)
+
+    def _on_path_changed(self, text: str) -> None:
+        if self._name_edit.text().strip():
+            return
+        path = (text or "").strip()
+        if not path:
+            return
+        try:
+            self._name_edit.setText(display_name_from_path(Path(path).expanduser()))
+        except Exception:
+            pass
+
+    def _browse(self) -> None:
+        from PySide6.QtWidgets import QFileDialog
+
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Select LoRA weights",
+            str(Path.home() / "Downloads"),
+            "Safetensors (*.safetensors);;All Files (*)",
+        )
+        if path:
+            self._path_edit.setText(path)
+
+    def _start_import(self) -> None:
+        path = self._path_edit.text().strip()
+        name = self._name_edit.text().strip()
+        if not path:
+            show_styled_warning(self, "Add LoRA", "Choose a .safetensors file.")
+            return
+        if not name:
+            show_styled_warning(self, "Add LoRA", "Enter a display name.")
+            return
+        try:
+            validate_safetensors_source(path)
+        except (OSError, ValueError) as exc:
+            show_styled_warning(self, "Add LoRA", str(exc))
+            return
+
+        progress = QProgressDialog(
+            f"Testing LoRA on {lora_model_display_name(self._model_key)}…",
+            "Cancel",
+            0,
+            0,
+            self,
+        )
+        progress.setWindowTitle("Add LoRA")
+        progress.setWindowModality(Qt.WindowModality.WindowModal)
+        progress.setMinimumDuration(0)
+        progress.show()
+        QApplication.processEvents()
+
+        cancel_flag: List[bool] = [False]
+        progress.canceled.connect(lambda: cancel_flag.__setitem__(0, True))
+
+        worker = _ImportLoraWorker(
+            source_path=path,
+            display_name=name,
+            model_key=self._model_key,
+            trigger_word=self._trigger_edit.text().strip(),
+            scale=float(self._scale_spin.value()),
+            cancel_flag=cancel_flag,
+        )
+
+        def on_done(ok: bool, err: str, entry: object) -> None:
+            progress.close()
+            if ok:
+                show_styled_information(
+                    self,
+                    "Add LoRA",
+                    f"«{getattr(entry, 'display_name', name)}» was added and enabled.",
+                )
+                self.accept()
+                return
+            if entry is not None:
+                from imagegen_plugins.lora_user_entries import remove_user_lora_files
+
+                remove_user_lora_files(entry)
+            if err and err != "Cancelled":
+                show_styled_warning(self, "Add LoRA", err)
+
+        worker.finished_result.connect(on_done)
+        worker.start()
+        self._worker = worker
+
+
+def run_add_downloaded_lora_dialog(
+    parent: Optional[QWidget],
+    *,
+    model_key: str,
+) -> bool:
+    """Open import dialog; return True if a LoRA was registered."""
+    dlg = AddDownloadedLoraDialog(parent, model_key=model_key)
+    return dlg.exec() == QDialog.DialogCode.Accepted

@@ -17,6 +17,8 @@ from imagegen_plugins.lora_model_registry import (
     lora_models_for_entry,
 )
 
+from imagegen_plugins.lora_user_entries import USER_ENTRIES_KEY, user_lora_entries_from_lc
+
 LORA_CATALOG = {**FLUX1_T2I_LORAS, **FLUX1_FILL_LORAS, **FLUX2_KLEIN_LORAS, **SD15_LORAS}
 
 _LEGACY_ENABLED_KEY = "enabled_ids"
@@ -67,38 +69,52 @@ def default_by_model() -> Dict[str, Dict[str, List[str]]]:
     return out
 
 
-def _normalize_host_slice(host_id: str, slice_: Dict[str, Any]) -> Dict[str, List[str]]:
+def _catalog_for_lc(lc: Dict[str, Any]) -> Dict[str, Any]:
+    merged = dict(LORA_CATALOG)
+    merged.update(user_lora_entries_from_lc(lc))
+    return merged
+
+
+def _normalize_host_slice(
+    host_id: str,
+    slice_: Dict[str, Any],
+    catalog: Dict[str, Any],
+) -> Dict[str, List[str]]:
     enabled = slice_.get("enabled_ids")
     hidden = slice_.get("hidden_ids")
     return {
         "enabled_ids": [
             str(x)
             for x in (enabled if isinstance(enabled, list) else [])
-            if str(x) in LORA_CATALOG and LORA_CATALOG[str(x)].host_id == host_id
+            if str(x) in catalog and catalog[str(x)].host_id == host_id
         ],
         "hidden_ids": [
             str(x)
             for x in (hidden if isinstance(hidden, list) else [])
-            if str(x) in LORA_CATALOG and LORA_CATALOG[str(x)].host_id == host_id
+            if str(x) in catalog and catalog[str(x)].host_id == host_id
         ],
     }
 
 
-def _normalize_model_slice(model_key: str, slice_: Dict[str, Any]) -> Dict[str, List[str]]:
+def _normalize_model_slice(
+    model_key: str,
+    slice_: Dict[str, Any],
+    catalog: Dict[str, Any],
+) -> Dict[str, List[str]]:
     enabled = slice_.get("enabled_ids")
     hidden = slice_.get("hidden_ids")
     return {
         "enabled_ids": [
             str(x)
             for x in (enabled if isinstance(enabled, list) else [])
-            if str(x) in LORA_CATALOG
-            and entry_matches_lora_model(LORA_CATALOG[str(x)], model_key)
+            if str(x) in catalog
+            and entry_matches_lora_model(catalog[str(x)], model_key)
         ],
         "hidden_ids": [
             str(x)
             for x in (hidden if isinstance(hidden, list) else [])
-            if str(x) in LORA_CATALOG
-            and entry_matches_lora_model(LORA_CATALOG[str(x)], model_key)
+            if str(x) in catalog
+            and entry_matches_lora_model(catalog[str(x)], model_key)
         ],
     }
 
@@ -127,6 +143,7 @@ def _by_model_from_by_host(by_host: Dict[str, Dict[str, List[str]]]) -> Dict[str
 
 
 def _ensure_by_model(lc: Dict[str, Any], by_host: Dict[str, Dict[str, List[str]]]) -> None:
+    catalog = _catalog_for_lc(lc)
     if _BY_MODEL_KEY not in lc:
         lc[_BY_MODEL_KEY] = _by_model_from_by_host(by_host)
     by_model = dict(lc.get(_BY_MODEL_KEY) or {})
@@ -142,7 +159,7 @@ def _ensure_by_model(lc: Dict[str, Any], by_host: Dict[str, Dict[str, List[str]]
                 "hidden_ids": [],
             }
         else:
-            by_model[model_key] = _normalize_model_slice(model_key, slice_)
+            by_model[model_key] = _normalize_model_slice(model_key, slice_, catalog)
     lc[_BY_MODEL_KEY] = by_model
 
 
@@ -202,10 +219,14 @@ def migrate_lora_catalog(lc: Dict[str, Any]) -> Dict[str, Any]:
         if not isinstance(slice_, dict):
             by_host[host_id] = _empty_slice()
         else:
-            by_host[host_id] = _normalize_host_slice(host_id, slice_)
+            by_host[host_id] = _normalize_host_slice(host_id, slice_, _catalog_for_lc(lc))
 
     lc[_BY_HOST_KEY] = by_host
     _ensure_by_model(lc, by_host)
+    if USER_ENTRIES_KEY not in lc:
+        lc[USER_ENTRIES_KEY] = {}
+    elif not isinstance(lc.get(USER_ENTRIES_KEY), dict):
+        lc[USER_ENTRIES_KEY] = {}
     return lc
 
 
@@ -262,12 +283,13 @@ def enabled_lora_ids_for_model(
 ) -> Tuple[str, ...]:
     st = model_state(settings, model_key)
     hidden = frozenset(st["hidden_ids"])
+    catalog = _catalog_for_lc(lora_catalog_from_settings(settings))
     return tuple(
         x
         for x in st["enabled_ids"]
-        if x in LORA_CATALOG
+        if x in catalog
         and x not in hidden
-        and entry_matches_lora_model(LORA_CATALOG[x], model_key)
+        and entry_matches_lora_model(catalog[x], model_key)
     )
 
 
@@ -294,12 +316,13 @@ def enabled_lora_ids_for_host(
 
 def all_hidden_lora_ids(settings: Optional[Dict[str, Any]] = None) -> FrozenSet[str]:
     lc = lora_catalog_from_settings(settings)
+    catalog = _catalog_for_lc(lc)
     by_model = lc.get(_BY_MODEL_KEY) or {}
     out: set[str] = set()
     for model_key in LORA_SETTINGS_MODEL_ORDER:
         slice_ = by_model.get(model_key)
         if isinstance(slice_, dict):
             for lid in slice_.get("hidden_ids") or []:
-                if str(lid) in LORA_CATALOG:
+                if str(lid) in catalog:
                     out.add(str(lid))
     return frozenset(out)

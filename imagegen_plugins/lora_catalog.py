@@ -90,21 +90,51 @@ def klein_lora_mismatch_message(entry: FluxLoraEntry, active_hf_model_id: str) -
     )
 
 
-def entries_for_host(host_id: str) -> Tuple[FluxLoraEntry, ...]:
+def merged_lora_catalog(settings: Optional[Dict[str, Any]] = None) -> Dict[str, FluxLoraEntry]:
+    from imagegen_plugins.lora_user_entries import user_lora_entries_from_settings
+
+    merged = dict(LORA_CATALOG)
+    merged.update(user_lora_entries_from_settings(settings))
+    return merged
+
+
+def entries_for_host(
+    host_id: str,
+    settings: Optional[Dict[str, Any]] = None,
+) -> Tuple[FluxLoraEntry, ...]:
     return tuple(
         sorted(
-            (e for e in LORA_CATALOG.values() if e.host_id == host_id),
+            (e for e in merged_lora_catalog(settings).values() if e.host_id == host_id),
             key=lambda x: x.display_name.lower(),
         )
     )
 
 
-def catalog_entries_sorted() -> Tuple[FluxLoraEntry, ...]:
-    return tuple(sorted(LORA_CATALOG.values(), key=lambda e: e.display_name.lower()))
+def catalog_entries_sorted(
+    settings: Optional[Dict[str, Any]] = None,
+) -> Tuple[FluxLoraEntry, ...]:
+    return tuple(
+        sorted(
+            merged_lora_catalog(settings).values(),
+            key=lambda e: e.display_name.lower(),
+        )
+    )
 
 
-def get_lora_entry(lora_id: str) -> Optional[FluxLoraEntry]:
-    return LORA_CATALOG.get(lora_id)
+def get_lora_entry(
+    lora_id: str,
+    settings: Optional[Dict[str, Any]] = None,
+) -> Optional[FluxLoraEntry]:
+    entry = LORA_CATALOG.get(lora_id)
+    if entry is not None:
+        return entry
+    from imagegen_plugins.lora_user_entries import user_lora_entries_from_settings
+
+    if settings is None:
+        from config import get_config
+
+        settings = get_config().load_settings()
+    return user_lora_entries_from_settings(settings).get(lora_id)
 
 
 def catalog_cache_path(entry: FluxLoraEntry) -> Optional[Path]:
@@ -115,8 +145,11 @@ def catalog_cache_path(entry: FluxLoraEntry) -> Optional[Path]:
     return DEFAULT_CACHE / entry.repo_id.replace("/", "__") / entry.filename
 
 
-def is_lora_installed(lora_id: str) -> bool:
-    entry = LORA_CATALOG.get(lora_id)
+def is_lora_installed(
+    lora_id: str,
+    settings: Optional[Dict[str, Any]] = None,
+) -> bool:
+    entry = get_lora_entry(lora_id, settings)
     if entry is None:
         return False
     path = catalog_cache_path(entry)
@@ -131,8 +164,10 @@ def is_lora_installed(lora_id: str) -> bool:
     return False
 
 
-def installed_lora_ids() -> FrozenSet[str]:
-    return frozenset(lid for lid in LORA_CATALOG if is_lora_installed(lid))
+def installed_lora_ids(settings: Optional[Dict[str, Any]] = None) -> FrozenSet[str]:
+    return frozenset(
+        lid for lid in merged_lora_catalog(settings) if is_lora_installed(lid, settings)
+    )
 
 
 def lora_model_support(settings: Optional[Dict[str, Any]] = None) -> Dict[str, Tuple[str, ...]]:
@@ -144,10 +179,11 @@ def lora_model_support(settings: Optional[Dict[str, Any]] = None) -> Dict[str, T
     raw = lc.get("model_support")
     if not isinstance(raw, dict):
         return {}
+    catalog = merged_lora_catalog(settings)
     out: Dict[str, Tuple[str, ...]] = {}
     for lid, models in raw.items():
         lid_s = str(lid)
-        if lid_s not in LORA_CATALOG:
+        if lid_s not in catalog:
             continue
         if not isinstance(models, list):
             continue
@@ -213,7 +249,7 @@ def lora_probe_passed_for_model(
     Other entries: after Check LoRAs, only those with a successful probe on model_key;
     before any check, only mflux_compatible=True (same as above).
     """
-    entry = LORA_CATALOG.get(lora_id)
+    entry = get_lora_entry(lora_id, settings)
     if entry is None or entry.mflux_compatible is False:
         return False
     if not entry_matches_lora_model(entry, model_key):
@@ -258,7 +294,7 @@ def catalog_entries_for_model(
     hidden = hidden_lora_ids_for_model(model_key, settings)
     return tuple(
         e
-        for e in catalog_entries_sorted()
+        for e in catalog_entries_sorted(settings)
         if lora_probe_passed_for_model(e.lora_id, model_key, settings)
         and e.lora_id not in hidden
     )
@@ -277,7 +313,11 @@ def catalog_entries_for_settings(
         if host_id
         else all_hidden_lora_ids(settings)
     )
-    entries = entries_for_host(host_id) if host_id else catalog_entries_sorted()
+    entries = (
+        entries_for_host(host_id, settings)
+        if host_id
+        else catalog_entries_sorted(settings)
+    )
     return tuple(
         e for e in entries if e.mflux_compatible is not False and e.lora_id not in hidden
     )
@@ -325,7 +365,7 @@ def lora_choices_for_plugin(
     if not host_id or not model_key:
         return (("None", "none"),)
     choices: List[Tuple[str, str]] = [("None", "none")]
-    for entry in entries_for_host(host_id):
+    for entry in entries_for_host(host_id, settings):
         if lora_visible_for_run(
             entry.lora_id,
             entry,
@@ -358,7 +398,7 @@ def lora_choices_for_pipeline(
     if not model_key:
         return (("None", "none"),)
     choices: List[Tuple[str, str]] = [("None", "none")]
-    for entry in entries_for_host(host_id):
+    for entry in entries_for_host(host_id, settings):
         if lora_visible_for_run(
             entry.lora_id,
             entry,
@@ -380,13 +420,13 @@ def resolve_plugin_base_model(hf_model_id: str, pipeline_id: str) -> str:
     return FLUX1_DEV
 
 
-def lora_entry_min_steps(lora_id: str) -> Optional[int]:
-    entry = LORA_CATALOG.get(lora_id)
+def lora_entry_min_steps(lora_id: str, settings: Optional[Dict[str, Any]] = None) -> Optional[int]:
+    entry = get_lora_entry(lora_id, settings)
     return entry.min_steps if entry is not None else None
 
 
-def manual_download_help(lora_id: str) -> str:
-    entry = LORA_CATALOG.get(lora_id)
+def manual_download_help(lora_id: str, settings: Optional[Dict[str, Any]] = None) -> str:
+    entry = get_lora_entry(lora_id, settings)
     if entry is None:
         return "Unknown LoRA."
     if entry.local_path:
@@ -405,7 +445,7 @@ def manual_download_help(lora_id: str) -> str:
 def sample_lora_download_entries() -> Tuple[FluxLoraEntry, ...]:
     return tuple(
         e
-        for e in catalog_entries_sorted()
+        for e in catalog_entries_sorted(None)
         if e.mflux_compatible is True and e.repo_id and e.filename
     )
 

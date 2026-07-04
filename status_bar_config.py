@@ -1267,6 +1267,7 @@ class ClickableImageGenIndicatorLabel(QLabel):
         if not info_html:
             return
         _apply_task_info_html_to_browser(browser, info_html)
+        controller.mark_task_status_display_refreshed()
         try:
             update_delayed_prompt_tooltip(
                 browser, controller.active_job_full_prompt()
