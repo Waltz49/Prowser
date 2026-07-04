@@ -200,6 +200,15 @@ class InfillPaintCanvas(QWidget):
     def adjust_brush_radius(self, delta: int) -> None:
         self.set_brush_radius(self._brush_radius + delta)
 
+    def _image_brush_radius(self) -> float:
+        """Mask-space brush radius; shrinks when zoomed in so the on-screen ring stays fixed."""
+        vs = max(1.0, self._view_scale)
+        return max(1.0, float(self._brush_radius) / vs)
+
+    def _display_brush_radius(self) -> float:
+        """On-screen brush ring radius (constant across view zoom)."""
+        return max(2.0, float(self._brush_radius) * self._fit_scale)
+
     def clear_mask(self) -> None:
         if not self._has_paint:
             return
@@ -452,7 +461,7 @@ class InfillPaintCanvas(QWidget):
     def _cursor_track_rect(self) -> QRect:
         """Image rect expanded so the brush ring stays visible near edges."""
         pad = self._track_margin_px()
-        display_r = int(float(self._brush_radius) * self._scale + 0.999) + 2
+        display_r = int(self._display_brush_radius() + 0.999) + 2
         pad = max(pad, display_r)
         return self._image_rect.adjusted(-pad, -pad, pad, pad)
 
@@ -463,7 +472,7 @@ class InfillPaintCanvas(QWidget):
         return rel_x / scale, rel_y / scale
 
     def _brush_overlaps_image(self, ix: float, iy: float) -> bool:
-        radius = float(self._brush_radius)
+        radius = self._image_brush_radius()
         return not (
             ix + radius < 0.0
             or iy + radius < 0.0
@@ -494,7 +503,7 @@ class InfillPaintCanvas(QWidget):
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         painter.setClipRect(QRect(0, 0, self._image_w, self._image_h))
         painter.setPen(Qt.PenStyle.NoPen)
-        radius = self._brush_radius
+        radius = self._image_brush_radius()
         if erase:
             painter.setCompositionMode(
                 QPainter.CompositionMode.CompositionMode_Clear
@@ -523,7 +532,7 @@ class InfillPaintCanvas(QWidget):
             return
         if not self._cursor_track_rect().contains(self._cursor_pos):
             return
-        display_r = max(2.0, float(self._brush_radius) * self._scale)
+        display_r = self._display_brush_radius()
         cx = float(self._cursor_pos.x())
         cy = float(self._cursor_pos.y())
         erase = self._option_erase_active()
