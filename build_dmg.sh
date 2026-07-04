@@ -4,6 +4,28 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
+MIN_BUILD=false
+for arg in "$@"; do
+  case "$arg" in
+    --min|-m) MIN_BUILD=true ;;
+    --help|-h)
+      echo "Usage: $0 [--min]"
+      echo ""
+      echo "Options:"
+      echo "  --min, -m   Create Prowser-VERSION-min.dmg (default: Prowser-VERSION.dmg)"
+      echo "  --help, -h  Show this help message"
+      echo ""
+      echo "Requires Prowser.app in /Applications (run ./pyInstallerBuild.sh first)."
+      exit 0
+      ;;
+    *)
+      echo "Unknown option: $arg" >&2
+      echo "Usage: $0 [--min]" >&2
+      exit 1
+      ;;
+  esac
+done
+
 #######################################
 # Config
 #######################################
@@ -24,7 +46,11 @@ fi
 VOLUME_NAME="Prowser Installer"
 
 APP_PATH="/Applications/${APP_NAME}.app"
-DMG_PATH="$HOME/Desktop/${APP_NAME}-${APP_VERSION}.dmg"
+if [ "$MIN_BUILD" = "true" ]; then
+  DMG_PATH="$HOME/Desktop/${APP_NAME}-${APP_VERSION}-min.dmg"
+else
+  DMG_PATH="$HOME/Desktop/${APP_NAME}-${APP_VERSION}.dmg"
+fi
 
 WORKDIR="/tmp/${APP_NAME}_dmg"
 TEMP_DMG="/tmp/${APP_NAME}_rw.dmg"

@@ -1293,7 +1293,11 @@ main() {
     echo "1. Prowser is now installed in /Applications and ready to use"
     echo "2. Launch Prowser from Applications folder or use Spotlight (Cmd+Space)"
     echo "3. The app bundle is also available locally at '$BUILD_DIR/${APP_NAME}.app'"
-    echo "4. You can now replace your current build process with this PyInstaller approach"
+    if [ "$MIN_BUILD" = "true" ]; then
+        echo "4. To create a minimal installer DMG: ./build_dmg.sh --min"
+    else
+        echo "4. To create an installer DMG: ./build_dmg.sh"
+    fi
     echo
     echo "Note: The app bundle maintains proper macOS identity (name, icons, dock behavior)"
     echo "Note: Dependencies were analyzed dynamically from your actual code imports"

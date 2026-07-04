@@ -524,7 +524,12 @@ Examples:
         help='Simulate a minimal PyInstaller bundle: '
              'hide image generation, LM Studio, voice input, and related UI',
     )
-    
+    parser.add_argument(
+        '--env',
+        action='store_true',
+        help='Report PROWSER_*_AI_EXIT environment variables and exit',
+    )
+
     return parser.parse_args()
 
 # Image and path validation functions moved to utils.py
@@ -733,6 +738,12 @@ def main():
     
     # Parse command line arguments early to get profile directory
     args = parse_arguments()
+
+    if args.env:
+        from imagegen_plugins.ai_prompt_exit import print_ai_exit_env_report
+
+        print_ai_exit_env_report()
+        sys.exit(0)
 
     if args.min:
         os.environ["PROWSER_MIN_BUNDLE"] = "1"

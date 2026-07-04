@@ -1,0 +1,14 @@
+---
+description: Do not add new test files under tests/
+alwaysApply: true
+---
+
+# No New Tests
+
+Do not create new permanent test files or test cases in the `tests/` directory.
+
+- Do not add files under `tests/` (e.g. `test_*.py`, `*_test.py`).
+- Do not expand existing test files with new test functions or classes unless the user explicitly asks.
+- If a change would benefit from tests, mention that to the user instead of writing them.
+
+Existing tests may be updated only when the user explicitly requests test changes.
