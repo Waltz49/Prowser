@@ -855,7 +855,7 @@ def make_image_gen_prompt_label_row(
     row.setObjectName(label_row_object_name)
     row.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
     layout = QHBoxLayout(row)
-    layout.setContentsMargins(0, 0, 0, 0)
+    layout.setContentsMargins(0, 8, 0, 0)
     layout.setSpacing(6)
     layout.addWidget(make_image_gen_field_label(label_text, row), 0)
     layout.addWidget(
@@ -1850,6 +1850,40 @@ def mount_image_gen_fields_in_scroll(
     QTimer.singleShot(0, panel.reflow_controls)
 
 
+def image_gen_custom_size_group_stylesheet() -> str:
+    """Tighter width/height rows inside the Custom Size group box."""
+    sz = IMAGE_GEN_DIM_HELPER_BTN_SIZE
+    return f"""
+    #imageGenDialog QGroupBox#imageGenCustomSizeGroup {{
+        margin-top: 6px;
+        padding-top: 4px;
+    }}
+    #imageGenDialog QGroupBox#imageGenCustomSizeGroup QLabel#{IMAGE_GEN_FIELD_LABEL_OBJECT_NAME} {{
+        padding-top: 0px;
+        font-size: 12px;
+    }}
+    #imageGenDialog QWidget#imageGenCustomSizeDimRow StepSpinBox {{
+        min-height: {sz}px;
+        max-height: {sz}px;
+    }}
+    #imageGenDialog QWidget#imageGenCustomSizeDimRow QSlider::groove:horizontal {{
+        height: 3px;
+    }}
+    #imageGenDialog QWidget#imageGenCustomSizeDimRow QSlider::handle:horizontal {{
+        width: 7px;
+        height: 7px;
+        margin: -3px 0;
+        border-radius: 3px;
+    }}
+    #imageGenDialog QGroupBox#imageGenCustomSizeGroup QPushButton#imageGenFieldResetBtn {{
+        min-width: {sz}px;
+        max-width: {sz}px;
+        min-height: {sz}px;
+        max-height: {sz}px;
+    }}
+    """
+
+
 def image_gen_field_label_stylesheet() -> str:
     t = get_active_theme()
     return f"""
@@ -1916,6 +1950,6 @@ def image_gen_field_label_stylesheet() -> str:
     #imageGenDialog QLineEdit {{
         padding: 5px 8px;
     }}
-    """ + image_gen_field_reset_btn_dialog_stylesheet() + image_gen_prompt_copy_btn_dialog_stylesheet() + image_gen_prompt_clear_btn_dialog_stylesheet() + image_gen_prompt_voice_mic_btn_dialog_stylesheet() + image_gen_system_prompt_copy_btn_dialog_stylesheet() + image_gen_system_prompt_clear_btn_dialog_stylesheet() + image_gen_system_prompt_voice_mic_btn_dialog_stylesheet()
+    """ + image_gen_custom_size_group_stylesheet() + image_gen_field_reset_btn_dialog_stylesheet() + image_gen_prompt_copy_btn_dialog_stylesheet() + image_gen_prompt_clear_btn_dialog_stylesheet() + image_gen_prompt_voice_mic_btn_dialog_stylesheet() + image_gen_system_prompt_copy_btn_dialog_stylesheet() + image_gen_system_prompt_clear_btn_dialog_stylesheet() + image_gen_system_prompt_voice_mic_btn_dialog_stylesheet()
 
 

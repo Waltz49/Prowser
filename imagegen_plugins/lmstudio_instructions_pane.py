@@ -218,6 +218,7 @@ class LmStudioInstructionsPane:
                 create_image_gen_prompt_edit,
                 make_image_gen_prompt_label_row,
                 wrap_image_gen_bordered_field,
+                wrap_image_gen_field_control_indent,
                 wrap_image_gen_prompt_subsection,
             )
 
@@ -250,7 +251,7 @@ class LmStudioInstructionsPane:
             toolbar_col.setSpacing(0)
             self._editor_block = QWidget(group_parent)
             editor_block_layout = QVBoxLayout(self._editor_block)
-            editor_block_layout.setContentsMargins(0, 0, 0, 0)
+            editor_block_layout.setContentsMargins(0, 4, 0, 0)
             editor_block_layout.setSpacing(0)
             editor_block_layout.addWidget(
                 wrap_image_gen_bordered_field(edit, bottom_pad=0),
@@ -288,7 +289,10 @@ class LmStudioInstructionsPane:
             section_layout.setSpacing(IMAGE_GEN_FIELD_LABEL_SPACING)
             section_layout.addWidget(self._toolbar_host, 0)
             section_layout.addWidget(label_row, 0)
-            section_layout.addWidget(field_row, 0)
+            section_layout.addWidget(
+                wrap_image_gen_field_control_indent(field_row, section),
+                0,
+            )
             section.setSizePolicy(
                 QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum
             )

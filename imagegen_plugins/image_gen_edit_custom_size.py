@@ -5,11 +5,12 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, Tuple
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QSize
 from PySide6.QtWidgets import (
     QCheckBox,
     QGroupBox,
     QHBoxLayout,
+    QPushButton,
     QSizePolicy,
     QVBoxLayout,
     QWidget,
@@ -18,6 +19,8 @@ from PySide6.QtWidgets import (
 from imagegen_plugins.image_gen_fields import FieldSpec
 from imagegen_plugins.image_gen_field_blocks import model_reset_default
 from imagegen_plugins.image_gen_form_layout import (
+    IMAGE_GEN_DIM_HELPER_BTN_SIZE,
+    IMAGE_GEN_FIELD_RESET_BTN_SIZE,
     ImageGenFieldsPanel,
     create_image_gen_dim_helper_icon_button,
     make_image_gen_field_label,
@@ -171,20 +174,35 @@ def edit_custom_size_field_specs(
     )
 
 
+def _compact_custom_size_dim_slider_row(row: QWidget) -> None:
+    """Shrink slider/spin/reset row height inside the Custom Size group."""
+    row.setObjectName("imageGenCustomSizeDimRow")
+    compact = IMAGE_GEN_DIM_HELPER_BTN_SIZE
+    icon_px = max(
+        10,
+        round(16 * compact / IMAGE_GEN_FIELD_RESET_BTN_SIZE),
+    )
+    for btn in row.findChildren(QPushButton):
+        if btn.objectName() == "imageGenFieldResetBtn":
+            btn.setFixedSize(compact, compact)
+            btn.setIconSize(QSize(icon_px, icon_px))
+
+
 def _add_labeled_slider_row(
     parent: QWidget,
     layout: QVBoxLayout,
     label_text: str,
     control: QWidget,
 ) -> None:
+    _compact_custom_size_dim_slider_row(control)
     row = QWidget(parent)
     col = QVBoxLayout(row)
     col.setContentsMargins(0, 0, 0, 0)
-    col.setSpacing(2)
+    col.setSpacing(0)
     col.addWidget(make_image_gen_field_label(label_text, row), 0)
     col.addWidget(
         wrap_image_gen_field_control_indent(
-            wrap_image_gen_bordered_field(control), row
+            wrap_image_gen_bordered_field(control, bottom_pad=0), row
         ),
         0,
         Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
@@ -242,9 +260,10 @@ def _build_custom_size_group_box(
     values: Dict[str, Any],
 ) -> QGroupBox:
     group_box = QGroupBox("Custom Size")
+    group_box.setObjectName("imageGenCustomSizeGroup")
     group_layout = QVBoxLayout(group_box)
-    group_layout.setContentsMargins(8, 8, 8, 8)
-    group_layout.setSpacing(8)
+    group_layout.setContentsMargins(6, 2, 6, 4)
+    group_layout.setSpacing(0)
     _add_labeled_slider_row(group_box, group_layout, width_spec.label, width_widget)
     _add_labeled_slider_row(group_box, group_layout, height_spec.label, height_widget)
 
@@ -267,6 +286,7 @@ def _build_custom_size_group_box(
         btn_row, 0, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
     )
     controls_row.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+    group_layout.addSpacing(4)
     group_layout.addWidget(controls_row)
 
     aspect_cb.setChecked(bool(values.get("aspect_ratio_lock", False)))
