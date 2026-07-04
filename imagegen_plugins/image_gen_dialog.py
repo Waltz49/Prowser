@@ -504,20 +504,11 @@ def append_image_gen_import_size_button(
 
 
 def create_image_gen_prompt_import_row(buttons: List[QPushButton]) -> QWidget:
-    from imagegen_plugins.imagegen_flux_prompt_ai import _FLUX_PROMPT_TOOLBAR_SPACING
+    from imagegen_plugins.image_gen_form_layout import (
+        create_image_gen_prompt_button_bar_row,
+    )
 
-    row = QWidget()
-    row.setSizePolicy(
-        QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum
-    )
-    layout = QHBoxLayout(row)
-    layout.setContentsMargins(
-        IMAGE_GEN_FIELD_BORDER_PAD, 0, IMAGE_GEN_FIELD_BORDER_PAD, 0
-    )
-    layout.setSpacing(_FLUX_PROMPT_TOOLBAR_SPACING)
-    layout.setAlignment(
-        Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
-    )
+    row, layout = create_image_gen_prompt_button_bar_row(horizontal_pad=False)
     for button in buttons:
         configure_image_gen_prompt_import_button(button)
         layout.addWidget(button, 0)

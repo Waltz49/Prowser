@@ -218,7 +218,7 @@ class LmStudioInstructionsPane:
                 create_image_gen_prompt_edit,
                 make_image_gen_prompt_label_row,
                 wrap_image_gen_bordered_field,
-                wrap_image_gen_field_control_indent,
+                wrap_image_gen_prompt_subsection,
             )
 
             group_parent = QWidget(self._parent)
@@ -234,16 +234,20 @@ class LmStudioInstructionsPane:
                 edit.setPlainText(saved_text)
             if self._on_text_changed is not None:
                 edit.textChanged.connect(self._on_text_changed)
-            col.addWidget(
-                make_image_gen_prompt_label_row(
-                    self._label_text,
-                    edit,
-                    group_parent,
-                    label_row_object_name="imageGenSystemPromptLabelRow",
-                    clear_object_name="imageGenSystemPromptClearBtn",
-                ),
-                0,
+            label_row = make_image_gen_prompt_label_row(
+                self._label_text,
+                edit,
+                group_parent,
+                label_row_object_name="imageGenSystemPromptLabelRow",
+                clear_object_name="imageGenSystemPromptClearBtn",
             )
+            self._toolbar_host = QWidget(group_parent)
+            self._toolbar_host.setSizePolicy(
+                QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum
+            )
+            toolbar_col = QVBoxLayout(self._toolbar_host)
+            toolbar_col.setContentsMargins(0, 0, 0, 0)
+            toolbar_col.setSpacing(0)
             self._editor_block = QWidget(group_parent)
             editor_block_layout = QVBoxLayout(self._editor_block)
             editor_block_layout.setContentsMargins(0, 0, 0, 0)
@@ -252,14 +256,6 @@ class LmStudioInstructionsPane:
                 wrap_image_gen_bordered_field(edit, bottom_pad=0),
                 0,
             )
-            self._toolbar_host = QWidget(self._editor_block)
-            self._toolbar_host.setSizePolicy(
-                QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum
-            )
-            toolbar_col = QVBoxLayout(self._toolbar_host)
-            toolbar_col.setContentsMargins(0, 0, 0, 0)
-            toolbar_col.setSpacing(0)
-            editor_block_layout.addWidget(self._toolbar_host, 0)
 
             field_row = QWidget(group_parent)
             field_row_layout = QHBoxLayout(field_row)
@@ -286,10 +282,17 @@ class LmStudioInstructionsPane:
             field_row.setSizePolicy(
                 QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum
             )
-            col.addWidget(
-                wrap_image_gen_field_control_indent(field_row, group_parent),
-                0,
+            section = QWidget(group_parent)
+            section_layout = QVBoxLayout(section)
+            section_layout.setContentsMargins(0, 0, 0, 0)
+            section_layout.setSpacing(IMAGE_GEN_FIELD_LABEL_SPACING)
+            section_layout.addWidget(self._toolbar_host, 0)
+            section_layout.addWidget(label_row, 0)
+            section_layout.addWidget(field_row, 0)
+            section.setSizePolicy(
+                QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum
             )
+            col.addWidget(wrap_image_gen_prompt_subsection(section, group_parent), 0)
             widget = group_parent
             self._instructions_edit = edit
         else:
@@ -353,7 +356,7 @@ class LmStudioInstructionsPane:
             return
         if self._editor_block is not None:
             self._editor_block.setVisible(True)
-        if self._toolbar_host is not None and self._toolbar_host.parent() is self._editor_block:
+        if self._toolbar_host is not None:
             self._toolbar_host.setVisible(True)
         if self._copy_btn is not None:
             self._copy_btn.setVisible(True)

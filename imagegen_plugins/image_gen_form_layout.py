@@ -443,6 +443,57 @@ def wrap_image_gen_bordered_field(
         QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum
     )
     return host
+
+
+def wrap_image_gen_prompt_subsection(
+    control: QWidget,
+    parent: Optional[QWidget] = None,
+) -> QWidget:
+    """Indent for blocks under the image prompt (import row, system prompt section)."""
+    outer = QWidget(parent)
+    outer_lay = QHBoxLayout(outer)
+    outer_lay.setContentsMargins(IMAGE_GEN_FIELD_CONTROL_INDENT, 0, 0, 0)
+    outer_lay.setSpacing(0)
+    inner = QWidget(outer)
+    inner_lay = QVBoxLayout(inner)
+    inner_lay.setContentsMargins(
+        IMAGE_GEN_FIELD_BORDER_PAD, 0, IMAGE_GEN_FIELD_BORDER_PAD, 0
+    )
+    inner_lay.setSpacing(0)
+    inner_lay.addWidget(control)
+    hp = control.sizePolicy().horizontalPolicy()
+    vp = control.sizePolicy().verticalPolicy()
+    if hp == QSizePolicy.Policy.Expanding:
+        outer_lay.addWidget(inner, 1)
+        outer.setSizePolicy(QSizePolicy.Policy.Expanding, vp)
+    else:
+        outer_lay.addWidget(inner, 0, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        outer.setSizePolicy(QSizePolicy.Policy.Maximum, vp)
+    return outer
+
+
+IMAGE_GEN_PROMPT_BUTTON_BAR_SPACING = 16
+
+
+def create_image_gen_prompt_button_bar_row(
+    parent: Optional[QWidget] = None,
+    *,
+    horizontal_pad: bool = True,
+) -> tuple[QWidget, QHBoxLayout]:
+    """Horizontal button/checkbox row under a prompt field (import or Gen Prompt)."""
+    row = QWidget(parent)
+    row.setObjectName("imageGenPromptButtonBarRow")
+    row.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
+    layout = QHBoxLayout(row)
+    pad = IMAGE_GEN_FIELD_BORDER_PAD if horizontal_pad else 0
+    layout.setContentsMargins(pad, 0, pad, 0)
+    layout.setSpacing(IMAGE_GEN_PROMPT_BUTTON_BAR_SPACING)
+    layout.setAlignment(
+        Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+    )
+    return row, layout
+
+
 IMAGE_GEN_CHECKBOX_ROW_SPACING = 14
 IMAGE_GEN_COLUMN_ROW_SPACING = 10
 IMAGE_GEN_BELOW_PROMPT_SPACING = 8
@@ -1636,7 +1687,7 @@ class ImageGenFieldsPanel:
         prompt_editor = self.prompt_editor_host_widget()
         if prompt_editor is None:
             return
-        host = wrap_image_gen_field_control_indent(row, self._prompt_group)
+        host = wrap_image_gen_prompt_subsection(row, self._prompt_group)
         self._prompt_import_host = host
         idx = col.indexOf(prompt_editor)
         if idx < 0:

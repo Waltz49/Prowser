@@ -17,11 +17,10 @@ from PySide6.QtWidgets import (
 )
 
 from imagegen_plugins.image_gen_form_layout import (
-    IMAGE_GEN_FIELD_BORDER_PAD,
+    create_image_gen_prompt_button_bar_row,
     image_gen_prompt_edit_set_plain_text,
     image_gen_prompt_stream_session_begin,
     image_gen_prompt_stream_session_end,
-    make_image_gen_field_label,
 )
 from thumbnails.thumbnail_constants import ALT_SYMBOL, ENTER_SYMBOL, SHIFT_SYMBOL
 from imagegen_plugins.image_gen_persistence import (
@@ -150,7 +149,6 @@ _FLUX_PROMPT_UNDO_LABEL = "Undo AI"
 _FLUX_PROMPT_UNDO_BUTTON_LABEL = (
     f"{_FLUX_PROMPT_UNDO_LABEL} {SHIFT_SYMBOL}{ALT_SYMBOL}{ENTER_SYMBOL}"
 )
-_FLUX_PROMPT_TOOLBAR_SPACING = 16
 _FLUX_PROMPT_PRIMARY_BTN_WIDTH = 88
 
 
@@ -174,7 +172,7 @@ def cancel_dialog_flux_prompt_refine(owner: Any) -> None:
 
 
 class ImageGenFluxPromptAi:
-    """Prompt AI controls for image-gen dialogs (toolbar under system prompt)."""
+    """Prompt AI controls for image-gen dialogs (toolbar above system prompt)."""
 
     def __init__(
         self,
@@ -226,15 +224,8 @@ class ImageGenFluxPromptAi:
     ) -> Optional[QWidget]:
         if not is_lmstudio_services_available():
             return None
-        row = QWidget()
+        row, layout = create_image_gen_prompt_button_bar_row(horizontal_pad=False)
         row.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        layout = QHBoxLayout(row)
-        layout.setContentsMargins(0, 4, 0, 0)
-        layout.setSpacing(_FLUX_PROMPT_TOOLBAR_SPACING)
-        layout.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
-
-        # controls_label = make_image_gen_field_label("AI Controls:", row)
-        # layout.addWidget(controls_label, 0)
 
         self._ai_btn = QPushButton(_FLUX_PROMPT_GEN_BUTTON_LABEL)
         self._ai_btn.setObjectName("flux_prompt_ai_btn")
