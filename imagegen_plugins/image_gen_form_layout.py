@@ -589,6 +589,102 @@ def split_groups_for_balanced_columns(
     return k
 
 
+IMAGE_GEN_FLOW_ROLE_SEED = "seed"
+IMAGE_GEN_FLOW_ROLE_STEPS_QUANT = "steps_quant"
+IMAGE_GEN_FLOW_ROLE_COPIES = "copies"
+_IMAGE_GEN_FLOW_RIGHT_COLUMN_PRIORITY = (
+    IMAGE_GEN_FLOW_ROLE_STEPS_QUANT,
+    IMAGE_GEN_FLOW_ROLE_SEED,
+    IMAGE_GEN_FLOW_ROLE_COPIES,
+)
+
+
+def _flow_section_role(group: QWidget) -> Optional[str]:
+    role = group.property("imageGenFlowRole")
+    if role in _IMAGE_GEN_FLOW_RIGHT_COLUMN_PRIORITY:
+        return role
+    return None
+
+
+def _set_image_gen_flow_role(group: QWidget, role: Optional[str]) -> None:
+    if role in _IMAGE_GEN_FLOW_RIGHT_COLUMN_PRIORITY:
+        group.setProperty("imageGenFlowRole", role)
+
+
+def order_right_column_flow_sections(
+    groups: List[QWidget],
+) -> List[QWidget]:
+    """Col2 order: steps/quant, seed, copies, then remaining sections."""
+    priority: List[Tuple[int, int, QWidget]] = []
+    rest: List[Tuple[int, QWidget]] = []
+    for index, group in enumerate(groups):
+        role = _flow_section_role(group)
+        if role is None:
+            rest.append((index, group))
+            continue
+        rank = _IMAGE_GEN_FLOW_RIGHT_COLUMN_PRIORITY.index(role)
+        priority.append((rank, index, group))
+    priority.sort(key=lambda item: (item[0], item[1]))
+    rest.sort(key=lambda item: item[0])
+    return [group for _, _, group in priority] + [group for _, group in rest]
+
+
+def partition_flow_sections_for_two_columns(
+    groups: List[QWidget], *, spacing: int
+) -> Tuple[List[QWidget], List[QWidget]]:
+    """Assign sections to col1/col2 one at a time; col1 height is always >= col2.
+
+    Priority controls (steps/quant, seed, copies) are tested first in that order.
+    Any that fit without making col2 taller move individually; then bottom items
+    from the natural field list overflow one at a time until col2 would exceed col1.
+    """
+    n = len(groups)
+    if n <= 1:
+        return list(groups), []
+
+    left_ids = {id(group) for group in groups}
+    right: List[QWidget] = []
+
+    def _left_column() -> List[QWidget]:
+        return [group for group in groups if id(group) in left_ids]
+
+    def _try_move_to_right(group: QWidget) -> bool:
+        left_ids.remove(id(group))
+        right.append(group)
+        left_h = _column_layout_height(_left_column(), spacing=spacing)
+        right_h = _column_layout_height(right, spacing=spacing)
+        if right_h > left_h:
+            right.pop()
+            left_ids.add(id(group))
+            return False
+        return True
+
+    for role in _IMAGE_GEN_FLOW_RIGHT_COLUMN_PRIORITY:
+        match = next(
+            (
+                group
+                for group in groups
+                if id(group) in left_ids and _flow_section_role(group) == role
+            ),
+            None,
+        )
+        if match is not None:
+            _try_move_to_right(match)
+
+    while len(left_ids) > 1:
+        if not _try_move_to_right(_left_column()[-1]):
+            break
+
+    return _left_column(), order_right_column_flow_sections(right)
+
+
+def two_column_partition_signature(
+    groups: List[QWidget], *, spacing: int
+) -> Tuple[Tuple[int, ...], Tuple[int, ...]]:
+    left, right = partition_flow_sections_for_two_columns(groups, spacing=spacing)
+    return (tuple(id(group) for group in left), tuple(id(group) for group in right))
+
+
 class _ImageGenFieldsReflowFilter(QObject):
     def __init__(self, panel: "ImageGenFieldsPanel") -> None:
         super().__init__(panel.widget)
@@ -602,10 +698,7 @@ class _ImageGenFieldsReflowFilter(QObject):
                 flow_sections = panel._visible_flow_sections()
                 two_col = panel._use_two_column_layout(len(flow_sections))
                 split = (
-                    split_groups_for_balanced_columns(
-                        flow_sections,
-                        spacing=IMAGE_GEN_FIELD_GROUP_SPACING,
-                    )
+                    panel._two_column_partition_signature(flow_sections)
                     if two_col
                     else -1
                 )
@@ -1483,6 +1576,14 @@ class ImageGenFieldsPanel:
             return False
         return self._available_controls_width() >= IMAGE_GEN_TWO_COLUMN_MIN_WIDTH
 
+    def _two_column_partition_signature(
+        self, flow_sections: List[QWidget]
+    ) -> Tuple[Tuple[int, ...], Tuple[int, ...]]:
+        return two_column_partition_signature(
+            flow_sections,
+            spacing=IMAGE_GEN_FIELD_GROUP_SPACING,
+        )
+
     def _side_button_width(self) -> int:
         if self._side_btn_host is None or not self._side_btn_host.isVisible():
             return 0
@@ -1641,11 +1742,18 @@ class ImageGenFieldsPanel:
             if self._section_is_visible(g)
         ]
         two_col = self._use_two_column_layout(len(flow_sections))
-        split = (
-            split_groups_for_balanced_columns(
+        # Partition BEFORE detaching wrappers: _clear_controls_layout_wrappers()
+        # reparents groups to None (making them invisible), which would zero out
+        # every sizeHint height used by the balancing math.
+        left_col: List[QWidget] = []
+        right_col: List[QWidget] = []
+        if two_col and flow_sections:
+            left_col, right_col = partition_flow_sections_for_two_columns(
                 flow_sections,
                 spacing=IMAGE_GEN_FIELD_GROUP_SPACING,
             )
+        split = (
+            (tuple(id(g) for g in left_col), tuple(id(g) for g in right_col))
             if two_col
             else -1
         )
@@ -1665,10 +1773,10 @@ class ImageGenFieldsPanel:
                 Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop
             )
             row_layout.addWidget(
-                self._make_controls_column(flow_sections[:split], row), 1
+                self._make_controls_column(left_col, row), 1
             )
             row_layout.addWidget(
-                self._make_controls_column(flow_sections[split:], row), 1
+                self._make_controls_column(right_col, row), 1
             )
             row.setSizePolicy(
                 QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum
@@ -1912,6 +2020,7 @@ class ImageGenFieldsPanel:
         stretch_control: bool = True,
         to_outer: bool = False,
         copy_from_edit: Optional[QPlainTextEdit] = None,
+        flow_role: Optional[str] = None,
     ) -> QWidget:
         parent = self.widget if to_outer else self._controls_host
         group = QWidget(parent)
@@ -1949,6 +2058,7 @@ class ImageGenFieldsPanel:
                 0,
                 Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
             )
+        _set_image_gen_flow_role(group, flow_role)
         if to_outer:
             self._layout.addWidget(group)
         elif label_text:
@@ -1974,6 +2084,8 @@ class ImageGenFieldsPanel:
     def add_half_column_row(
         self,
         columns: List[Optional[Tuple[str, QWidget]]],
+        *,
+        flow_role: Optional[str] = None,
     ) -> None:
         """Steps/quant-style row: two half-width labeled fields, blank filler if absent."""
         group = QWidget(self._controls_host)
@@ -1986,6 +2098,7 @@ class ImageGenFieldsPanel:
             Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop,
         )
         group.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
+        _set_image_gen_flow_role(group, flow_role)
         self._append_control_group(group)
 
     def add_checkbox_row(self, checkboxes: List[QWidget]) -> None:

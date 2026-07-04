@@ -29,6 +29,9 @@ from imagegen_plugins.image_gen_fields import (
     resolve_plugin_field_layout,
 )
 from imagegen_plugins.image_gen_form_layout import (
+    IMAGE_GEN_FLOW_ROLE_COPIES,
+    IMAGE_GEN_FLOW_ROLE_SEED,
+    IMAGE_GEN_FLOW_ROLE_STEPS_QUANT,
     IMAGE_GEN_HALF_COLUMN_SLIDER_TRACK_WIDTH,
     IMAGE_GEN_SEED_SPIN_MAX_WIDTH,
     ImageGenFieldsPanel,
@@ -481,6 +484,7 @@ def _mount_node(
             seed_spec.label,
             build_seed_and_random_seed_row(seed_w, random_w),
             stretch_control=False,
+            flow_role=IMAGE_GEN_FLOW_ROLE_SEED,
         )
         return
 
@@ -513,7 +517,7 @@ def _mount_node(
             )
             widgets[quant_spec.key] = (quant_w, quant_extra, quant_spec)
             columns[1] = (quant_spec.label, quant_w)
-        panel.add_half_column_row(columns)
+        panel.add_half_column_row(columns, flow_role=IMAGE_GEN_FLOW_ROLE_STEPS_QUANT)
         return
 
     if group.layout == "bool_run":
@@ -549,7 +553,16 @@ def _mount_node(
                 inner_col.setContentsMargins(0, 0, 0, 0)
                 _mount_subtree_into_layout(inner_col, child, widgets, options=options)
                 col.addWidget(inner)
-        panel.add_labeled_field(group.label, row_w)
+        copies_flow_role = (
+            IMAGE_GEN_FLOW_ROLE_COPIES
+            if group.label == "Copies"
+            else None
+        )
+        panel.add_labeled_field(
+            group.label,
+            row_w,
+            flow_role=copies_flow_role,
+        )
         return
 
     if group.layout == "row":
@@ -630,4 +643,10 @@ def _mount_leaf_spec(
         panel.add_labeled_field(None, widget, stretch_control=False)
         return
     stretch = spec.kind not in ("int_slider", "float_slider", "choice")
-    panel.add_labeled_field(spec.label, widget, stretch_control=stretch)
+    flow_role = IMAGE_GEN_FLOW_ROLE_COPIES if spec.key == "copies" else None
+    panel.add_labeled_field(
+        spec.label,
+        widget,
+        stretch_control=stretch,
+        flow_role=flow_role,
+    )

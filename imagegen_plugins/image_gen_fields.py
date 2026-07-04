@@ -97,6 +97,37 @@ def resolve_field_nodes(
     return tuple(resolved)
 
 
+def _field_group_layout(node: FieldNode) -> Optional[FieldLayoutKind]:
+    if isinstance(node, FieldGroup):
+        return node.layout
+    return None
+
+
+def reorder_steps_before_seed(nodes: Tuple[FieldNode, ...]) -> Tuple[FieldNode, ...]:
+    """Mount steps/quant above seed in single-column below-prompt order."""
+    items = list(nodes)
+    seed_idx = next(
+        (i for i, node in enumerate(items) if _field_group_layout(node) == "seed_row"),
+        None,
+    )
+    steps_idx = next(
+        (
+            i
+            for i, node in enumerate(items)
+            if _field_group_layout(node) == "steps_quant_row"
+            or (isinstance(node, FieldSpec) and node.key == "steps")
+        ),
+        None,
+    )
+    if (
+        seed_idx is not None
+        and steps_idx is not None
+        and seed_idx < steps_idx
+    ):
+        items[seed_idx], items[steps_idx] = items[steps_idx], items[seed_idx]
+    return tuple(items)
+
+
 def resolve_plugin_field_layout(
     plugin: "ImageGenModelPlugin",
     values: dict[str, Any],
@@ -110,4 +141,4 @@ def resolve_plugin_field_layout(
             f"Plugin {plugin.plugin_id!r} has no field_layout_builder"
         )
     raw = builder(plugin, values, effective_max_side)
-    return resolve_field_nodes(raw, values)
+    return reorder_steps_before_seed(resolve_field_nodes(raw, values))
