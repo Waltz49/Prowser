@@ -489,11 +489,11 @@ def _series_progress_row(
         fill_percent = int(round(100.0 * series_done / series_total))
         return (
             "Copies:",
-            str(series_done),
+            f"{series_done}/{series_total}",
             str(remaining_series),
             str(fill_percent),
         )
-    return ("Copies:", str(series_total), "(total)", "0")
+    return ("Copies:", f"0/{series_total}", "", "0")
 
 
 def format_information_generation_timing_cell_html(
