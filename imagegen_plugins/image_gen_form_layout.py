@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QScrollArea,
     QSizePolicy,
+    QSplitter,
     QVBoxLayout,
     QWidget,
 )
@@ -520,7 +521,7 @@ IMAGE_GEN_SLIDER_ROW_SPACING = 8
 IMAGE_GEN_FIELD_LABEL_OBJECT_NAME = "imageGenFieldLabel"
 IMAGE_GEN_FIELD_LABEL_FONT_SIZE = 14
 # Two-column flow below the prompt when there are enough fields and width.
-IMAGE_GEN_TWO_COLUMN_MIN_FIELD_COUNT = 5
+IMAGE_GEN_TWO_COLUMN_MIN_FIELD_COUNT = 2
 IMAGE_GEN_TWO_COLUMN_MIN_ITEM_WIDTH = (
     IMAGE_GEN_FIELD_CONTROL_INDENT
     + IMAGE_GEN_SLIDER_TRACK_WIDTH
@@ -547,6 +548,47 @@ IMAGE_GEN_HALF_COLUMN_SLIDER_TRACK_WIDTH = max(
 )
 
 
+def _group_layout_height(group: QWidget) -> int:
+    if not group.isVisible():
+        return 0
+    height = group.sizeHint().height()
+    if height <= 0:
+        height = group.minimumSizeHint().height()
+    return max(0, height)
+
+
+def _column_layout_height(groups: List[QWidget], *, spacing: int) -> int:
+    if not groups:
+        return 0
+    heights = [_group_layout_height(g) for g in groups]
+    total = sum(heights)
+    visible = sum(1 for h in heights if h > 0)
+    if visible <= 1:
+        return total
+    return total + spacing * (visible - 1)
+
+
+def split_groups_for_balanced_columns(
+    groups: List[QWidget], *, spacing: int
+) -> int:
+    """Return split index k: col1 = groups[:k], col2 = groups[k:].
+
+    Move bottom items to col2 until col2 would exceed col1 height.
+    """
+    n = len(groups)
+    if n <= 1:
+        return n
+    k = n
+    while k > 1:
+        k -= 1
+        if _column_layout_height(groups[k:], spacing=spacing) > _column_layout_height(
+            groups[:k], spacing=spacing
+        ):
+            k += 1
+            break
+    return k
+
+
 class _ImageGenFieldsReflowFilter(QObject):
     def __init__(self, panel: "ImageGenFieldsPanel") -> None:
         super().__init__(panel.widget)
@@ -557,14 +599,32 @@ class _ImageGenFieldsReflowFilter(QObject):
             panel = self._panel
             width = panel._available_controls_width()
             if width > 0:
-                two_col = panel._use_two_column_layout(len(panel._control_groups))
+                flow_sections = panel._visible_flow_sections()
+                two_col = panel._use_two_column_layout(len(flow_sections))
+                split = (
+                    split_groups_for_balanced_columns(
+                        flow_sections,
+                        spacing=IMAGE_GEN_FIELD_GROUP_SPACING,
+                    )
+                    if two_col
+                    else -1
+                )
                 if (
                     width != panel._last_reflow_width
                     or two_col != panel._last_reflow_two_col
+                    or split != panel._last_reflow_split
                 ):
+                    leaving_two_col = (
+                        width < IMAGE_GEN_TWO_COLUMN_MIN_WIDTH
+                        and panel._last_reflow_two_col
+                    )
                     panel._last_reflow_width = width
                     panel._last_reflow_two_col = two_col
-                    panel._schedule_reflow()
+                    panel._last_reflow_split = split
+                    if leaving_two_col:
+                        panel._reflow_controls_layout()
+                    else:
+                        panel._schedule_reflow()
         return super().eventFilter(obj, event)
 
 
@@ -1235,8 +1295,7 @@ def build_image_gen_half_column_row(
                 ),
                 1,
             )
-    row_w.setFixedWidth(IMAGE_GEN_TWO_COLUMN_MIN_ITEM_WIDTH)
-    row_w.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+    row_w.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
     return row_w
 
 
@@ -1316,6 +1375,7 @@ class ImageGenFieldsPanel:
         self._reflow_timer.timeout.connect(self._reflow_controls_layout)
         self._last_reflow_width = -1
         self._last_reflow_two_col: Optional[bool] = None
+        self._last_reflow_split = -1
         self._scroll_area: Optional[QScrollArea] = None
         self._resize_filter = _ImageGenFieldsReflowFilter(self)
         self._controls_host.installEventFilter(self._resize_filter)
@@ -1336,20 +1396,90 @@ class ImageGenFieldsPanel:
         """Recompute single- vs two-column layout for fields below the prompt."""
         self._schedule_reflow()
 
+    def reflow_controls_for_shell_resize(self) -> None:
+        """Reflow when the unified shell resizes (Create has no splitter)."""
+        width = self._available_controls_width()
+        if (
+            width > 0
+            and width < IMAGE_GEN_TWO_COLUMN_MIN_WIDTH
+            and self._last_reflow_two_col
+        ):
+            self._reflow_controls_layout()
+        elif width > 0:
+            self._schedule_reflow()
+
     def _schedule_reflow(self) -> None:
         self._reflow_timer.start(0)
 
+    def _controls_pane_host(self) -> Optional[QWidget]:
+        """Right-hand splitter column hosting the scroll area, if any."""
+        if self._scroll_area is None:
+            return None
+        host = self._scroll_area.parentWidget()
+        while host is not None:
+            if isinstance(host.parentWidget(), QSplitter):
+                return host
+            host = host.parentWidget()
+        return None
+
+    def _splitter_for_controls_pane(self) -> Optional[QSplitter]:
+        pane = self._controls_pane_host()
+        if pane is None:
+            return None
+        parent = pane.parentWidget()
+        return parent if isinstance(parent, QSplitter) else None
+
     def _available_controls_width(self) -> int:
-        width = self._controls_host.width()
-        if width > 0:
-            return width
+        """Usable width for below-prompt flow (tightest splitter column constraint)."""
+        candidates: List[int] = []
+        host_w = self._controls_host.width()
+        if host_w > 0:
+            candidates.append(host_w)
+        if self._scroll_area is not None:
+            viewport_w = self._scroll_area.viewport().width()
+            if viewport_w > 0:
+                candidates.append(viewport_w)
+        pane = self._controls_pane_host()
+        if pane is not None:
+            pane_w = pane.width()
+            if pane_w > 0:
+                candidates.append(pane_w)
+        if candidates:
+            return min(candidates)
         return max(
             0,
             self.widget.width() - self._inset_h - self._inset_right,
         )
 
-    def _use_two_column_layout(self, control_count: int) -> bool:
-        if control_count < IMAGE_GEN_TWO_COLUMN_MIN_FIELD_COUNT:
+    def _section_is_visible(self, group: QWidget) -> bool:
+        return group.isVisibleTo(self._controls_host)
+
+    def _visible_flow_sections(self) -> List[QWidget]:
+        # --- Control sections (labeled fields, custom size, seed row, etc.) ---
+        control_sections = [
+            g for g in self._control_groups if self._section_is_visible(g)
+        ]
+        # --- Checkbox sections (Low RAM, etc.) ---
+        # NOTE: Included in shared column flow for now. Future: apply separate
+        # split_groups_for_balanced_columns() here for an independent checkbox block.
+        checkbox_sections = [
+            g for g in self._checkbox_groups if self._section_is_visible(g)
+        ]
+        return control_sections + checkbox_sections
+
+    def _flow_sections_for_min_width(self) -> List[QWidget]:
+        """Flow groups for minimum-width; tolerates stale isVisibleTo during reflow."""
+        visible = self._visible_flow_sections()
+        if visible:
+            return visible
+        groups = self._control_groups + self._checkbox_groups
+        if not groups:
+            return []
+        loose = [g for g in groups if g.isVisible()]
+        return loose or list(groups)
+
+    def _use_two_column_layout(self, section_count: int) -> bool:
+        if section_count < IMAGE_GEN_TWO_COLUMN_MIN_FIELD_COUNT:
             return False
         return self._available_controls_width() >= IMAGE_GEN_TWO_COLUMN_MIN_WIDTH
 
@@ -1368,18 +1498,20 @@ class ImageGenFieldsPanel:
         return max(0, width)
 
     def _controls_content_minimum_width(self) -> int:
-        groups = self._control_groups + self._checkbox_groups
-        if not groups:
+        """Minimum below-prompt width (single-column; no two-col floor)."""
+        flow_sections = self._flow_sections_for_min_width()
+        if not flow_sections:
             return self._side_button_width()
 
-        if self._use_two_column_layout(len(self._control_groups)):
-            base = IMAGE_GEN_TWO_COLUMN_MIN_WIDTH
-        else:
-            base = 0
-            for group in groups:
-                base = max(base, self._group_natural_width(group))
+        base = 0
+        for group in flow_sections:
+            base = max(base, self._group_natural_width(group))
 
         return base + self._side_button_width()
+
+    def content_minimum_width(self) -> int:
+        """Minimum width for the fields panel widget (includes horizontal insets)."""
+        return self._content_minimum_width()
 
     def _outer_fields_minimum_width(self) -> int:
         outer_min = 0
@@ -1404,16 +1536,39 @@ class ImageGenFieldsPanel:
         """Stop horizontal shrink once fixed-width controls would need a scrollbar."""
         controls_min = self._controls_content_minimum_width()
         content_min = self._content_minimum_width()
+        pane = self._controls_pane_host()
+        splitter = self._splitter_for_controls_pane()
 
         self._controls_host.setMinimumWidth(controls_min)
         self._below_row.setMinimumWidth(controls_min)
-        self.widget.setMinimumWidth(content_min)
-        if self._scroll_area is not None:
-            self._scroll_area.setMinimumWidth(content_min)
-            splitter = self._scroll_area.parent()
-            clamp = getattr(splitter, "_clamp_left_size", None)
-            if callable(clamp):
-                QTimer.singleShot(0, clamp)
+
+        if pane is not None:
+            # Enforce min on the splitter controls column, not the scroll content
+            # (scroll/widget mins caused clip when pane_w < content_min).
+            pane.setMinimumWidth(content_min)
+            self.widget.setMinimumWidth(0)
+            if self._scroll_area is not None:
+                self._scroll_area.setMinimumWidth(0)
+            if splitter is not None:
+                clamp = getattr(splitter, "_clamp_left_size", None)
+                if callable(clamp):
+                    clamp()
+        else:
+            self.widget.setMinimumWidth(content_min)
+            if self._scroll_area is not None:
+                self._scroll_area.setMinimumWidth(content_min)
+
+        self._notify_unified_shell_minimum_width()
+
+    def _notify_unified_shell_minimum_width(self) -> None:
+        from imagegen_plugins.image_gen_panel_shell import find_image_gen_unified_shell
+
+        shell = find_image_gen_unified_shell(self.widget)
+        if shell is None:
+            return
+        sync = getattr(shell, "_sync_shell_minimum_width", None)
+        if callable(sync):
+            sync()
 
     def _detach_below_prompt_groups(self) -> None:
         for group in self._control_groups + self._checkbox_groups:
@@ -1473,17 +1628,35 @@ class ImageGenFieldsPanel:
             return
 
         width = self._available_controls_width()
-        two_col = self._use_two_column_layout(len(self._control_groups))
+        # --- Control sections (labeled fields, custom size, seed row, etc.) ---
+        control_sections = list(self._control_groups)
+        # --- Checkbox sections (Low RAM, etc.) ---
+        # NOTE: Included in shared column flow for now. Future: apply separate
+        # split_groups_for_balanced_columns() to control_sections and
+        # checkbox_sections independently, then lay out each block.
+        checkbox_sections = list(self._checkbox_groups)
+        flow_sections = [
+            g
+            for g in control_sections + checkbox_sections
+            if self._section_is_visible(g)
+        ]
+        two_col = self._use_two_column_layout(len(flow_sections))
+        split = (
+            split_groups_for_balanced_columns(
+                flow_sections,
+                spacing=IMAGE_GEN_FIELD_GROUP_SPACING,
+            )
+            if two_col
+            else -1
+        )
         self._last_reflow_width = width
         self._last_reflow_two_col = two_col
+        self._last_reflow_split = split
 
         self._ensure_below_row_in_layout()
         self._clear_controls_layout_wrappers()
 
-        controls = list(self._control_groups)
-        checkboxes = list(self._checkbox_groups)
-        if self._use_two_column_layout(len(controls)):
-            first_count = (len(controls) + 1) // 2
+        if two_col and flow_sections:
             row = QWidget(self._controls_host)
             row_layout = QHBoxLayout(row)
             row_layout.setContentsMargins(0, 0, 0, 0)
@@ -1492,22 +1665,17 @@ class ImageGenFieldsPanel:
                 Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop
             )
             row_layout.addWidget(
-                self._make_controls_column(controls[:first_count], row), 1
+                self._make_controls_column(flow_sections[:split], row), 1
             )
             row_layout.addWidget(
-                self._make_controls_column(controls[first_count:], row), 1
+                self._make_controls_column(flow_sections[split:], row), 1
             )
             row.setSizePolicy(
                 QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum
             )
             self._controls_layout.addWidget(row)
-            if checkboxes:
-                checkbox_col = self._make_controls_column(
-                    checkboxes, self._controls_host
-                )
-                self._controls_layout.addWidget(checkbox_col)
         else:
-            for group in controls + checkboxes:
+            for group in control_sections + checkbox_sections:
                 self._mount_group_in_layout(self._controls_layout, group)
 
         self._sync_minimum_widths()
@@ -1578,6 +1746,9 @@ class ImageGenFieldsPanel:
         self.widget.setMinimumWidth(0)
         if self._scroll_area is not None:
             self._scroll_area.setMinimumWidth(0)
+        pane = self._controls_pane_host()
+        if pane is not None:
+            pane.setMinimumWidth(0)
 
         while self._layout.count() > keep:
             item = self._layout.takeAt(keep)
@@ -1843,6 +2014,8 @@ def mount_image_gen_fields_in_scroll(
     apply_image_gen_preview_client_background(viewport)
     scroll.setWidget(panel.widget)
     panel._scroll_area = scroll
+    viewport.installEventFilter(panel._resize_filter)
+    scroll.installEventFilter(panel._resize_filter)
     apply_image_gen_preview_client_background(panel.widget)
     panel.widget.setSizePolicy(
         QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum

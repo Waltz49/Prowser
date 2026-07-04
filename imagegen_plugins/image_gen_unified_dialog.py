@@ -165,6 +165,8 @@ class ImageGenUnifiedDialog(QDialog):
             min_height=600,
             unified_shell=True,
         )
+        self._bootstrap_min_width = 800
+        self._bootstrap_min_height = 600
 
         root = QVBoxLayout(self)
         l, t, r, b = IMAGE_GEN_UNIFIED_SHELL_MARGINS
@@ -340,6 +342,7 @@ class ImageGenUnifiedDialog(QDialog):
             if auto_import_available and hasattr(panel, "_on_import_available"):
                 panel._on_import_available()
             self._activate_panel_layouts()
+            self._sync_shell_minimum_width()
             self._attach_dialog_event_filters(panel)
         finally:
             if paint_updates:
@@ -381,6 +384,51 @@ class ImageGenUnifiedDialog(QDialog):
         for panel in self._panels.values():
             for splitter in panel.findChildren(ImageGenPreviewSplitter):
                 splitter._ensure_initial_sizes()
+        self._sync_shell_minimum_width()
+
+    def _embedded_panel_minimum_width(self, panel) -> int:
+        """Panel min width; splitter layouts need preview + controls columns."""
+        if panel is None:
+            return 0
+        from imagegen_plugins.image_gen_dialog import ImageGenPreviewSplitter
+
+        fp = getattr(panel, "_fields_panel", None)
+        fields_min = fp.content_minimum_width() if fp is not None else 0
+        base = panel.minimumSizeHint().width()
+        splitters = panel.findChildren(ImageGenPreviewSplitter)
+        if not splitters:
+            return max(base, fields_min)
+        splitter = splitters[0]
+        preview = splitter.widget(0)
+        preview_min = 1
+        if preview is not None:
+            preview_min = max(
+                preview.minimumWidth(),
+                preview.minimumSizeHint().width(),
+            )
+        return max(base, preview_min + fields_min)
+
+    def _sync_shell_minimum_width(self) -> None:
+        """Keep the unified shell wide enough that client controls are not clipped."""
+        from imagegen_plugins.image_gen_panel_shell import IMAGE_GEN_UNIFIED_SHELL_MARGINS
+
+        panel = self._current_panel
+        panel_min = self._embedded_panel_minimum_width(panel)
+        l, _, r, _ = IMAGE_GEN_UNIFIED_SHELL_MARGINS
+        footer_min = 0
+        if self._footer is not None:
+            footer_min = self._footer.minimumSizeHint().width()
+        shell_min = l + r + max(panel_min, footer_min)
+        self.setMinimumWidth(max(1, shell_min))
+        if self.isVisible() and self.width() < shell_min:
+            self.resize(shell_min, self.height())
+
+    def _enforce_shell_minimum_width(self) -> None:
+        before = self.width()
+        self._sync_shell_minimum_width()
+        min_w = self.minimumWidth()
+        if before < min_w:
+            self.resize(min_w, self.height())
 
     def _save_current_to_session(self) -> None:
         if self._current_panel is None:
@@ -829,6 +877,19 @@ class ImageGenUnifiedDialog(QDialog):
     def resizeEvent(self, event):
         super().resizeEvent(event)
         self._submit_notice.reposition()
+        QTimer.singleShot(0, self._on_shell_geometry_changed)
+
+    def _on_shell_geometry_changed(self) -> None:
+        self._enforce_shell_minimum_width()
+        panel = self._current_panel
+        if panel is None:
+            return
+        fp = getattr(panel, "_fields_panel", None)
+        if fp is None:
+            return
+        reflow = getattr(fp, "reflow_controls_for_shell_resize", None)
+        if callable(reflow):
+            reflow()
 
     def keyPressEvent(self, event):
         key = event.key()

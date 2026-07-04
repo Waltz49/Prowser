@@ -398,6 +398,7 @@ def mount_custom_size_section(
         def _on_use_custom_size_toggled(checked: bool) -> None:
             group_box.setVisible(checked)
             _refresh_use_custom_size_checkbox_label(dialog, use_widget)
+            panel.reflow_controls()
             if getattr(dialog, "_panel_mode", False):
                 dialog.state_changed.emit()
 
@@ -413,6 +414,7 @@ def mount_custom_size_section(
 
     panel.prepend_control_group(outer)
     dialog._custom_size_outer = outer
+    panel.reflow_controls()
 
     widgets[width_spec.key] = (width_widget, width_extra, width_spec)
     widgets[height_spec.key] = (height_widget, height_extra, height_spec)
