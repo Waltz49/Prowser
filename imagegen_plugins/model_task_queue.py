@@ -15,8 +15,7 @@ from imagegen_plugins.flux_prompt_job import (
     effective_job_prompt_for_tooltip,
     has_flux_prompt_ai_job,
 )
-
-_PAINT_INFILL_SOURCE_EXTS = frozenset({".pxd", ".pxm"})
+from imagegen_plugins.pixelmator_export import missing_infill_export_paths
 
 
 def _preview_output_path() -> str:
@@ -25,14 +24,6 @@ def _preview_output_path() -> str:
     return os.path.join(
         ensure_temporary_files_directory(), ".__imagegen_queue_preview__.png"
     )
-
-
-def _is_paint_infill_values(values: dict[str, Any]) -> bool:
-    doc_path = str(values.get("pixelmator_doc_path") or "").strip()
-    if not doc_path or not os.path.isfile(doc_path):
-        return False
-    _, ext = os.path.splitext(doc_path)
-    return ext.lower() in _PAINT_INFILL_SOURCE_EXTS
 
 
 def missing_reference_paths(
@@ -65,16 +56,7 @@ def missing_reference_paths(
         if not source_path or not os.path.isfile(source_path):
             missing.append(source_path or "(source image)")
     elif function == FUNCTION_INFILL:
-        if _is_paint_infill_values(values):
-            mask_path = str(values.get("pixelmator_mask_path") or "")
-            if mask_path and not os.path.isfile(mask_path):
-                missing.append(mask_path)
-        else:
-            base_path = str(values.get("pixelmator_base_path") or "")
-            mask_path = str(values.get("pixelmator_mask_path") or "")
-            for path in (base_path, mask_path):
-                if path and not os.path.isfile(path):
-                    missing.append(path)
+        missing.extend(missing_infill_export_paths(values))
     ai_meta = flux_prompt_ai_job_meta(values)
     if isinstance(ai_meta, dict):
         raw_paths = ai_meta.get("image_paths")

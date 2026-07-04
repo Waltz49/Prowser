@@ -19,6 +19,32 @@ from pil_image_io import open_pil_with_exif_correction
 _IMAGE_REFERENCE_EXTS = frozenset(
     {".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".tiff", ".tif"}
 )
+_PIXELMATOR_DOC_EXTS = frozenset({".pxd", ".pxm"})
+
+
+def is_paint_infill_job_values(values: Dict[str, Any]) -> bool:
+    """True when infill was prepared from a regular image (paint canvas), not Pixelmator Pro."""
+    doc_path = str(values.get("pixelmator_doc_path") or "").strip()
+    if not doc_path or not os.path.isfile(doc_path):
+        return False
+    _, ext = os.path.splitext(doc_path)
+    ext_lower = ext.lower()
+    if ext_lower in _PIXELMATOR_DOC_EXTS:
+        return False
+    return ext_lower in _IMAGE_REFERENCE_EXTS
+
+
+def missing_infill_export_paths(values: Dict[str, Any]) -> list[str]:
+    """Base/mask export paths required for an infill worker run."""
+    missing: list[str] = []
+    for key, label in (
+        ("pixelmator_base_path", "infill base image"),
+        ("pixelmator_mask_path", "infill mask"),
+    ):
+        path = str(values.get(key) or "").strip()
+        if not path or not os.path.isfile(path):
+            missing.append(path or f"({label})")
+    return missing
 
 _SCRIPT_PATH = Path(__file__).resolve().parent / "applescript_pixelmator_export.applescript"
 

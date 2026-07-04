@@ -532,6 +532,16 @@ def build_worker_payload(
             merged,
             for_fill=(pipeline_id in ("mflux_fill_expand", "mflux_fill_infill")),
         )
+    if pipeline_id == "mflux_fill_infill":
+        from imagegen_plugins.pixelmator_export import missing_infill_export_paths
+
+        missing = missing_infill_export_paths(merged)
+        if missing:
+            preview = ", ".join(missing[:3])
+            raise ValueError(
+                "Infill base image or mask is not available on disk "
+                f"({preview}). Re-run infill from the paint or Pixelmator dialog."
+            )
     if pipeline_id == "mflux_fill_expand":
         from imagegen_plugins.image_gen_naming import resolve_source_image_paths
 

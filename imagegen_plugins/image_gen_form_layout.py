@@ -317,6 +317,7 @@ class ImageGenPromptPlainTextEdit(QPlainTextEdit):
         )
         self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.document().contentsChanged.connect(self._update_height)
+        self._image_gen_updating_height = False
         self._update_height()
 
     def set_line_limits(
@@ -339,16 +340,24 @@ class ImageGenPromptPlainTextEdit(QPlainTextEdit):
     def _update_height(self) -> None:
         if not _image_gen_prompt_edit_is_alive(self):
             return
-        lines = image_gen_prompt_content_line_count(self)
-        at_max = lines >= self._max_lines
-        self.setVerticalScrollBarPolicy(
-            Qt.ScrollBarPolicy.ScrollBarAsNeeded
-            if at_max
-            else Qt.ScrollBarPolicy.ScrollBarAlwaysOff
-        )
-        _image_gen_apply_prompt_edit_height(
-            self, self._min_lines, self._max_lines
-        )
+        if self._image_gen_updating_height:
+            return
+        self._image_gen_updating_height = True
+        try:
+            lines = image_gen_prompt_content_line_count(self)
+            at_max = lines >= self._max_lines
+            policy = (
+                Qt.ScrollBarPolicy.ScrollBarAsNeeded
+                if at_max
+                else Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+            )
+            if self.verticalScrollBarPolicy() != policy:
+                self.setVerticalScrollBarPolicy(policy)
+            _image_gen_apply_prompt_edit_height(
+                self, self._min_lines, self._max_lines
+            )
+        finally:
+            self._image_gen_updating_height = False
 
 
 def create_image_gen_prompt_edit(
@@ -380,18 +389,26 @@ def _attach_image_gen_prompt_auto_height(
     def _apply_height() -> None:
         if not _image_gen_prompt_edit_is_alive(edit):
             return
-        max_lines = edit._image_gen_prompt_max_lines  # type: ignore[attr-defined]
-        at_max = image_gen_prompt_content_line_count(edit) >= max_lines
-        edit.setVerticalScrollBarPolicy(
-            Qt.ScrollBarPolicy.ScrollBarAsNeeded
-            if at_max
-            else Qt.ScrollBarPolicy.ScrollBarAlwaysOff
-        )
-        _image_gen_apply_prompt_edit_height(
-            edit,
-            edit._image_gen_prompt_min_lines,  # type: ignore[attr-defined]
-            max_lines,
-        )
+        if getattr(edit, "_image_gen_updating_height", False):
+            return
+        edit._image_gen_updating_height = True  # type: ignore[attr-defined]
+        try:
+            max_lines = edit._image_gen_prompt_max_lines  # type: ignore[attr-defined]
+            at_max = image_gen_prompt_content_line_count(edit) >= max_lines
+            policy = (
+                Qt.ScrollBarPolicy.ScrollBarAsNeeded
+                if at_max
+                else Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+            )
+            if edit.verticalScrollBarPolicy() != policy:
+                edit.setVerticalScrollBarPolicy(policy)
+            _image_gen_apply_prompt_edit_height(
+                edit,
+                edit._image_gen_prompt_min_lines,  # type: ignore[attr-defined]
+                max_lines,
+            )
+        finally:
+            edit._image_gen_updating_height = False  # type: ignore[attr-defined]
 
     if not getattr(edit, _IMAGE_GEN_PROMPT_AUTO_HEIGHT_ATTR, False):
         setattr(edit, _IMAGE_GEN_PROMPT_AUTO_HEIGHT_ATTR, True)

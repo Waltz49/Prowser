@@ -680,6 +680,23 @@ class ImageGenController(QObject):
                 base_path = prepare_and_save_expand_base(expand_values, output_path)
                 payload["prepared_fill_image_path"] = base_path
                 self._expand_base_path = base_path
+            elif plugin.pipeline_id == "mflux_fill_infill":
+                from imagegen_plugins.pixelmator_export import (
+                    missing_infill_export_paths,
+                )
+
+                missing_infill = missing_infill_export_paths(values)
+                if missing_infill:
+                    preview = "\n".join(f"• {p}" for p in missing_infill[:4])
+                    show_styled_critical(
+                        self.main_window,
+                        "Infill",
+                        "Infill base image or mask is missing on disk. "
+                        "Paint a mask and generate again, or re-export from Pixelmator Pro.\n\n"
+                        f"{preview}",
+                    )
+                    self._finish_copy_batch()
+                    return False
             if get_pipeline(plugin.pipeline_id).requires_source_image:
                 worker_source_paths = source_paths_for_generation_exif(payload)
                 if isinstance(canonical_from_payload, list) and canonical_from_payload:

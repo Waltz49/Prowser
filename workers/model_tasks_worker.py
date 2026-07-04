@@ -338,6 +338,14 @@ def _run_generate(payload: Dict[str, Any], job_id: str) -> None:
 
     prepare_image_model_for_payload(payload)
     _LOADED_KIND = "image"
+    if pipeline_id == "mflux_fill_infill":
+        print(
+            "[model_tasks_worker] infill job payload: "
+            f"base={str(payload.get('pixelmator_base_path') or '')!r} "
+            f"mask={str(payload.get('pixelmator_mask_path') or '')!r} "
+            f"source={str(payload.get('pixelmator_doc_path') or '')!r}",
+            flush=True,
+        )
     job_t0 = time.perf_counter()
     try:
         with PerfTimer("worker_job", job_id=job_id, pipeline=pipeline_id):

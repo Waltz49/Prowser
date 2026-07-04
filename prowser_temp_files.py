@@ -224,9 +224,10 @@ _IMAGEGEN_TEMP_FILE_PREFIXES = (
     "imagegen-mflux-mask-",
 )
 
+# imagegen-infill-* batch dirs are removed explicitly via remove_persisted_pixelmator_batch;
+# do not sweep them here or queued paint-infill jobs lose base/mask exports.
 _IMAGEGEN_TEMP_DIR_PREFIXES = (
     "imagegen-mflux-stepwise-",
-    "imagegen-infill-",
 )
 
 

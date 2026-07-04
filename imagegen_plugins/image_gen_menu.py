@@ -45,7 +45,11 @@ from imagegen_plugins.image_gen_persistence import (
 from imagegen_plugins.image_gen_model_availability import confirm_model_download_if_needed
 from imagegen_plugins.image_gen_model_selector import available_plugins
 from imagegen_plugins.image_gen_registry import ImageGenModelPlugin
-from imagegen_plugins.pixelmator_export import is_pixelmator_pro_installed
+from imagegen_plugins.pixelmator_export import (
+    is_paint_infill_job_values,
+    is_pixelmator_pro_installed,
+    missing_infill_export_paths,
+)
 from menu_manager import TextSeparator
 from utils import (
     restore_dialog_geometry_hex,
@@ -66,10 +70,6 @@ _CREATE_FUNCTION_ACTIONS = (
 
 _FUNCTION_LABELS = {fn: label for fn, label in _CREATE_FUNCTION_ACTIONS}
 
-_PAINT_INFILL_SOURCE_EXTS = frozenset(
-    {".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".tiff", ".tif"}
-)
-
 
 def begin_imagegen_dialog_build(main_window) -> None:
     main_window._imagegen_dialog_building = True
@@ -83,14 +83,6 @@ def end_imagegen_dialog_build(main_window) -> None:
     jobs = getattr(main_window, "sidebar_jobs_widget", None)
     if jobs is not None and hasattr(jobs, "resume_live_refresh"):
         jobs.resume_live_refresh()
-
-
-def _is_paint_infill_job_values(values: Dict[str, Any]) -> bool:
-    doc_path = str(values.get("pixelmator_doc_path") or "").strip()
-    if not doc_path or not os.path.isfile(doc_path):
-        return False
-    _, ext = os.path.splitext(doc_path)
-    return ext.lower() in _PAINT_INFILL_SOURCE_EXTS
 
 
 def _raise_imagegen_function_dialog(dlg: QDialog) -> None:
@@ -324,17 +316,9 @@ def open_imagegen_dialog_from_job(
             )
             return
     elif function == FUNCTION_INFILL:
-        if _is_paint_infill_job_values(job_values):
+        if is_paint_infill_job_values(job_values):
             function = FUNCTION_INFILL_PAINT
-            mask_path = str(job_values.get("pixelmator_mask_path") or "")
-            if mask_path and not os.path.isfile(mask_path):
-                missing.append(mask_path)
-        else:
-            base_path = str(job_values.get("pixelmator_base_path") or "")
-            mask_path = str(job_values.get("pixelmator_mask_path") or "")
-            for path in (base_path, mask_path):
-                if path and not os.path.isfile(path):
-                    missing.append(path)
+        missing.extend(missing_infill_export_paths(job_values))
 
     _warn_missing_job_paths(main_window, missing)
     seed_state = _job_session_state(function, job_values, initial_plugin_id)

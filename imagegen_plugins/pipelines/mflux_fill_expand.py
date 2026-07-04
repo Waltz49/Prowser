@@ -266,9 +266,22 @@ def _run_infill_from_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     base_path = str(payload.get("pixelmator_base_path") or "")
     mask_path = str(payload.get("pixelmator_mask_path") or "")
     if not base_path or not os.path.isfile(base_path):
-        raise ValueError("pixelmator_base_path is required and must exist")
+        raise ValueError(
+            "Infill base image is missing or was removed before generation. "
+            "Re-run infill from the paint or Pixelmator dialog."
+        )
     if not mask_path or not os.path.isfile(mask_path):
-        raise ValueError("pixelmator_mask_path is required and must exist")
+        raise ValueError(
+            "Infill mask is missing or was removed before generation. "
+            "Re-run infill from the paint or Pixelmator dialog."
+        )
+
+    print(
+        "[model_tasks_worker] infill inputs: "
+        f"base={base_path!r} mask={mask_path!r} "
+        f"source={str(payload.get('pixelmator_doc_path') or '')!r}",
+        flush=True,
+    )
 
     steps = max(8, min(30, int(payload.get("steps", 20))))
     guidance = max(1.0, min(50.0, float(payload.get("guidance_scale", 30.0))))
