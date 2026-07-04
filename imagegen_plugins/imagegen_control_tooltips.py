@@ -5,7 +5,8 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-from PySide6.QtWidgets import QCheckBox, QDialogButtonBox, QPushButton, QSlider, QSpinBox
+from PySide6.QtWidgets import QCheckBox, QDialogButtonBox, QPushButton, QSlider
+from theme.spin_box import StepSpinBox
 
 from imagegen_plugins.image_gen_fields import FieldSpec
 from thumbnails.thumbnail_constants import CMD_SYMBOL
@@ -62,8 +63,8 @@ _FIELD_TOOLTIPS: dict[str, str] = {
 
 _DIM_HELPER_TOOLTIPS: dict[str, str] = {
     "import": (
-        "Load prompt text saved\n"
-        "in the EXIF user comment."
+        "Import size from the\n"
+        "dimensions of the selected image."
     ),
     "screen_size": (
         "Set size to fit your screen.\n"
@@ -105,7 +106,7 @@ def apply_field_control_tooltips(
     widget: Any,
     *,
     slider: Optional[QSlider] = None,
-    spin: Optional[QSpinBox] = None,
+    spin: Optional[StepSpinBox] = None,
 ) -> None:
     """Set tooltips on bool checkboxes and slider/spin controls."""
     tip = field_tooltip(spec)
@@ -149,7 +150,7 @@ _EDIT_IMPORT_TEXT_TOOLTIP = (
 )
 
 _EDIT_IMPORT_SIZE_TOOLTIP = (
-    "Set width and height from the\n"
+    "Import width and height from the\n"
     "pixel dimensions of the selected image."
 )
 

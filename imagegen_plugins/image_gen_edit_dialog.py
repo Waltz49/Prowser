@@ -32,7 +32,6 @@ from PySide6.QtWidgets import (
     QScrollArea,
     QSizePolicy,
     QSlider,
-    QSpinBox,
     QVBoxLayout,
     QWidget,
 )
@@ -44,7 +43,6 @@ from imagegen_plugins.image_gen_dialog import (
     apply_image_gen_preview_client_background,
     image_gen_preview_workarea_fill,
     apply_import_extras_from_image_path,
-    append_image_gen_import_size_button,
     load_import_prompt_from_path,
     configure_image_gen_side_checkbox,
     create_image_gen_side_button_column,
@@ -1456,7 +1454,6 @@ class ImageGenEditDialog(ImageGenDimensionAspectMixin, QDialog):
         import_text_btn.clicked.connect(self._on_import_text)
         apply_edit_import_text_button_tooltip(import_text_btn)
         buttons.append(import_text_btn)
-        append_image_gen_import_size_button(self, buttons)
         import_all_btn = QPushButton("Import Rest")
         import_all_btn.clicked.connect(self._on_import_all)
         apply_edit_import_all_button_tooltip(import_all_btn, include_prompt=False)

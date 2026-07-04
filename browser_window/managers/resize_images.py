@@ -26,10 +26,9 @@ from PySide6.QtWidgets import (
     QPushButton,
     QRadioButton,
     QSlider,
-    QSpinBox,
-    QStyle,
     QVBoxLayout,
 )
+from theme.spin_box import StepSpinBox
 
 from config import get_config
 from exif.exif_utils import (
@@ -324,14 +323,6 @@ class ResizeImagesDialog(QDialog):
 
         self._setup_ui(settings)
 
-    @staticmethod
-    def _spin_box_char_width(spin: QSpinBox, chars: int = 5) -> int:
-        fm = spin.fontMetrics()
-        text_w = fm.horizontalAdvance("9" * chars)
-        style = spin.style()
-        frame = style.pixelMetric(QStyle.PixelMetric.PM_SpinBoxFrameWidth, None, spin) * 2
-        return text_w + frame + 44
-
     def _percent_mode_allowed(self) -> bool:
         return self.ref_width <= MAX_RESIZE_DIMENSION and self.ref_height <= MAX_RESIZE_DIMENSION
 
@@ -428,17 +419,17 @@ class ResizeImagesDialog(QDialog):
         dims_row = QHBoxLayout()
         dims_row.addWidget(QLabel("Width:"))
         spin_hi = self._dim_spin_max()
-        self.width_spin = QSpinBox()
+        self.width_spin = StepSpinBox()
         self.width_spin.setRange(1, spin_hi)
         self.width_spin.setValue(self.ref_width)
-        self.width_spin.setFixedWidth(self._spin_box_char_width(self.width_spin))
+        self.width_spin.setFixedWidth(self.width_spin.char_width())
         dims_row.addWidget(self.width_spin)
         dims_row.addSpacing(12)
         dims_row.addWidget(QLabel("Height:"))
-        self.height_spin = QSpinBox()
+        self.height_spin = StepSpinBox()
         self.height_spin.setRange(1, spin_hi)
         self.height_spin.setValue(self.ref_height)
-        self.height_spin.setFixedWidth(self._spin_box_char_width(self.height_spin))
+        self.height_spin.setFixedWidth(self.height_spin.char_width())
         dims_row.addWidget(self.height_spin)
         dims_row.addStretch(1)
         dims_section.addLayout(dims_row)
@@ -471,12 +462,19 @@ class ResizeImagesDialog(QDialog):
                 parent=self,
             )
             screen_btn.clicked.connect(self._on_screen_size_dims)
+            import_btn = create_image_gen_dim_helper_icon_button(
+                "import_icon.png",
+                hover_icon_name="import_icon_hover.png",
+                parent=self,
+            )
+            import_btn.clicked.connect(self._on_import_size_dims)
             apply_dim_helper_tooltips(
                 screen_btn=screen_btn,
                 square_btn=square_btn,
                 reverse_btn=reverse_btn,
+                import_btn=import_btn,
             )
-            for btn in (square_btn, reverse_btn, screen_btn):
+            for btn in (square_btn, reverse_btn, screen_btn, import_btn):
                 dim_btn_layout.addWidget(btn)
                 self._dim_helper_buttons.append(btn)
             dims_section.addLayout(dim_btn_layout)
@@ -715,6 +713,46 @@ class ResizeImagesDialog(QDialog):
         w = int(self.width_spin.value())
         h = int(self.height_spin.value())
         self._set_dim_spins(h, w)
+
+    def _on_import_size_dims(self) -> None:
+        mw = self.parent()
+        if mw is not None and getattr(mw, "current_view_mode", None) not in (
+            "browse",
+            "thumbnail",
+        ):
+            show_styled_warning(
+                self,
+                "Import Size",
+                "Select an image in browse view, or select a single thumbnail, "
+                "before importing.",
+            )
+            return
+        from imagegen_plugins.image_gen_source_nav import (
+            active_image_path_for_browse_or_thumbnail,
+        )
+        from exif.exif_image_loader import get_image_dimensions_fast_metadata
+
+        image_path = active_image_path_for_browse_or_thumbnail(mw)
+        if not image_path:
+            show_styled_warning(self, "Import Size", "No image selected.")
+            return
+        size = get_image_dimensions_fast_metadata(image_path)
+        if not size:
+            show_styled_warning(
+                self,
+                "Import",
+                "Could not read image dimensions.",
+            )
+            return
+        w, h = size
+        if w <= 0 or h <= 0:
+            show_styled_warning(
+                self,
+                "Import",
+                "Could not read image dimensions.",
+            )
+            return
+        self._set_dim_spins(w, h)
 
     def accept(self) -> None:
         if self.percent_radio.isChecked() and self._percent_mode_allowed():

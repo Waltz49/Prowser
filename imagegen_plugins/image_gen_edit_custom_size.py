@@ -216,12 +216,19 @@ def _build_dim_helper_icon_buttons(dialog: Any, parent: QWidget) -> Tuple[QWidge
         parent=parent,
     )
     reverse_btn.clicked.connect(dialog._on_reverse_dims)
+    import_btn = create_image_gen_dim_helper_icon_button(
+        "import_icon.png",
+        hover_icon_name="import_icon_hover.png",
+        parent=parent,
+    )
+    import_btn.clicked.connect(dialog._on_import_size)
     apply_dim_helper_tooltips(
         screen_btn=screen_btn,
         square_btn=square_btn,
         reverse_btn=reverse_btn,
+        import_btn=import_btn,
     )
-    return  square_btn, reverse_btn,screen_btn
+    return square_btn, reverse_btn, screen_btn, import_btn
 
 
 def _build_custom_size_group_box(

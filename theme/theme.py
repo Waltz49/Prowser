@@ -244,29 +244,18 @@ def push_button_stylesheet(
 
 
 def spinbox_stylesheet(t) -> str:
-    """QSpinBox / QDoubleSpinBox with step buttons inside the right border."""
-    au = asset_url
+    """Native QSpinBox / QDoubleSpinBox container styling (no subcontrol rules on macOS)."""
     border = t.border_default_hex
-    if t.theme_id == "light":
-        up_arrow = au("spinbox_up_light.svg")
-        down_arrow = au("spinbox_down_light.svg")
-    else:
-        up_arrow = au("spinbox_up_dark.svg")
-        down_arrow = au("spinbox_down_dark.svg")
     return f"""
     QSpinBox, QDoubleSpinBox {{
         font-size: 12px;
         border: 2px solid {border};
-        padding: 5px 20px 5px 5px;
+        padding: 5px 5px 5px 5px;
         margin-left: 10px;
         border-radius: 4px;
         background-color: transparent;
-        text-align: right;
     }}
     QSpinBox:focus, QDoubleSpinBox:focus {{
-        border: 2px solid {t.accent_color_hex};
-    }}
-    QSpinBox:pressed, QDoubleSpinBox:pressed {{
         border: 2px solid {t.accent_color_hex};
     }}
     QSpinBox:disabled, QDoubleSpinBox:disabled {{
@@ -275,41 +264,67 @@ def spinbox_stylesheet(t) -> str:
         color: {t.spinbox_disabled_text_hex};
         border-color: {t.spinbox_disabled_border_hex};
     }}
-    QSpinBox::up-button, QSpinBox::down-button,
-    QDoubleSpinBox::up-button, QDoubleSpinBox::down-button {{
-        subcontrol-origin: border;
-        width: 16px;
+    """
+
+
+def step_spin_box_stylesheet(t) -> str:
+    """StepSpinBox composite control with explicit step buttons."""
+    border = t.border_default_hex
+    return f"""
+    StepSpinBox {{
+        font-size: 12px;
+        border: 2px solid {border};
+        margin-left: 10px;
+        border-radius: 4px;
+        background-color: transparent;
+    }}
+    StepSpinBox[hasFocus="true"] {{
+        border: 2px solid {t.accent_color_hex};
+    }}
+    StepSpinBox:disabled {{
+        border: 2px solid {t.spinbox_disabled_border_hex};
+        background-color: {t.dialog_background_hex};
+        color: {t.spinbox_disabled_text_hex};
+    }}
+    StepSpinBox QLineEdit#StepSpinEdit {{
+        border: none;
+        background: transparent;
+        color: inherit;
+        padding: 5px 4px 5px 5px;
+        margin: 0px;
+        selection-background-color: {t.accent_color_hex};
+    }}
+    StepSpinBox:disabled QLineEdit#StepSpinEdit {{
+        color: {t.spinbox_disabled_text_hex};
+    }}
+    StepSpinBox QWidget#StepSpinButtons {{
+        background: transparent;
+        min-width: 12px;
+        max-width: 12px;
+    }}
+    StepSpinBox QToolButton#StepSpinUpButton,
+    StepSpinBox QToolButton#StepSpinDownButton {{
         border: none;
         border-left: 1px solid {border};
         background: transparent;
+        padding: 0px;
+        margin: 0px;
+        min-width: 12px;
+        max-width: 12px;
     }}
-    QSpinBox::up-button, QDoubleSpinBox::up-button {{
-        subcontrol-position: top right;
-        height: 50%;
-        border-top-right-radius: 2px;
+    StepSpinBox QToolButton#StepSpinUpButton {{
         border-bottom: 1px solid {border};
+        border-top-right-radius: 2px;
     }}
-    QSpinBox::down-button, QDoubleSpinBox::down-button {{
-        subcontrol-position: bottom right;
-        height: 50%;
+    StepSpinBox QToolButton#StepSpinDownButton {{
         border-bottom-right-radius: 2px;
     }}
-    QSpinBox::up-button:hover, QSpinBox::down-button:hover,
-    QDoubleSpinBox::up-button:hover, QDoubleSpinBox::down-button:hover {{
+    StepSpinBox QToolButton#StepSpinUpButton:hover:enabled,
+    StepSpinBox QToolButton#StepSpinDownButton:hover:enabled {{
         background: {t.widget_bg_hover_hex};
     }}
-    QSpinBox::up-arrow, QDoubleSpinBox::up-arrow {{
-        width: 10px;
-        height: 6px;
-        image: {down_arrow};
-    }}
-    QSpinBox::down-arrow, QDoubleSpinBox::down-arrow {{
-        width: 10px;
-        height: 6px;
-        image: {up_arrow};
-    }}
-    QSpinBox::up-arrow:disabled, QDoubleSpinBox::up-arrow:disabled,
-    QSpinBox::down-arrow:disabled, QDoubleSpinBox::down-arrow:disabled {{
+    StepSpinBox QToolButton#StepSpinUpButton:disabled,
+    StepSpinBox QToolButton#StepSpinDownButton:disabled {{
         opacity: 0.35;
     }}
     """
@@ -394,6 +409,7 @@ def global_stylesheet_light(t) -> str:
     }}
 
     {spinbox_stylesheet(t)}
+    {step_spin_box_stylesheet(t)}
 
     QComboBox {{
         background-color: #ffffff;
@@ -704,6 +720,7 @@ def global_stylesheet_dark(t) -> str:
     }}
 
     {spinbox_stylesheet(t)}
+    {step_spin_box_stylesheet(t)}
 
     /* Combo Box */
     QComboBox {{

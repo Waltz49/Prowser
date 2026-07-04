@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+from theme.spin_box import StepSpinBox
 
 from theme.theme_base import asset_path
 from theme.theme_service import get_active_theme
@@ -576,6 +577,12 @@ def configure_image_gen_slider_track(
     )
     slider.setFixedWidth(width)
     slider.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+
+
+def configure_image_gen_int_slider_spin(spin: StepSpinBox) -> None:
+    """Fixed-width spin sized for six digit characters."""
+    spin.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+    spin.setFixedWidth(spin.char_width())
 
 
 def image_gen_field_reset_trash_stylesheet(
@@ -1853,11 +1860,14 @@ def image_gen_field_label_stylesheet() -> str:
         padding-top: 4px;
         margin: 0px;
     }}
-    #imageGenDialog QSpinBox {{
-        min-height: 22px;
-        max-height: 26px;
-        padding: 1px 20px 1px 4px;
+    #imageGenDialog StepSpinBox {{
+        min-height: 30px;
+        max-height: 30px;
         margin: 0px;
+    }}
+    #imageGenDialog StepSpinBox QLineEdit#StepSpinEdit {{
+        padding: 1px 4px 1px 4px;
+        font-size: 12px;
     }}
     #imageGenDialog QSlider::groove:horizontal {{
         height: 4px;

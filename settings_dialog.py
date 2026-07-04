@@ -4753,7 +4753,6 @@ class SettingsDialog(QDialog):
             "Applies when tree filtering is set to show all entries."
         )
         self.shift_cmd_depth_spinbox.setFixedWidth(120)
-        self.shift_cmd_depth_spinbox.setStyleSheet("QSpinBox {font-size: 12px; }")
         search_depth_label = QLabel("Search depth:")
         self.search_depth_spinbox = QSpinBox()
         self.search_depth_spinbox.setRange(1, 10)
@@ -4766,7 +4765,6 @@ class SettingsDialog(QDialog):
             "• Similarity / background indexing over folders"
         )
         self.search_depth_spinbox.setFixedWidth(120)
-        self.search_depth_spinbox.setStyleSheet("QSpinBox {font-size: 12px; }")
         depth_horizontal_layout.addWidget(depth_label)
         depth_horizontal_layout.addWidget(self.shift_cmd_depth_spinbox)
         depth_horizontal_layout.addSpacing(16)

@@ -16,10 +16,10 @@ from PySide6.QtWidgets import (
     QPushButton,
     QSizePolicy,
     QSlider,
-    QSpinBox,
     QVBoxLayout,
     QWidget,
 )
+from theme.spin_box import StepSpinBox
 
 from imagegen_plugins.image_gen_fields import (
     FieldGroup,
@@ -32,6 +32,8 @@ from imagegen_plugins.image_gen_form_layout import (
     IMAGE_GEN_HALF_COLUMN_SLIDER_TRACK_WIDTH,
     IMAGE_GEN_SEED_SPIN_MAX_WIDTH,
     ImageGenFieldsPanel,
+    configure_image_gen_int_slider_spin,
+    configure_image_gen_slider_track,
     create_image_gen_field_reset_button,
     create_image_gen_prompt_edit,
     sync_image_gen_field_reset_button_active,
@@ -191,11 +193,6 @@ def build_seed_and_random_seed_row(
     seed_widget: QWidget, random_widget: QWidget
 ) -> QWidget:
     """Horizontal row: seed spinbox, then Randomize checkbox."""
-    if isinstance(seed_widget, QSpinBox):
-        seed_widget.setMaximumWidth(IMAGE_GEN_SEED_SPIN_MAX_WIDTH)
-        seed_widget.setSizePolicy(
-            QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed
-        )
     if isinstance(random_widget, QCheckBox):
         random_widget.setSizePolicy(
             QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed
@@ -280,12 +277,12 @@ def widget_for_field_spec(
         val = int(spec.default or lo)
         val = max(lo, min(hi, val))
         slider.setValue(val)
-        spin = QSpinBox()
+        spin = StepSpinBox()
         spin.setMinimum(lo)
         spin.setMaximum(hi)
         spin.setSingleStep(step)
         spin.setValue(val)
-        spin.setMaximumWidth(72)
+        configure_image_gen_int_slider_spin(spin)
         slider.valueChanged.connect(spin.setValue)
         spin.valueChanged.connect(slider.setValue)
         apply_field_control_tooltips(spec, slider, slider=slider, spin=spin)
@@ -332,7 +329,7 @@ def widget_for_field_spec(
         return row, scale
 
     if spec.kind == "seed":
-        spin = QSpinBox()
+        spin = StepSpinBox()
         spin.setMinimum(0)
         spin.setMaximum(2**31 - 1)
         spin.setValue(int(spec.default or 0))

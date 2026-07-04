@@ -23,7 +23,6 @@ from PySide6.QtWidgets import (
     QScrollArea,
     QSizePolicy,
     QSlider,
-    QSpinBox,
     QSplitter,
     QVBoxLayout,
     QWidget,
@@ -78,7 +77,6 @@ from imagegen_plugins.image_gen_registry import ImageGenModelPlugin
 from imagegen_plugins.imagegen_control_tooltips import (
     apply_dialog_button_tooltips,
     apply_edit_import_all_button_tooltip,
-    apply_edit_import_size_button_tooltip,
     apply_edit_import_text_button_tooltip,
     apply_field_control_tooltips,
     apply_model_combo_tooltip,
@@ -491,18 +489,6 @@ def configure_image_gen_prompt_import_button(button: QPushButton) -> None:
     button.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
 
 
-def append_image_gen_import_size_button(
-    owner: Any,
-    buttons: List[QPushButton],
-) -> None:
-    if not owner._has_dim_fields():
-        return
-    import_size_btn = QPushButton("Import Size")
-    import_size_btn.clicked.connect(owner._on_import_size)
-    apply_edit_import_size_button_tooltip(import_size_btn)
-    buttons.append(import_size_btn)
-
-
 def create_image_gen_prompt_import_row(buttons: List[QPushButton]) -> QWidget:
     from imagegen_plugins.image_gen_form_layout import (
         create_image_gen_prompt_button_bar_row,
@@ -701,9 +687,94 @@ def wrap_image_gen_controls_with_side_buttons(
     return scroll
 
 
-def _snap_nearest_multiple(value: int, step: int = 8) -> int:
+def _snap_dim_floor(value: int, step: int) -> int:
+    """Floor to step grid; matches pipeline align_dims_for_pipeline snapping."""
     step = max(1, int(step))
-    return int(round(value / step)) * step
+    return (int(value) // step) * step
+
+
+def _aspect_pair_from_width(
+    width: int,
+    ratio: float,
+    *,
+    w_bounds: tuple[int, int],
+    h_bounds: tuple[int, int],
+    step: int,
+) -> tuple[int, int]:
+    w_lo, w_hi = w_bounds
+    h_lo, h_hi = h_bounds
+    if ratio <= 0:
+        ratio = 1.0
+    w = _snap_dim_floor(width, step)
+    w = max(w_lo, min(w_hi, w))
+    h = _snap_dim_floor(int(round(w / ratio)), step)
+    h = max(h_lo, min(h_hi, h))
+    w = _snap_dim_floor(int(round(h * ratio)), step)
+    w = max(w_lo, min(w_hi, w))
+    h = _snap_dim_floor(int(round(w / ratio)), step)
+    h = max(h_lo, min(h_hi, h))
+    return w, h
+
+
+def _aspect_pair_from_height(
+    height: int,
+    ratio: float,
+    *,
+    w_bounds: tuple[int, int],
+    h_bounds: tuple[int, int],
+    step: int,
+) -> tuple[int, int]:
+    w_lo, w_hi = w_bounds
+    h_lo, h_hi = h_bounds
+    if ratio <= 0:
+        ratio = 1.0
+    h = _snap_dim_floor(height, step)
+    h = max(h_lo, min(h_hi, h))
+    w = _snap_dim_floor(int(round(h * ratio)), step)
+    w = max(w_lo, min(w_hi, w))
+    h = _snap_dim_floor(int(round(w / ratio)), step)
+    h = max(h_lo, min(h_hi, h))
+    w = _snap_dim_floor(int(round(h * ratio)), step)
+    w = max(w_lo, min(w_hi, w))
+    return w, h
+
+
+def next_aspect_locked_dims(
+    changed: str,
+    direction: int,
+    current_w: int,
+    current_h: int,
+    ratio: float,
+    *,
+    w_bounds: tuple[int, int],
+    h_bounds: tuple[int, int],
+    step: int,
+) -> tuple[int, int]:
+    """Next aspect-locked pair one step on the changed axis; avoids round-snap dead zones."""
+    if direction not in (-1, 1):
+        return current_w, current_h
+    step = max(1, int(step))
+    w_lo, w_hi = w_bounds
+    h_lo, h_hi = h_bounds
+    if changed == "width":
+        probe = current_w + direction * step
+        while w_lo <= probe <= w_hi:
+            w, h = _aspect_pair_from_width(
+                probe, ratio, w_bounds=w_bounds, h_bounds=h_bounds, step=step
+            )
+            if w != current_w or h != current_h:
+                return w, h
+            probe += direction * step
+        return current_w, current_h
+    probe = current_h + direction * step
+    while h_lo <= probe <= h_hi:
+        w, h = _aspect_pair_from_height(
+            probe, ratio, w_bounds=w_bounds, h_bounds=h_bounds, step=step
+        )
+        if w != current_w or h != current_h:
+            return w, h
+        probe += direction * step
+    return current_w, current_h
 
 
 def pair_dims_with_aspect_lock(
@@ -716,51 +787,13 @@ def pair_dims_with_aspect_lock(
     step: int,
 ) -> tuple[int, int]:
     """Width/height pair that keeps aspect ratio and stays within per-axis bounds."""
-    w_lo, w_hi = w_bounds
-    h_lo, h_hi = h_bounds
-    step = max(1, int(step))
-    if ratio <= 0:
-        ratio = 1.0
-
     if changed == "width":
-        w, h = float(value), float(value) / ratio
-    else:
-        h, w = float(value), float(value) * ratio
-
-    if w > w_hi:
-        scale = w_hi / w
-        w *= scale
-        h *= scale
-    if h > h_hi:
-        scale = h_hi / h
-        w *= scale
-        h *= scale
-    if w < w_lo:
-        scale = w_lo / w
-        w *= scale
-        h *= scale
-    if h < h_lo:
-        scale = h_lo / h
-        w *= scale
-        h *= scale
-
-    w = max(w_lo, min(w_hi, int(round(w))))
-    h = max(h_lo, min(h_hi, int(round(h))))
-    w = _snap_nearest_multiple(w, step)
-    h = _snap_nearest_multiple(h, step)
-    w = max(w_lo, min(w_hi, w))
-    h = max(h_lo, min(h_hi, h))
-
-    if changed == "width":
-        h = max(h_lo, min(h_hi, _snap_nearest_multiple(int(round(w / ratio)), step)))
-        if h > 0:
-            w = max(w_lo, min(w_hi, _snap_nearest_multiple(int(round(h * ratio)), step)))
-    else:
-        w = max(w_lo, min(w_hi, _snap_nearest_multiple(int(round(h * ratio)), step)))
-        if w > 0:
-            h = max(h_lo, min(h_hi, _snap_nearest_multiple(int(round(w / ratio)), step)))
-
-    return w, h
+        return _aspect_pair_from_width(
+            value, ratio, w_bounds=w_bounds, h_bounds=h_bounds, step=step
+        )
+    return _aspect_pair_from_height(
+        value, ratio, w_bounds=w_bounds, h_bounds=h_bounds, step=step
+    )
 
 
 class ImageGenDimensionAspectMixin:
@@ -811,6 +844,7 @@ class ImageGenDimensionAspectMixin:
                 self._refresh_aspect_ratio_from_sliders()
         finally:
             self._aspect_lock_updating = False
+            self._sync_aspect_lock_prev_dims()
 
     def refresh_generation_dim_limits(self) -> None:
         """Re-read app-wide max from settings; update bounds and clamp width/height."""
@@ -845,6 +879,16 @@ class ImageGenDimensionAspectMixin:
         self._aspect_checkbox = None
         self._aspect_lock_updating = False
         self._aspect_ratio = 1.0
+        self._aspect_lock_prev_w: Optional[int] = None
+        self._aspect_lock_prev_h: Optional[int] = None
+
+    def _sync_aspect_lock_prev_dims(self) -> None:
+        width = self._get_int_slider("width")
+        height = self._get_int_slider("height")
+        if width is None or height is None:
+            return
+        self._aspect_lock_prev_w = int(width)
+        self._aspect_lock_prev_h = int(height)
 
     def _has_dim_fields(self) -> bool:
         keys = {s.key for s in self._specs}
@@ -905,21 +949,80 @@ class ImageGenDimensionAspectMixin:
             changed_key,
             value,
             self._aspect_ratio,
-            w_bounds=self._int_slider_bounds("width"),
-            h_bounds=self._int_slider_bounds("height"),
+            w_bounds=self._spin_slider_limits("width"),
+            h_bounds=self._spin_slider_limits("height"),
+            step=step,
+        )
+
+    def _spin_slider_limits(self, key: str) -> tuple[int, int]:
+        entry = self._widgets.get(key)
+        if entry is None:
+            return self._int_slider_bounds(key)
+        widget, _, spec = entry
+        if spec.kind != "int_slider":
+            return self._int_slider_bounds(key)
+        inner = widget.layout()
+        spin = inner.itemAt(1).widget()
+        return int(spin.minimum()), int(spin.maximum())
+
+    def _resolve_aspect_locked_dims(
+        self,
+        changed_key: str,
+        value: int,
+        *,
+        prev_w: int,
+        prev_h: int,
+    ) -> tuple[int, int]:
+        old_val = prev_w if changed_key == "width" else prev_h
+        if value == old_val:
+            return prev_w, prev_h
+        direction = 1 if value > old_val else -1
+        step = self._dim_align_step()
+        return next_aspect_locked_dims(
+            changed_key,
+            direction,
+            prev_w,
+            prev_h,
+            self._aspect_ratio,
+            w_bounds=self._spin_slider_limits("width"),
+            h_bounds=self._spin_slider_limits("height"),
             step=step,
         )
 
     def _apply_aspect_locked_dims(self, changed_key: str, value: int) -> None:
         if not self._aspect_lock_enabled():
             return
-        w, h = self._paired_dims_for_aspect(changed_key, value)
+        if self._aspect_lock_prev_w is None or self._aspect_lock_prev_h is None:
+            self._sync_aspect_lock_prev_dims()
+        prev_w = self._aspect_lock_prev_w
+        prev_h = self._aspect_lock_prev_h
+        if prev_w is None or prev_h is None:
+            return
+        w, h = self._resolve_aspect_locked_dims(
+            changed_key,
+            value,
+            prev_w=prev_w,
+            prev_h=prev_h,
+        )
+        if w == prev_w and h == prev_h:
+            current_w = self._get_int_slider("width")
+            current_h = self._get_int_slider("height")
+            if current_w != prev_w or current_h != prev_h:
+                self._aspect_lock_updating = True
+                try:
+                    self._set_int_slider("width", prev_w)
+                    self._set_int_slider("height", prev_h)
+                finally:
+                    self._aspect_lock_updating = False
+            return
         self._aspect_lock_updating = True
         try:
             self._set_int_slider("width", w)
             self._set_int_slider("height", h)
         finally:
             self._aspect_lock_updating = False
+        self._aspect_lock_prev_w = w
+        self._aspect_lock_prev_h = h
 
     def _on_dim_value_changed(self, changed_key: str, value: int) -> None:
         if self._aspect_lock_updating:
@@ -928,8 +1031,8 @@ class ImageGenDimensionAspectMixin:
             self._apply_aspect_locked_dims(changed_key, value)
             return
         step = self._dim_align_step()
-        snapped = _snap_nearest_multiple(value, step)
-        lo, hi = self._int_slider_bounds(changed_key)
+        snapped = _snap_dim_floor(value, step)
+        lo, hi = self._spin_slider_limits(changed_key)
         snapped = max(lo, min(hi, snapped))
         if snapped == value:
             return
@@ -938,6 +1041,7 @@ class ImageGenDimensionAspectMixin:
             self._set_int_slider(changed_key, snapped)
         finally:
             self._aspect_lock_updating = False
+        self._sync_aspect_lock_prev_dims()
 
     def _on_aspect_lock_toggled(self, checked: bool) -> None:
         if checked:
@@ -962,6 +1066,7 @@ class ImageGenDimensionAspectMixin:
                 self._refresh_aspect_ratio_from_sliders()
         finally:
             self._aspect_lock_updating = False
+        self._sync_aspect_lock_prev_dims()
 
     def _stash_aspect_lock_in_values(self, out: Dict[str, Any]) -> None:
         if self._aspect_checkbox is not None:
@@ -1005,6 +1110,7 @@ class ImageGenDimensionAspectMixin:
                 self._refresh_aspect_ratio_from_sliders()
         finally:
             self._aspect_lock_updating = False
+            self._sync_aspect_lock_prev_dims()
 
     def _on_import_size(self) -> None:
         image_path = self._image_path_for_import_size()
@@ -1030,6 +1136,7 @@ class ImageGenDimensionAspectMixin:
                 lambda value, k=key: self._on_dim_value_changed(k, int(value))
             )
         self._restore_aspect_lock_from_values()
+        self._sync_aspect_lock_prev_dims()
 
     @staticmethod
     def _screen_pixel_size() -> tuple[int, int]:
@@ -1058,6 +1165,7 @@ class ImageGenDimensionAspectMixin:
                 self._refresh_aspect_ratio_from_sliders()
         finally:
             self._aspect_lock_updating = False
+            self._sync_aspect_lock_prev_dims()
 
     def _on_square_dims(self) -> None:
         width = self._get_int_slider("width")
@@ -1068,7 +1176,7 @@ class ImageGenDimensionAspectMixin:
         lo = max(w_lo, h_lo)
         hi = min(w_hi, h_hi)
         step = self._dim_align_step()
-        side = _snap_nearest_multiple(width, step)
+        side = _snap_dim_floor(width, step)
         side = max(lo, min(hi, side))
         self._aspect_lock_updating = True
         try:
@@ -1078,6 +1186,7 @@ class ImageGenDimensionAspectMixin:
             self._set_int_slider("height", side)
         finally:
             self._aspect_lock_updating = False
+            self._sync_aspect_lock_prev_dims()
 
     def _on_reverse_dims(self) -> None:
         width = self._get_int_slider("width")
@@ -1092,6 +1201,7 @@ class ImageGenDimensionAspectMixin:
             self._set_int_slider("height", width)
         finally:
             self._aspect_lock_updating = False
+            self._sync_aspect_lock_prev_dims()
 
 
 IMAGE_GEN_PREVIEW_CLIENT_OBJECT_NAME = "imageGenPreviewClient"
@@ -1701,7 +1811,6 @@ class ImageGenDialog(ImageGenDimensionAspectMixin, QDialog):
         import_text_btn.clicked.connect(self._on_import_prompt_text)
         apply_edit_import_text_button_tooltip(import_text_btn)
         buttons.append(import_text_btn)
-        append_image_gen_import_size_button(self, buttons)
         import_all_btn = QPushButton("Import Rest")
         import_all_btn.clicked.connect(self._on_import_available)
         apply_edit_import_all_button_tooltip(import_all_btn)

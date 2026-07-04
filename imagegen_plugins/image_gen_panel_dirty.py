@@ -10,8 +10,8 @@ from PySide6.QtWidgets import (
     QComboBox,
     QPlainTextEdit,
     QSlider,
-    QSpinBox,
 )
+from theme.spin_box import StepSpinBox
 
 
 def connect_widget_dirty_tracking(widget: Any, emit: Callable[[], None]) -> None:
@@ -21,7 +21,7 @@ def connect_widget_dirty_tracking(widget: Any, emit: Callable[[], None]) -> None
         widget.toggled.connect(lambda _v: emit())
     elif isinstance(widget, QComboBox):
         widget.currentIndexChanged.connect(lambda _i: emit())
-    elif isinstance(widget, QSpinBox):
+    elif isinstance(widget, StepSpinBox):
         widget.valueChanged.connect(lambda _v: emit())
     elif isinstance(widget, QSlider):
         widget.valueChanged.connect(lambda _v: emit())
