@@ -137,6 +137,10 @@ def settings_dialog_stylesheet(chrome: SettingsDialogChrome) -> str:
     #{_SETTINGS_DIALOG_OBJECT_NAME} QComboBox:hover {{
         border: 1px solid {c.control_hover_border_hex};
     }}
+    #{_SETTINGS_DIALOG_OBJECT_NAME} QSpinBox,
+    #{_SETTINGS_DIALOG_OBJECT_NAME} QDoubleSpinBox {{
+        padding: 4px 22px 4px 8px;
+    }}
     #{_SETTINGS_DIALOG_OBJECT_NAME} QCheckBox,
     #{_SETTINGS_DIALOG_OBJECT_NAME} QRadioButton {{
         color: {c.text_hex};

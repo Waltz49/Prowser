@@ -243,6 +243,78 @@ def push_button_stylesheet(
     """
 
 
+def spinbox_stylesheet(t) -> str:
+    """QSpinBox / QDoubleSpinBox with step buttons inside the right border."""
+    au = asset_url
+    border = t.border_default_hex
+    if t.theme_id == "light":
+        up_arrow = au("spinbox_up_light.svg")
+        down_arrow = au("spinbox_down_light.svg")
+    else:
+        up_arrow = au("spinbox_up_dark.svg")
+        down_arrow = au("spinbox_down_dark.svg")
+    return f"""
+    QSpinBox, QDoubleSpinBox {{
+        font-size: 12px;
+        border: 2px solid {border};
+        padding: 5px 20px 5px 5px;
+        margin-left: 10px;
+        border-radius: 4px;
+        background-color: transparent;
+        text-align: right;
+    }}
+    QSpinBox:focus, QDoubleSpinBox:focus {{
+        border: 2px solid {t.accent_color_hex};
+    }}
+    QSpinBox:pressed, QDoubleSpinBox:pressed {{
+        border: 2px solid {t.accent_color_hex};
+    }}
+    QSpinBox:disabled, QDoubleSpinBox:disabled {{
+        border: 2px solid {t.widget_bg_disabled_hex};
+        background-color: {t.dialog_background_hex};
+        color: {t.spinbox_disabled_text_hex};
+        border-color: {t.spinbox_disabled_border_hex};
+    }}
+    QSpinBox::up-button, QSpinBox::down-button,
+    QDoubleSpinBox::up-button, QDoubleSpinBox::down-button {{
+        subcontrol-origin: border;
+        width: 16px;
+        border: none;
+        border-left: 1px solid {border};
+        background: transparent;
+    }}
+    QSpinBox::up-button, QDoubleSpinBox::up-button {{
+        subcontrol-position: top right;
+        height: 50%;
+        border-top-right-radius: 2px;
+        border-bottom: 1px solid {border};
+    }}
+    QSpinBox::down-button, QDoubleSpinBox::down-button {{
+        subcontrol-position: bottom right;
+        height: 50%;
+        border-bottom-right-radius: 2px;
+    }}
+    QSpinBox::up-button:hover, QSpinBox::down-button:hover,
+    QDoubleSpinBox::up-button:hover, QDoubleSpinBox::down-button:hover {{
+        background: {t.widget_bg_hover_hex};
+    }}
+    QSpinBox::up-arrow, QDoubleSpinBox::up-arrow {{
+        width: 10px;
+        height: 6px;
+        image: {down_arrow};
+    }}
+    QSpinBox::down-arrow, QDoubleSpinBox::down-arrow {{
+        width: 10px;
+        height: 6px;
+        image: {up_arrow};
+    }}
+    QSpinBox::up-arrow:disabled, QDoubleSpinBox::up-arrow:disabled,
+    QSpinBox::down-arrow:disabled, QDoubleSpinBox::down-arrow:disabled {{
+        opacity: 0.35;
+    }}
+    """
+
+
 def global_stylesheet_light(t) -> str:
     au = asset_url
     return f"""
@@ -321,41 +393,7 @@ def global_stylesheet_light(t) -> str:
         border: 1px solid {t.button_border_hover_hex};
     }}
 
-    QSpinBox {{
-        font-size: 12px;
-        border: 2px solid {t.border_default_hex};
-        padding: 5px;
-        margin-left: 10px;
-        border-radius: 4px;
-        background-color: transparent;
-        text-align: right;
-    }}
-    QSpinBox:focus {{
-        border: 2px solid {t.accent_color_hex};
-    }}
-
-    QSpinBox:pressed {{
-        border: 2px solid {t.accent_color_hex};
-    }}
-    QSpinBox:disabled {{
-        border: 2px solid {t.widget_bg_disabled_hex};
-    }}
-    QSpinBox::up-button, QSpinBox::down-button {{
-        height: 25px;
-        width: 25px;
-        top:-4px;
-        left: 6px;
-        height: 16px;
-        width: 18px;
-        top:0px;
-    }}
-    QSpinBox::down-button {{ top: 2px; }}
-
-    QSpinBox:disabled {{
-        background-color: {t.dialog_background_hex};
-        color: {t.spinbox_disabled_text_hex};
-        border-color: {t.spinbox_disabled_border_hex};
-    }}
+    {spinbox_stylesheet(t)}
 
     QComboBox {{
         background-color: #ffffff;
@@ -665,43 +703,7 @@ def global_stylesheet_dark(t) -> str:
         border: 1px solid {t.button_border_hover_hex};
     }}
 
-
-    /* Spin Box */
-    QSpinBox {{
-        font-size: 12px;
-        border: 2px solid {t.border_default_hex};
-        padding: 5px;
-        margin-left: 10px;
-        border-radius: 4px;
-        background-color: transparent;
-        text-align: right;
-    }}
-    QSpinBox:focus {{
-        border: 2px solid {t.accent_color_hex};
-    }}
-
-    QSpinBox:pressed {{
-        border: 2px solid {t.accent_color_hex};
-    }}
-    QSpinBox:disabled {{
-        border: 2px solid {t.widget_bg_disabled_hex};
-    }}
-    QSpinBox::up-button, QSpinBox::down-button {{
-        height: 25px;
-        width: 25px;
-        top:-4px;
-        left: 6px;
-        height: 16px;
-        width: 18px;
-        top:0px;
-    }}
-    QSpinBox::down-button {{ top: 2px; }}
-
-    QSpinBox:disabled {{
-        background-color: {t.dialog_background_hex};
-        color: {t.spinbox_disabled_text_hex};
-        border-color: {t.spinbox_disabled_border_hex};
-    }}
+    {spinbox_stylesheet(t)}
 
     /* Combo Box */
     QComboBox {{

@@ -1856,7 +1856,7 @@ def image_gen_field_label_stylesheet() -> str:
     #imageGenDialog QSpinBox {{
         min-height: 22px;
         max-height: 26px;
-        padding: 1px 4px;
+        padding: 1px 20px 1px 4px;
         margin: 0px;
     }}
     #imageGenDialog QSlider::groove:horizontal {{

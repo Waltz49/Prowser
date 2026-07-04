@@ -27,6 +27,7 @@ from PySide6.QtWidgets import (
     QRadioButton,
     QSlider,
     QSpinBox,
+    QStyle,
     QVBoxLayout,
 )
 
@@ -326,7 +327,10 @@ class ResizeImagesDialog(QDialog):
     @staticmethod
     def _spin_box_char_width(spin: QSpinBox, chars: int = 5) -> int:
         fm = spin.fontMetrics()
-        return fm.horizontalAdvance("0" * chars) + 28
+        text_w = fm.horizontalAdvance("9" * chars)
+        style = spin.style()
+        frame = style.pixelMetric(QStyle.PixelMetric.PM_SpinBoxFrameWidth, None, spin) * 2
+        return text_w + frame + 44
 
     def _percent_mode_allowed(self) -> bool:
         return self.ref_width <= MAX_RESIZE_DIMENSION and self.ref_height <= MAX_RESIZE_DIMENSION
