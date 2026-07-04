@@ -16,6 +16,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import (
     QApplication,
+    QButtonGroup,
     QCheckBox,
     QComboBox,
     QDialog,
@@ -23,6 +24,8 @@ from PySide6.QtWidgets import (
     QLabel,
     QProgressDialog,
     QPushButton,
+    QRadioButton,
+    QSlider,
     QSpinBox,
     QVBoxLayout,
 )
@@ -86,6 +89,12 @@ def _format_supports_embed_dpi(ext_lower: str) -> bool:
     return ext_lower in {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".webp", ".bmp"}
 
 
+MAX_RESIZE_DIMENSION = 6000
+PERCENT_SCALE_MIN = 20
+PERCENT_SCALE_MAX = 200
+PERCENT_SCALE_DEFAULT = 100
+
+
 def _read_dpi_from_pil(img: Image.Image) -> Optional[int]:
     d = img.info.get("dpi") if img.info else None
     if not d:
@@ -133,6 +142,7 @@ def resize_image_file(
     ignore_exif: bool,
     delete_original: bool,
     preserve_dates: bool,
+    scale_percent: Optional[int] = None,
 ) -> Tuple[bool, Optional[str], bool, Optional[str]]:
     """
     Load, resize, and save. If delete_original: replace image_path in place.
@@ -171,7 +181,16 @@ def resize_image_file(
         resized = None
         try:
             ow, oh = img.size
-            tw, th = _compute_target_size(ow, oh, target_w, target_h, preserve_aspect, anchor_is_width)
+            if scale_percent is not None:
+                pct = max(PERCENT_SCALE_MIN, min(PERCENT_SCALE_MAX, int(scale_percent)))
+                tw = max(1, int(round(ow * pct / 100.0)))
+                th = max(1, int(round(oh * pct / 100.0)))
+                tw = min(tw, MAX_RESIZE_DIMENSION)
+                th = min(th, MAX_RESIZE_DIMENSION)
+            else:
+                tw, th = _compute_target_size(
+                    ow, oh, target_w, target_h, preserve_aspect, anchor_is_width
+                )
             if tw == ow and th == oh:
                 return True, None, False, None
 
@@ -299,8 +318,74 @@ class ResizeImagesDialog(QDialog):
         self.dpi_value: Optional[int] = None
         self.delete_original = self._saved_delete_original
         self.preserve_dates = self._saved_preserve_dates
+        self.use_percent_scale = False
+        self.percent_scale = PERCENT_SCALE_DEFAULT
 
         self._setup_ui(settings)
+
+    @staticmethod
+    def _spin_box_char_width(spin: QSpinBox, chars: int = 5) -> int:
+        fm = spin.fontMetrics()
+        return fm.horizontalAdvance("0" * chars) + 28
+
+    def _percent_mode_allowed(self) -> bool:
+        return self.ref_width <= MAX_RESIZE_DIMENSION and self.ref_height <= MAX_RESIZE_DIMENSION
+
+    def _max_percent_for_reference(self) -> int:
+        if self.ref_width < 1 or self.ref_height < 1:
+            return PERCENT_SCALE_MAX
+        max_w = int(MAX_RESIZE_DIMENSION * 100 / self.ref_width)
+        max_h = int(MAX_RESIZE_DIMENSION * 100 / self.ref_height)
+        return max(PERCENT_SCALE_MIN, min(PERCENT_SCALE_MAX, max_w, max_h))
+
+    def _dimensions_from_percent(self, percent: int) -> Tuple[int, int]:
+        pct = max(PERCENT_SCALE_MIN, min(self._max_percent_for_reference(), int(percent)))
+        w = max(1, int(round(self.ref_width * pct / 100.0)))
+        h = max(1, int(round(self.ref_height * pct / 100.0)))
+        w = min(w, MAX_RESIZE_DIMENSION)
+        h = min(h, MAX_RESIZE_DIMENSION)
+        return w, h
+
+    def _update_final_size_label(self) -> None:
+        if self.percent_radio.isChecked():
+            pct = int(self.percent_slider.value())
+            w, h = self._dimensions_from_percent(pct)
+            self.final_size_label.setText(f"Final size: {w} × {h} pixels ({pct}%)")
+        else:
+            w = int(self.width_spin.value())
+            h = int(self.height_spin.value())
+            self.final_size_label.setText(f"Final size: {w} × {h} pixels")
+
+    def _set_mode_controls_enabled(self) -> None:
+        dims_mode = self.dims_radio.isChecked()
+        self.width_spin.setEnabled(dims_mode)
+        self.height_spin.setEnabled(dims_mode)
+        self.preserve_cb.setEnabled(dims_mode)
+        for btn in self._dim_helper_buttons:
+            btn.setEnabled(dims_mode)
+        percent_enabled = (not dims_mode) and self._percent_mode_allowed()
+        self.percent_slider.setEnabled(percent_enabled)
+        self.percent_value_label.setEnabled(percent_enabled)
+        self._update_final_size_label()
+
+    def _on_mode_changed(self) -> None:
+        if self.percent_radio.isChecked():
+            max_pct = self._max_percent_for_reference()
+            self.percent_slider.setRange(PERCENT_SCALE_MIN, max_pct)
+            self._updating = True
+            try:
+                self.percent_slider.setValue(min(PERCENT_SCALE_DEFAULT, max_pct))
+            finally:
+                self._updating = False
+            self._on_percent_changed(self.percent_slider.value())
+        self._set_mode_controls_enabled()
+
+    def _on_percent_changed(self, value: int) -> None:
+        if self._updating:
+            return
+        pct = int(value)
+        self.percent_value_label.setText(f"{pct}%")
+        self._update_final_size_label()
 
     def _setup_ui(self, settings: dict) -> None:
         self.setWindowTitle("Resize Images" if len(self.files) > 1 else "Resize Image")
@@ -323,21 +408,36 @@ class ResizeImagesDialog(QDialog):
         first_ext = os.path.splitext(self.files[0])[1].lower()
         self._dpi_supported = _format_supports_embed_dpi(first_ext)
 
-        row_w = QHBoxLayout()
-        row_w.addWidget(QLabel("Width:"))
-        self.width_spin = QSpinBox()
-        self.width_spin.setRange(1, 99999)
-        self.width_spin.setValue(self.ref_width)
-        row_w.addWidget(self.width_spin, 1)
-        layout.addLayout(row_w)
+        self._dim_helper_buttons: List[QPushButton] = []
 
-        row_h = QHBoxLayout()
-        row_h.addWidget(QLabel("Height:"))
+        self.mode_group = QButtonGroup(self)
+        self.dims_radio = QRadioButton("Dimensions")
+        self.percent_radio = QRadioButton("Percent")
+        self.mode_group.addButton(self.dims_radio, 0)
+        self.mode_group.addButton(self.percent_radio, 1)
+        layout.addWidget(self.dims_radio)
+
+        dims_section = QVBoxLayout()
+        dims_section.setSpacing(6)
+        dims_section.setContentsMargins(20, 0, 0, 0)
+
+        dims_row = QHBoxLayout()
+        dims_row.addWidget(QLabel("Width:"))
+        spin_hi = self._dim_spin_max()
+        self.width_spin = QSpinBox()
+        self.width_spin.setRange(1, spin_hi)
+        self.width_spin.setValue(self.ref_width)
+        self.width_spin.setFixedWidth(self._spin_box_char_width(self.width_spin))
+        dims_row.addWidget(self.width_spin)
+        dims_row.addSpacing(12)
+        dims_row.addWidget(QLabel("Height:"))
         self.height_spin = QSpinBox()
-        self.height_spin.setRange(1, 99999)
+        self.height_spin.setRange(1, spin_hi)
         self.height_spin.setValue(self.ref_height)
-        row_h.addWidget(self.height_spin, 1)
-        layout.addLayout(row_h)
+        self.height_spin.setFixedWidth(self._spin_box_char_width(self.height_spin))
+        dims_row.addWidget(self.height_spin)
+        dims_row.addStretch(1)
+        dims_section.addLayout(dims_row)
 
         try:
             from imagegen_plugins.image_gen_form_layout import (
@@ -374,50 +474,86 @@ class ResizeImagesDialog(QDialog):
             )
             for btn in (square_btn, reverse_btn, screen_btn):
                 dim_btn_layout.addWidget(btn)
-            layout.addLayout(dim_btn_layout)
+                self._dim_helper_buttons.append(btn)
+            dims_section.addLayout(dim_btn_layout)
         except ImportError:
             pass
+
+        layout.addLayout(dims_section)
+
+        layout.addWidget(self.percent_radio)
+        percent_section = QVBoxLayout()
+        percent_section.setSpacing(6)
+        percent_section.setContentsMargins(20, 0, 0, 0)
+        percent_row = QHBoxLayout()
+        max_pct = self._max_percent_for_reference()
+        self.percent_slider = QSlider(Qt.Orientation.Horizontal)
+        self.percent_slider.setRange(PERCENT_SCALE_MIN, max_pct)
+        self.percent_slider.setValue(min(PERCENT_SCALE_DEFAULT, max_pct))
+        self.percent_slider.setTickPosition(QSlider.TickPosition.TicksBelow)
+        self.percent_slider.setTickInterval(20)
+        self.percent_value_label = QLabel(f"{self.percent_slider.value()}%")
+        self.percent_value_label.setMinimumWidth(42)
+        percent_row.addWidget(self.percent_slider, 1)
+        percent_row.addWidget(self.percent_value_label)
+        percent_section.addLayout(percent_row)
+        layout.addLayout(percent_section)
+
+        if not self._percent_mode_allowed():
+            self.percent_radio.setEnabled(False)
+            self.percent_radio.setToolTip(
+                f"Percent scaling is unavailable when either side exceeds "
+                f"{MAX_RESIZE_DIMENSION} pixels."
+            )
+
+        self.final_size_label = QLabel()
+        layout.addWidget(self.final_size_label)
+
+        self.dims_radio.setChecked(True)
+        if not self._percent_mode_allowed():
+            self.dims_radio.setChecked(True)
 
         self.preserve_cb = QCheckBox("Preserve aspect ratio")
         self.preserve_cb.setChecked(self.preserve_aspect)
         layout.addWidget(self.preserve_cb)
 
-        self.embed_dpi_cb = QCheckBox("Embed DPI in file")
-        self.embed_dpi_cb.setChecked(self._saved_embed_dpi)
-        self.embed_dpi_cb.setEnabled(self._dpi_supported)
-        if not self._dpi_supported:
-            self.embed_dpi_cb.setToolTip("DPI embedding is not supported for this file type.")
-        layout.addWidget(self.embed_dpi_cb)
-
-        dpi_row = QHBoxLayout()
-        dpi_row.addWidget(QLabel("DPI:"))
-        self.dpi_spin = QSpinBox()
-        self.dpi_spin.setRange(1, 2400)
-        self.dpi_spin.setEnabled(self._dpi_supported and self.embed_dpi_cb.isChecked())
-        dpi_default = int(settings.get("resize_default_dpi", 72))
-        self.dpi_spin.setValue(dpi_default)
-        dpi_row.addWidget(self.dpi_spin, 1)
-        layout.addLayout(dpi_row)
-
-        try:
-            from pil_image_io import open_pil_with_exif_correction
-
-            parent_win = self.parent()
-            ignore_exif = bool(
-                getattr(parent_win, "ignore_exif_rotation", False) if parent_win else False
-            )
-            probe = open_pil_with_exif_correction(
-                self.files[0], ignore_exif=ignore_exif, cr2_half_size=False
-            )
-            if probe is not None:
-                try:
-                    d = _read_dpi_from_pil(probe)
-                    if d:
-                        self.dpi_spin.setValue(d)
-                finally:
-                    probe.close()
-        except Exception:
-            pass
+        # --- DPI UI commented out for now; logic retained below ---
+        # self.embed_dpi_cb = QCheckBox("Embed DPI in file")
+        # self.embed_dpi_cb.setChecked(self._saved_embed_dpi)
+        # self.embed_dpi_cb.setEnabled(self._dpi_supported)
+        # if not self._dpi_supported:
+        #     self.embed_dpi_cb.setToolTip("DPI embedding is not supported for this file type.")
+        # layout.addWidget(self.embed_dpi_cb)
+        #
+        # dpi_row = QHBoxLayout()
+        # dpi_row.addWidget(QLabel("DPI:"))
+        # self.dpi_spin = QSpinBox()
+        # self.dpi_spin.setRange(1, 2400)
+        # self.dpi_spin.setEnabled(self._dpi_supported and self.embed_dpi_cb.isChecked())
+        # dpi_default = int(settings.get("resize_default_dpi", 72))
+        # self.dpi_spin.setValue(dpi_default)
+        # dpi_row.addWidget(self.dpi_spin, 1)
+        # layout.addLayout(dpi_row)
+        #
+        # try:
+        #     from pil_image_io import open_pil_with_exif_correction
+        #
+        #     parent_win = self.parent()
+        #     ignore_exif = bool(
+        #         getattr(parent_win, "ignore_exif_rotation", False) if parent_win else False
+        #     )
+        #     probe = open_pil_with_exif_correction(
+        #         self.files[0], ignore_exif=ignore_exif, cr2_half_size=False
+        #     )
+        #     if probe is not None:
+        #         try:
+        #             d = _read_dpi_from_pil(probe)
+        #             if d:
+        #                 self.dpi_spin.setValue(d)
+        #         finally:
+        #             probe.close()
+        # except Exception:
+        #     pass
 
         method_row = QHBoxLayout()
         method_row.addWidget(QLabel("Method:"))
@@ -464,52 +600,77 @@ class ResizeImagesDialog(QDialog):
         self.width_spin.valueChanged.connect(self._on_width_changed)
         self.height_spin.valueChanged.connect(self._on_height_changed)
         self.preserve_cb.toggled.connect(self._on_preserve_toggled)
-        self.embed_dpi_cb.toggled.connect(self._on_embed_dpi_toggled)
+        self.dims_radio.toggled.connect(self._on_mode_changed)
+        self.percent_radio.toggled.connect(self._on_mode_changed)
+        self.percent_slider.valueChanged.connect(self._on_percent_changed)
+        # self.embed_dpi_cb.toggled.connect(self._on_embed_dpi_toggled)
+
+        self._set_mode_controls_enabled()
 
         if self.preserve_cb.isChecked():
             if self._anchor_is_width:
                 self._apply_preserve_from_width()
             else:
                 self._apply_preserve_from_height()
+        self._update_final_size_label()
 
-    def _on_embed_dpi_toggled(self, checked: bool) -> None:
-        self.dpi_spin.setEnabled(bool(checked) and self._dpi_supported)
+    # def _on_embed_dpi_toggled(self, checked: bool) -> None:
+    #     self.dpi_spin.setEnabled(bool(checked) and self._dpi_supported)
 
     def _on_preserve_toggled(self, checked: bool) -> None:
         if checked:
             self._anchor_is_width = True
             self._apply_preserve_from_width()
 
+    def _dim_spin_max(self) -> int:
+        if self._percent_mode_allowed():
+            return MAX_RESIZE_DIMENSION
+        return max(self.ref_width, self.ref_height)
+
     def _apply_preserve_from_width(self) -> None:
         if not self.preserve_cb.isChecked():
             return
+        cap = self._dim_spin_max()
         self._updating = True
         try:
             w = int(self.width_spin.value())
             h = max(1, int(round(self.ref_height * w / float(self.ref_width))))
+            h = min(h, cap)
+            if h == cap and self.ref_height > 0:
+                w = min(cap, max(1, int(round(self.ref_width * h / float(self.ref_height)))))
+                self.width_spin.setValue(w)
             self.height_spin.setValue(h)
         finally:
             self._updating = False
+        self._update_final_size_label()
 
     def _apply_preserve_from_height(self) -> None:
         if not self.preserve_cb.isChecked():
             return
+        cap = self._dim_spin_max()
         self._updating = True
         try:
             h = int(self.height_spin.value())
             w = max(1, int(round(self.ref_width * h / float(self.ref_height))))
+            w = min(w, cap)
+            if w == cap and self.ref_width > 0:
+                h = min(cap, max(1, int(round(self.ref_height * w / float(self.ref_width)))))
+                self.height_spin.setValue(h)
             self.width_spin.setValue(w)
         finally:
             self._updating = False
+        self._update_final_size_label()
 
     def _on_width_changed(self, _v: int) -> None:
         if self._updating or not self.preserve_cb.isChecked():
+            self._update_final_size_label()
             return
         self._anchor_is_width = True
         self._apply_preserve_from_width()
 
     def _on_height_changed(self, _v: int) -> None:
         if self._updating or not self.preserve_cb.isChecked():
+            self._update_final_size_label()
             return
         self._anchor_is_width = False
         self._apply_preserve_from_height()
@@ -526,22 +687,24 @@ class ResizeImagesDialog(QDialog):
         return int(geom.width()), int(geom.height())
 
     def _set_dim_spins(self, width: int, height: int) -> None:
-        lo, hi = 1, 99999
-        w = max(lo, min(hi, int(width)))
-        h = max(lo, min(hi, int(height)))
+        spin_hi = self._dim_spin_max()
+        w = max(1, min(spin_hi, int(width)))
+        h = max(1, min(spin_hi, int(height)))
         self._updating = True
         try:
             self.width_spin.setValue(w)
             self.height_spin.setValue(h)
         finally:
             self._updating = False
+        self._update_final_size_label()
 
     def _on_screen_size_dims(self) -> None:
         sw, sh = self._screen_pixel_size()
         self._set_dim_spins(sw, sh)
 
     def _on_square_dims(self) -> None:
-        side = max(1, min(99999, int(self.width_spin.value())))
+        spin_hi = self._dim_spin_max()
+        side = max(1, min(spin_hi, int(self.width_spin.value())))
         self._set_dim_spins(side, side)
 
     def _on_reverse_dims(self) -> None:
@@ -550,25 +713,40 @@ class ResizeImagesDialog(QDialog):
         self._set_dim_spins(h, w)
 
     def accept(self) -> None:
-        self.result_width = int(self.width_spin.value())
-        self.result_height = int(self.height_spin.value())
-        self.preserve_aspect = self.preserve_cb.isChecked()
+        if self.percent_radio.isChecked() and self._percent_mode_allowed():
+            self.use_percent_scale = True
+            self.percent_scale = int(self.percent_slider.value())
+            self.result_width, self.result_height = self._dimensions_from_percent(self.percent_scale)
+            self.preserve_aspect = True
+            self._anchor_is_width = True
+        else:
+            self.use_percent_scale = False
+            self.result_width = int(self.width_spin.value())
+            self.result_height = int(self.height_spin.value())
+            self.preserve_aspect = self.preserve_cb.isChecked()
         self.resample_filter = int(self.method_combo.currentData())
-        self.embed_dpi = bool(self.embed_dpi_cb.isChecked()) and self._dpi_supported
-        self.dpi_value = int(self.dpi_spin.value()) if self.embed_dpi else None
+        self.embed_dpi = False
+        self.dpi_value = None
         self.delete_original = bool(self.delete_original_cb.isChecked())
         self.preserve_dates = bool(self.preserve_dates_cb.isChecked())
 
         if self.result_width < 1 or self.result_height < 1:
             show_styled_warning(self, "Resize", "Width and height must be at least 1 pixel.")
             return
+        if self.result_width > MAX_RESIZE_DIMENSION or self.result_height > MAX_RESIZE_DIMENSION:
+            show_styled_warning(
+                self,
+                "Resize",
+                f"Width and height cannot exceed {MAX_RESIZE_DIMENSION} pixels.",
+            )
+            return
 
         cfg = get_config()
         st = cfg.load_settings()
         st["resize_preserve_aspect"] = self.preserve_aspect
         st["resize_resample_method"] = self.method_combo.currentText()
-        st["resize_embed_dpi"] = bool(self.embed_dpi_cb.isChecked())
-        st["resize_default_dpi"] = int(self.dpi_spin.value())
+        # st["resize_embed_dpi"] = bool(self.embed_dpi_cb.isChecked())
+        # st["resize_default_dpi"] = int(self.dpi_spin.value())
         st["resize_delete_original"] = self.delete_original
         st["resize_preserve_dates"] = self.preserve_dates
         st["resize_anchor_is_width"] = self._anchor_is_width
@@ -598,6 +776,7 @@ def resize_selected_images(main_window, files: List[str]) -> bool:
     target_h = dlg.result_height
     preserve = dlg.preserve_aspect
     anchor_is_width = dlg._anchor_is_width
+    scale_percent = dlg.percent_scale if dlg.use_percent_scale else None
     resample = dlg.resample_filter
     dpi_val = dlg.dpi_value
     embed_dpi = dlg.embed_dpi
@@ -655,6 +834,7 @@ def resize_selected_images(main_window, files: List[str]) -> bool:
             ignore_exif,
             delete_original,
             preserve_dates,
+            scale_percent=scale_percent,
         )
         if ok and wrote and final_path:
             ok_count += 1
