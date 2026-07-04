@@ -94,7 +94,11 @@ def job_queue_edit_row(main_window, controller, row: int) -> None:
     plugin, values = record
     from imagegen_plugins.image_gen_menu import open_imagegen_dialog_from_job
 
-    replace_job_id = entry.job_id if not entry.is_active else None
+    replace_job_id = entry.job_id
+    if entry.is_active and not controller.is_active_job_remaining_updatable(
+        entry.job_id
+    ):
+        replace_job_id = None
     open_imagegen_dialog_from_job(
         main_window, plugin, values, replace_job_id=replace_job_id
     )
@@ -121,7 +125,8 @@ def build_job_queue_action_widget(
     edit_btn = QPushButton()
     edit_btn.setToolTip(
         "Replicate job settings…\n"
-        "For a pending job, use Replace in the dialog to update it in place."
+        "For a pending job, use Replace in the dialog to update it in place.\n"
+        "For a running batch job, use Update to change remaining copies."
     )
     edit_btn.setStyleSheet(_edit_button_stylesheet())
     edit_btn.clicked.connect(

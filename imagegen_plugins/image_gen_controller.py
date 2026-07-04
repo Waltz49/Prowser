@@ -139,6 +139,10 @@ class ImageGenController(QObject):
         self._expand_base_path: str = ""
         self._aspect_pad_temp_paths: list[str] = []
         self._task_reference_paths: list[str] = []
+        self._copy_cycle_plugin: Optional[ImageGenModelPlugin] = None
+        self._copy_cycle_values: Dict[str, Any] = {}
+        self._copy_cycle_reference_paths: list[str] = []
+        self._copy_cycle_expand_source_path: str = ""
         self._suppress_task_failure_ui = False
         self._copies_total = 0
         self._copies_done = 0
@@ -341,6 +345,53 @@ class ImageGenController(QObject):
 
     def is_queued_job_replaceable(self, job_id: str) -> bool:
         return bool(job_id) and self._queued_job_by_id(job_id) is not None
+
+    def active_job_future_copies_updatable(self) -> int:
+        """Batch copies not yet finished that can still pick up updated settings."""
+        if not self._active_queue_job_id:
+            return 0
+        pending = self._pending_batch_copies()
+        if pending <= 0:
+            return 0
+        if self._tasks.is_running():
+            return max(0, pending - 1)
+        return pending
+
+    def is_active_job_remaining_updatable(self, job_id: str) -> bool:
+        return (
+            bool(job_id)
+            and job_id == self._active_queue_job_id
+            and self.active_job_future_copies_updatable() > 0
+        )
+
+    def update_active_job_remaining(
+        self, job_id: str, plugin: ImageGenModelPlugin, values: Dict[str, Any]
+    ) -> bool:
+        """Update settings for pending copies in the active batch (not the in-flight copy)."""
+        if not self.is_active_job_remaining_updatable(job_id):
+            return False
+        copies = self._normalize_copies(values.get("copies", 1))
+        values = dict(values)
+        in_progress = 1 if self._tasks.is_running() else 0
+        min_total = self._copies_done + in_progress
+        copies = max(min_total, copies)
+        values["copies"] = copies
+        future = copies - self._copies_done - in_progress
+        if future > 1 and not values.get("random_seed"):
+            if not prompt_enable_random_seed_for_copies(self.main_window):
+                return False
+            values["random_seed"] = True
+            sync_random_seed_setting(self.main_window, True)
+        self._active_plugin = plugin
+        self._pending_values = values
+        self._copies_total = copies
+        self._copy_batch_active = copies > 1 or self._copies_done > 0
+        self._active_thumbnail_paths = thumbnail_paths_for_values(plugin, values)
+        self._task_status_info_html = self.get_task_queue_status_info_html()
+        self.task_status_info_changed.emit()
+        self.queue_changed.emit()
+        self._schedule_persist_job_queue()
+        return True
 
     def replace_queued_job(
         self, job_id: str, plugin: ImageGenModelPlugin, values: Dict[str, Any]
@@ -774,6 +825,7 @@ class ImageGenController(QObject):
             get_config().load_settings().get("debug_mode", False)
         )
 
+        self._snapshot_copy_cycle_for_exif(plugin)
         if not self._tasks.start_generate_job(payload):
             show_styled_critical(
                 self.main_window,
@@ -783,6 +835,29 @@ class ImageGenController(QObject):
             self._finish_copy_batch()
             return False
         return True
+
+    def _snapshot_copy_cycle_for_exif(self, plugin: ImageGenModelPlugin) -> None:
+        """Freeze the settings for the in-flight copy (survives mid-run Update)."""
+        self._copy_cycle_plugin = plugin
+        self._copy_cycle_values = dict(self._pending_values)
+        self._copy_cycle_reference_paths = list(self._task_reference_paths)
+        self._copy_cycle_expand_source_path = self._expand_source_path
+
+    def _clear_copy_cycle_exif_snapshot(self) -> None:
+        self._copy_cycle_plugin = None
+        self._copy_cycle_values = {}
+        self._copy_cycle_reference_paths = []
+        self._copy_cycle_expand_source_path = ""
+
+    def _copy_cycle_exif_plugin(self) -> Optional[ImageGenModelPlugin]:
+        if self._copy_cycle_plugin is not None:
+            return self._copy_cycle_plugin
+        return self._active_plugin
+
+    def _copy_cycle_exif_values(self) -> Dict[str, Any]:
+        if self._copy_cycle_values:
+            return self._copy_cycle_values
+        return self._pending_values
 
     def get_task_status_info_html(self) -> str:
         html = self._task_status_info_html
@@ -1785,8 +1860,8 @@ class ImageGenController(QObject):
     def _on_generation_finished(
         self, success: bool, output_path: str, error_message: str
     ) -> None:
-        plugin = self._active_plugin
-        values = self._pending_values
+        plugin = self._copy_cycle_exif_plugin()
+        values = self._copy_cycle_exif_values()
         if not output_path:
             output_path = self._output_path
         worker_result = self._tasks.pop_worker_result()
@@ -1935,7 +2010,7 @@ class ImageGenController(QObject):
 
     def _repair_cancelled_output_exif_references(self, output_path: str) -> None:
         """Fix progressive-preview References when a job is cancelled mid-run."""
-        plugin = self._active_plugin
+        plugin = self._copy_cycle_exif_plugin()
         if plugin is None or not output_path or not os.path.isfile(output_path):
             return
         try:
@@ -1949,7 +2024,7 @@ class ImageGenController(QObject):
                 return
             ref_entries, allow_cross_dir = self._exif_reference_entries_for_output(
                 plugin,
-                self._pending_values,
+                self._copy_cycle_exif_values(),
                 output_path,
                 fallback_source_paths=self._exif_fallback_source_paths(),
             )
@@ -1966,16 +2041,27 @@ class ImageGenController(QObject):
 
     def _exif_fallback_source_paths(self) -> List[str]:
         """Source paths captured at job launch when dialog values omit them."""
-        canonical = self._pending_values.get("_canonical_source_image_paths")
+        values = self._copy_cycle_exif_values()
+        canonical = values.get("_canonical_source_image_paths")
         if isinstance(canonical, list) and canonical:
             paths = source_paths_for_generation_exif(
                 {"_canonical_source_image_paths": canonical}
             )
             if paths:
                 return paths
+        ref_paths = (
+            self._copy_cycle_reference_paths
+            if self._copy_cycle_values
+            else self._task_reference_paths
+        )
+        expand_src = (
+            self._copy_cycle_expand_source_path
+            if self._copy_cycle_values
+            else self._expand_source_path
+        )
         paths: List[str] = []
         seen: set[str] = set()
-        for raw in (*self._task_reference_paths, self._expand_source_path):
+        for raw in (*ref_paths, expand_src):
             ap = os.path.normpath(os.path.abspath(str(raw or "")))
             if ap and os.path.isfile(ap) and ap not in seen:
                 seen.add(ap)
@@ -2081,8 +2167,8 @@ class ImageGenController(QObject):
         if not force_fullscreen:
             step = self._live_step
             total = self._live_step_total
-            plugin = self._active_plugin
-            values = self._pending_values
+            plugin = self._copy_cycle_exif_plugin()
+            values = self._copy_cycle_exif_values()
             if (
                 step > 0
                 and total > 0
@@ -2341,6 +2427,7 @@ class ImageGenController(QObject):
         self._expand_base_path = ""
         self._aspect_pad_temp_paths = []
         self._task_reference_paths = []
+        self._clear_copy_cycle_exif_snapshot()
         self._live_step = 0
         self._live_step_total = 0
         self._live_elapsed_seconds = None

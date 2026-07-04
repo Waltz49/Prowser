@@ -263,6 +263,10 @@ class ImageGenUnifiedDialog(QDialog):
         self._replace_job_id = (job_id or "").strip()
         if self._replace_job_id and not self._replace_queue_signal_connected:
             self._controller.queue_changed.connect(self._update_replace_visibility)
+            self._controller.task_status_info_changed.connect(
+                self._update_replace_visibility
+            )
+            self._controller.generation_started.connect(self._update_replace_visibility)
             self._replace_queue_signal_connected = True
         self._update_replace_visibility()
 
@@ -273,19 +277,37 @@ class ImageGenUnifiedDialog(QDialog):
     def _update_replace_visibility(self) -> None:
         if self._replace_btn is None:
             return
-        visible = bool(self._replace_job_id) and self._controller.is_queued_job_replaceable(
-            self._replace_job_id
-        )
+        job_id = self._replace_job_id
+        if self._controller.is_queued_job_replaceable(job_id):
+            visible = True
+            self._replace_btn.setText("Replace")
+            self._replace_btn.setToolTip(
+                "Update this queued job with the current settings (does not add a new job)."
+            )
+        elif self._controller.is_active_job_remaining_updatable(job_id):
+            visible = True
+            self._replace_btn.setText("Update")
+            self._replace_btn.setToolTip(
+                "Update remaining copies in this batch with the current settings "
+                "(does not affect the copy in progress)."
+            )
+        else:
+            visible = False
         self._replace_btn.setVisible(visible)
         self._replace_btn.setEnabled(visible)
 
     def _disconnect_replace_queue_signal(self) -> None:
         if not self._replace_queue_signal_connected:
             return
-        try:
-            self._controller.queue_changed.disconnect(self._update_replace_visibility)
-        except (RuntimeError, TypeError):
-            pass
+        for signal in (
+            self._controller.queue_changed,
+            self._controller.task_status_info_changed,
+            self._controller.generation_started,
+        ):
+            try:
+                signal.disconnect(self._update_replace_visibility)
+            except (RuntimeError, TypeError):
+                pass
         self._replace_queue_signal_connected = False
 
     def switch_to_function(
@@ -738,14 +760,34 @@ class ImageGenUnifiedDialog(QDialog):
             return
         save_plugin_dialog_settings(self._function, plugin.plugin_id, values)
         set_active_plugin_for_function(self._main_window, self._function, plugin)
-        if not self._controller.replace_queued_job(
-            self._replace_job_id, plugin, values
-        ):
+        job_id = self._replace_job_id
+        if self._controller.is_queued_job_replaceable(job_id):
+            ok = self._controller.replace_queued_job(job_id, plugin, values)
+            failure_title = "Replace job"
+            failure_message = (
+                "That queued job is no longer available "
+                "(it may have started or been cancelled)."
+            )
+        elif self._controller.is_active_job_remaining_updatable(job_id):
+            ok = self._controller.update_active_job_remaining(job_id, plugin, values)
+            failure_title = "Update job"
+            failure_message = (
+                "That running job can no longer be updated "
+                "(it may have finished or have no remaining copies)."
+            )
+        else:
+            ok = False
+            failure_title = "Update job"
+            failure_message = (
+                "That job is no longer available "
+                "(it may have finished or been cancelled)."
+            )
+        if not ok:
             self._clear_queue_replace_context()
             show_styled_warning(
                 self._main_window,
-                "Replace job",
-                "That queued job is no longer available (it may have started or been cancelled).",
+                failure_title,
+                failure_message,
             )
             return
         self._after_successful_submit()
