@@ -70,7 +70,7 @@ from imagegen_plugins.image_gen_dialog import (
     prompt_enable_random_seed_for_copies,
     sync_random_seed_setting,
 )
-from utils import show_styled_critical, show_styled_question
+from utils import show_styled_critical, show_styled_question, styled_message_box
 
 _COPIES_MIN = 1
 _COPIES_MAX = 200
@@ -165,6 +165,11 @@ class ImageGenController(QObject):
         self._job_ai_last_progress_bucket = -1
         self._hold_job_queue = load_hold_job_queue()
         self._queue_advance_suppressed = False
+        self._quit_after_current_worker = False
+        self._deferred_quit_wait_all_jobs = False
+        self._deferred_quit_dialog = None
+        self._deferred_quit_status_label = None
+        self._deferred_quit_toggle_btn = None
         self._exit_queue_persisted = False
         self._queue_persist_suppressed = False
         self._queue_persist_timer = QTimer(self)
@@ -1675,6 +1680,9 @@ class ImageGenController(QObject):
 
     def prepare_for_shutdown(self, *, suppress_failure_ui: bool = True) -> None:
         """Stop any in-flight task without confirmation or failure dialogs."""
+        self._quit_after_current_worker = False
+        self._deferred_quit_wait_all_jobs = False
+        self._dismiss_deferred_quit_dialog()
         if suppress_failure_ui:
             self._suppress_task_failure_ui = True
         self._queue_advance_suppressed = True
@@ -1710,25 +1718,226 @@ class ImageGenController(QObject):
         """True when quitting would cancel an in-flight model worker task."""
         return self._tasks.is_running() or self._foreground_tasks.is_running()
 
+    def _deferred_quit_status_message(self) -> str:
+        if self._deferred_quit_wait_all_jobs:
+            return "Prowser will shut down after all queued jobs finish."
+        if self._copy_batch_active:
+            return (
+                "Prowser will shut down after the current copy completes.\n"
+                "Existing jobs will be requeued on the next startup."
+            )
+        return "Prowser will shut down after the current task completes."
+
+    def _deferred_quit_toggle_button_label(self) -> str:
+        if self._deferred_quit_wait_all_jobs:
+            return "Quit after current copy"
+        return "Wait for all jobs"
+
+    def _refresh_deferred_quit_dialog(self) -> None:
+        label = self._deferred_quit_status_label
+        if label is not None:
+            label.setText(self._deferred_quit_status_message())
+        toggle_btn = self._deferred_quit_toggle_btn
+        if toggle_btn is not None:
+            toggle_btn.setText(self._deferred_quit_toggle_button_label())
+
+    def _show_deferred_quit_dialog(self) -> None:
+        from PySide6.QtCore import Qt
+        from PySide6.QtWidgets import QDialog, QHBoxLayout, QLabel, QPushButton, QVBoxLayout
+        from utils import get_button_style, get_dialog_shell_stylesheet
+
+        self._dismiss_deferred_quit_dialog()
+        parent = self.main_window
+        dialog = QDialog(parent)
+        dialog.setWindowTitle("Shutting down")
+        dialog.setStyleSheet(get_dialog_shell_stylesheet() + get_button_style())
+        dialog.setWindowModality(Qt.WindowModality.ApplicationModal)
+        dialog.setMinimumWidth(360)
+        layout = QVBoxLayout(dialog)
+        layout.setSpacing(18)
+        layout.setContentsMargins(22, 18, 22, 18)
+        status_label = QLabel(self._deferred_quit_status_message())
+        layout.addWidget(status_label)
+        button_row = QHBoxLayout()
+        toggle_btn = QPushButton(self._deferred_quit_toggle_button_label())
+        toggle_btn.clicked.connect(self._toggle_deferred_quit_mode)
+        button_row.addWidget(toggle_btn)
+        button_row.addStretch()
+        cancel_btn = QPushButton("Cancel")
+        cancel_btn.setDefault(True)
+        cancel_btn.clicked.connect(dialog.reject)
+        button_row.addWidget(cancel_btn)
+        layout.addLayout(button_row)
+        dialog.finished.connect(self._on_deferred_quit_dialog_finished)
+        self._deferred_quit_dialog = dialog
+        self._deferred_quit_status_label = status_label
+        self._deferred_quit_toggle_btn = toggle_btn
+        dialog.show()
+        dialog.raise_()
+        dialog.activateWindow()
+
+    def _dismiss_deferred_quit_dialog(self) -> None:
+        dialog = self._deferred_quit_dialog
+        if dialog is None:
+            return
+        self._deferred_quit_dialog = None
+        self._deferred_quit_status_label = None
+        self._deferred_quit_toggle_btn = None
+        try:
+            dialog.blockSignals(True)
+            dialog.hide()
+            dialog.deleteLater()
+        except RuntimeError:
+            pass
+
+    def _on_deferred_quit_dialog_finished(self, _result: int) -> None:
+        if self._deferred_quit_dialog is not None:
+            self._deferred_quit_dialog = None
+        self._deferred_quit_status_label = None
+        self._deferred_quit_toggle_btn = None
+        if not self._quit_after_current_worker:
+            return
+        self._quit_after_current_worker = False
+        self._deferred_quit_wait_all_jobs = False
+        self._queue_advance_suppressed = False
+
+    def _resume_deferred_quit_queue_advance(self) -> None:
+        if not self._quit_after_current_worker or not self._deferred_quit_wait_all_jobs:
+            return
+        if self._hold_job_queue:
+            return
+        if (
+            self._copy_batch_active
+            and not self._copy_batch_cancelled
+            and self._pending_batch_copies() > 0
+            and not self._tasks.is_running()
+            and not self._is_in_copy_cooldown()
+        ):
+            QTimer.singleShot(0, self._launch_next_copy_after_cooldown)
+            return
+        if not self.is_running():
+            QTimer.singleShot(0, self._try_start_next_queued_job)
+
+    def _set_deferred_quit_wait_all_jobs(self) -> None:
+        self._deferred_quit_wait_all_jobs = True
+        self._queue_advance_suppressed = False
+        self._exit_queue_persisted = False
+        self._queue_persist_suppressed = False
+        self._refresh_deferred_quit_dialog()
+        QTimer.singleShot(0, self._resume_deferred_quit_queue_advance)
+
+    def _set_deferred_quit_after_current_copy(self) -> None:
+        self._deferred_quit_wait_all_jobs = False
+        self._queue_advance_suppressed = True
+        self._persist_job_queue_for_exit()
+        self._refresh_deferred_quit_dialog()
+        if (
+            self._job_ai_stage_active
+            or self._tasks.is_running()
+            or self._foreground_tasks.is_running()
+            or self._is_in_copy_cooldown()
+        ):
+            return
+        self._finish_copy_batch()
+        self._maybe_quit_after_current_worker()
+
+    def _toggle_deferred_quit_mode(self) -> None:
+        if self._deferred_quit_wait_all_jobs:
+            self._set_deferred_quit_after_current_copy()
+        else:
+            self._set_deferred_quit_wait_all_jobs()
+
+    def _begin_quit_after_current_worker(self) -> None:
+        """Finish the in-flight copy or job, then quit (see _maybe_quit_after_current_worker)."""
+        self._quit_after_current_worker = True
+        self._deferred_quit_wait_all_jobs = False
+        self._queue_advance_suppressed = True
+        self._persist_job_queue_for_exit()
+        self._show_deferred_quit_dialog()
+
+    def _deferred_quit_pipeline_idle(self) -> bool:
+        if self._job_ai_stage_active:
+            return False
+        if self._tasks.is_running() or self._foreground_tasks.is_running():
+            return False
+        return not self.has_pending_work()
+
+    def _maybe_quit_after_current_worker(self) -> None:
+        if not self._quit_after_current_worker:
+            return
+        if self._job_ai_stage_active:
+            return
+        if self._tasks.is_running() or self._foreground_tasks.is_running():
+            # Worker job id is cleared after generation_finished / task_finished handlers.
+            QTimer.singleShot(0, self._maybe_quit_after_current_worker)
+            return
+        if self._deferred_quit_wait_all_jobs:
+            if not self._deferred_quit_pipeline_idle():
+                return
+        self._quit_after_current_worker = False
+        self._deferred_quit_wait_all_jobs = False
+        self._dismiss_deferred_quit_dialog()
+        mw = self.main_window
+        if mw is not None:
+            QTimer.singleShot(0, mw.close)
+
+    def _finish_current_unit_and_maybe_quit(self) -> bool:
+        """End the active copy batch when deferred quit was requested."""
+        if not self._quit_after_current_worker:
+            return False
+        if self._deferred_quit_wait_all_jobs:
+            return False
+        self._finish_copy_batch()
+        self._maybe_quit_after_current_worker()
+        return True
+
     def confirm_quit_if_running(self, parent=None) -> bool:
         """Return True if quit may proceed (not running, or user confirmed)."""
         if getattr(self.main_window, "_api_quit_in_progress", False):
             self.prepare_for_shutdown()
             return True
+        if self._quit_after_current_worker:
+            if self._quit_interrupts_active_worker():
+                return False
+            if self._deferred_quit_wait_all_jobs and not self._deferred_quit_pipeline_idle():
+                return False
+            return True
         if not self._quit_interrupts_active_worker():
             return True
         parent = parent or self.main_window
-        answer = show_styled_question(
+        msg_box = styled_message_box(
             parent,
+            QMessageBox.Question,
             "AI task running",
             "Image generation or an AI caption is in progress. Quit anyway?",
-            default_no=True,
-            proceed_note=_CANCEL_PROCEED_NOTE,
-            on_proceed=self.prepare_for_shutdown,
+            buttons=(
+                QMessageBox.StandardButton.No
+                | QMessageBox.StandardButton.Yes
+                | QMessageBox.StandardButton.Apply
+            ),
+            default_button=QMessageBox.StandardButton.No,
+            button_label_overrides={
+                QMessageBox.StandardButton.Yes: "Quit anyway",
+                QMessageBox.StandardButton.Apply: "Wait and quit",
+            },
+            proceed_handlers={
+                QMessageBox.StandardButton.Yes: (
+                    _CANCEL_PROCEED_NOTE,
+                    self.prepare_for_shutdown,
+                ),
+            },
         )
+        msg_box.exec()
+        answer = msg_box.result_data["button"]
+        if answer == QMessageBox.StandardButton.Apply:
+            self._begin_quit_after_current_worker()
+            return False
         return answer == QMessageBox.StandardButton.Yes
 
     def cleanup(self) -> None:
+        self._dismiss_deferred_quit_dialog()
+        self._quit_after_current_worker = False
+        self._deferred_quit_wait_all_jobs = False
         self._queue_advance_suppressed = True
         self._persist_job_queue_for_exit()
         self._copy_batch_cancelled = True
@@ -1745,6 +1954,7 @@ class ImageGenController(QObject):
             self.caption_finished.emit()
         elif kind == "flux_prompt":
             self.flux_prompt_finished.emit()
+        self._maybe_quit_after_current_worker()
 
     def _on_flux_prompt_chunk_from_worker(self, chunk: str) -> None:
         if self._job_ai_stage_active:
@@ -1849,6 +2059,8 @@ class ImageGenController(QObject):
         if self._copy_batch_active or self._tasks.is_running():
             if self._copy_batch_active:
                 self._sync_cancel_menu()
+            if self._quit_after_current_worker:
+                QTimer.singleShot(0, self._maybe_quit_after_current_worker)
             return
         if not self._tasks.is_running():
             self._sync_cancel_menu()
@@ -1856,6 +2068,7 @@ class ImageGenController(QObject):
                 if not self._queue:
                     self._update_status_bar_indicator(None)
                     self._task_status_info_html = ""
+        self._maybe_quit_after_current_worker()
 
     def _on_generation_finished(
         self, success: bool, output_path: str, error_message: str
@@ -1877,6 +2090,8 @@ class ImageGenController(QObject):
             self._remove_aspect_pad_temps()
             self._copies_done += 1
             self.generation_finished.emit(False, output_path, "")
+            if self._finish_current_unit_and_maybe_quit():
+                return
             remaining = self._copies_total - self._copies_done
             if (
                 remaining > 0
@@ -1965,6 +2180,8 @@ class ImageGenController(QObject):
                 self._expand_base_path = ""
             self._remove_aspect_pad_temps()
             self._copies_done += 1
+            if self._finish_current_unit_and_maybe_quit():
+                return
             remaining = self._copies_total - self._copies_done
             if (
                 remaining > 0
@@ -1995,6 +2212,7 @@ class ImageGenController(QObject):
             self._repair_cancelled_output_exif_references(output_path)
             self._finish_copy_batch(cancelled=True)
             self.generation_finished.emit(False, output_path, err)
+            self._maybe_quit_after_current_worker()
             return
         if not self._suppress_task_failure_ui:
             show_styled_critical(
@@ -2004,6 +2222,7 @@ class ImageGenController(QObject):
             )
         self.generation_finished.emit(False, output_path, err)
         self._finish_copy_batch()
+        self._maybe_quit_after_current_worker()
 
     def _open_in_browse(self, output_path: str) -> None:
         self._refresh_progressive_image(output_path, force_fullscreen=True)
@@ -2299,6 +2518,10 @@ class ImageGenController(QObject):
         self._cooldown_timer = None
         self._cooldown_deadline = None
         self._last_cooldown_ui_second = None
+        if self._quit_after_current_worker and not self._deferred_quit_wait_all_jobs:
+            self._finish_copy_batch()
+            self._maybe_quit_after_current_worker()
+            return
         if self._copy_batch_cancelled:
             self._finish_copy_batch(cancelled=True)
             return
@@ -2313,6 +2536,10 @@ class ImageGenController(QObject):
         QTimer.singleShot(0, self._launch_next_copy_after_cooldown)
 
     def _launch_next_copy_after_cooldown(self) -> None:
+        if self._quit_after_current_worker and not self._deferred_quit_wait_all_jobs:
+            self._finish_copy_batch()
+            self._maybe_quit_after_current_worker()
+            return
         if self._copy_batch_cancelled:
             return
         if self._hold_job_queue:
@@ -2379,9 +2606,21 @@ class ImageGenController(QObject):
             QTimer.singleShot(0, self._try_start_next_queued_job)
 
     def _try_start_next_queued_job(self) -> None:
+        if self._quit_after_current_worker and not self._deferred_quit_wait_all_jobs:
+            self._maybe_quit_after_current_worker()
+            return
         if self._queue_advance_suppressed or self._hold_job_queue:
+            if self._quit_after_current_worker and self._deferred_quit_wait_all_jobs:
+                self._maybe_quit_after_current_worker()
             return
         if self.is_running() or not self._queue:
+            if (
+                self._quit_after_current_worker
+                and self._deferred_quit_wait_all_jobs
+                and not self.is_running()
+                and not self._queue
+            ):
+                self._maybe_quit_after_current_worker()
             return
         job = self._queue[0]
         if job.plugin_unavailable or job.plugin is None:

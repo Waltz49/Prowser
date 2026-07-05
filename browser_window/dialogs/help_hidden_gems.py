@@ -83,6 +83,7 @@ These links appear in the information pane when a user comment is present.
 |------------------|------|--------|
 | click | **References** level link | Show the full reference graph (complete history). |
 | **{opt}+click** | **References** level link | Show only this image and its **direct** references. |
+| **F5** | Thumbnail or browse view | Show reference graph for the **active** image (same EXIF reference data; shows a dialog if none is found). |
 | click | **Copy** link | Copy the prompt text (truncated before generation metadata). |
 | **{opt}+click** | **Copy** link | Copy the **full** raw user comment. |
 

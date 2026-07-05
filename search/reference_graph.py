@@ -151,6 +151,21 @@ def notify_reference_extension_swap(main_window) -> None:
     )
 
 
+def notify_no_references_found(main_window) -> None:
+    """Dialog when an image has no usable EXIF reference chain."""
+    if main_window is None:
+        return
+    from utils import show_styled_information
+
+    show_styled_information(
+        main_window,
+        "No References Found",
+        "This image has no reference information in its EXIF user comment. "
+        "References are saved there by the image generation functions when "
+        "an image is created from other images.",
+    )
+
+
 def resolve_reference_entries_map(
     image_dir: str,
     current_path: str,
@@ -278,12 +293,7 @@ def open_reference_graph_for_path(main_window, image_path: str) -> None:
         image_dir, image_path, entries
     )
     if len(paths) < 2:
-        try:
-            from imagegen_plugins.image_gen_job_queue_dialog import _open_image_in_browse
-
-            _open_image_in_browse(main_window, image_path)
-        except ImportError:
-            pass
+        notify_no_references_found(main_window)
         return
     if extension_swapped:
         notify_reference_extension_swap(main_window)

@@ -242,8 +242,33 @@ class BaseKeyboardHandler(QObject):
                         key_binding.description = f"Open favorite directory {i}"
         except Exception as e:
             logger.error(f"Error refreshing favorite bindings: {e}")
-            import traceback
-            logger.error(traceback.format_exc())
+
+    def _handle_f5_reference_graph(
+        self, event: QKeyEvent, context_data: Dict[str, Any]
+    ) -> bool:
+        """Show reference graph for the active image (F5)."""
+        if event.modifiers():
+            return False
+
+        mw = getattr(self, "main_window", None)
+        if not mw:
+            return False
+
+        # Get current image path efficiently
+        path = None
+        if hasattr(mw, "get_current_image_path") and callable(mw.get_current_image_path):
+            path = mw.get_current_image_path()
+        elif hasattr(mw, "current_image_path"):
+            path = mw.current_image_path
+
+        if not path:
+            return False
+
+        from search.reference_graph import open_reference_graph_for_path
+        open_reference_graph_for_path(mw, path)
+        return True
+ 
+
 
 class ThumbnailKeyboardHandler(BaseKeyboardHandler):
     """Keyboard handler for thumbnail view mode."""
@@ -304,6 +329,11 @@ class ThumbnailKeyboardHandler(BaseKeyboardHandler):
         self.add_key_binding("shift_escape", KeyBinding(Qt.Key_Escape, Qt.ShiftModifier, description="Navigate forward in directory history"), self._handle_shift_escape)
         # F10 to clear history stacks
         self.add_key_binding("f10", KeyBinding(Qt.Key_F10, description="Clear forward and backward history stacks"), self._handle_f10)
+        self.add_key_binding(
+            "f5",
+            KeyBinding(Qt.Key_F5, description="Show reference graph for active image"),
+            self._handle_f5_reference_graph,
+        )
 
         # List view row height adjustment (+/- keys)
         self.add_key_binding("list_plus", KeyBinding(Qt.Key_Plus, description="Increase list view row height"), self._handle_list_plus)
@@ -1656,6 +1686,11 @@ class BrowseViewKeyboardHandler(BaseKeyboardHandler):
         # self.add_key_binding("f12", KeyBinding(Qt.Key_F12, description="Toggle maximized"), self._handle_f12)
         # F10 to clear history stacks
         self.add_key_binding("f10", KeyBinding(Qt.Key_F10, description="Clear forward and backward history stacks"), self._handle_f10)
+        self.add_key_binding(
+            "f5",
+            KeyBinding(Qt.Key_F5, description="Show reference graph for active image"),
+            self._handle_f5_reference_graph,
+        )
         # Shift+Esc to navigate forward in directory history
         self.add_key_binding("shift_escape", KeyBinding(Qt.Key_Escape, Qt.ShiftModifier, description="Navigate forward in directory history"), self._handle_shift_escape)
 
