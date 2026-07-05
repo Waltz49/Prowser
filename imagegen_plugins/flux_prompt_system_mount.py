@@ -267,6 +267,9 @@ def _deferred_mount_flux_prompt_extras(owner: Any) -> None:
         return
     setattr(owner, "_defer_flux_prompt_extras", False)
     remount_flux_prompt_system_splitter(owner)
+    repopulate = getattr(owner, "_repopulate_side_buttons", None)
+    if callable(repopulate):
+        repopulate()
 
 
 def flux_prompt_system_override_for(owner: Any) -> Optional[str]:

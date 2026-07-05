@@ -505,10 +505,16 @@ def repopulate_image_gen_prompt_import_row(
     owner: Any,
     buttons: Optional[List[QPushButton]],
 ) -> None:
+    from imagegen_plugins.imagegen_prompt_grammar import prompt_grammar_button
+
     panel = getattr(owner, "_fields_panel", None)
     if panel is None:
         return
-    row = create_image_gen_prompt_import_row(buttons) if buttons else None
+    merged: List[QPushButton] = list(buttons) if buttons else []
+    grammar_btn = prompt_grammar_button(owner)
+    if grammar_btn is not None:
+        merged.append(grammar_btn)
+    row = create_image_gen_prompt_import_row(merged) if merged else None
     panel.mount_prompt_import_row(row)
 
 

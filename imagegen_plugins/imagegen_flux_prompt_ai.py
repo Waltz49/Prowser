@@ -169,6 +169,9 @@ def cancel_dialog_flux_prompt_refine(owner: Any) -> None:
     flux_ai = getattr(owner, "_flux_prompt_ai", None)
     if flux_ai is not None:
         flux_ai.cancel_running()
+    from imagegen_plugins.imagegen_prompt_grammar import cancel_dialog_prompt_grammar
+
+    cancel_dialog_prompt_grammar(owner)
 
 
 class ImageGenFluxPromptAi:
@@ -474,6 +477,17 @@ class ImageGenFluxPromptAi:
             _show_ai_caption_error_dialog(
                 self._dialog,
                 preflight_error,
+                window_title="AI Prompt Error",
+                cancel_label="Cancel",
+            )
+            return
+
+        grammar = getattr(self._dialog, "_prompt_grammar", None)
+        if grammar is not None and getattr(grammar, "_running", False):
+            _show_ai_caption_error_dialog(
+                self._dialog,
+                "Grammar correction is already running.\n\n"
+                "Wait for it to finish or cancel it first.",
                 window_title="AI Prompt Error",
                 cancel_label="Cancel",
             )
