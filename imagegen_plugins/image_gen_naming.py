@@ -246,7 +246,6 @@ def parse_exif_generation_metadata(full_comment: str) -> Dict[str, Any]:
 def format_image_exif_prompt(
     model_name: str,
     prompt_text: str,
-    iterations: Optional[int] = None,
     elapsed_seconds: Optional[float] = None,
     *,
     seed: Optional[int] = None,
@@ -282,14 +281,19 @@ def format_image_exif_prompt(
             pass
 
     if model_name:
-        iter_suffix = f" [{iterations}]" if iterations is not None else ""
-        model_block = f"Image Model:\n{model_name}{iter_suffix}"
+        model_block = f"Image Model:\n{model_name}"
         if param_lines:
             model_block += "\n" + "\n".join(param_lines)
         if elapsed_seconds is not None:
             elapsed_str = format_elapsed_hms(elapsed_seconds)
             elapsed_line = f"Elapsed: {elapsed_str}"
-            step_count = steps if _exif_scalar_present(steps) else iterations
+            if _exif_scalar_present(steps):
+                try:
+                    step_count = int(steps)
+                except (TypeError, ValueError):
+                    step_count = None
+            else:
+                step_count = None
             if step_count is not None and step_count > 0:
                 elapsed_line += (
                     f" ({format_elapsed_hms(elapsed_seconds / step_count)}/iter)"
@@ -559,8 +563,13 @@ def _strip_legacy_model_quant_suffix(name: str) -> str:
     return _LEGACY_MODEL_QUANT_SUFFIX_RE.sub("", name, count=1).strip()
 
 
+def _strip_legacy_model_steps_suffix(name: str) -> str:
+    """Old EXIF used [n] step count on the model name line; strip for display."""
+    return _EXIF_MODEL_STEPS_SUFFIX.sub("", name).strip()
+
+
 def _strip_quant_from_image_model_block(text: str) -> str:
-    """Remove legacy Q{n} from the model name line when displaying old EXIF."""
+    """Remove legacy Q{n} and [n] from the model name line when displaying old EXIF."""
     lines = text.splitlines()
     result: List[str] = []
     after_image_model = False
@@ -570,10 +579,95 @@ def _strip_quant_from_image_model_block(text: str) -> str:
             after_image_model = True
             continue
         if after_image_model and line.strip():
-            line = _strip_legacy_model_quant_suffix(line)
+            line = _strip_legacy_model_steps_suffix(
+                _strip_legacy_model_quant_suffix(line)
+            )
             after_image_model = False
         result.append(line)
     return "\n".join(result)
+
+
+def _exif_steps_line_insert_index(lines: List[str], model_line_idx: int) -> int:
+    """Index for inserting Steps: after Seed when present, else before other params."""
+    insert_idx = model_line_idx + 1
+    for j in range(model_line_idx + 1, len(lines)):
+        stripped = lines[j].strip()
+        if not stripped:
+            continue
+        lower = stripped.lower()
+        if lower.startswith("prompt") or lower.startswith("references"):
+            break
+        if lower.startswith("elapsed:"):
+            return j
+        m_int = _EXIF_PARAM_LINE_INT.match(stripped)
+        if m_int is not None:
+            label = m_int.group(1).lower()
+            if label == "seed":
+                return j + 1
+            return j
+        if _EXIF_PARAM_LINE_GUIDANCE.match(stripped) or _EXIF_PARAM_LINE_LORA.match(
+            stripped
+        ):
+            return j
+    return insert_idx
+
+
+def normalize_legacy_exif_steps_suffix(text: str) -> Tuple[str, bool]:
+    """Strip trailing [N] from Image Model line; add Steps: N when missing.
+
+    Returns (new_text, changed). Skips mflux JSON UserComment.
+    """
+    if not text or not str(text).strip():
+        return text, False
+    if parse_mflux_metadata_json(text) is not None:
+        return text, False
+
+    lines = text.splitlines()
+    in_image_model = False
+    model_line_idx: Optional[int] = None
+    bracket_steps: Optional[int] = None
+
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if not stripped:
+            continue
+        lower = stripped.lower().rstrip(":")
+        if lower in ("image model", "image model:"):
+            in_image_model = True
+            continue
+        if lower.startswith("prompt") or lower.startswith("references"):
+            in_image_model = False
+            continue
+        if in_image_model:
+            m_steps = _EXIF_MODEL_STEPS_SUFFIX.search(stripped)
+            if m_steps is not None:
+                model_line_idx = i
+                bracket_steps = int(m_steps.group(1))
+            break
+
+    if model_line_idx is None or bracket_steps is None:
+        return text, False
+
+    has_explicit_steps = False
+    for line in lines:
+        m_int = _EXIF_PARAM_LINE_INT.match(line.strip())
+        if m_int is not None and m_int.group(1).lower() == "steps":
+            has_explicit_steps = True
+            break
+
+    stripped_model = lines[model_line_idx].strip()
+    new_model_stripped = _strip_legacy_model_steps_suffix(stripped_model)
+    if new_model_stripped == stripped_model and has_explicit_steps:
+        return text, False
+
+    prefix = lines[model_line_idx][: len(lines[model_line_idx]) - len(stripped_model)]
+    lines[model_line_idx] = prefix + new_model_stripped
+
+    if not has_explicit_steps:
+        insert_idx = _exif_steps_line_insert_index(lines, model_line_idx)
+        lines.insert(insert_idx, f"Steps: {bracket_steps}")
+
+    return "\n".join(lines), True
 
 
 def menu_label_for_hf_model_id(
@@ -647,7 +741,6 @@ def format_exif_comment_from_mflux_metadata(
     return format_image_exif_prompt(
         model_name,
         prompt_text,
-        iterations=steps,
         elapsed_seconds=elapsed_seconds,
         seed=seed,
         steps=steps,
@@ -736,7 +829,6 @@ def make_readable_user_comment_before_browse(
         comment = format_image_exif_prompt(
             model_name,
             str(values.get("prompt") or "").strip(),
-            iterations=values.get("steps"),
             elapsed_seconds=elapsed_seconds,
             seed=seed,
             steps=values.get("steps"),

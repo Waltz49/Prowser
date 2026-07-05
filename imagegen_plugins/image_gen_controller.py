@@ -2132,7 +2132,6 @@ class ImageGenController(QObject):
                 comment = format_image_exif_prompt(
                     plugin.menu_label(values),
                     values.get("prompt", ""),
-                    iterations=values.get("steps"),
                     elapsed_seconds=elapsed_seconds,
                     seed=used_seed,
                     steps=values.get("steps"),

@@ -1409,6 +1409,16 @@ class MenuManager:
         view_log_action.triggered.connect(self._debug_view_print_log)
         debug_menu.addAction(view_log_action)
 
+        debug_menu.addSeparator()
+
+        self.main_window.normalize_exif_steps_action = QAction(
+            "Normalize EXIF Steps in Image Model...", self.main_window
+        )
+        self.main_window.normalize_exif_steps_action.triggered.connect(
+            self.main_window.normalize_exif_steps_suffix
+        )
+        debug_menu.addAction(self.main_window.normalize_exif_steps_action)
+
         try:
             from bundle_capabilities import imagegen_ui_enabled
 
@@ -2611,6 +2621,17 @@ class MenuManager:
                     mw.delete_exif_date_action.setText("Delete EXIF Dates from Files...")
                 else:
                     mw.delete_exif_date_action.setText("Delete EXIF Date from File...")
+
+        # Update Normalize EXIF Steps action enabled state
+        if hasattr(mw, 'normalize_exif_steps_action'):
+            is_thumbnail_mode = (
+                hasattr(mw, 'current_view_mode')
+                and mw.current_view_mode == 'thumbnail'
+            )
+            is_specific_files_mode = getattr(mw, 'specific_files_active', False)
+            mw.normalize_exif_steps_action.setEnabled(
+                is_thumbnail_mode and not is_specific_files_mode
+            )
         
         # Update Edit EXIF User Comment action enabled state
         if hasattr(mw, 'edit_exif_usercomment_action'):

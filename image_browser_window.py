@@ -76,6 +76,10 @@ from config import (
 )
 from browser_window.managers.configuration_sync_manager import ConfigurationSyncManager
 from browser_window.dialogs.delete_exif_dialog import DeleteExifDialog
+from browser_window.dialogs.normalize_exif_steps_dialog import NormalizeExifStepsDialog
+from browser_window.dialogs.normalize_exif_steps_scope_dialog import (
+    NormalizeExifStepsScopeDialog,
+)
 from browser_window.managers.directory_history_handler import DirectoryHistoryHandler, DirectoryHistoryHandlerForMenu
 from browser_window.managers.directory_loader import DirectoryLoader
 from browser_window.managers.event_handler import EventHandler
@@ -142,9 +146,12 @@ from browser_window.managers.thumbnail_context_menu import ThumbnailContextMenuH
 
 from browser_window.managers.ui_layout_manager import UILayoutManager
 from utils import (
+    create_titled_progress_dialog,
     file_string,
+    get_file_extension,
     handle_filter_pattern_mismatch,
     is_macos_space_mode,
+    is_root_or_system_volume,
     normalize_path_for_display,
     present_auxiliary_dialog,
     should_preserve_window_focus,
@@ -7847,6 +7854,202 @@ class ImageBrowserWindow(QMainWindow):
                         self.right_sidebar.show_image_info_overlay()
         else:
             self.status_notification.show_message(f"Failed to delete EXIF dates from {error_count} {file_string(error_count)}")
+
+    def normalize_exif_steps_suffix(self):
+        """Remove legacy [N] step suffix from Image Model in EXIF UserComment."""
+        if self.current_view_mode != 'thumbnail':
+            self.status_notification.show_message(
+                "This feature is only available in thumbnail mode"
+            )
+            return
+
+        if getattr(self, 'specific_files_active', False):
+            self.status_notification.show_message(
+                "This feature is not available in specific files mode"
+            )
+            return
+
+        from PySide6.QtWidgets import QApplication
+
+        from exif.exif_utils import (
+            decode_usercomment,
+            encode_usercomment,
+            get_usercomment_from_path,
+            restore_usercomment_to_file,
+        )
+        from faces.face_scan_runner import get_image_list
+        from imagegen_plugins.image_gen_naming import normalize_legacy_exif_steps_suffix
+
+        exif_comment_extensions = {'.jpg', '.jpeg', '.png', '.tiff', '.tif', '.webp'}
+        selected_files = self.selection_manager.get_selected_files() or []
+        selected_exif_count = sum(
+            1
+            for file_path in selected_files
+            if os.path.isfile(file_path)
+            and get_file_extension(file_path) in exif_comment_extensions
+        )
+
+        current_dir = self.current_directory
+        if (
+            not current_dir
+            and getattr(self, 'displayed_images', None)
+            and self.displayed_images
+        ):
+            current_dir = os.path.dirname(self.displayed_images[0])
+        current_dir = (
+            os.path.normpath(os.path.abspath(current_dir))
+            if current_dir and os.path.isdir(current_dir)
+            else ""
+        )
+
+        config = get_config()
+        search_depth = int(config.load_settings().get('search_depth', 4))
+
+        scope = NormalizeExifStepsScopeDialog.ask(
+            selected_exif_count,
+            current_dir,
+            search_depth,
+            self,
+        )
+        if not scope:
+            return
+
+        def _normalize_exif_path(path: str) -> str:
+            try:
+                return os.path.normcase(os.path.normpath(os.path.abspath(path)))
+            except Exception:
+                return os.path.normcase(os.path.normpath(path))
+
+        candidate_files: List[str] = []
+
+        if scope == NormalizeExifStepsScopeDialog.SCOPE_SELECTED:
+            if selected_exif_count <= 0:
+                self.status_notification.show_message(
+                    "No selected files support EXIF user comments"
+                )
+                return
+            for file_path in selected_files:
+                if not os.path.isfile(file_path):
+                    continue
+                if get_file_extension(file_path) in exif_comment_extensions:
+                    candidate_files.append(file_path)
+        else:
+            if not current_dir:
+                self.status_notification.show_message("No directory available")
+                return
+            if is_root_or_system_volume(current_dir):
+                if current_dir == '/':
+                    show_styled_warning(
+                        self,
+                        "Action Not Available",
+                        "This action is not available on the root directory.",
+                    )
+                else:
+                    show_styled_warning(
+                        self,
+                        "Action Not Available",
+                        "This action is not available on system volumes.",
+                    )
+                return
+
+            progress_dialog = create_titled_progress_dialog(
+                self,
+                "Scan for Legacy EXIF Step Suffixes",
+                0,
+                indeterminate=True,
+            )
+            cancelled = False
+            try:
+                progress_dialog.setLabelText(
+                    f"Scanning directory (depth {search_depth})..."
+                )
+                QApplication.processEvents()
+                image_paths = get_image_list(current_dir, search_depth)
+                for idx, file_path in enumerate(image_paths, start=1):
+                    if progress_dialog.wasCanceled():
+                        cancelled = True
+                        break
+                    if get_file_extension(file_path) in exif_comment_extensions:
+                        candidate_files.append(file_path)
+                    if idx % 100 == 0:
+                        progress_dialog.setLabelText(
+                            f"Scanning directory (depth {search_depth})...\n"
+                            f"Images scanned: {idx} / {len(image_paths)}"
+                        )
+                        QApplication.processEvents()
+            finally:
+                progress_dialog.close()
+
+            if cancelled:
+                self.status_notification.show_message("Scan cancelled", 2000)
+                return
+
+        files_to_update = []
+        for file_path in candidate_files:
+            try:
+                raw = get_usercomment_from_path(file_path)
+                if not raw:
+                    continue
+                text = decode_usercomment(raw)
+                new_text, changed = normalize_legacy_exif_steps_suffix(text)
+                if changed:
+                    files_to_update.append((file_path, new_text))
+            except Exception:
+                continue
+
+        if not files_to_update:
+            show_styled_information(
+                self,
+                "Normalize EXIF Steps",
+                "No files found with legacy [N] step suffix in Image Model.",
+            )
+            return
+
+        if not NormalizeExifStepsDialog.show_confirmation(files_to_update, self):
+            return
+
+        success_count = 0
+        error_count = 0
+        for file_path, new_text in files_to_update:
+            try:
+                if restore_usercomment_to_file(
+                    file_path, encode_usercomment(new_text)
+                ):
+                    success_count += 1
+                else:
+                    error_count += 1
+            except Exception:
+                error_count += 1
+
+        if success_count > 0:
+            if error_count > 0:
+                self.status_notification.show_message(
+                    f"Normalized EXIF steps in {success_count} "
+                    f"{file_string(success_count)}, {error_count} error(s)"
+                )
+            else:
+                self.status_notification.show_message(
+                    f"Successfully normalized EXIF steps in "
+                    f"{success_count} {file_string(success_count)}"
+                )
+            if hasattr(self, 'debounce_refresh_directory'):
+                self.debounce_refresh_directory()
+            if getattr(self, 'right_sidebar', None) and getattr(
+                self, 'right_sidebar_visible', None
+            ):
+                current_path = getattr(self, 'current_image_path', None)
+                if current_path:
+                    current_norm = _normalize_exif_path(current_path)
+                    if any(
+                        current_norm == _normalize_exif_path(file_path)
+                        for file_path, _ in files_to_update
+                    ):
+                        self.right_sidebar.show_image_info_overlay()
+        else:
+            self.status_notification.show_message(
+                f"Failed to normalize EXIF steps in {error_count} "
+                f"{file_string(error_count)}"
+            )
 
     def edit_exif_usercomment(self):
         """Open a dialog to view and edit the EXIF UserComment for the current image."""
