@@ -12,6 +12,7 @@ from imagegen_plugins.image_gen_fields import FieldSpec
 from imagegen_plugins.image_gen_form_layout import ImageGenFieldsPanel
 from imagegen_plugins.image_gen_persistence import load_plugin_dialog_settings
 from imagegen_plugins.image_gen_registry import ImageGenModelPlugin
+from imagegen_plugins.lora_host_registry import HOST_SD15
 from theme.theme_service import get_active_theme
 
 _MODEL_COMBO_MIN_WIDTH = 300
@@ -298,19 +299,20 @@ def mount_image_gen_lora_field(
     panel: ImageGenFieldsPanel,
     *,
     parent: QWidget,
-) -> Tuple[QWidget, QComboBox]:
-    """LoRA heading + pulldown as a top-level field (not nested under Model)."""
-    combo = QComboBox(parent)
-    configure_lora_combo(combo)
-    combo.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
+) -> Tuple[QWidget, Any]:
+    """LoRA heading + control as a top-level field (not nested under Model)."""
+    from imagegen_plugins.lora_stack_field import LoraStackField
+
+    field = LoraStackField(parent)
+    field.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
     group = panel.add_labeled_field(
         "LoRA",
-        combo,
+        field,
         to_outer=True,
         stretch_control=False,
     )
     group.hide()
-    return group, combo
+    return group, field
 
 
 def build_model_selector_row(
@@ -387,6 +389,7 @@ def values_after_plugin_switch(
     out = dict(current)
     for key in (
         "mflux_lora",
+        "mflux_lora_stack",
         "mflux_lora_paths",
         "mflux_lora_scales",
         "hf_model_id",
@@ -398,18 +401,28 @@ def values_after_plugin_switch(
 
 
 def sync_image_gen_lora_field(dialog: Any) -> None:
-    """Show the LoRA pulldown and register it in ``_widgets`` for the active plugin."""
+    """Show the LoRA control and register it in ``_widgets`` for the active plugin."""
     from imagegen_plugins.imagegen_control_tooltips import field_tooltip
-    from imagegen_plugins.mflux_lora_presets import coerce_lora_preset_id
+    from imagegen_plugins.mflux_lora_presets import (
+        coerce_lora_preset_id,
+        normalize_lora_stack_from_values,
+    )
 
     plugin = getattr(dialog, "plugin", None)
     specs: List[FieldSpec] = getattr(dialog, "_specs", None) or []
     values: Dict[str, Any] = getattr(dialog, "_values", None) or {}
     widgets: Dict[str, Any] = getattr(dialog, "_widgets", None) or {}
-    lora_combo = getattr(dialog, "_lora_combo", None)
+    lora_field = getattr(dialog, "_lora_field", None)
     lora_group = getattr(dialog, "_lora_group", None)
-    if lora_combo is None or lora_group is None:
+    if lora_field is None or lora_group is None:
         return
+
+    host_id = getattr(plugin, "lora_host_id", None) if plugin else None
+    use_stack = (
+        plugin_supports_lora(plugin)
+        and host_id is not None
+        and host_id != HOST_SD15
+    )
 
     lora_spec = next((s for s in specs if s.key == "mflux_lora"), None)
     if lora_spec is None and plugin is not None:
@@ -423,27 +436,57 @@ def sync_image_gen_lora_field(dialog: Any) -> None:
         fresh_specs = plugin.field_specs(base_values)
         setattr(dialog, "_specs", fresh_specs)
         lora_spec = next((s for s in fresh_specs if s.key == "mflux_lora"), None)
-    current = coerce_lora_preset_id(values.get("mflux_lora", "none"))
+
+    stack = normalize_lora_stack_from_values(values, pop=False)
+    if use_stack and lora_field.is_stack_mode():
+        live_stack = lora_field.selected_ids()
+        if live_stack:
+            stack = live_stack
+    legacy = coerce_lora_preset_id(values.get("mflux_lora", "none"))
     if lora_spec is None:
         lora_spec = FieldSpec(
             key="mflux_lora",
             label="LoRA",
             kind="choice",
-            default=current,
+            default=legacy,
             choices=(("None", "none"),),
         )
 
     lora_group.show()
-    populate_image_gen_lora_combo(
-        lora_combo,
+    lora_field.populate(
         plugin,
-        current_preset_id=current,
+        current_stack=stack,
+        current_preset_id=legacy,
     )
-    finalize_lora_combo_display(lora_combo)
-    tip = field_tooltip(lora_spec)
-    if tip:
-        lora_combo.setToolTip(tip)
-    widgets["mflux_lora"] = (lora_combo, None, lora_spec)
+    if use_stack:
+        if not getattr(dialog, "_lora_stack_values_connected", False):
+
+            def _sync_lora_stack_to_dialog_values() -> None:
+                lf = getattr(dialog, "_lora_field", None)
+                if lf is None or not lf.is_stack_mode():
+                    return
+                vals = getattr(dialog, "_values", None)
+                if isinstance(vals, dict):
+                    vals["mflux_lora_stack"] = lf.selected_ids()
+
+            lora_field.stack_changed.connect(_sync_lora_stack_to_dialog_values)
+            dialog._lora_stack_values_connected = True
+        tip = field_tooltip(lora_spec) or ""
+        extra = (
+            " Select one or more LoRAs (experimental stacking). "
+            "Click to open the list; OK to apply."
+        )
+        lora_field.summary_combo.setToolTip((tip + extra).strip())
+        widgets["mflux_lora_stack"] = (lora_field, None, lora_spec)
+        widgets.pop("mflux_lora", None)
+    else:
+        tip = field_tooltip(lora_spec)
+        if tip:
+            lora_field.summary_combo.setToolTip(tip)
+        widgets["mflux_lora"] = (lora_field.summary_combo, None, lora_spec)
+        widgets.pop("mflux_lora_stack", None)
+
+    dialog._lora_combo = lora_field.summary_combo
 
 
 def apply_mflux_lora_collection_guard(
@@ -451,9 +494,19 @@ def apply_mflux_lora_collection_guard(
     widgets: Dict[str, Any],
 ) -> None:
     """Do not pass a saved LoRA when the field is absent or unsupported."""
+    stack_entry = widgets.get("mflux_lora_stack")
+    if stack_entry is not None:
+        widget, _, _spec = stack_entry
+        if not widget.isEnabled():
+            out["mflux_lora_stack"] = []
+        elif hasattr(widget, "selected_ids"):
+            out["mflux_lora_stack"] = widget.selected_ids()
+        return
+
     entry = widgets.get("mflux_lora")
     if entry is None:
         out["mflux_lora"] = "none"
+        out.pop("mflux_lora_stack", None)
         return
     widget, _, spec = entry
     if spec.kind == "choice" and not widget.isEnabled():

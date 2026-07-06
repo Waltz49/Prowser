@@ -724,6 +724,8 @@ def format_exif_comment_from_mflux_metadata(
     guidance = values.get("guidance_scale")
     if guidance is None:
         guidance = meta.get("guidance")
+    from imagegen_plugins.mflux_lora_presets import lora_name_for_exif_from_values
+
     if seed is None and not values.get("random_seed"):
         try:
             seed = int(values.get("seed"))
@@ -745,7 +747,7 @@ def format_exif_comment_from_mflux_metadata(
         seed=seed,
         steps=steps,
         quantization=quant,
-        lora=lora_name_for_exif(values.get("mflux_lora")),
+        lora=lora_name_for_exif_from_values(values),
         guidance=guidance,
     )
 
@@ -821,6 +823,8 @@ def make_readable_user_comment_before_browse(
             include_quantization=include_quantization,
         )
     else:
+        from imagegen_plugins.mflux_lora_presets import lora_name_for_exif_from_values
+
         if seed is None and not values.get("random_seed"):
             try:
                 seed = int(values.get("seed"))
@@ -837,7 +841,7 @@ def make_readable_user_comment_before_browse(
                 if include_quantization
                 else None
             ),
-            lora=lora_name_for_exif(values.get("mflux_lora")),
+            lora=lora_name_for_exif_from_values(values),
             guidance=values.get("guidance_scale"),
         )
     if not write_exif_user_comment(

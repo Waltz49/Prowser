@@ -350,6 +350,10 @@ def collect_widget_values(
 ) -> Dict[str, Any]:
     out: Dict[str, Any] = dict(base_values)
     for key, (widget, extra, spec) in widgets.items():
+        if key == "mflux_lora_stack":
+            if hasattr(widget, "selected_ids"):
+                out["mflux_lora_stack"] = widget.selected_ids()
+            continue
         if spec.kind == "text":
             out[key] = widget.toPlainText()
         elif spec.kind == "bool":
@@ -625,7 +629,7 @@ def _mount_leaf_spec(
     *,
     options: WidgetBuildOptions,
 ) -> None:
-    if spec.key in ("mflux_lora", "width", "height"):
+    if spec.key in ("mflux_lora", "mflux_lora_stack", "width", "height"):
         return
     widget, extra = widget_for_field_spec(spec, options=options)
     widgets[spec.key] = (widget, extra, spec)

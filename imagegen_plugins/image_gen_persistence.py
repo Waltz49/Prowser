@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 import threading
-from typing import Any, Callable, Dict, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from config import get_config
 
@@ -49,6 +49,7 @@ def _normalize_plugin_id(plugin_id: str) -> str:
 
 _DIALOGS_KEY = "dialogs"
 _LEGACY_MODELS_KEY = "models"
+_LORA_STACKS_KEY = "lora_stacks"
 
 # Not shared across models in a function dialog (come from plugin model_defaults).
 _PLUGIN_SPECIFIC_DIALOG_KEYS = frozenset(
@@ -96,6 +97,96 @@ def _shared_function_values(values: Dict[str, Any]) -> Dict[str, Any]:
 
 def _per_plugin_dialog_values(values: Dict[str, Any]) -> Dict[str, Any]:
     return {k: v for k, v in values.items() if k not in _SHARED_FUNCTION_KEYS}
+
+
+def _split_lora_stack_from_values(
+    values: Dict[str, Any],
+) -> Tuple[Dict[str, Any], List[str]]:
+    """Pop ``mflux_lora_stack`` before sanitize; it is stored under ``lora_stacks``."""
+    raw = dict(values)
+    stack = _coerce_lora_stack_list(raw.pop("mflux_lora_stack", None))
+    return _sanitize_dialog_values(raw), stack
+
+
+def _coerce_lora_stack_list(raw: Any) -> List[str]:
+    from imagegen_plugins.mflux_lora_presets import coerce_lora_preset_id
+
+    if not isinstance(raw, list):
+        return []
+    out: List[str] = []
+    for item in raw:
+        pid = coerce_lora_preset_id(item)
+        if pid != "none" and pid not in out:
+            out.append(pid)
+    return out
+
+
+def _plugin_uses_lora_stack(plugin_id: str) -> bool:
+    """FLUX/mflux/Klein use multi-LoRA stacks; SD15 keeps single ``mflux_lora``."""
+    from imagegen_plugins.lora_host_registry import HOST_SD15
+
+    plugin_id = _normalize_plugin_id(plugin_id)
+    try:
+        from imagegen_plugins.image_gen_registry import discover_plugins
+
+        for plugin in discover_plugins():
+            if plugin.plugin_id == plugin_id:
+                host = getattr(plugin, "lora_host_id", None)
+                return host is not None and host != HOST_SD15
+    except Exception:
+        pass
+    return True
+
+
+def load_lora_stack_for_plugin(function: str, plugin_id: str) -> List[str]:
+    """Per-function, per-plugin LoRA stack (preset ids). Migrates legacy ``mflux_lora``."""
+    from imagegen_plugins.mflux_lora_presets import coerce_lora_preset_id
+
+    plugin_id = _normalize_plugin_id(plugin_id)
+    if not _plugin_uses_lora_stack(plugin_id):
+        return []
+    settings = get_config().load_settings()
+    imagegen = settings.get("imagegen") or {}
+    dialogs = imagegen.get(_DIALOGS_KEY) or {}
+    fn_entry = dialogs.get(function) or {}
+    stacks = fn_entry.get(_LORA_STACKS_KEY) or {}
+    if isinstance(stacks, dict):
+        raw = stacks.get(plugin_id)
+        stack = _coerce_lora_stack_list(raw)
+        if stack:
+            return stack
+
+    legacy = load_model_settings(plugin_id).get("mflux_lora")
+    pid = coerce_lora_preset_id(legacy)
+    if pid != "none":
+        return [pid]
+    return []
+
+
+def save_lora_stack_for_plugin(
+    function: str,
+    plugin_id: str,
+    stack: List[str],
+) -> None:
+    plugin_id = _normalize_plugin_id(plugin_id)
+    cleaned = _coerce_lora_stack_list(stack)
+
+    def mutate(imagegen: dict) -> None:
+        dialogs = imagegen.get(_DIALOGS_KEY)
+        if not isinstance(dialogs, dict):
+            dialogs = {}
+            imagegen[_DIALOGS_KEY] = dialogs
+        fn_entry = dialogs.get(function)
+        if not isinstance(fn_entry, dict):
+            fn_entry = {}
+            dialogs[function] = fn_entry
+        stacks = fn_entry.get(_LORA_STACKS_KEY)
+        if not isinstance(stacks, dict):
+            stacks = {}
+            fn_entry[_LORA_STACKS_KEY] = stacks
+        stacks[plugin_id] = cleaned
+
+    _mutate_imagegen_settings(mutate)
 
 
 def _merge_prompt_from_shared(
@@ -184,6 +275,12 @@ def load_plugin_dialog_settings(function: str, plugin_id: str) -> Dict[str, Any]
     prompt = _merge_prompt_from_shared(shared, per_plugin)
     if prompt is not None:
         out["prompt"] = prompt
+
+    stack = load_lora_stack_for_plugin(function, plugin_id)
+    if _plugin_uses_lora_stack(plugin_id):
+        out["mflux_lora_stack"] = stack
+        if stack:
+            out.pop("mflux_lora", None)
     return _sanitize_dialog_values(out)
 
 
@@ -196,7 +293,8 @@ def save_plugin_dialog_settings(
 ) -> None:
     """Persist model-specific settings per plugin; prompt stays function-level."""
     plugin_id = _normalize_plugin_id(plugin_id)
-    sanitized = _sanitize_dialog_values(dict(values))
+    sanitized, stack = _split_lora_stack_from_values(dict(values))
+    persist_stack = _plugin_uses_lora_stack(plugin_id)
 
     def mutate(imagegen: dict) -> None:
         from imagegen_plugins.image_gen_active_model import (
@@ -209,13 +307,23 @@ def save_plugin_dialog_settings(
             imagegen[_DIALOGS_KEY] = dialogs
         prev_shared = dict(dialogs.get(function) or {})
         prev_shared.update(_shared_function_values(sanitized))
-        dialogs[function] = prev_shared
+        fn_entry = dict(prev_shared)
+        stacks = fn_entry.get(_LORA_STACKS_KEY)
+        if not isinstance(stacks, dict):
+            stacks = {}
+        if persist_stack:
+            stacks[plugin_id] = stack
+        fn_entry[_LORA_STACKS_KEY] = stacks
+        dialogs[function] = fn_entry
 
         models = imagegen.get(_LEGACY_MODELS_KEY)
         if not isinstance(models, dict):
             models = {}
             imagegen[_LEGACY_MODELS_KEY] = models
-        models[plugin_id] = _per_plugin_dialog_values(sanitized)
+        per_plugin = _per_plugin_dialog_values(sanitized)
+        if persist_stack and stack:
+            per_plugin.pop("mflux_lora", None)
+        models[plugin_id] = per_plugin
 
         aid = active_plugin_id or plugin_id
         apply_active_plugin_to_imagegen(imagegen, function, aid)
@@ -272,9 +380,10 @@ def save_dialog_sessions_batch(
     if not sessions:
         return
 
-    cleaned: Dict[str, Tuple[Dict[str, Any], Optional[str]]] = {}
+    prepared: Dict[str, Tuple[Dict[str, Any], Optional[str], List[str]]] = {}
     for function, (values, plugin_id) in sessions.items():
-        cleaned[function] = (_sanitize_dialog_values(values), plugin_id)
+        sanitized, stack = _split_lora_stack_from_values(dict(values))
+        prepared[function] = (sanitized, plugin_id, stack)
 
     def mutate(imagegen: dict) -> None:
         from imagegen_plugins.image_gen_active_model import (
@@ -289,14 +398,28 @@ def save_dialog_sessions_batch(
         if not isinstance(models, dict):
             models = {}
             imagegen[_LEGACY_MODELS_KEY] = models
-        for function, (values, plugin_id) in cleaned.items():
+        for function, (vals, plugin_id, stack) in prepared.items():
+            persist_stack = (
+                _plugin_uses_lora_stack(_normalize_plugin_id(plugin_id))
+                if plugin_id is not None
+                else False
+            )
             prev_shared = dict(dialogs.get(function) or {})
-            prev_shared.update(_shared_function_values(values))
-            dialogs[function] = prev_shared
+            prev_shared.update(_shared_function_values(vals))
+            fn_entry = dict(prev_shared)
             if plugin_id is not None:
-                models[_normalize_plugin_id(plugin_id)] = _per_plugin_dialog_values(
-                    values
-                )
+                stacks = fn_entry.get(_LORA_STACKS_KEY)
+                if not isinstance(stacks, dict):
+                    stacks = {}
+                if persist_stack:
+                    stacks[_normalize_plugin_id(plugin_id)] = stack
+                fn_entry[_LORA_STACKS_KEY] = stacks
+            dialogs[function] = fn_entry
+            if plugin_id is not None:
+                per_plugin = _per_plugin_dialog_values(vals)
+                if persist_stack and stack:
+                    per_plugin.pop("mflux_lora", None)
+                models[_normalize_plugin_id(plugin_id)] = per_plugin
                 apply_active_plugin_to_imagegen(imagegen, function, plugin_id)
 
     _mutate_imagegen_settings(mutate)

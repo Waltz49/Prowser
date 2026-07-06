@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple, TYPE_CHECKING
+from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from PySide6.QtWidgets import QComboBox, TYPE_CHECKING
@@ -216,22 +216,100 @@ def effective_steps_for_lora(
     return max(int(steps), min_steps)
 
 
+def effective_steps_for_lora_stack(
+    steps: int,
+    stack: List[str],
+    *,
+    for_fill: bool = False,
+) -> int:
+    """Raise steps to the maximum minimum required by any LoRA in the stack."""
+    result = int(steps)
+    for preset_id in stack:
+        result = effective_steps_for_lora(result, preset_id, for_fill=for_fill)
+    return result
+
+
+def lora_stack_min_steps(stack: List[str]) -> Optional[int]:
+    """Highest per-LoRA min steps in stack, or None when empty."""
+    mins: List[int] = []
+    for preset_id in stack:
+        lo = lora_preset_min_steps(preset_id)
+        if lo is not None:
+            mins.append(lo)
+    return max(mins) if mins else None
+
+
+def normalize_lora_stack_from_values(
+    values: Dict[str, Any],
+    *,
+    pop: bool = False,
+) -> List[str]:
+    """
+    Resolve active LoRA preset ids from dialog/job values.
+
+    Accepts ``mflux_lora_stack`` (list) or legacy single ``mflux_lora`` string.
+    """
+    if pop:
+        stack_raw = values.pop("mflux_lora_stack", None)
+        legacy = values.pop("mflux_lora", None)
+        values.pop("mflux_lora_paths", None)
+        values.pop("mflux_lora_scales", None)
+    else:
+        stack_raw = values.get("mflux_lora_stack")
+        legacy = values.get("mflux_lora")
+
+    ids: List[str] = []
+    if isinstance(stack_raw, list):
+        for item in stack_raw:
+            pid = _normalize_preset_id(item)
+            if pid != "none" and pid not in ids:
+                ids.append(pid)
+    elif stack_raw is not None and stack_raw != []:
+        pid = _normalize_preset_id(stack_raw)
+        if pid != "none" and pid not in ids:
+            ids.append(pid)
+
+    if not ids and legacy is not None:
+        pid = _normalize_preset_id(legacy)
+        if pid != "none":
+            ids.append(pid)
+    return ids
+
+
+def lora_display_names_for_stack(stack: List[str]) -> List[str]:
+    names: List[str] = []
+    for preset_id in stack:
+        entry = get_lora_entry(preset_id)
+        if entry is not None:
+            names.append(entry.display_name)
+        else:
+            names.append(preset_id)
+    return names
+
+
+def lora_name_for_exif_from_values(values: Dict[str, Any]) -> Optional[str]:
+    """LoRA label for EXIF from stack or legacy single preset."""
+    stack = normalize_lora_stack_from_values(values, pop=False)
+    if not stack:
+        return None
+    names = lora_display_names_for_stack(stack)
+    if len(names) == 1:
+        return names[0]
+    return " + ".join(names)
+
+
 def apply_lora_to_mflux_payload(
     merged: Dict[str, object],
     *,
     for_fill: bool = False,
     for_klein: bool = False,
 ) -> None:
-    """Set mflux_lora_paths/scales and optional dev model + steps when a preset is selected."""
-    preset_id = _normalize_preset_id(merged.pop("mflux_lora", "none") or "none")
-    if preset_id == "none":
+    """Set mflux_lora_paths/scales when one or more presets are selected."""
+    stack = normalize_lora_stack_from_values(merged, pop=True)
+    if not stack:
         merged.pop("mflux_lora_paths", None)
         merged.pop("mflux_lora_scales", None)
         return
-
-    entry = get_lora_entry(preset_id)
-    if entry is None:
-        raise ValueError(f"Unknown mflux LoRA preset: {preset_id}")
 
     from config import get_config
     from imagegen_plugins.hf_model_ids import FLUX1_DEV, FLUX1_FILL_DEV
@@ -248,40 +326,52 @@ def apply_lora_to_mflux_payload(
         model_key = FLUX1_DEV
 
     settings = get_config().load_settings()
-    if model_key and not lora_probe_passed_for_model(
-        preset_id, model_key, settings
-    ):
-        raise ValueError(
-            f"LoRA «{entry.display_name}» did not pass Check LoRAs for this base model. "
-            "Run Tools → Debug → Check LoRAs, or enable a passing LoRA in Settings → LoRA."
-        )
+    paths: List[str] = []
+    scales: List[float] = []
 
-    if for_klein and entry.base_hf_model_id:
-        from imagegen_plugins.lora_model_registry import entry_matches_lora_model
+    for preset_id in stack:
+        entry = get_lora_entry(preset_id)
+        if entry is None:
+            raise ValueError(f"Unknown mflux LoRA preset: {preset_id}")
 
-        active = str(merged.get("hf_model_id") or "").strip()
-        if active and not entry_matches_lora_model(entry, active):
-            raise ValueError(klein_lora_mismatch_message(entry, active))
-
-    path = resolve_lora_path(preset_id)
-    merged["mflux_lora_paths"] = [path]
-    merged["mflux_lora_scales"] = [entry.scale]
-    if not for_fill and not for_klein:
-        required = (entry.base_hf_model_id or FLUX1_DEV).strip()
-        active = str(merged.get("hf_model_id") or "").strip()
-        if required and active and required != active:
-            from imagegen_plugins.image_gen_model_availability import model_display_name
-
-            req_name = model_display_name("flux_schnell_mflux_play", required)
-            act_name = model_display_name("flux_schnell_mflux_play", active)
+        if model_key and not lora_probe_passed_for_model(
+            preset_id, model_key, settings
+        ):
             raise ValueError(
-                f"LoRA «{entry.display_name}» requires {req_name}. "
-                f"Select {req_name} in the Create dialog, then choose this LoRA "
-                f"(active model: {act_name})."
+                f"LoRA «{entry.display_name}» did not pass Check LoRAs for this base model. "
+                "Run Tools → Debug → Check LoRAs, or enable a passing LoRA in Settings → LoRA."
             )
-        merged["steps"] = effective_steps_for_lora(
-            int(merged.get("steps") or entry.min_steps),
-            preset_id,
+
+        if for_klein and entry.base_hf_model_id:
+            from imagegen_plugins.lora_model_registry import entry_matches_lora_model
+
+            active = str(merged.get("hf_model_id") or "").strip()
+            if active and not entry_matches_lora_model(entry, active):
+                raise ValueError(klein_lora_mismatch_message(entry, active))
+
+        if not for_fill and not for_klein:
+            required = (entry.base_hf_model_id or FLUX1_DEV).strip()
+            active = str(merged.get("hf_model_id") or "").strip()
+            if required and active and required != active:
+                from imagegen_plugins.image_gen_model_availability import model_display_name
+
+                req_name = model_display_name("flux_schnell_mflux_play", required)
+                act_name = model_display_name("flux_schnell_mflux_play", active)
+                raise ValueError(
+                    f"LoRA «{entry.display_name}» requires {req_name}. "
+                    f"Select {req_name} in the Create dialog, then choose this LoRA "
+                    f"(active model: {act_name})."
+                )
+
+        paths.append(resolve_lora_path(preset_id))
+        scales.append(entry.scale)
+
+    merged["mflux_lora_paths"] = paths
+    merged["mflux_lora_scales"] = scales
+    if not for_fill and not for_klein:
+        merged["steps"] = effective_steps_for_lora_stack(
+            int(merged.get("steps") or 0),
+            stack,
             for_fill=False,
         )
 
@@ -292,11 +382,16 @@ __all__ = [
     "apply_lora_to_mflux_payload",
     "coerce_lora_preset_id",
     "effective_steps_for_lora",
+    "effective_steps_for_lora_stack",
     "lora_choice_ids",
     "lora_choices_for_plugin",
     "lora_choices_for_pipeline",
+    "lora_display_names_for_stack",
+    "lora_name_for_exif_from_values",
     "lora_preset_min_steps",
+    "lora_stack_min_steps",
     "manual_download_help",
+    "normalize_lora_stack_from_values",
     "repopulate_mflux_lora_combo",
     "resolve_lora_path",
 ]

@@ -18,7 +18,6 @@ from imagegen_plugins.expand_base_image import (
 )
 from imagegen_plugins.image_gen_naming import (
     format_image_exif_prompt,
-    lora_name_for_exif,
     make_readable_user_comment_before_browse,
     next_imagegen_path,
     apply_refinement_source_for_next_copy,
@@ -28,6 +27,7 @@ from imagegen_plugins.image_gen_naming import (
     resolve_generation_elapsed_seconds,
     write_exif_user_comment,
 )
+from imagegen_plugins.mflux_lora_presets import lora_name_for_exif_from_values
 from imagegen_plugins.image_gen_persistence import (
     load_hold_job_queue,
     load_job_queue_records,
@@ -2140,7 +2140,7 @@ class ImageGenController(QObject):
                         if include_quantization
                         else None
                     ),
-                    lora=lora_name_for_exif(values.get("mflux_lora")),
+                    lora=lora_name_for_exif_from_values(values),
                     guidance=values.get("guidance_scale"),
                 )
                 ref_entries, allow_cross_dir = self._exif_reference_entries_for_output(

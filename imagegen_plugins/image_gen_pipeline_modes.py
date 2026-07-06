@@ -13,7 +13,10 @@ from imagegen_plugins.hf_model_ids import FLUX1_SCHNELL
 from imagegen_plugins.mflux_lora_presets import (
     coerce_lora_preset_id,
     effective_steps_for_lora,
+    effective_steps_for_lora_stack,
     lora_preset_min_steps,
+    lora_stack_min_steps,
+    normalize_lora_stack_from_values,
 )
 
 MFLUX_QUANT_CHOICES = (3, 4, 5, 6, 8)
@@ -446,8 +449,12 @@ def resolve_steps_for_run(pipeline_id: str, values: Dict[str, Any]) -> int:
     steps = int(values.get("steps", mode.steps_default))
     steps = max(mode.steps_min, min(mode.steps_max, steps))
     if pipeline_id == "flux_schnell_mflux_play":
-        lora_id = coerce_lora_preset_id(values.get("mflux_lora", "none"))
-        steps = effective_steps_for_lora(steps, lora_id, for_fill=False)
+        stack = normalize_lora_stack_from_values(values, pop=False)
+        if stack:
+            steps = effective_steps_for_lora_stack(steps, stack, for_fill=False)
+        else:
+            lora_id = coerce_lora_preset_id(values.get("mflux_lora", "none"))
+            steps = effective_steps_for_lora(steps, lora_id, for_fill=False)
         steps = max(mode.steps_min, min(mode.steps_max, steps))
     if pipeline_id in _MFLUX_PIPELINE_IDS:
         steps = max(MFLUX_FLOW_MATCH_MIN_STEPS, steps)
@@ -483,6 +490,7 @@ def merge_defaults(
         "copies": 1,
         "low_ram": False,
         "mflux_lora": "none",
+        "mflux_lora_stack": [],
     }
     if mode.includes_output_dimensions:
         base["width"] = 1024
@@ -493,6 +501,13 @@ def merge_defaults(
         base.update(saved)
     if "mflux_lora" in base:
         base["mflux_lora"] = coerce_lora_preset_id(base["mflux_lora"])
+    if "mflux_lora_stack" in base:
+        base["mflux_lora_stack"] = normalize_lora_stack_from_values(
+            {"mflux_lora_stack": base.get("mflux_lora_stack"), "mflux_lora": base.get("mflux_lora")},
+            pop=False,
+        )
+    elif base.get("mflux_lora"):
+        base["mflux_lora_stack"] = normalize_lora_stack_from_values(base, pop=False)
     return base
 
 
@@ -510,6 +525,9 @@ def build_worker_payload(
     run_values = dict(values)
     clear_flux_prompt_ai_job(run_values)
     merged = finalize_run_values(pipeline_id, run_values)
+    from imagegen_plugins.lora_trigger_prompt_guard import apply_lora_triggers_for_run
+
+    apply_lora_triggers_for_run(merged)
     merged["pipeline_id"] = pipeline_id
     merged["output_path"] = output_path
     merged["hf_model_id"] = hf_model_id

@@ -1237,10 +1237,11 @@ class ImageGenEditDialog(ImageGenDimensionAspectMixin, QDialog):
         apply_model_combo_tooltip(self._model_combo)
         self._fields_panel.add_labeled_field("Model", model_row, to_outer=True)
         sync_image_gen_generate_enabled(self, panel=self)
-        self._lora_group, self._lora_combo = mount_image_gen_lora_field(
+        self._lora_group, self._lora_field = mount_image_gen_lora_field(
             self._fields_panel,
             parent=self._fields_panel.widget,
         )
+        self._lora_combo = self._lora_field.summary_combo
 
         self._populate_field_rows()
         mount_image_gen_fields_in_scroll(scroll, self._fields_panel)
@@ -1486,6 +1487,9 @@ class ImageGenEditDialog(ImageGenDimensionAspectMixin, QDialog):
             out = dict(self._values)
         else:
             out = self._param_panel.collect_values(self._values)
+        lora_field = getattr(self, "_lora_field", None)
+        if lora_field is not None and lora_field.is_stack_mode():
+            out["mflux_lora_stack"] = lora_field.selected_ids()
         self._stash_aspect_lock_in_values(out)
         out["source_image_path"] = self.source_path
         out["source_image_paths"] = list(self._source_paths)
@@ -1518,13 +1522,6 @@ class ImageGenEditDialog(ImageGenDimensionAspectMixin, QDialog):
                 )
                 return None
         if not validate_copies_require_random_seed(self, values):
-            return None
-        from imagegen_plugins.lora_trigger_prompt_guard import (
-            validate_lora_trigger_before_generate,
-        )
-
-        values = validate_lora_trigger_before_generate(self, values)
-        if values is None:
             return None
         if not apply_flux_prompt_job_to_prepare_run_values(
             self, values, force=force_flux_ai_job

@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
-"""Confirm LoRA trigger words appear in the generation prompt before run."""
+"""Append missing LoRA trigger words to the generation prompt at job time."""
 
 from __future__ import annotations
 
 import re
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List
 
-from PySide6.QtWidgets import QMessageBox
-
-from imagegen_plugins.lora_catalog import get_lora_entry, lora_base_display_name
-from imagegen_plugins.mflux_lora_presets import coerce_lora_preset_id
-from utils import styled_message_box
+from imagegen_plugins.lora_catalog import get_lora_entry
+from imagegen_plugins.mflux_lora_presets import (
+    coerce_lora_preset_id,
+    normalize_lora_stack_from_values,
+)
 
 
 def prompt_contains_lora_trigger(prompt: str, trigger: str) -> bool:
@@ -38,63 +38,39 @@ def prompt_with_lora_trigger_added(prompt: str, trigger: str) -> str:
     return trigger_s
 
 
-def validate_lora_trigger_before_generate(
-    dialog: Any,
-    values: Dict[str, Any],
-) -> Optional[Dict[str, Any]]:
-    """
-    When the selected LoRA defines a trigger, ensure the prompt contains it.
-
-    Returns updated values, unchanged values (Ignore), or None (Cancel).
-    """
-    lora_id = coerce_lora_preset_id(values.get("mflux_lora", "none"))
-    if lora_id == "none":
-        return values
-    entry = get_lora_entry(lora_id)
-    if entry is None:
-        return values
-    trigger = (entry.trigger_word or "").strip()
-    if not trigger:
-        return values
-
+def _missing_lora_trigger_words(values: Dict[str, Any]) -> List[str]:
+    stack = normalize_lora_stack_from_values(values, pop=False)
+    if not stack:
+        lora_id = coerce_lora_preset_id(values.get("mflux_lora", "none"))
+        if lora_id != "none":
+            stack = [lora_id]
     prompt = (values.get("prompt") or "").strip()
-    if prompt_contains_lora_trigger(prompt, trigger):
-        return values
+    missing: List[str] = []
+    for lora_id in stack:
+        entry = get_lora_entry(lora_id)
+        if entry is None:
+            continue
+        trigger = (entry.trigger_word or "").strip()
+        if not trigger or prompt_contains_lora_trigger(prompt, trigger):
+            continue
+        missing.append(trigger)
+    return missing
 
-    plugin = getattr(dialog, "plugin", None)
-    model_key = str(
-        getattr(plugin, "hf_model_id", None) or values.get("hf_model_id") or ""
-    )
-    lora_name = lora_base_display_name(entry, model_key=model_key)
 
-    msg_box = styled_message_box(
-        dialog,
-        QMessageBox.Question,
-        "LoRA trigger",
-        f"This generation has specified LoRA {lora_name} which requires a trigger.",
-        buttons=(
-            QMessageBox.StandardButton.Cancel
-            | QMessageBox.StandardButton.Ignore
-            | QMessageBox.StandardButton.Apply
-        ),
-        default_button=QMessageBox.StandardButton.Cancel,
-        button_label_overrides={
-            QMessageBox.StandardButton.Apply: "Add and proceed",
-        },
-    )
-    msg_box.exec()
-    choice = msg_box.result_data["button"]
+def augment_prompt_with_missing_lora_triggers(
+    prompt: str,
+    values: Dict[str, Any],
+) -> str:
+    """Return prompt with any missing LoRA trigger words appended."""
+    probe = dict(values)
+    probe["prompt"] = prompt
+    out = (prompt or "").strip()
+    for trigger in _missing_lora_trigger_words(probe):
+        out = prompt_with_lora_trigger_added(out, trigger)
+    return out
 
-    if choice == QMessageBox.StandardButton.Cancel:
-        return None
-    if choice == QMessageBox.StandardButton.Ignore:
-        return values
-    if choice == QMessageBox.StandardButton.Apply:
-        updated = dict(values)
-        new_prompt = prompt_with_lora_trigger_added(prompt, trigger)
-        updated["prompt"] = new_prompt
-        apply_prompt = getattr(dialog, "set_prompt_text", None)
-        if callable(apply_prompt):
-            apply_prompt(new_prompt)
-        return updated
-    return None
+
+def apply_lora_triggers_for_run(values: Dict[str, Any]) -> None:
+    """Mutate ``values['prompt']`` in place; does not affect persisted dialog text."""
+    prompt = (values.get("prompt") or "").strip()
+    values["prompt"] = augment_prompt_with_missing_lora_triggers(prompt, values)

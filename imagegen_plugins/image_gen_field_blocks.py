@@ -92,20 +92,43 @@ def steps_slider_block(
 ) -> FieldSpec:
     lo = steps_min
     lora_id = None
+    lora_stack: list[str] = []
     if pipeline_id == "flux_schnell_mflux_play":
-        lora_id = coerce_lora_preset_id(values.get("mflux_lora", "none"))
-        lora_min = lora_preset_min_steps(lora_id)
-        if lora_min is not None:
-            lo = max(lo, lora_min)
+        from imagegen_plugins.mflux_lora_presets import (
+            effective_steps_for_lora,
+            effective_steps_for_lora_stack,
+            lora_stack_min_steps,
+            normalize_lora_stack_from_values,
+        )
+
+        lora_stack = normalize_lora_stack_from_values(values, pop=False)
+        if lora_stack:
+            lora_min = lora_stack_min_steps(lora_stack)
+            if lora_min is not None:
+                lo = max(lo, lora_min)
+        else:
+            lora_id = coerce_lora_preset_id(values.get("mflux_lora", "none"))
+            lora_min = lora_preset_min_steps(lora_id)
+            if lora_min is not None:
+                lo = max(lo, lora_min)
     default = int(values.get("steps", steps_default))
-    if lora_id is not None:
+    if lora_stack:
+        default = effective_steps_for_lora_stack(default, lora_stack, for_fill=False)
+    elif lora_id is not None:
         default = effective_steps_for_lora(default, lora_id, for_fill=False)
     default = max(lo, min(steps_max, default))
     reset_default = int(
         model_reset_default(model_defaults, "steps", steps_default)
     )
     reset_default = max(lo, min(steps_max, reset_default))
-    if lora_id is not None:
+    if lora_stack:
+        from imagegen_plugins.mflux_lora_presets import effective_steps_for_lora_stack
+
+        reset_default = effective_steps_for_lora_stack(
+            reset_default, lora_stack, for_fill=False
+        )
+        reset_default = max(lo, min(steps_max, reset_default))
+    elif lora_id is not None:
         reset_default = effective_steps_for_lora(
             reset_default, lora_id, for_fill=False
         )

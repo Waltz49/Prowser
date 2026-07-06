@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import os
+import re
 from typing import Any, Dict, List, Optional
 
 from PySide6.QtCore import Qt, QTimer, Signal
@@ -313,39 +314,84 @@ def apply_exif_generation_params_to_dialog(
     if "guidance" in params:
         _set_float_slider("guidance_scale", float(params["guidance"]))
 
-    if "lora" in params and "mflux_lora" in spec_keys:
-        entry = widgets.get("mflux_lora")
-        if entry is not None:
-            widget, _, spec = entry
-            if spec.kind == "choice":
-                combo = choice_field_widget(widget)
-                from imagegen_plugins.flux_lora_catalog import get_lora_entry
+    if "lora" in params and (
+        "mflux_lora" in spec_keys or "mflux_lora_stack" in widgets
+    ):
+        stack_entry = widgets.get("mflux_lora_stack")
+        lora_field = getattr(dialog, "_lora_field", None)
+        target = str(params["lora"]).strip()
+        if not target or target.lower() == "none":
+            if lora_field is not None and lora_field.is_stack_mode():
+                lora_field.set_stack([])
+            elif stack_entry is None:
+                entry = widgets.get("mflux_lora")
+                if entry is not None:
+                    widget, _, spec = entry
+                    if spec.kind == "choice":
+                        combo = choice_field_widget(widget)
+                        none_idx = combo.findData("none")
+                        if none_idx >= 0:
+                            combo.setCurrentIndex(none_idx)
+        elif lora_field is not None and lora_field.is_stack_mode():
+            from imagegen_plugins.flux_lora_catalog import get_lora_entry
+            from imagegen_plugins.lora_catalog import LORA_CATALOG
 
-                target = str(params["lora"]).strip().lower()
-                if target and target != "none":
-                    for i in range(combo.count()):
-                        if combo.itemText(i).strip().lower() == target:
-                            combo.setCurrentIndex(i)
+            parts = [p.strip() for p in re.split(r"\s*\+\s*", target) if p.strip()]
+            if len(parts) <= 1:
+                parts = [target]
+            matched_ids: List[str] = []
+            lower_target = target.strip().lower()
+            for entry_obj in LORA_CATALOG.values():
+                if entry_obj.display_name.strip().lower() == lower_target:
+                    matched_ids.append(entry_obj.lora_id)
+                    break
+            if not matched_ids:
+                for part in parts:
+                    part_lower = part.lower()
+                    for entry_obj in LORA_CATALOG.values():
+                        if entry_obj.display_name.strip().lower() == part_lower:
+                            if entry_obj.lora_id not in matched_ids:
+                                matched_ids.append(entry_obj.lora_id)
                             break
-                    else:
+            if matched_ids:
+                lora_field.set_stack(matched_ids)
+        else:
+            entry = widgets.get("mflux_lora")
+            if entry is not None:
+                widget, _, spec = entry
+                if spec.kind == "choice":
+                    combo = choice_field_widget(widget)
+                    from imagegen_plugins.flux_lora_catalog import get_lora_entry
+
+                    target_lower = target.lower()
+                    if target_lower and target_lower != "none":
                         for i in range(combo.count()):
-                            preset_id = combo.itemData(i)
-                            entry_obj = get_lora_entry(str(preset_id))
-                            if (
-                                entry_obj is not None
-                                and entry_obj.display_name.strip().lower() == target
-                            ):
-                                combo.setCurrentIndex(i)
-                                break
-                            if str(preset_id).strip().lower() == target:
+                            if combo.itemText(i).strip().lower() == target_lower:
                                 combo.setCurrentIndex(i)
                                 break
                         else:
-                            base_target = os.path.basename(target)
                             for i in range(combo.count()):
-                                if combo.itemText(i).strip().lower() == base_target:
+                                preset_id = combo.itemData(i)
+                                entry_obj = get_lora_entry(str(preset_id))
+                                if (
+                                    entry_obj is not None
+                                    and entry_obj.display_name.strip().lower()
+                                    == target_lower
+                                ):
                                     combo.setCurrentIndex(i)
                                     break
+                                if str(preset_id).strip().lower() == target_lower:
+                                    combo.setCurrentIndex(i)
+                                    break
+                            else:
+                                base_target = os.path.basename(target_lower)
+                                for i in range(combo.count()):
+                                    if (
+                                        combo.itemText(i).strip().lower()
+                                        == base_target
+                                    ):
+                                        combo.setCurrentIndex(i)
+                                        break
 
     sync_random_seed_setting(dialog, True)
 
@@ -1591,10 +1637,11 @@ class ImageGenDialog(ImageGenDimensionAspectMixin, QDialog):
         sync_image_gen_generate_enabled(
             self, panel=self, plugin_installed=self._selected_plugin_installed()
         )
-        self._lora_group, self._lora_combo = mount_image_gen_lora_field(
+        self._lora_group, self._lora_field = mount_image_gen_lora_field(
             self._fields_panel,
             parent=self._fields_panel.widget,
         )
+        self._lora_combo = self._lora_field.summary_combo
 
         self._populate_field_rows()
         mount_image_gen_fields_in_scroll(scroll, self._fields_panel)
@@ -1759,41 +1806,56 @@ class ImageGenDialog(ImageGenDimensionAspectMixin, QDialog):
         """When LoRA requires more steps, raise the steps slider minimum and value."""
         if self.plugin.pipeline_id != "flux_schnell_mflux_play":
             return
-        lora_entry = self._widgets.get("mflux_lora")
+        lora_field = getattr(self, "_lora_field", None)
+        lora_entry = self._widgets.get("mflux_lora_stack") or self._widgets.get(
+            "mflux_lora"
+        )
         if lora_entry is None:
             return
         lora_widget, _, lora_spec = lora_entry
-        if lora_spec.kind != "choice":
-            return
-
-        if self._lora_steps_floor_widget is not lora_widget:
-            lora_widget.currentIndexChanged.connect(self._on_mflux_lora_steps_changed)
-            self._lora_steps_floor_widget = lora_widget
+        if lora_field is not None and lora_field.is_stack_mode():
+            if self._lora_steps_floor_widget is not lora_field:
+                lora_field.stack_changed.connect(self._on_mflux_lora_steps_changed)
+                self._lora_steps_floor_widget = lora_field
+        elif lora_spec.kind == "choice":
+            if self._lora_steps_floor_widget is not lora_widget:
+                lora_widget.currentIndexChanged.connect(self._on_mflux_lora_steps_changed)
+                self._lora_steps_floor_widget = lora_widget
         self._apply_lora_steps_floor()
 
-    def _on_mflux_lora_steps_changed(self, _index: int = 0) -> None:
+    def _on_mflux_lora_steps_changed(self, *_args) -> None:
         self._apply_lora_steps_floor()
 
     def _apply_lora_steps_floor(self) -> None:
         if self.plugin.pipeline_id != "flux_schnell_mflux_play":
             return
-        lora_entry = self._widgets.get("mflux_lora")
         steps_entry = self._widgets.get("steps")
-        if lora_entry is None or steps_entry is None:
+        if steps_entry is None:
             return
-        lora_widget, _, lora_spec = lora_entry
         steps_widget, _, steps_spec = steps_entry
-        if lora_spec.kind != "choice" or steps_spec.kind != "int_slider":
+        if steps_spec.kind != "int_slider":
             return
 
         from imagegen_plugins.mflux_lora_presets import (
             coerce_lora_preset_id,
+            lora_stack_min_steps,
             lora_preset_min_steps,
         )
 
         mode = get_pipeline(self.plugin.pipeline_id)
-        lora_id = coerce_lora_preset_id(lora_widget.currentData())
-        lora_min = lora_preset_min_steps(lora_id)
+        lora_field = getattr(self, "_lora_field", None)
+        if lora_field is not None and lora_field.is_stack_mode():
+            stack = lora_field.selected_ids()
+            lora_min = lora_stack_min_steps(stack)
+        else:
+            lora_entry = self._widgets.get("mflux_lora")
+            if lora_entry is None:
+                return
+            lora_widget, _, lora_spec = lora_entry
+            if lora_spec.kind != "choice":
+                return
+            lora_id = coerce_lora_preset_id(lora_widget.currentData())
+            lora_min = lora_preset_min_steps(lora_id)
         steps_min = mode.steps_min if lora_min is None else max(mode.steps_min, lora_min)
 
         inner = steps_widget.layout()
@@ -1967,6 +2029,9 @@ class ImageGenDialog(ImageGenDimensionAspectMixin, QDialog):
             out = dict(self._values)
         else:
             out = self._param_panel.collect_values(self._values)
+        lora_field = getattr(self, "_lora_field", None)
+        if lora_field is not None and lora_field.is_stack_mode():
+            out["mflux_lora_stack"] = lora_field.selected_ids()
         self._stash_aspect_lock_in_values(out)
         return out
 
@@ -1997,13 +2062,6 @@ class ImageGenDialog(ImageGenDimensionAspectMixin, QDialog):
                 )
                 return None
         if not validate_copies_require_random_seed(self, values):
-            return None
-        from imagegen_plugins.lora_trigger_prompt_guard import (
-            validate_lora_trigger_before_generate,
-        )
-
-        values = validate_lora_trigger_before_generate(self, values)
-        if values is None:
             return None
         if not apply_flux_prompt_job_to_prepare_run_values(
             self, values, force=force_flux_ai_job

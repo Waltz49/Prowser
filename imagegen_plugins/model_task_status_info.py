@@ -898,9 +898,9 @@ def _collect_generation_status_fields(
         fields["model"] = model_display_name(pipeline_id, raw_hf_id)
 
     if getattr(plugin, "lora_host_id", None):
-        from imagegen_plugins.image_gen_naming import lora_name_for_exif
+        from imagegen_plugins.mflux_lora_presets import lora_name_for_exif_from_values
 
-        lora_label = lora_name_for_exif(effective.get("mflux_lora"))
+        lora_label = lora_name_for_exif_from_values(effective)
         if lora_label:
             fields["lora"] = lora_label
 
