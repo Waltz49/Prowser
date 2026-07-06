@@ -378,6 +378,7 @@ class ImageBrowserConfig:
             # ms on same browse image before recording to Image History (0 = immediate; max 5000; 500 ms steps in UI)
             'browse_image_history_save_after_ms': 3000,
             'wrap_around': True,  # Wrap around when navigating past first/last image
+            'use_prompt_filter_exits': False,  # Run PROWSER_TEXT_AI_EXIT / PROWSER_IMAGE_AI_EXIT hooks
             'slideshow_rate': 5000,
             'slideshow_transition_speed': 1300,
             'slideshow_direction': 'right',

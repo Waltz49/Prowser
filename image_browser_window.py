@@ -378,6 +378,7 @@ class ImageBrowserWindow(QMainWindow):
         self.confirm_delete = settings.get('confirm_delete', True)
         self.is_actual_size = settings.get('browse_view_actual_size', False)
         self.wrap_around = settings.get('wrap_around', True)
+        self.use_prompt_filter_exits = settings.get('use_prompt_filter_exits', False)
         self.ignore_exif_rotation = settings.get('ignore_exif_rotation', False)
         self.drag_drop_auto_date_change = settings.get('drag_drop_auto_date_change', False)
         self.allow_thumbnail_locking = settings.get('allow_thumbnail_locking', False)
@@ -5492,6 +5493,9 @@ class ImageBrowserWindow(QMainWindow):
         
         if 'wrap_around' in new_settings:
             self.wrap_around = new_settings['wrap_around']
+
+        if 'use_prompt_filter_exits' in new_settings:
+            self.use_prompt_filter_exits = new_settings['use_prompt_filter_exits']
         
         if 'drag_drop_auto_date_change' in new_settings:
             self.drag_drop_auto_date_change = new_settings['drag_drop_auto_date_change']

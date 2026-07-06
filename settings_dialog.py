@@ -1112,6 +1112,7 @@ class SettingsDialog(QDialog):
                 'debug_mode': self.debug_checkbox.isChecked(),
                 'confirm_delete': self.confirm_delete_checkbox.isChecked(),
                 'wrap_around': self.wrap_around_checkbox.isChecked(),
+                'use_prompt_filter_exits': self.use_prompt_filter_exits_checkbox.isChecked(),
                 'ignore_exif_rotation': not self.ignore_exif_rotation_checkbox.isChecked(),
                 'imagegen_max_generation_dimension': (
                     self._imagegen_max_generation_dimension_px()
@@ -1347,6 +1348,8 @@ class SettingsDialog(QDialog):
                 self.confirm_delete_checkbox.setChecked(settings['confirm_delete'])
             if 'wrap_around' in settings:
                 self.wrap_around_checkbox.setChecked(settings['wrap_around'])
+            if 'use_prompt_filter_exits' in settings:
+                self.use_prompt_filter_exits_checkbox.setChecked(settings['use_prompt_filter_exits'])
             if 'ignore_exif_rotation' in settings:
                 self.ignore_exif_rotation_checkbox.setChecked(not settings['ignore_exif_rotation'])
             self._load_imagegen_general_settings(settings)
@@ -1611,6 +1614,7 @@ class SettingsDialog(QDialog):
             self.debug_checkbox.setChecked(False)
             self.confirm_delete_checkbox.setChecked(True)
             self.wrap_around_checkbox.setChecked(True)
+            self.use_prompt_filter_exits_checkbox.setChecked(False)
             self.ignore_exif_rotation_checkbox.setChecked(True)
             if hasattr(self, 'imagegen_max_generation_dimension_slider'):
                 from imagegen_plugins.image_gen_dim_limits import (
@@ -1807,6 +1811,7 @@ class SettingsDialog(QDialog):
             self.debug_checkbox.setChecked(False)
             self.confirm_delete_checkbox.setChecked(True)
             self.wrap_around_checkbox.setChecked(True)
+            self.use_prompt_filter_exits_checkbox.setChecked(False)
             self.ignore_exif_rotation_checkbox.setChecked(True)
             if hasattr(self, 'imagegen_max_generation_dimension_slider'):
                 from imagegen_plugins.image_gen_dim_limits import (
@@ -2186,6 +2191,15 @@ class SettingsDialog(QDialog):
         self.debug_checkbox.setToolTip("Show key popup overlay for debugging keyboard events")
         self.debug_checkbox.setStyleSheet(self.SMALL_CHECKBOX_STYLE)
         checkbox_grid.addWidget(self.debug_checkbox, 1, 1)
+
+        self.use_prompt_filter_exits_checkbox = QCheckBox("Use prompt filter exits")
+        self.use_prompt_filter_exits_checkbox.setToolTip(
+            "When enabled, run external prompt filter scripts configured via\n"
+            "PROWSER_TEXT_AI_EXIT (LMStudio / caption prompts) and\n"
+            "PROWSER_IMAGE_AI_EXIT (image generation prompts) before model calls."
+        )
+        self.use_prompt_filter_exits_checkbox.setStyleSheet(self.SMALL_CHECKBOX_STYLE)
+        checkbox_grid.addWidget(self.use_prompt_filter_exits_checkbox, 2, 0)
         
         # Add checkbox grid to general group
         checkbox_container = QWidget()
@@ -6237,6 +6251,12 @@ class SettingsDialog(QDialog):
                 
                 self.wrap_around_checkbox.setChecked(parent_window.wrap_around)
                 self.original_settings['wrap_around'] = parent_window.wrap_around
+
+                use_prompt_filter_exits = getattr(
+                    parent_window, 'use_prompt_filter_exits', False
+                )
+                self.use_prompt_filter_exits_checkbox.setChecked(use_prompt_filter_exits)
+                self.original_settings['use_prompt_filter_exits'] = use_prompt_filter_exits
                 
                 # Set ignore EXIF rotation setting (reversed: checkbox checked = use EXIF = ignore_exif=False)
                 ignore_exif_rotation = getattr(parent_window, 'ignore_exif_rotation', False)
@@ -6494,6 +6514,10 @@ class SettingsDialog(QDialog):
                 
                 confirm_delete = settings.get('confirm_delete', True)
                 self.confirm_delete_checkbox.setChecked(confirm_delete)
+
+                use_prompt_filter_exits = settings.get('use_prompt_filter_exits', False)
+                self.use_prompt_filter_exits_checkbox.setChecked(use_prompt_filter_exits)
+                self.original_settings['use_prompt_filter_exits'] = use_prompt_filter_exits
                 
                 ignore_exif_rotation = settings.get('ignore_exif_rotation', False)
                 # Reverse logic: checkbox checked (True) means use EXIF (ignore_exif=False)
@@ -7492,6 +7516,7 @@ class SettingsDialog(QDialog):
             'slideshow_overlap_delay': self._calculate_overlap_delay(),
             'slideshow_back_and_forth': self.slideshow_back_and_forth_checkbox.isChecked(),
             'wrap_around': self.wrap_around_checkbox.isChecked(),
+            'use_prompt_filter_exits': self.use_prompt_filter_exits_checkbox.isChecked(),
             'ignore_exif_rotation': not self.ignore_exif_rotation_checkbox.isChecked(),  # Reversed: checked = use EXIF (ignore_exif=False)
             'drag_drop_auto_date_change': self.drag_drop_auto_date_change_checkbox.isChecked(),
             'allow_thumbnail_locking': self.allow_thumbnail_locking_checkbox.isChecked(),
