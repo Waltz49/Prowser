@@ -14,6 +14,7 @@ from imagegen_plugins.hf_model_ids import (
     FLUX2_KLEIN_9B,
     FLUX2_KLEIN_9B_KV,
     LORA_PROBE_MODEL_ORDER,
+    SCENEWORKS_FLUX2_KLEIN_9B_KV_MLX,
     SD15_LORA_MODEL_KEYS,
     ANYTHING_FURRY,
     REALISTIC_VISION_V4_NOVAE,
@@ -85,6 +86,12 @@ LORA_SETTINGS_MODELS: Tuple[LoraSettingsModel, ...] = (
         FLUX2_KLEIN_9B_KV,
         "Create and Edit dialogs (9B KV model)",
         ("create", "edit"),
+    ),
+    LoraSettingsModel(
+        SCENEWORKS_FLUX2_KLEIN_9B_KV_MLX,
+        SCENEWORKS_FLUX2_KLEIN_9B_KV_MLX,
+        "Create, Edit, and Expand dialogs (SceneWorks MLX 9B KV)",
+        ("create", "edit", "expand"),
     ),
     LoraSettingsModel(
         REALISTIC_VISION_V4_NOVAE,
@@ -187,7 +194,12 @@ def lora_probe_pipeline_id(model_key: str) -> Optional[str]:
         return "flux_schnell_mflux_play"
     if mk == FLUX1_FILL_DEV:
         return "mflux_fill_infill"
-    if mk in (FLUX2_KLEIN_4B, FLUX2_KLEIN_9B, FLUX2_KLEIN_9B_KV):
+    if mk in (
+        FLUX2_KLEIN_4B,
+        FLUX2_KLEIN_9B,
+        FLUX2_KLEIN_9B_KV,
+        SCENEWORKS_FLUX2_KLEIN_9B_KV_MLX,
+    ):
         return "mflux_flux2_klein_edit"
     if mk in SD15_LORA_MODEL_KEYS:
         return "sd15_diffusers"
@@ -209,6 +221,8 @@ def klein_lora_model_aliases(model_key: str) -> Tuple[str, ...]:
     mk = (model_key or "").strip()
     if mk == FLUX2_KLEIN_9B_KV:
         return (FLUX2_KLEIN_9B_KV, FLUX2_KLEIN_9B)
+    if mk == SCENEWORKS_FLUX2_KLEIN_9B_KV_MLX:
+        return (SCENEWORKS_FLUX2_KLEIN_9B_KV_MLX, FLUX2_KLEIN_9B_KV, FLUX2_KLEIN_9B)
     return (mk,) if mk else ()
 
 
@@ -232,7 +246,12 @@ def host_id_for_lora_model(model_key: str) -> Optional[str]:
         return HOST_FLUX1_T2I
     if model_key == FLUX1_FILL_DEV:
         return HOST_FLUX1_FILL
-    if model_key in (FLUX2_KLEIN_4B, FLUX2_KLEIN_9B, FLUX2_KLEIN_9B_KV):
+    if model_key in (
+        FLUX2_KLEIN_4B,
+        FLUX2_KLEIN_9B,
+        FLUX2_KLEIN_9B_KV,
+        SCENEWORKS_FLUX2_KLEIN_9B_KV_MLX,
+    ):
         return HOST_FLUX2_KLEIN
     if model_key in SD15_LORA_MODEL_KEYS:
         return HOST_SD15

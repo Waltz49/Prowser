@@ -55,10 +55,11 @@ def _run_mflux_klein_create(
     model: str,
     steps: int,
     seed: int,
-    quantize: int,
+    quantize: int | None,
     low_ram: bool,
     width: int,
     height: int,
+    model_path: str | None = None,
     lora_paths: list[str] | None = None,
     lora_scales: list[float] | None = None,
     stepwise_image_output_dir: str | None = None,
@@ -73,6 +74,7 @@ def _run_mflux_klein_create(
         image = generate_flux2_klein_create(
             model_name=model,
             quantize=quantize,
+            model_path=model_path,
             lora_paths=lora_paths,
             lora_scales=lora_scales,
             prompt=prompt,
@@ -103,14 +105,11 @@ def run_from_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
         MFLUX_FLOW_MATCH_MIN_STEPS,
         min(50, int(payload.get("steps", 4))),
     )
-    quantize = int(payload.get("mflux_quantize", 4))
-    if quantize not in _MFLUX_ALLOWED_QUANT:
-        raise ValueError(f"mflux_quantize must be one of {sorted(_MFLUX_ALLOWED_QUANT)}")
     low_ram = bool(payload.get("low_ram", True))
     output_path = str(payload["output_path"])
-    model = str(payload.get("hf_model_id") or "").strip()
-    if not model:
-        raise ValueError("hf_model_id is required")
+    from imagegen_plugins.sceneworks_klein_mlx import klein_load_params_from_payload
+
+    model, quantize, model_path = klein_load_params_from_payload(payload)
 
     if payload.get("random_seed", True):
         seed = random.randint(0, 2**31 - 1)
@@ -156,6 +155,7 @@ def run_from_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
                 low_ram=low_ram,
                 width=w,
                 height=h,
+                model_path=model_path,
                 lora_paths=lora_paths,
                 lora_scales=lora_scales,
                 stepwise_image_output_dir=stepwise_dir,

@@ -76,6 +76,13 @@ def model_display_name(pipeline_id: str, hf_model_id: str) -> str:
         "mflux_flux2_klein_create",
         "mflux_flux2_klein_expand",
     ):
+        from imagegen_plugins.sceneworks_klein_mlx import (
+            is_sceneworks_klein_mlx_repo,
+            sceneworks_model_is_local,
+        )
+
+        if is_sceneworks_klein_mlx_repo(hf_model_id):
+            return "FLUX 2 Klein 9B KV MLX (SceneWorks)"
         text = (hf_model_id or "").strip().lower()
         if "9b-kv" in text or "klein-9b-kv" in text or "flux.2-klein-9b-kv" in text:
             return "FLUX 2 klein 9B KV"
@@ -104,7 +111,15 @@ def pipeline_model_is_local(
         "mflux_flux2_klein_create",
         "mflux_flux2_klein_expand",
     ):
-        result = _hf_repo_snapshot_is_complete(hf_model_id, _FLUX2_KLEIN_WEIGHT_SUBDIRS)
+        from imagegen_plugins.sceneworks_klein_mlx import (
+            is_sceneworks_klein_mlx_repo,
+            sceneworks_model_is_local,
+        )
+
+        if is_sceneworks_klein_mlx_repo(hf_model_id):
+            result = sceneworks_model_is_local(hf_model_id)
+        else:
+            result = _hf_repo_snapshot_is_complete(hf_model_id, _FLUX2_KLEIN_WEIGHT_SUBDIRS)
     elif pipeline_id == "sana_sprint_600m":
         result = _hf_repo_snapshot_has_weights(hf_model_id)
     elif pipeline_id == "z_image_turbo_sdnq":
@@ -161,11 +176,25 @@ def confirm_model_download_if_needed(
         "mflux_flux2_klein_expand",
     ):
         try:
-            ensure_hf_repo_downloaded(
-                plugin.hf_model_id,
-                pipeline_id=plugin.pipeline_id,
-                parent=parent,
+            from imagegen_plugins.sceneworks_klein_mlx import (
+                DEFAULT_MLX_TIER,
+                ensure_sceneworks_tier_downloaded,
+                is_sceneworks_klein_mlx_repo,
             )
+
+            if is_sceneworks_klein_mlx_repo(plugin.hf_model_id):
+                tier = DEFAULT_MLX_TIER
+                ensure_sceneworks_tier_downloaded(
+                    plugin.hf_model_id,
+                    tier,
+                    parent=parent,
+                )
+            else:
+                ensure_hf_repo_downloaded(
+                    plugin.hf_model_id,
+                    pipeline_id=plugin.pipeline_id,
+                    parent=parent,
+                )
         except Exception as e:
             from utils import show_styled_critical
 

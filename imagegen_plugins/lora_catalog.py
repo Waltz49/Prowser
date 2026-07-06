@@ -44,12 +44,14 @@ from imagegen_plugins.hf_model_ids import (
     FLUX2_KLEIN_9B,
     FLUX2_KLEIN_9B_KV,
     LORA_PROBE_MODEL_ORDER,
+    SCENEWORKS_FLUX2_KLEIN_9B_KV_MLX,
 )
 
 _MODEL_SIZE_TAG_BY_KEY: Dict[str, str] = {
     FLUX2_KLEIN_4B: "4B",
     FLUX2_KLEIN_9B: "9B",
     FLUX2_KLEIN_9B_KV: "9B KV",
+    SCENEWORKS_FLUX2_KLEIN_9B_KV_MLX: "9B KV MLX",
 }
 from imagegen_plugins.lora_host_registry import (
     HOST_FLUX2_KLEIN,

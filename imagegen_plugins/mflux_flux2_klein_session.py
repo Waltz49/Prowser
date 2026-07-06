@@ -15,6 +15,11 @@ import mlx.core as mx
 
 from workers.model_tasks_worker import PerfTimer, perf_log_kv
 
+from imagegen_plugins.sceneworks_klein_mlx_weights import (
+    init_flux2_klein_from_sceneworks_tier,
+    is_sceneworks_packed_tier_path,
+)
+
 _VAE_CACHE_MAX = 10
 
 _session_model: Any = None
@@ -73,15 +78,54 @@ class _VaeEncodeCache:
 _vae_cache = _VaeEncodeCache()
 
 
+def _klein_model_config(model_name: str):
+    """Klein HF ids inferred by mflux omit text_encoder_overrides (4B defaults break 9B)."""
+    from mflux.models.common.config.model_config import ModelConfig
+
+    inferred = ModelConfig.from_name(model_name=model_name)
+    if inferred.text_encoder_overrides:
+        return inferred
+
+    lowered = model_name.lower()
+    if "9b" in lowered:
+        canonical = ModelConfig.flux2_klein_9b()
+    elif "4b" in lowered:
+        canonical = ModelConfig.flux2_klein_4b()
+    else:
+        return inferred
+
+    return ModelConfig(
+        priority=canonical.priority,
+        aliases=canonical.aliases,
+        model_name=model_name,
+        base_model=canonical.model_name,
+        controlnet_model=canonical.controlnet_model,
+        custom_transformer_model=canonical.custom_transformer_model,
+        num_train_steps=canonical.num_train_steps,
+        max_sequence_length=canonical.max_sequence_length,
+        supports_guidance=canonical.supports_guidance,
+        requires_sigma_shift=canonical.requires_sigma_shift,
+        transformer_overrides=dict(canonical.transformer_overrides),
+        text_encoder_overrides=dict(canonical.text_encoder_overrides),
+        sigma_base_shift=canonical.sigma_base_shift,
+        sigma_max_shift=canonical.sigma_max_shift,
+        sigma_base_seq_len=canonical.sigma_base_seq_len,
+        sigma_max_seq_len=canonical.sigma_max_seq_len,
+        sigma_shift_terminal=canonical.sigma_shift_terminal,
+    )
+
+
 def _klein_session_key(
     model_name: str,
-    quantize: int,
+    quantize: int | None,
     lora_paths: list[str] | None,
     lora_scales: list[float] | None,
+    model_path: str | None = None,
 ) -> tuple[Any, ...]:
     paths = tuple(str(p) for p in (lora_paths or ()))
     scales = tuple(float(s) for s in (lora_scales or ()))
-    return (model_name, int(quantize), paths, scales)
+    quant_key: Any = int(quantize) if quantize is not None else "pre"
+    return (model_name, quant_key, str(model_path or ""), paths, scales)
 
 
 def _klein_model_unusable_after_low_ram(model: Any) -> bool:
@@ -126,12 +170,15 @@ def _register_run_callbacks(
 def get_flux2_klein_edit(
     *,
     model_name: str,
-    quantize: int,
+    quantize: int | None,
     lora_paths: list[str] | None,
     lora_scales: list[float] | None,
+    model_path: str | None = None,
 ) -> Any:
     global _session_model, _session_key
-    key = _klein_session_key(model_name, quantize, lora_paths, lora_scales)
+    key = _klein_session_key(
+        model_name, quantize, lora_paths, lora_scales, model_path=model_path
+    )
     if _session_model is not None and _session_key == key:
         if _klein_model_unusable_after_low_ram(_session_model):
             perf_log_kv("model_load", kind="flux2_klein_edit", cache="stale", model=model_name)
@@ -141,17 +188,26 @@ def get_flux2_klein_edit(
             return _session_model
 
     release_flux2_klein_session(reason="reload")
-    from mflux.models.common.config import ModelConfig
     from mflux.models.flux2.variants.edit.flux2_klein_edit import Flux2KleinEdit
 
     t0 = time.perf_counter()
-    model_config = ModelConfig.from_name(model_name=model_name)
-    _session_model = Flux2KleinEdit(
-        model_config=model_config,
-        quantize=int(quantize),
-        lora_paths=lora_paths,
-        lora_scales=lora_scales,
-    )
+    model_config = _klein_model_config(model_name)
+    if is_sceneworks_packed_tier_path(model_path):
+        _session_model = init_flux2_klein_from_sceneworks_tier(
+            "edit",
+            model_config=model_config,
+            model_path=str(model_path),
+            lora_paths=lora_paths,
+            lora_scales=lora_scales,
+        )
+    else:
+        _session_model = Flux2KleinEdit(
+            model_config=model_config,
+            quantize=quantize,
+            model_path=model_path,
+            lora_paths=lora_paths,
+            lora_scales=lora_scales,
+        )
     _session_key = key
     perf_log_kv(
         "model_load",
@@ -179,12 +235,15 @@ def release_flux2_klein_session(*, reason: str = "explicit") -> None:
 def get_flux2_klein_create(
     *,
     model_name: str,
-    quantize: int,
+    quantize: int | None,
     lora_paths: list[str] | None,
     lora_scales: list[float] | None,
+    model_path: str | None = None,
 ) -> Any:
     global _create_session_model, _create_session_key
-    key = _klein_session_key(model_name, quantize, lora_paths, lora_scales)
+    key = _klein_session_key(
+        model_name, quantize, lora_paths, lora_scales, model_path=model_path
+    )
     if _create_session_model is not None and _create_session_key == key:
         if _klein_model_unusable_after_low_ram(_create_session_model):
             perf_log_kv(
@@ -204,17 +263,26 @@ def get_flux2_klein_create(
         _create_session_key = None
         gc.collect()
 
-    from mflux.models.common.config import ModelConfig
     from mflux.models.flux2.variants.txt2img.flux2_klein import Flux2Klein
 
     t0 = time.perf_counter()
-    model_config = ModelConfig.from_name(model_name=model_name)
-    _create_session_model = Flux2Klein(
-        model_config=model_config,
-        quantize=int(quantize),
-        lora_paths=lora_paths,
-        lora_scales=lora_scales,
-    )
+    model_config = _klein_model_config(model_name)
+    if is_sceneworks_packed_tier_path(model_path):
+        _create_session_model = init_flux2_klein_from_sceneworks_tier(
+            "create",
+            model_config=model_config,
+            model_path=str(model_path),
+            lora_paths=lora_paths,
+            lora_scales=lora_scales,
+        )
+    else:
+        _create_session_model = Flux2Klein(
+            model_config=model_config,
+            quantize=quantize,
+            model_path=model_path,
+            lora_paths=lora_paths,
+            lora_scales=lora_scales,
+        )
     _create_session_key = key
     perf_log_kv(
         "model_load",
@@ -230,9 +298,10 @@ def get_flux2_klein_create(
 def generate_flux2_klein_create(
     *,
     model_name: str,
-    quantize: int,
+    quantize: int | None,
     lora_paths: list[str] | None,
     lora_scales: list[float] | None,
+    model_path: str | None = None,
     prompt: str,
     seed: int,
     steps: int,
@@ -249,6 +318,7 @@ def generate_flux2_klein_create(
             quantize=quantize,
             lora_paths=lora_paths,
             lora_scales=lora_scales,
+            model_path=model_path,
         )
         _register_run_callbacks(
             model,
@@ -321,9 +391,10 @@ def _reference_conditioning(
 def generate_flux2_klein_edit(
     *,
     model_name: str,
-    quantize: int,
+    quantize: int | None,
     lora_paths: list[str] | None,
     lora_scales: list[float] | None,
+    model_path: str | None = None,
     prompt: str,
     seed: int,
     steps: int,
@@ -348,6 +419,7 @@ def generate_flux2_klein_edit(
             quantize=quantize,
             lora_paths=lora_paths,
             lora_scales=lora_scales,
+            model_path=model_path,
         )
         _register_run_callbacks(
             model,
@@ -386,7 +458,9 @@ def generate_flux2_klein_edit(
                 )
             )
 
-        session_key = _klein_session_key(model_name, quantize, lora_paths, lora_scales)
+        session_key = _klein_session_key(
+            model_name, quantize, lora_paths, lora_scales, model_path=model_path
+        )
         image_latents, image_latent_ids = _reference_conditioning(
             model,
             image_paths,

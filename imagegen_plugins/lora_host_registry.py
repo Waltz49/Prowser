@@ -13,6 +13,7 @@ from imagegen_plugins.hf_model_ids import (
     FLUX2_KLEIN_4B,
     FLUX2_KLEIN_9B,
     FLUX2_KLEIN_9B_KV,
+    SCENEWORKS_FLUX2_KLEIN_9B_KV_MLX,
     SD15_LORA_MODEL_KEYS,
 )
 
@@ -51,7 +52,12 @@ LORA_HOSTS: Dict[str, LoraHost] = {
             "mflux_flux2_klein_edit",
             "mflux_flux2_klein_expand",
         ),
-        probe_targets=(FLUX2_KLEIN_4B, FLUX2_KLEIN_9B, FLUX2_KLEIN_9B_KV),
+        probe_targets=(
+            FLUX2_KLEIN_4B,
+            FLUX2_KLEIN_9B,
+            FLUX2_KLEIN_9B_KV,
+            SCENEWORKS_FLUX2_KLEIN_9B_KV_MLX,
+        ),
     ),
     HOST_SD15: LoraHost(
         host_id=HOST_SD15,

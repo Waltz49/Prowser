@@ -16,6 +16,7 @@ from imagegen_plugins.hf_model_ids import (
     FLUX2_KLEIN_4B,
     FLUX2_KLEIN_9B,
     FLUX2_KLEIN_9B_KV,
+    SCENEWORKS_FLUX2_KLEIN_9B_KV_MLX,
 )
 from imagegen_plugins.lora_catalog import (
     FluxLoraEntry,
@@ -219,6 +220,8 @@ def _probe_klein_edit(
     lora_scale: float,
     cancel_check: Callable[[], bool],
     prompt: str = "test edit",
+    quantize: int | None = 4,
+    model_path: str | None = None,
 ) -> bool:
     from PIL import Image
 
@@ -237,7 +240,8 @@ def _probe_klein_edit(
             pass
         image = generate_flux2_klein_edit(
             model_name=hf_model_id,
-            quantize=4,
+            quantize=quantize,
+            model_path=model_path,
             lora_paths=[lora_path],
             lora_scales=[lora_scale],
             prompt=prompt,
@@ -326,6 +330,27 @@ def probe_lora_on_model(
             lora_scale=lora_scale,
             cancel_check=cancel_check,
             prompt=prompt("test edit"),
+        )
+    if model_key == SCENEWORKS_FLUX2_KLEIN_9B_KV_MLX:
+        from imagegen_plugins.sceneworks_klein_mlx import (
+            DEFAULT_MLX_TIER,
+            resolve_tier_model_path,
+        )
+
+        tier_path = resolve_tier_model_path(
+            SCENEWORKS_FLUX2_KLEIN_9B_KV_MLX,
+            DEFAULT_MLX_TIER,
+        )
+        if not tier_path:
+            return False
+        return _probe_klein_edit(
+            hf_model_id=SCENEWORKS_FLUX2_KLEIN_9B_KV_MLX,
+            lora_path=lora_path,
+            lora_scale=lora_scale,
+            cancel_check=cancel_check,
+            prompt=prompt("test edit"),
+            quantize=None,
+            model_path=tier_path,
         )
     raise ValueError(f"Unknown LoRA probe model: {model_key}")
 

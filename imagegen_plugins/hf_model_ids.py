@@ -9,6 +9,7 @@ FLUX1_FILL_DEV = "black-forest-labs/FLUX.1-Fill-dev"
 FLUX2_KLEIN_4B = "black-forest-labs/FLUX.2-klein-4B"
 FLUX2_KLEIN_9B = "black-forest-labs/FLUX.2-klein-9B"
 FLUX2_KLEIN_9B_KV = "black-forest-labs/FLUX.2-klein-9b-kv"
+SCENEWORKS_FLUX2_KLEIN_9B_KV_MLX = "SceneWorks/flux2-klein-9b-kv-mlx"
 
 REALISTIC_VISION_V4_NOVAE = "SG161222/Realistic_Vision_V4.0_noVAE"
 ANYTHING_FURRY = "stablediffusionapi/anythingfurry"
@@ -29,6 +30,7 @@ LORA_PROBE_MODEL_ORDER: tuple[str, ...] = (
     FLUX2_KLEIN_4B,
     FLUX2_KLEIN_9B,
     FLUX2_KLEIN_9B_KV,
+    SCENEWORKS_FLUX2_KLEIN_9B_KV_MLX,
     REALISTIC_VISION_V4_NOVAE,
     ANYTHING_FURRY,
 )
@@ -40,9 +42,10 @@ LORA_MODEL_DISPLAY_NAMES: dict[str, str] = {
     FLUX2_KLEIN_4B: "FLUX.2 Klein 4B",
     FLUX2_KLEIN_9B: "FLUX.2 Klein 9B",
     FLUX2_KLEIN_9B_KV: "FLUX.2 Klein 9B KV",
+    SCENEWORKS_FLUX2_KLEIN_9B_KV_MLX: "FLUX.2 Klein 9B KV MLX",
     REALISTIC_VISION_V4_NOVAE: "Realistic Vision V4.0",
     ANYTHING_FURRY: "Anything Furry",
-    Z_IMAGE_TURBO_SDNQ_INT8: "Z-Image Turbo (8-bit)",
+    Z_IMAGE_TURBO_SDNQ_INT8: "Z-Image Turbo",
 }
 
 

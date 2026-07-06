@@ -853,6 +853,7 @@ IMAGEGEN_DEFAULTS = {
                 "black-forest-labs/FLUX.2-klein-4B": {"enabled_ids": [], "hidden_ids": []},
                 "black-forest-labs/FLUX.2-klein-9B": {"enabled_ids": [], "hidden_ids": []},
                 "black-forest-labs/FLUX.2-klein-9b-kv": {"enabled_ids": [], "hidden_ids": []},
+                "SceneWorks/flux2-klein-9b-kv-mlx": {"enabled_ids": [], "hidden_ids": []},
             },
             "model_support": {},
         },

@@ -121,6 +121,19 @@ def discover_plugins() -> List[ImageGenModelPlugin]:
     except ImportError:
         pass
 
+    try:
+        from imagegen_plugins.flux_klein_sceneworks import (
+            SCENEWORKS_KLEIN_9B_KV_MLX_CREATE_PLUGIN,
+            SCENEWORKS_KLEIN_9B_KV_MLX_EDIT_PLUGIN,
+            SCENEWORKS_KLEIN_9B_KV_MLX_EXPAND_PLUGIN,
+        )
+
+        candidates.append(SCENEWORKS_KLEIN_9B_KV_MLX_CREATE_PLUGIN)
+        candidates.append(SCENEWORKS_KLEIN_9B_KV_MLX_EDIT_PLUGIN)
+        candidates.append(SCENEWORKS_KLEIN_9B_KV_MLX_EXPAND_PLUGIN)
+    except ImportError:
+        pass
+
     _discovered_plugins = candidates
     return list(candidates)
 
