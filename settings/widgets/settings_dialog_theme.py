@@ -98,6 +98,13 @@ def settings_dialog_stylesheet(chrome: SettingsDialogChrome) -> str:
         background-color: transparent;
         color: {c.text_hex};
     }}
+    #{_SETTINGS_DIALOG_OBJECT_NAME} QToolTip {{
+        background-color: {t.qtooltip_bg_hex};
+        color: {t.qtooltip_fg_hex};
+        border: 1px solid {t.qtooltip_border_hex};
+        border-radius: 4px;
+        padding: 4px 8px;
+    }}
     #{_SETTINGS_DIALOG_OBJECT_NAME} QGroupBox {{
         color: {c.header_hex};
         border: 1px solid {c.groupbox_border_hex};
@@ -180,5 +187,20 @@ def settings_dialog_stylesheet(chrome: SettingsDialogChrome) -> str:
     ) + f"""
     #{_SETTINGS_DIALOG_OBJECT_NAME} QPushButton:disabled {{
         border-color: {disabled_btn_border};
+    }}
+    """
+
+
+def settings_dialog_tooltip_label_stylesheet(chrome: SettingsDialogChrome) -> str:
+    """Opaque floating tooltip for settings controls (native QToolTip is unreliable on macOS)."""
+    c = chrome
+    return f"""
+    QLabel {{
+        background-color: {c.control_bg_hex};
+        color: {c.control_text_hex};
+        border: 1px solid {c.control_border_hex};
+        border-radius: 4px;
+        padding: 4px 8px;
+        font-size: 12px;
     }}
     """

@@ -415,13 +415,23 @@ def _information_panel_progress_bar_html(
     fill_hex: str,
     border_hex: str,
     bg_hex: str,
+    show_pending_start_indicator: bool = False,
 ) -> str:
     """Single-row table bar with explicit pixel widths (QTextBrowser-safe)."""
     bar_width_px = max(_INFO_PANEL_BAR_MIN_W, int(bar_width_px))
     fill_percent = max(0, min(100, int(fill_percent)))
+    h = _INFO_PANEL_BAR_H
+    if show_pending_start_indicator and fill_percent <= 0:
+        return (
+            f'<table width="{bar_width_px}" cellspacing="0" cellpadding="0" '
+            f'style="border:1px solid {border_hex}; table-layout:fixed;"><tr>'
+            f'<td width="{bar_width_px}" bgcolor="{bg_hex}" height="{h}" '
+            f'align="center" valign="middle" '
+            f'style="font-size:9px;line-height:{h}px;color:#FFFFFF;">'
+            f"\u2192</td></tr></table>"
+        )
     filled_w = max(0, min(bar_width_px, int(round(bar_width_px * fill_percent / 100.0))))
     empty_w = bar_width_px - filled_w
-    h = _INFO_PANEL_BAR_H
     cells: list[str] = []
     if filled_w > 0:
         cells.append(f'<td width="{filled_w}" bgcolor="{fill_hex}" height="{h}"></td>')
@@ -444,6 +454,8 @@ def _information_panel_progress_rows_html(
     fill_hex: str,
     border_hex: str,
     bg_hex: str,
+    show_pending_start_indicator: bool = False,
+    pending_start_indicator_label: str | None = None,
 ) -> str:
     """Stacked Elapsed/Est/Steps/Series rows in one table so columns stay aligned."""
     tr_parts: list[str] = []
@@ -454,6 +466,12 @@ def _information_panel_progress_rows_html(
             fill_hex=fill_hex,
             border_hex=border_hex,
             bg_hex=bg_hex,
+            show_pending_start_indicator=(
+                show_pending_start_indicator
+                and int(fill_percent) <= 0
+                and pending_start_indicator_label is not None
+                and label == pending_start_indicator_label
+            ),
         )
         tr_parts.append(
             "<tr valign=\"middle\">"
@@ -573,6 +591,12 @@ def format_information_generation_timing_cell_html(
         if series_row is not None:
             progress_rows.append(series_row)
 
+    pending_start = (
+        completed_steps is not None
+        and total_steps is not None
+        and total_steps > 0
+        and int(completed_steps) <= 0
+    )
     table_html = _information_panel_progress_rows_html(
         progress_rows,
         row_width,
@@ -580,6 +604,8 @@ def format_information_generation_timing_cell_html(
         fill_hex=fill_hex,
         border_hex=border_hex,
         bg_hex=bg_hex,
+        show_pending_start_indicator=pending_start,
+        pending_start_indicator_label="Elapsed:" if pending_start else None,
     )
     body = table_html
 

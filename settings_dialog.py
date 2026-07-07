@@ -136,6 +136,7 @@ from settings.widgets.settings_dialog_theme import (
     resolve_settings_chrome_from_widget,
     settings_chrome_for_preset,
     settings_dialog_stylesheet,
+    settings_dialog_tooltip_label_stylesheet,
 )
 from settings.widgets.collapsible_theme_group import (
     CollapsibleThemeGroup,
@@ -147,20 +148,54 @@ from settings.widgets.multi_row_tab_widget import (
     MultiRowTabWidget,
     TabButtonContainer,
 )
+from tooltip_popup_utils import install_settings_dialog_tooltip_filter
 
 THEME_COLOR_SWATCH_TOOLTIPS = {
-    "default_background_color_hex": "Background for the main application window chrome (not thumbnails or dialogs).",
-    "text_color_hex": "Browse view and other main-window information (not dialogs or menus).",
+    "default_background_color_hex": (
+        "Background for the main application window chrome (not\n"
+        "thumbnails or dialogs)."
+    ),
+    "text_color_hex": (
+        "Browse view and other main-window information (not\n"
+        "dialogs or menus)."
+    ),
     "dialog_background_hex": "Background for modal and modeless dialog windows.",
-    "dialog_text_color_hex": "Text color for dialog labels and general dialog content.",
-    "dialog_input_background_hex": "Background for text fields, combo boxes, and other typed-in controls inside dialogs.",
-    "thumbnail_grid_background_color_hex": "Background behind the thumbnail and list grids (margins and empty areas).",
-    "thumbnail_text_color_hex": "Text on thumbnail overlays, list rows, and in-grid labels.",
-    "status_bar_background_color_hex": "Background fill for the main status bar, context menus, and menu-bar dropdowns.",
-    "status_bar_text_color_hex": "Text color for status bar labels, context menus, and menu-bar dropdown items.",
-    "sidebar_header_bg_hex": "Background of view title bars (e.g. Favorites, folder name headers).",
-    "sidebar_background_color_hex": "Background for left and right sidebar panes (file tree, preview, organize, information, jobs).",
-    "sidebar_text_color_hex": "Text color for sidebar content, titlebar labels, and tables; section headings are derived automatically.",
+    "dialog_text_color_hex": (
+        "Text color for dialog labels and general dialog\n"
+        "content."
+    ),
+    "dialog_input_background_hex": (
+        "Background for text fields, combo boxes, and other\n"
+        "typed-in controls inside dialogs."
+    ),
+    "thumbnail_grid_background_color_hex": (
+        "Background behind the thumbnail and list grids (margins\n"
+        "and empty areas)."
+    ),
+    "thumbnail_text_color_hex": (
+        "Text on thumbnail overlays, list rows, and in-grid\n"
+        "labels."
+    ),
+    "status_bar_background_color_hex": (
+        "Background fill for the main status bar, context menus,\n"
+        "and menu-bar dropdowns."
+    ),
+    "status_bar_text_color_hex": (
+        "Text color for status bar labels, context menus, and\n"
+        "menu-bar dropdown items."
+    ),
+    "sidebar_header_bg_hex": (
+        "Background of view title bars (e.g. Favorites, folder\n"
+        "name headers)."
+    ),
+    "sidebar_background_color_hex": (
+        "Background for left and right sidebar panes (file tree,\n"
+        "preview, organize, information, jobs)."
+    ),
+    "sidebar_text_color_hex": (
+        "Text color for sidebar content, titlebar labels, and\n"
+        "tables; section headings are derived automatically."
+    ),
     "default_border_color_hex": "Border color around sidebar sections and other chrome dividers.",
     "default_image_color_hex": "Border color around non-selected thumbnails.",
     "default_image_background_color_hex": "Background fill behind non-selected thumbnail images.",
@@ -729,6 +764,10 @@ class SettingsDialog(QDialog):
         if hasattr(self, 'browse_border_color_button'):
             self._update_browse_border_color_button()
         self.apply_theme()
+        install_settings_dialog_tooltip_filter(
+            self,
+            lambda: settings_dialog_tooltip_label_stylesheet(self._settings_chrome()),
+        )
 
     def _settings_chrome_preset_id(self) -> str:
         """Theme preset driving settings-dialog chrome (not generic app dialog colors)."""
@@ -935,9 +974,11 @@ class SettingsDialog(QDialog):
         # Reset to defaults button (now resets only the current tab)
         self.reset_button = QPushButton("Reset to Defaults")
         self.reset_button.setToolTip(
-            "Reset settings on the current tab to your saved defaults.\n"
-            f"Hold Option ({OPTION_SYMBOL}) for Save as Defaults; "
-            f"Option+Shift ({SHIFT_SYMBOL}{OPTION_SYMBOL}) for System Defaults."
+            "Reset settings on the current tab to your saved\n"
+            "defaults.\n"
+            f"Hold Option ({OPTION_SYMBOL}) for Save as Defaults;\n"
+            f"Option+Shift ({SHIFT_SYMBOL}{OPTION_SYMBOL}) for System\n"
+            "Defaults."
         )
         self.reset_button.clicked.connect(self.reset_tab_to_defaults)
         self.reset_button.setStyleSheet(f"""
@@ -966,7 +1007,8 @@ class SettingsDialog(QDialog):
         self.option_note.setToolTip(
             "Modifier keys for the reset button:\n"
             f"{OPTION_SYMBOL} — Save current tab as your defaults\n"
-            f"{SHIFT_SYMBOL}{OPTION_SYMBOL} — Reset current tab to system defaults"
+            f"{SHIFT_SYMBOL}{OPTION_SYMBOL} — Reset current tab to\n"
+            "system defaults"
         )
         button_layout.addWidget(self.option_note)
         
@@ -2000,7 +2042,10 @@ class SettingsDialog(QDialog):
         self.filter_pattern_layout.setContentsMargins(0, 0, 0, 0)
         self.filter_pattern_layout.setSpacing(10)
         self.filter_pattern_input = QLineEdit()
-        self.filter_pattern_input.setToolTip("Filter images by filename using glob pattern (e.g., '*.jpg', 'IMG_*', etc.)")
+        self.filter_pattern_input.setToolTip(
+            "Filter images by filename using glob pattern\n"
+            "(e.g., '*.jpg', 'IMG_*', etc.)"
+        )
         self.filter_pattern_input.setPlaceholderText("e.g., *.jpg, IMG_*, etc.")
         self.filter_pattern_input.setMinimumWidth(130)
         self.filter_pattern_input.setMaximumWidth(130)
@@ -2054,7 +2099,11 @@ class SettingsDialog(QDialog):
         thumbnail_layout.addRow(filter_pattern_label, filter_container)
         # Show extensions checkbox (filename/size overlays are toggled via Cmd+I)
         self.show_extensions_checkbox = QCheckBox("Always show file extensions on file names")
-        self.show_extensions_checkbox.setToolTip("Always show file extensions on file names. If unchecked, file extensions are only shown when multiple files have the same base name.")
+        self.show_extensions_checkbox.setToolTip(
+            "Always show file extensions on file names.\n"
+            "If unchecked, file extensions are only\n"
+            "shown when multiple files have the same base name."
+        )
         self.show_extensions_checkbox.setStyleSheet(self.SMALL_CHECKBOX_STYLE)
         extensions_field = QWidget()
         extensions_field_layout = QVBoxLayout(extensions_field)
@@ -2068,19 +2117,29 @@ class SettingsDialog(QDialog):
        
         # Drag/Drop auto date change checkbox
         self.drag_drop_auto_date_change_checkbox = QCheckBox("Drag/Drop changes dates when sorted by date")
-        self.drag_drop_auto_date_change_checkbox.setToolTip("When sorted by date, moving icons in thumbnail view automatically adjusts file dates to preserve the new sort order.")
+        self.drag_drop_auto_date_change_checkbox.setToolTip(
+            "When sorted by date, moving icons in thumbnail view\n"
+            "automatically adjusts file dates to preserve the new\n"
+            "sort order."
+        )
         self.drag_drop_auto_date_change_checkbox.setStyleSheet(self.SMALL_CHECKBOX_STYLE)
         thumbnail_layout.addRow("", self.drag_drop_auto_date_change_checkbox)
         
         # Allow thumbnail locking functions checkbox
         self.allow_thumbnail_locking_checkbox = QCheckBox("Allow thumbnail locking functions (Experimental)")
-        self.allow_thumbnail_locking_checkbox.setToolTip("Allow marking thumbnails as locked to keep them in place while organizing images in a directory.")
+        self.allow_thumbnail_locking_checkbox.setToolTip(
+            "Allow marking thumbnails as locked to keep them in\n"
+            "place while organizing images in a directory."
+        )
         self.allow_thumbnail_locking_checkbox.setStyleSheet(self.SMALL_CHECKBOX_STYLE)
         thumbnail_layout.addRow("", self.allow_thumbnail_locking_checkbox)
         
         # Allow quick mass rename checkbox
         self.allow_quick_mass_rename_checkbox = QCheckBox("Allow Quick Mass Rename")
-        self.allow_quick_mass_rename_checkbox.setToolTip("Allow Quick rename. Warning: This can rename large numbers of files without confirmation")
+        self.allow_quick_mass_rename_checkbox.setToolTip(
+            "Allow Quick rename. Warning: This can rename large\n"
+            "numbers of files without confirmation"
+        )
         self.allow_quick_mass_rename_checkbox.setStyleSheet(self.SMALL_CHECKBOX_STYLE)
         thumbnail_layout.addRow("", self.allow_quick_mass_rename_checkbox)
         
@@ -2121,8 +2180,9 @@ class SettingsDialog(QDialog):
         save_history_label.setAlignment(Qt.AlignRight | Qt.AlignTop)
         save_history_label.setMinimumWidth(130)
         save_history_label.setToolTip(
-                "After this time, the current image is added to Image History\nthat you can see by pressing F3."
-            )
+            "After this time, the current image is added to Image\n"
+            "History that you can see by pressing F3."
+        )
         save_history_row = QWidget()
         save_history_layout = QHBoxLayout(save_history_row)
         save_history_layout.setContentsMargins(0, 0, 0, 0)
@@ -2138,9 +2198,10 @@ class SettingsDialog(QDialog):
         self.browse_image_history_save_after_slider.setToolTip(
             "Time in seconds before the currently browsed image\n"
             "is added to Image History.\n\n"
-            "This can be used to group together images that are not in\n"
-            "the current thumbnail list by viewing individual images\n"
-            "and then pressing F3 to show them in the same thumbnail view."
+            "This can be used to group together images that are not\n"
+            "in the current thumbnail list by viewing individual\n"
+            "images and then pressing F3 to show them in the same\n"
+            "thumbnail view."
         )
    
 
@@ -2177,13 +2238,22 @@ class SettingsDialog(QDialog):
         checkbox_grid.addWidget(self.confirm_delete_checkbox, 0, 0)
         
         self.wrap_around_checkbox = QCheckBox("Wrap around")
-        self.wrap_around_checkbox.setToolTip("Allow navigation to wrap from end to beginning and vice versa")
+        self.wrap_around_checkbox.setToolTip(
+            "Allow navigation to wrap from end to beginning and\n"
+            "vice versa"
+        )
         self.wrap_around_checkbox.setStyleSheet(self.SMALL_CHECKBOX_STYLE)
         checkbox_grid.addWidget(self.wrap_around_checkbox, 0, 1)
         
         # Row 1: Use EXIF Rotation, Debug mode
         self.ignore_exif_rotation_checkbox = QCheckBox("Use EXIF Rotation")
-        self.ignore_exif_rotation_checkbox.setToolTip("Apply automatic EXIF rotation correction. When unchecked, images are displayed without rotation correction. Manual rotation (Shift+arrow keys) still works in fullscreen.")
+        self.ignore_exif_rotation_checkbox.setToolTip(
+            "Apply automatic EXIF rotation correction.\n"
+            "When unchecked, images are displayed without rotation\n"
+            "correction.\n"
+            "Manual rotation (Shift+arrow keys) still works in\n"
+            "fullscreen."
+        )
         self.ignore_exif_rotation_checkbox.setStyleSheet(self.SMALL_CHECKBOX_STYLE)
         checkbox_grid.addWidget(self.ignore_exif_rotation_checkbox, 1, 0)
         
@@ -2194,9 +2264,10 @@ class SettingsDialog(QDialog):
 
         self.use_prompt_filter_exits_checkbox = QCheckBox("Use prompt filter exits")
         self.use_prompt_filter_exits_checkbox.setToolTip(
-            "When enabled, run external prompt filter scripts configured via\n"
-            "PROWSER_TEXT_AI_EXIT (LMStudio / caption prompts) and\n"
-            "PROWSER_IMAGE_AI_EXIT (image generation prompts) before model calls."
+            "When enabled, run external prompt filter scripts\n"
+            "configured via PROWSER_TEXT_AI_EXIT (LMStudio / caption\n"
+            "prompts) and PROWSER_IMAGE_AI_EXIT (image generation\n"
+            "prompts) before model calls."
         )
         self.use_prompt_filter_exits_checkbox.setStyleSheet(self.SMALL_CHECKBOX_STYLE)
         checkbox_grid.addWidget(self.use_prompt_filter_exits_checkbox, 2, 0)
@@ -2244,7 +2315,8 @@ class SettingsDialog(QDialog):
         self.imagegen_max_generation_dimension_slider.setSingleStep(1)
         self.imagegen_max_generation_dimension_slider.setPageStep(4)
         self.imagegen_max_generation_dimension_slider.setToolTip(
-            "Maximum edge length (width or height) for image generation.\n"
+            "Maximum edge length (width or height) for image\n"
+            "generation.\n"
             "Individual models may impose lower limits."
         )
         self.imagegen_max_generation_dimension_slider.valueChanged.connect(
@@ -2417,7 +2489,10 @@ class SettingsDialog(QDialog):
         s.setSingleStep(1)
         s.setPageStep(1)
         s.setTickPosition(QSlider.TickPosition.NoTicks)
-        s.setToolTip("Thickness of main splitters and the line above the status bar (px). 0 = hidden.")
+        s.setToolTip(
+            "Thickness of main splitters and the line above the\n"
+            "status bar (px). 0 = hidden."
+        )
         s.setFixedHeight(22)
         s.valueChanged.connect(
             lambda _v, k="view_border_width_px": self._schedule_user_theme_preview_live(k)
@@ -2547,7 +2622,7 @@ class SettingsDialog(QDialog):
             "Image border:",
             "default_image_color_hex",
             width_key="default_image_border_width_index",
-            width_tooltip="Border around non-selected thumbnails (0 = hidden)",
+            width_tooltip="Border around non-selected thumbnails\n(0 = hidden)",
         )
         self._add_theme_color_swatch_row(v_thumb, "Image background:", "default_image_background_color_hex")
         self._add_theme_color_swatch_row(
@@ -2591,7 +2666,8 @@ class SettingsDialog(QDialog):
                           height: 28px; width: 28px; padding: 0px; margin: 0px; border: 1px solid white; }
         """)
         self.transparency_color_button.setToolTip(
-            "Transparency fill for transparent pixels in browse mode (for the palette selected above)"
+            "Transparency fill for transparent pixels in browse mode\n"
+            "(for the palette selected above)"
         )
         self.transparency_color_button.clicked.connect(self.choose_transparency_color)
         transparency_color_layout.addWidget(self.transparency_color_button)
@@ -2600,7 +2676,8 @@ class SettingsDialog(QDialog):
         transparency_color_layout.addWidget(or_label)
         self.use_diamonds_checkbox = QCheckBox("Use Checkerboard")
         self.use_diamonds_checkbox.setToolTip(
-            "Use checkerboard pattern (tilted 45 degrees) instead of solid color for transparent pixels in browse mode"
+            "Use checkerboard pattern (tilted 45 degrees) instead of\n"
+            "solid color for transparent pixels in browse mode"
         )
         self.use_diamonds_checkbox.setStyleSheet(self.SMALL_CHECKBOX_STYLE)
         self.use_diamonds_checkbox.stateChanged.connect(self._on_browse_transparency_widget_changed)
@@ -2624,7 +2701,8 @@ class SettingsDialog(QDialog):
                           height: 28px; width: 28px; padding: 0px; margin: 0px; border: 1px solid white; }
         """)
         self.browse_border_color_button.setToolTip(
-            "Fill color for the viewport margin when the image is smaller than the browse window"
+            "Fill color for the viewport margin when the image is\n"
+            "smaller than the browse window"
         )
         self.browse_border_color_button.clicked.connect(self.choose_browse_border_color)
         border_row_layout.addWidget(self.browse_border_color_button)
@@ -3546,28 +3624,41 @@ class SettingsDialog(QDialog):
         self.slideshow_rate_spinbox.setRange(1000, 60000)  # 1 second to 1 minute
         self.slideshow_rate_spinbox.setSingleStep(1000)  # 1000ms increments
         self.slideshow_rate_spinbox.setSuffix(" ms")
-        self.slideshow_rate_spinbox.setToolTip("Time between slides in milliseconds (1000ms = 1 second)")
+        self.slideshow_rate_spinbox.setToolTip(
+            "Time between slides in milliseconds (1000ms = 1\n"
+            "second)"
+        )
 
         # Transition speed setting
         self.transition_speed_spinbox = QSpinBox()
         self.transition_speed_spinbox.setRange(0, 10000)  # 0 to 10 seconds
         self.transition_speed_spinbox.setSingleStep(100)  # 100ms increments
         self.transition_speed_spinbox.setSuffix(" ms")
-        self.transition_speed_spinbox.setToolTip("Animation duration for slide transitions in milliseconds")
+        self.transition_speed_spinbox.setToolTip(
+            "Animation duration for slide transitions in\n"
+            "milliseconds"
+        )
 
         # Rotation angle setting
         self.rotation_angle_spinbox = QSpinBox()
         self.rotation_angle_spinbox.setRange(0, 360)
         self.rotation_angle_spinbox.setSingleStep(15)
         self.rotation_angle_spinbox.setSuffix("°")
-        self.rotation_angle_spinbox.setToolTip("Maximum random rotation angle for slideshow images (0-360°)")
+        self.rotation_angle_spinbox.setToolTip(
+            "Maximum random rotation angle for slideshow images\n"
+            "(0-360°)"
+        )
 
         # Overlap percentage setting
         self.overlap_percent_spinbox = QSpinBox()
         self.overlap_percent_spinbox.setRange(0, 200)  # 0% to 200% overlap
         self.overlap_percent_spinbox.setSingleStep(10)  # 10% increments
         self.overlap_percent_spinbox.setSuffix("%")
-        self.overlap_percent_spinbox.setToolTip("Overlap percentage between slide transitions (0% = no overlap, 100% = perfect overlap, 200% = incoming starts early)")
+        self.overlap_percent_spinbox.setToolTip(
+            "Overlap percentage between slide transitions (0% = no\n"
+            "overlap, 100% = perfect overlap, 200% = incoming starts\n"
+            "early)"
+        )
 
         # Default direction setting
         self.direction_combo = QComboBox()
@@ -3649,7 +3740,8 @@ class SettingsDialog(QDialog):
 
         self.cache_dirs_text = QTextEdit()
         self.cache_dirs_text.setToolTip(
-            "Folders whose images are represented in the thumbnail and recognition caches (read-only)."
+            "Folders whose images are represented in the thumbnail\n"
+            "and recognition caches (read-only)."
         )
         self.cache_dirs_text.setReadOnly(True)
         self.cache_dirs_text.setMaximumHeight(100)
@@ -3836,7 +3928,10 @@ class SettingsDialog(QDialog):
         
         # Clear Thumbnail Cache button
         self.clear_thumbnail_cache_button = QPushButton("Clear Thumbs")
-        self.clear_thumbnail_cache_button.setToolTip("Clear only the thumbnail cache.\nThis will force a rebuild of thumbnail images.")
+        self.clear_thumbnail_cache_button.setToolTip(
+            "Clear only the thumbnail cache.\n"
+            "This will force a rebuild of thumbnail images."
+        )
         self.clear_thumbnail_cache_button.clicked.connect(self.clear_thumbnail_cache)
         self.clear_thumbnail_cache_button.setStyleSheet(button_style)
         self.clear_thumbnail_cache_button.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Fixed)
@@ -3844,7 +3939,11 @@ class SettingsDialog(QDialog):
         
         # Clear Image Recognition Cache button
         self.clear_image_recognition_cache_button = QPushButton("Clear Image Rec")
-        self.clear_image_recognition_cache_button.setToolTip("Clear CNN and CLIP feature caches.\nThis will force recalculation of all image recognition features.")
+        self.clear_image_recognition_cache_button.setToolTip(
+            "Clear CNN and CLIP feature caches.\n"
+            "This will force recalculation of all image recognition\n"
+            "features."
+        )
         self.clear_image_recognition_cache_button.clicked.connect(self.clear_image_recognition_cache)
         self.clear_image_recognition_cache_button.setStyleSheet(button_style)
         self.clear_image_recognition_cache_button.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Fixed)
@@ -3853,7 +3952,8 @@ class SettingsDialog(QDialog):
         # Clear Face Cache button
         self.clear_face_cache_button = QPushButton("Clear Face")
         self.clear_face_cache_button.setToolTip(
-            "Clear cached face encodings (for Search by person) and face sample thumbnails (Settings Faces tab)."
+            "Clear cached face encodings (for Search by person) and\n"
+            "face sample thumbnails (Settings Faces tab)."
         )
         self.clear_face_cache_button.clicked.connect(self.clear_face_cache)
         self.clear_face_cache_button.setStyleSheet(button_style)
@@ -3862,7 +3962,10 @@ class SettingsDialog(QDialog):
         
         # Scrub caches button
         self.scrub_caches_button = QPushButton("Scrub")
-        self.scrub_caches_button.setToolTip("Remove cache entries for images that no longer exist.\nThis will check CNN, CLIP, face, and thumbnail caches.")
+        self.scrub_caches_button.setToolTip(
+            "Remove cache entries for images that no longer exist.\n"
+            "This will check CNN, CLIP, face, and thumbnail caches."
+        )
         self.scrub_caches_button.clicked.connect(self.scrub_caches)
         self.scrub_caches_button.setStyleSheet(button_style)
         self.scrub_caches_button.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Fixed)
@@ -3877,7 +3980,10 @@ class SettingsDialog(QDialog):
 
         # Clear All Caches button
         self.clear_cache_button = QPushButton("Clear All")
-        self.clear_cache_button.setToolTip("Clear all thumbnail, metadata, and full image caches.\nThis will force a rebuild of all cached data.")
+        self.clear_cache_button.setToolTip(
+            "Clear all thumbnail, metadata, and full image caches.\n"
+            "This will force a rebuild of all cached data."
+        )
         self.clear_cache_button.clicked.connect(self.clear_all_caches)
         self.clear_cache_button.setStyleSheet(button_style)
         self.clear_cache_button.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Fixed)
@@ -3903,10 +4009,12 @@ class SettingsDialog(QDialog):
 
         self.background_clip_enabled_checkbox = QCheckBox("Enable idle search-data collection (use sparingly)")
         self.background_clip_enabled_checkbox.setToolTip(
-            "Analyzes images to populate cache with data needed for similarity\n"
-            "and text searches for files in the Favorites and recently used directories.\n"
-            "This runs while the application is idle and does not interfere\n"
-            "with normal operations, but may cause battery drain."
+            "Analyzes images to populate cache with data needed for\n"
+            "similarity and text searches for files in the Favorites\n"
+            "and recently used directories.\n"
+            "This runs while the application is idle and does not\n"
+            "interfere with normal operations, but may cause battery\n"
+            "drain."
         )
         self.background_clip_enabled_checkbox.setStyleSheet(self.SMALL_CHECKBOX_STYLE)
         background_layout.addRow("", self.background_clip_enabled_checkbox)
@@ -3918,7 +4026,9 @@ class SettingsDialog(QDialog):
         gather_thumb_layout.setContentsMargins(0, 0, 0, 0)
         self.background_clip_gather_thumbnails_checkbox = QCheckBox("Also gather thumbnails")
         self.background_clip_gather_thumbnails_checkbox.setToolTip(
-            "When processing images for CLIP extraction, also generate and cache thumbnails for images that don't have them yet."
+            "When processing images for CLIP extraction, also\n"
+            "generate and cache thumbnails for images that don't\n"
+            "have them yet."
         )
         gather_thumb_style = self.SMALL_CHECKBOX_STYLE + f"""
             QCheckBox:disabled {{
@@ -3937,7 +4047,8 @@ class SettingsDialog(QDialog):
         extract_faces_layout.setContentsMargins(0, 0, 0, 0)
         self.background_clip_extract_faces_checkbox = QCheckBox("Extract faces")
         self.background_clip_extract_faces_checkbox.setToolTip(
-            "When processing images for CLIP/CNN extraction, also extract and cache face encodings for face search."
+            "When processing images for CLIP/CNN extraction, also\n"
+            "extract and cache face encodings for face search."
         )
         self.background_clip_extract_faces_checkbox.setStyleSheet(gather_thumb_style)
         extract_faces_layout.addWidget(self.background_clip_extract_faces_checkbox)
@@ -4006,7 +4117,8 @@ class SettingsDialog(QDialog):
             input_field = QLineEdit()
             input_field.setPlaceholderText(f"Enter path for destination {i}")
             input_field.setToolTip(
-                f"Folder path for move/copy destination {i} ({CMD_SYMBOL}{i} / {OPTION_SYMBOL}{CMD_SYMBOL}{i})."
+                f"Folder path for move/copy destination {i}\n"
+                f"({CMD_SYMBOL}{i} / {OPTION_SYMBOL}{CMD_SYMBOL}{i})."
             )
             input_field.setMinimumHeight(28)
             input_field.textChanged.connect(lambda text, idx=i-1: self.validate_move_destination_path(idx, text))
@@ -4040,7 +4152,8 @@ class SettingsDialog(QDialog):
         self.destination_menu_action_combo = QComboBox()
         self.destination_menu_action_combo.addItems(["None", "Copy", "Move"])
         self.destination_menu_action_combo.setToolTip(
-            "None: hide destination menu items and disable keys. Copy: copy files. Move: move files."
+            "None: hide destination menu items and disable keys.\n"
+            "Copy: copy files. Move: move files."
         )
         self.destination_menu_action_combo.setMinimumWidth(60)
         self.destination_menu_action_combo.setMaximumWidth(60)
@@ -4096,7 +4209,8 @@ class SettingsDialog(QDialog):
             input_field.setPlaceholderText(f"Enter path for favorite directory or image file {i} (Ctrl+{i})")
             input_field.setToolTip(
                 f"Favorite folder or image file for Ctrl+{i}.\n"
-                "Directories open in thumbnail view; image files open in browse view."
+                "Directories open in thumbnail view; image files open\n"
+                "in browse view."
             )
             input_field.setMinimumHeight(28)
             input_field.textChanged.connect(lambda text, idx=i-1: self.validate_favorite_destination_path(idx, text))
@@ -4112,7 +4226,10 @@ class SettingsDialog(QDialog):
             
             # Browse button with "..." label
             browse_button = QPushButton("...")
-            browse_button.setToolTip(f"Browse for directory or image file for favorite {i} (Ctrl+{i})")
+            browse_button.setToolTip(
+                f"Browse for directory or image file for favorite {i}\n"
+                f"(Ctrl+{i})"
+            )
             browse_button.setFixedWidth(30)
             browse_button.setFixedHeight(28)
             browse_button.setStyleSheet(self._small_ellipsis_button_style())
@@ -4248,7 +4365,8 @@ class SettingsDialog(QDialog):
         btn_row = QHBoxLayout()
         examine_btn = QPushButton("Examine an image...")
         examine_btn.setToolTip(
-            "Detect faces in the current browse image and assign them to people in this list."
+            "Detect faces in the current browse image and assign\n"
+            "them to people in this list."
         )
         examine_btn.clicked.connect(self._faces_examine_current_image)
         btn_row.addWidget(examine_btn)
@@ -4365,7 +4483,10 @@ class SettingsDialog(QDialog):
         row1 = QHBoxLayout()
         name_edit = QLineEdit()
         name_edit.setPlaceholderText("Person name (unique)")
-        name_edit.setToolTip("Display name for this person (used in face search and the jump list).")
+        name_edit.setToolTip(
+            "Display name for this person (used in face search and\n"
+            "the jump list)."
+        )
         name_edit.setText(subject.get("name") or "")
         name_edit.setMinimumWidth(140)
         def _on_name_changed():
@@ -4601,7 +4722,8 @@ class SettingsDialog(QDialog):
             input_field = QLineEdit()
             input_field.setPlaceholderText(f"Enter string to exclude")
             input_field.setToolTip(
-                "Path substring or folder name to exclude from thumbnail view (Cmd-X).\n"
+                "Path substring or folder name to exclude from thumbnail\n"
+                "view (Cmd-X).\n"
                 "Use Browse to pick a directory."
             )
             input_field.setMinimumHeight(28)
@@ -4725,8 +4847,9 @@ class SettingsDialog(QDialog):
         # Add hidden directories checkbox
         self.show_hidden_directories_checkbox = QCheckBox("Process hidden directories")
         self.show_hidden_directories_checkbox.setToolTip(
-            "Process directories starting with a period (e.g., .git, .vscode) in searches and "
-            "file operations, not just the file tree"
+            "Process directories starting with a period (e.g., .git,\n"
+            ".vscode) in searches and file operations, not just the\n"
+            "file tree"
         )
         pad_factor = "; margin-left: 16px;"
         self.show_hidden_directories_checkbox.setStyleSheet(self.SMALL_CHECKBOX_STYLE + pad_factor)
@@ -4736,9 +4859,10 @@ class SettingsDialog(QDialog):
         # Add "Always show 'work'" checkbox
         self.always_show_work_checkbox = QCheckBox("Always show directorise that start with 'work'")
         self.always_show_work_checkbox.setToolTip(
-            "Always show directories that start with 'work...' in the file tree, "
-            "regardless of filter settings.\n"
-            "This is intended to provide empty directories when tree filtering requires images."
+            "Always show directories that start with 'work...' in\n"
+            "the file tree, regardless of filter settings.\n"
+            "This is intended to provide empty directories when tree\n"
+            "filtering requires images."
         )
         self.always_show_work_checkbox.setStyleSheet(self.SMALL_CHECKBOX_STYLE + pad_factor)
         layout.addWidget(self.always_show_work_checkbox)
@@ -4747,8 +4871,10 @@ class SettingsDialog(QDialog):
         # Add "Follow symlinks" checkbox
         self.follow_symlinks_checkbox = QCheckBox("Follow symlinks (including system volumes)")
         self.follow_symlinks_checkbox.setToolTip(
-            "Follow symbolic and hard links when scanning directories in the tree view.\n"
-            "Disable this to not show the system volumes in the tree view."
+            "Follow symbolic and hard links when scanning\n"
+            "directories in the tree view.\n"
+            "Disable this to not show the system volumes in the tree\n"
+            "view."
         )
         self.follow_symlinks_checkbox.setStyleSheet(self.SMALL_CHECKBOX_STYLE + pad_factor)
         layout.addWidget(self.follow_symlinks_checkbox)
@@ -4763,7 +4889,8 @@ class SettingsDialog(QDialog):
         self.shift_cmd_depth_spinbox.setRange(1, 10)
         self.shift_cmd_depth_spinbox.setValue(4)  # Default value
         self.shift_cmd_depth_spinbox.setToolTip(
-            "How many levels to expand the file tree when you press Shift+Cmd+Return (1-10).\n"
+            "How many levels to expand the file tree when you press\n"
+            "Shift+Cmd+Return (1-10).\n"
             "Applies when tree filtering is set to show all entries."
         )
         self.shift_cmd_depth_spinbox.setFixedWidth(120)
@@ -4772,7 +4899,8 @@ class SettingsDialog(QDialog):
         self.search_depth_spinbox.setRange(1, 10)
         self.search_depth_spinbox.setValue(4)
         self.search_depth_spinbox.setToolTip(
-            "Maximum depth for recursive directory scans (1-10). Used by:\n"
+            "Maximum depth for recursive directory scans (1-10).\n"
+            "Used by:\n"
             "• Ctrl+= (Cache Faces)\n"
             "• Shift+Cmd+C (cache subdirectories' thumbnails)\n"
             "• Recursive image search and tree \"has images\" checks\n"
@@ -4847,7 +4975,8 @@ class SettingsDialog(QDialog):
             "Enter directory for generated images"
         )
         self.image_creation_directory_input_field.setToolTip(
-            "Folder for newly generated images when the checkbox above is enabled.\n"
+            "Folder for newly generated images when the checkbox\n"
+            "above is enabled.\n"
             "When disabled, images are saved to ~/Downloads."
         )
         self.image_creation_directory_input_field.setMinimumHeight(28)
@@ -4890,7 +5019,8 @@ class SettingsDialog(QDialog):
             f"Default: {_default_temp_dir}"
         )
         self.temporary_files_directory_input_field.setToolTip(
-            "Folder for temporary work files (infill, masking, image generation, wallpaper).\n"
+            "Folder for temporary work files (infill, masking, image\n"
+            "generation, wallpaper).\n"
             "Leave blank to use the default location."
         )
         self.temporary_files_directory_input_field.setMinimumHeight(28)
@@ -4959,7 +5089,8 @@ class SettingsDialog(QDialog):
             input_field = QLineEdit()
             input_field.setPlaceholderText(f"Enter directory to ignore")
             input_field.setToolTip(
-                "Directory to skip during scans and file operations when the checkbox is enabled."
+                "Directory to skip during scans and file operations when\n"
+                "the checkbox is enabled."
             )
             input_field.setMinimumHeight(28)
             self.ignore_directory_input_fields.append(input_field)
@@ -5153,7 +5284,8 @@ class SettingsDialog(QDialog):
         # Button to select editor
         self.select_editor_button = QPushButton("Select Editor...")
         self.select_editor_button.setToolTip(
-            f"Choose which application opens when you edit an image ({CMD_SYMBOL}+E)."
+            f"Choose which application opens when you edit an image\n"
+            f"({CMD_SYMBOL}+E)."
         )
         self.select_editor_button.clicked.connect(self._select_image_editor)
         editor_layout.addWidget(self.select_editor_button)
@@ -5179,9 +5311,12 @@ class SettingsDialog(QDialog):
         self.similarity_metric_combo.addItems(["Cosine", "Euclidean", "Manhattan"])
         self.similarity_metric_combo.setToolTip(
             "Similarity metric for image similarity sorting:\n"
-            "Cosine: Measures angle between feature vectors (default, good for normalized features)\n"
-            "Euclidean: Measures straight-line distance between vectors\n"
-            "Manhattan: Measures sum of absolute differences (L1 distance)"
+            "Cosine: Measures angle between feature vectors\n"
+            "(default, good for normalized features)\n"
+            "Euclidean: Measures straight-line distance between\n"
+            "vectors\n"
+            "Manhattan: Measures sum of absolute differences (L1\n"
+            "distance)"
         )
         self.similarity_metric_combo.setFixedHeight(28)
         self.similarity_metric_combo.setMinimumWidth(0)
@@ -5200,19 +5335,25 @@ class SettingsDialog(QDialog):
         
         # ResNet18 radio button
         self.resnet_model_18_radio = QRadioButton("ResNet18 (fastest)")
-        self.resnet_model_18_radio.setToolTip("Smallest model, fastest processing, good quality")
+        self.resnet_model_18_radio.setToolTip(
+            "Smallest model, fastest processing, good quality"
+        )
         self.resnet_model_button_group.addButton(self.resnet_model_18_radio, 0)
         resnet_model_layout.addWidget(self.resnet_model_18_radio)
         
         # ResNet50 radio button
         self.resnet_model_50_radio = QRadioButton("ResNet50 (balanced)")
-        self.resnet_model_50_radio.setToolTip("Medium model, balanced speed and quality")
+        self.resnet_model_50_radio.setToolTip(
+            "Medium model, balanced speed and quality"
+        )
         self.resnet_model_button_group.addButton(self.resnet_model_50_radio, 1)
         resnet_model_layout.addWidget(self.resnet_model_50_radio)
         
         # ResNet101 radio button
         self.resnet_model_101_radio = QRadioButton("ResNet101 (best quality)")
-        self.resnet_model_101_radio.setToolTip("Largest model, slower processing, best quality")
+        self.resnet_model_101_radio.setToolTip(
+            "Largest model, slower processing, best quality"
+        )
         self.resnet_model_button_group.addButton(self.resnet_model_101_radio, 2)
         resnet_model_layout.addWidget(self.resnet_model_101_radio)
         
@@ -5230,13 +5371,18 @@ class SettingsDialog(QDialog):
         
         # OpenAI model radio button
         self.clip_model_openai_radio = QRadioButton("openai/clip-vit-base-patch32\nSmaller model, faster processing, good quality")
-        self.clip_model_openai_radio.setToolTip("Smaller model, faster processing, good quality")
+        self.clip_model_openai_radio.setToolTip(
+            "Smaller model, faster processing, good quality"
+        )
         self.clip_model_button_group.addButton(self.clip_model_openai_radio, 0)
         clip_model_layout.addWidget(self.clip_model_openai_radio)
         
         # Zer0int model radio button
         self.clip_model_zer0int_radio = QRadioButton("openai/clip-vit-large-patch14\nSlower feature extraction, better quality")
-        self.clip_model_zer0int_radio.setToolTip("Larger model, much slower feature extraction, Significantly better quality")
+        self.clip_model_zer0int_radio.setToolTip(
+            "Larger model, much slower feature extraction,\n"
+            "Significantly better quality"
+        )
         self.clip_model_button_group.addButton(self.clip_model_zer0int_radio, 1)
         clip_model_layout.addWidget(self.clip_model_zer0int_radio)
         advice_label = QLabel(
@@ -5269,7 +5415,9 @@ class SettingsDialog(QDialog):
         self.caption_lms_host_edit = QLineEdit()
         self.caption_lms_host_edit.setText(default_lms_host)
         self.caption_lms_host_edit.setPlaceholderText("localhost:1234")
-        self.caption_lms_host_edit.setToolTip("LMStudio API host and port (e.g. localhost:1234)")
+        self.caption_lms_host_edit.setToolTip(
+            "LMStudio API host and port (e.g. localhost:1234)"
+        )
         self.caption_lms_host_edit.setMinimumWidth(180)
         caption_layout.addRow("LMS host:", self.caption_lms_host_edit)
 
@@ -5278,7 +5426,8 @@ class SettingsDialog(QDialog):
         self.caption_system_prompt_edit.setPlaceholderText("System prompt for the vision model…")
         self.caption_system_prompt_edit.setMinimumHeight(120)
         self.caption_system_prompt_edit.setToolTip(
-            "System prompt sent to the model. Use {CAPTION_WORD_COUNT} for the max word count."
+            "System prompt sent to the model.\n"
+            "Use {CAPTION_WORD_COUNT} for the max word count."
         )
         caption_layout.addRow("System prompt:", self.caption_system_prompt_edit)
 
@@ -5287,14 +5436,17 @@ class SettingsDialog(QDialog):
         self.caption_user_prompt_edit.setPlaceholderText("User prompt for the vision model…")
         self.caption_user_prompt_edit.setMinimumHeight(120)
         self.caption_user_prompt_edit.setToolTip(
-            "User prompt sent with the image. Use {CAPTION_WORD_COUNT} for the max word count."
+            "User prompt sent with the image.\n"
+            "Use {CAPTION_WORD_COUNT} for the max word count."
         )
         caption_layout.addRow("User prompt:", self.caption_user_prompt_edit)
 
         self.caption_max_words_spinbox = QSpinBox()
         self.caption_max_words_spinbox.setRange(10, 2000)
         self.caption_max_words_spinbox.setValue(default_max_words)
-        self.caption_max_words_spinbox.setToolTip("Target word count for the caption (used in prompts)")
+        self.caption_max_words_spinbox.setToolTip(
+            "Target word count for the caption (used in prompts)"
+        )
         self.caption_max_words_spinbox.setMinimumWidth(100)
         caption_layout.addRow("Caption max words:", self.caption_max_words_spinbox)
 
@@ -5302,7 +5454,10 @@ class SettingsDialog(QDialog):
         self.caption_temperature_spinbox.setRange(0.0, 3.0)
         self.caption_temperature_spinbox.setSingleStep(0.1)
         self.caption_temperature_spinbox.setValue(default_temp)
-        self.caption_temperature_spinbox.setToolTip("Model temperature (0=deterministic, higher=more creative)")
+        self.caption_temperature_spinbox.setToolTip(
+            "Model temperature (0=deterministic, higher=more\n"
+            "creative)"
+        )
         self.caption_temperature_spinbox.setMinimumWidth(100)
         self.caption_temperature_spinbox.setDecimals(1)
         caption_layout.addRow("Temperature (0–3):", self.caption_temperature_spinbox)
@@ -5407,7 +5562,8 @@ class SettingsDialog(QDialog):
         self._lora_model_combo = QComboBox()
         self._lora_model_combo.setObjectName("loraSettingsModelCombo")
         self._lora_model_combo.setToolTip(
-            "Base image generation model whose LoRA adapters are listed below."
+            "Base image generation model whose LoRA adapters are\n"
+            "listed below."
         )
         self._lora_model_combo.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
@@ -5884,11 +6040,13 @@ class SettingsDialog(QDialog):
 
             if is_user_lora_id(entry.lora_id):
                 del_btn.setToolTip(
-                    f"Remove imported LoRA {lora_choice_label(entry, model_key=model_key)}"
+                    "Remove imported LoRA\n"
+                    f"{lora_choice_label(entry, model_key=model_key)}"
                 )
             else:
                 del_btn.setToolTip(
-                    f"Hide {lora_choice_label(entry, model_key=model_key)} for this base model"
+                    f"Hide {lora_choice_label(entry, model_key=model_key)}\n"
+                    "for this base model"
                 )
             del_btn.setStyleSheet(self._lora_trash_button_style())
             del_btn.clicked.connect(
@@ -5995,14 +6153,17 @@ class SettingsDialog(QDialog):
             # Valid directory - green checkmark
             validation_label.setText("✓")
             validation_label.setStyleSheet(f"color: {VALIDATION_SUCCESS_COLOR_HEX}; font-size: 14px; font-weight: bold;")
-            validation_label.setToolTip(f"Valid directory: {full_path}")
+            validation_label.setToolTip(f"Valid directory:\n{full_path}")
             return True
         else:
             # Invalid path - red X
             validation_label.setText("✗")
             validation_label.setStyleSheet(f"color: {ERROR_COLOR_HEX}; font-size: 14px; font-weight: bold;")
             if os.path.exists(full_path):
-                validation_label.setToolTip(f"Path exists but is not a directory: {full_path}")
+                validation_label.setToolTip(
+                    f"Path exists but is not a directory:\n"
+                    f"{full_path}"
+                )
             else:
                 validation_label.setToolTip(f"Path does not exist: {full_path}")
             return False
@@ -6164,7 +6325,7 @@ class SettingsDialog(QDialog):
             # Valid directory - green checkmark
             validation_label.setText("✓")
             validation_label.setStyleSheet(f"color: {VALIDATION_SUCCESS_COLOR_HEX}; font-size: 14px; font-weight: bold;")
-            validation_label.setToolTip(f"Valid directory: {full_path}")
+            validation_label.setToolTip(f"Valid directory:\n{full_path}")
             return True
         elif os.path.isfile(full_path):
             # Check if it's an image file
@@ -6174,21 +6335,27 @@ class SettingsDialog(QDialog):
                 # Valid image file - green checkmark
                 validation_label.setText("✓")
                 validation_label.setStyleSheet(f"color: {VALIDATION_SUCCESS_COLOR_HEX}; font-size: 14px; font-weight: bold;")
-                validation_label.setToolTip(f"Valid image file: {full_path}")
+                validation_label.setToolTip(f"Valid image file:\n{full_path}")
                 return True
             else:
                 # File exists but is not an image file - red X
                 ext = get_file_extension(full_path)
                 validation_label.setText("✗")
                 validation_label.setStyleSheet(f"color: {ERROR_COLOR_HEX}; font-size: 14px; font-weight: bold;")
-                validation_label.setToolTip(f"File is not an image file (extension: {ext if ext else 'none'})")
+                validation_label.setToolTip(
+                    f"File is not an image file\n"
+                    f"(extension: {ext if ext else 'none'})"
+                )
                 return False
         else:
             # Invalid path - red X
             validation_label.setText("✗")
             validation_label.setStyleSheet(f"color: {ERROR_COLOR_HEX}; font-size: 14px; font-weight: bold;")
             if os.path.exists(full_path):
-                validation_label.setToolTip(f"Path exists but is not a directory or image file: {full_path}")
+                validation_label.setToolTip(
+                    f"Path exists but is not a directory or image file:\n"
+                    f"{full_path}"
+                )
             else:
                 validation_label.setToolTip(f"Path does not exist: {full_path}")
             return False
@@ -7925,23 +8092,27 @@ class SettingsDialog(QDialog):
             # Option+Shift: Load system defaults
             self.reset_button.setText("System Defaults")
             self.reset_button.setToolTip(
-                "Reset settings on the current tab to built-in system defaults."
+                "Reset settings on the current tab to built-in system\n"
+                "defaults."
             )
             self.reset_button.clicked.connect(self.load_system_defaults)
         elif option_pressed:
             # Option only: Save as defaults
             self.reset_button.setText("Save as Defaults")
             self.reset_button.setToolTip(
-                "Save the current tab's settings as your personal defaults."
+                "Save the current tab's settings as your personal\n"
+                "defaults."
             )
             self.reset_button.clicked.connect(self.save_as_defaults)
         else:
             # No modifiers: Reset to defaults (saved or system)
             self.reset_button.setText("Reset to Defaults")
             self.reset_button.setToolTip(
-                "Reset settings on the current tab to your saved defaults.\n"
-                f"Hold Option ({OPTION_SYMBOL}) for Save as Defaults; "
-                f"Option+Shift ({SHIFT_SYMBOL}{OPTION_SYMBOL}) for System Defaults."
+                "Reset settings on the current tab to your saved\n"
+                "defaults.\n"
+                f"Hold Option ({OPTION_SYMBOL}) for Save as Defaults;\n"
+                f"Option+Shift ({SHIFT_SYMBOL}{OPTION_SYMBOL}) for System\n"
+                "Defaults."
             )
             self.reset_button.clicked.connect(self.reset_tab_to_defaults)
     

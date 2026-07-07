@@ -229,8 +229,12 @@ class StatusNotification(QWidget):
         for b in self._bubbles:
             b.raise_()
 
-    def show_message(self, message: str, duration: int = 3000):
-        if message == self._last_shown_message:
+    def show_file_operation_message(self, message: str, duration: int = 3000):
+        """Show move/copy/undo notification; never skipped by duplicate-message suppression."""
+        self.show_message(message, duration, always_show=True)
+
+    def show_message(self, message: str, duration: int = 3000, always_show: bool = False):
+        if not always_show and message == self._last_shown_message:
             return
         self._last_shown_message = message
         w, new_h = self._measure_bubble_size(message)

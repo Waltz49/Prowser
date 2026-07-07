@@ -3,9 +3,11 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import QPoint, QRect, Qt
+from typing import Callable
+
+from PySide6.QtCore import QEvent, QObject, QPoint, QRect, Qt
 from PySide6.QtGui import QCursor, QGuiApplication
-from PySide6.QtWidgets import QLabel, QMenu, QWidget
+from PySide6.QtWidgets import QApplication, QLabel, QMenu, QWidget
 
 TOOLTIP_MARGIN = 10
 _OFFSET_X = 12
@@ -73,3 +75,71 @@ def ensure_tooltip_label(
         lbl.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, True)
         setattr(owner, attr_name, lbl)
     return lbl
+
+
+class SettingsDialogTooltipFilter(QObject):
+    """Replace native QToolTip in settings with an opaque floating label."""
+
+    def __init__(
+        self,
+        dialog: QWidget,
+        stylesheet_fn: Callable[[], str],
+        *,
+        parent: QObject | None = None,
+    ):
+        super().__init__(parent or dialog)
+        self._dialog = dialog
+        self._stylesheet_fn = stylesheet_fn
+        self._label = ensure_tooltip_label(dialog, "_settings_dialog_tooltip_label")
+        self._source_widget: QWidget | None = None
+        app = QApplication.instance()
+        if app is not None:
+            app.installEventFilter(self)
+            dialog.destroyed.connect(lambda *_: app.removeEventFilter(self))
+
+    def _is_descendant(self, widget: QWidget) -> bool:
+        host = widget
+        while host is not None:
+            if host is self._dialog:
+                return True
+            host = host.parentWidget()
+        return False
+
+    def _hide_tooltip(self) -> None:
+        self._label.hide()
+        self._source_widget = None
+
+    def eventFilter(self, obj: QObject, event: QEvent) -> bool:
+        if not self._dialog.isVisible():
+            return False
+        if not isinstance(obj, QWidget) or not self._is_descendant(obj):
+            return False
+
+        if event.type() == QEvent.Type.ToolTip:
+            tip = obj.toolTip()
+            if tip:
+                self._label.setStyleSheet(self._stylesheet_fn())
+                self._label.setText(tip)
+                self._label.adjustSize()
+                position_tooltip_near_cursor(self._label, clamp_widget=self._dialog)
+                self._label.show()
+                self._label.raise_()
+                self._source_widget = obj
+            else:
+                self._hide_tooltip()
+            return True
+
+        if event.type() == QEvent.Type.Leave and obj is self._source_widget:
+            self._hide_tooltip()
+
+        return False
+
+
+def install_settings_dialog_tooltip_filter(
+    dialog: QWidget,
+    stylesheet_fn: Callable[[], str],
+) -> SettingsDialogTooltipFilter:
+    """Show opaque custom tooltips for all controls inside the settings dialog."""
+    filt = SettingsDialogTooltipFilter(dialog, stylesheet_fn, parent=dialog)
+    dialog._settings_dialog_tooltip_filter = filt  # type: ignore[attr-defined]
+    return filt

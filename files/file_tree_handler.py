@@ -2073,13 +2073,13 @@ class CustomTreeView(QTreeView):
         # Show status message
         if copied_count > 0:
             if skipped_count > 0:
-                self.main_window.status_notification.show_message(f"Copied {copied_count} {file_string(copied_count)}, skipped {skipped_count}"
+                self.main_window.status_notification.show_file_operation_message(f"Copied {copied_count} {file_string(copied_count)}, skipped {skipped_count}"
                 )
             else:
-                self.main_window.status_notification.show_message(f"Copied {copied_count} {file_string(copied_count)} to {folder_basename_for_display(target_directory)}"
+                self.main_window.status_notification.show_file_operation_message(f"Copied {copied_count} {file_string(copied_count)} to {folder_basename_for_display(target_directory)}"
                 )
         else:
-            self.main_window.status_notification.show_message("No files copied")
+            self.main_window.status_notification.show_file_operation_message("No files copied")
 
         # Batch clear cache for copied files (avoids N listdirs and O(N*cache_size) work)
         if _paths_to_clear_after_copy and self.main_window and hasattr(self.main_window, 'cache_manager'):
@@ -2289,10 +2289,10 @@ class CustomTreeView(QTreeView):
         # Show status message or error dialog
         if moved_count > 0:
             if skipped_count > 0:
-                self.main_window.status_notification.show_message(f"Moved {moved_count} {file_string(moved_count)}, skipped {skipped_count}"
+                self.main_window.status_notification.show_file_operation_message(f"Moved {moved_count} {file_string(moved_count)}, skipped {skipped_count}"
                 )
             else:
-                self.main_window.status_notification.show_message(f"Moved {moved_count} {file_string(moved_count)} to {folder_basename_for_display(target_directory)}"
+                self.main_window.status_notification.show_file_operation_message(f"Moved {moved_count} {file_string(moved_count)} to {folder_basename_for_display(target_directory)}"
                 )
 
         # Show error dialog if no files were moved (but only if not already shown above)

@@ -1357,7 +1357,7 @@ class FileOperationsManager:
                     return False
             self._register_undo_for_deleted_files([file_path], 1)
             mw.remove_thumbnails_for_files([file_path], active_file_path)
-            mw.status_notification.show_message(f"Moved '{os.path.basename(file_path)}' to Trash")
+            mw.status_notification.show_file_operation_message(f"Moved '{os.path.basename(file_path)}' to Trash")
             return True
         except Exception as e:
             print(f"Error deleting file {file_path}: {e}")
@@ -5710,13 +5710,13 @@ class FileOperationsManager:
 
         target_directory = mw.file_tree_handler.file_tree.get_last_drop_location()
         if not target_directory or not os.path.isdir(target_directory):
-            mw.status_notification.show_message("No previous drop location available")
+            mw.status_notification.show_file_operation_message("No previous drop location available")
             return
 
         # Get selected files (or active file if none selected)
         file_paths = mw.selection_manager.get_selected_files()
         if not file_paths:
-            mw.status_notification.show_message("No files selected")
+            mw.status_notification.show_file_operation_message("No files selected")
             return
 
         if copy_only is None:
@@ -5836,7 +5836,7 @@ class FileOperationsManager:
         # Show status message
         if copied_count > 0:
             if skipped_count > 0:
-                mw.status_notification.show_message(
+                mw.status_notification.show_file_operation_message(
                     f"Copied {copied_count} {file_string(copied_count)} from Photos Library, skipped {skipped_count}"
                 )
             else:
@@ -5854,7 +5854,7 @@ class FileOperationsManager:
                 f"Original files remain in Photos Library."
             )
         elif skipped_count > 0:
-            mw.status_notification.show_message(f"No files copied, {skipped_count} skipped")
+            mw.status_notification.show_file_operation_message(f"No files copied, {skipped_count} skipped")
         
         # Don't remove files from displayed images for copy operations (files still exist in original location)
         # Refresh directory if needed
@@ -5901,7 +5901,7 @@ class FileOperationsManager:
         # Get selected files (or active file if none selected)
         file_paths = mw.selection_manager.get_selected_files()
         if not file_paths:
-            mw.status_notification.show_message("No files selected")
+            mw.status_notification.show_file_operation_message("No files selected")
             return
 
         if copy_only is None:
@@ -6031,7 +6031,7 @@ class FileOperationsManager:
                 # Source and destination are the same - skip with notification
                 skipped_count += 1
                 skipped_src_dest_count += 1
-                mw.status_notification.show_message(f"file {op_label.lower()} skipped, src=dest")
+                mw.status_notification.show_file_operation_message(f"file {op_label.lower()} skipped, src=dest")
                 continue
             
             # Use common handler to resolve target path (handles overwrite dialog and rename)
@@ -6207,11 +6207,11 @@ class FileOperationsManager:
         destination_name = folder_basename_for_display(target_directory)
         if moved_count > 0:
             if skipped_count > 0:
-                mw.status_notification.show_message(
+                mw.status_notification.show_file_operation_message(
                     f"{op_label_past} {moved_count} {file_string(moved_count)} to {destination_name}, skipped {skipped_count}"
                 )
             else:
-                mw.status_notification.show_message(
+                mw.status_notification.show_file_operation_message(
                     f"{op_label_past} {moved_count} {file_string(moved_count)} to {destination_name}"
                 )
 
@@ -6468,9 +6468,9 @@ class FileOperationsManager:
                     if show_status and mw.status_notification:
                         restored_filename = os.path.basename(unique_path)
                         if unique_path != original_path:
-                            mw.status_notification.show_message(f"Restored: {restored_filename} (renamed to avoid overwrite)")
+                            mw.status_notification.show_file_operation_message(f"Restored: {restored_filename} (renamed to avoid overwrite)")
                         else:
-                            mw.status_notification.show_message(f"Restored: {restored_filename}")
+                            mw.status_notification.show_file_operation_message(f"Restored: {restored_filename}")
                     return True
             else:
                 if show_status:
@@ -6557,7 +6557,7 @@ class FileOperationsManager:
                     mw.thumbnail_display_manager.add_thumbnails_for_files(restored_files, restored_positions)
 
             if mw.status_notification:
-                mw.status_notification.show_message(f"Restored {restored_count} files from trash")
+                mw.status_notification.show_file_operation_message(f"Restored {restored_count} files from trash")
         else:
             show_styled_warning(mw, "Undo Failed", "Failed to restore files from trash")
 
@@ -6580,7 +6580,7 @@ class FileOperationsManager:
                     mw.thumbnail_container.canvas.repaint()
                 if getattr(mw, 'current_view_mode', None) == 'list' and hasattr(mw, 'view_manager') and mw.view_manager:
                     mw.view_manager.update_list_view()
-                mw.status_notification.show_message(f"Restored: {filename}")
+                mw.status_notification.show_file_operation_message(f"Restored: {filename}")
                 return
 
             # Normal mode: add back to displayed images
@@ -6603,7 +6603,7 @@ class FileOperationsManager:
                     if displayed:
                         mw.show_image(displayed[mw.image_indices[mw.current_index]], mw.current_index)
 
-                mw.status_notification.show_message(f"Restored: {filename}")
+                mw.status_notification.show_file_operation_message(f"Restored: {filename}")
 
         except Exception:
             pass
@@ -6701,7 +6701,7 @@ class FileOperationsManager:
                 # Single file operation
                 file_info = last_operation[0]
 
-                success = self.restore_file_from_trash_(file_info['path'], file_info.get('original_position'))
+                success = self.restore_file_from_trash_(file_info['path'], file_info.get('original_position'), show_status=False)
 
                 # If standard restore succeeds, update the UI
                 if success:
@@ -6733,7 +6733,7 @@ class FileOperationsManager:
                     mw.debounce_refresh_directory()
         else:
             if mw.status_notification:
-                mw.status_notification.show_message("No undo operations available")
+                mw.status_notification.show_file_operation_message("No undo operations available")
 
     def _fallback_undo_from_deletion_operations(self):
         """Fallback undo using deletion operations stack when undo manager fails"""
@@ -6742,7 +6742,7 @@ class FileOperationsManager:
         print(f"{RED}DEBUG {RESET}: {RED}_fallback_undo_from_deletion_operations{RESET} called by {GREEN}{inspect.stack()[1].function}{RESET}: Entering")
         if not hasattr(mw, 'deletion_operations') or not mw.deletion_operations:
             if mw.status_notification:
-                mw.status_notification.show_message("No undo operations available")
+                mw.status_notification.show_file_operation_message("No undo operations available")
             return
 
         # Use the existing deletion operations logic
@@ -6753,7 +6753,7 @@ class FileOperationsManager:
             file_info = last_operation[0]
 
             # Try standard restore first
-            success = self.restore_file_from_trash_(file_info['path'], file_info.get('original_position'))
+            success = self.restore_file_from_trash_(file_info['path'], file_info.get('original_position'), show_status=False)
 
             # If standard restore succeeds, update the UI
             if success:
@@ -6779,7 +6779,7 @@ class FileOperationsManager:
         mw = self.main_window
         if not moved_files_info:
             if mw.status_notification:
-                mw.status_notification.show_message("No move operations to undo")
+                mw.status_notification.show_file_operation_message("No move operations to undo")
             return
 
         restored_count = 0
@@ -6834,11 +6834,11 @@ class FileOperationsManager:
         # Show status message
         if restored_count > 0:
             if errors:
-                mw.status_notification.show_message(
+                mw.status_notification.show_file_operation_message(
                     f"Undo: Moved {restored_count} {file_string(restored_count)} back, {len(errors)} error(s)"
                 )
             else:
-                mw.status_notification.show_message(
+                mw.status_notification.show_file_operation_message(
                     f"Undo: Moved {restored_count} {file_string(restored_count)} back"
                 )
             
