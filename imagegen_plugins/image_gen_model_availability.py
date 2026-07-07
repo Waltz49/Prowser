@@ -82,7 +82,7 @@ def model_display_name(pipeline_id: str, hf_model_id: str) -> str:
         )
 
         if is_sceneworks_klein_mlx_repo(hf_model_id):
-            return "FLUX 2 Klein 9B KV MLX (SceneWorks)"
+            return "FLUX 2 Klein 9B KV MLX"
         text = (hf_model_id or "").strip().lower()
         if "9b-kv" in text or "klein-9b-kv" in text or "flux.2-klein-9b-kv" in text:
             return "FLUX 2 klein 9B KV"
