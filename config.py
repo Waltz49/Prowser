@@ -372,6 +372,7 @@ class ImageBrowserConfig:
         default_settings = {
             'debug_mode': False,
             'confirm_delete': True,
+            'show_splash': True,  # Startup splash; False when user checks "Do not show again"
             'imagegen_max_generation_dimension': 1024,
             'imagegen_series_cooldown_seconds': 60,
             'browse_view_actual_size': False,

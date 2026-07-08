@@ -6,6 +6,7 @@ import inspect
 import math
 import os
 import re
+import sys
 import traceback
 import urllib.parse
 import fnmatch
@@ -399,6 +400,201 @@ def _center_styled_dialog_on_screen(dialog, parent):
     fg = dialog.frameGeometry()
     fg.moveCenter(geo.center())
     dialog.move(fg.topLeft())
+
+
+def _is_terminal_gui_launch() -> bool:
+    """True when the GUI was started from a script, not as a bundled .app."""
+    if getattr(sys, "frozen", False):
+        return False
+    argv0 = os.path.abspath(sys.argv[0]) if sys.argv else ""
+    if ".app/Contents/MacOS/" in argv0:
+        return False
+    if argv0.endswith(".app"):
+        return False
+    return True
+
+
+def _process_serial_number_type():
+    from ctypes import Structure, c_uint32
+
+    class _ProcessSerialNumber(Structure):
+        _fields_ = [("highLongOfPSN", c_uint32), ("lowLongOfPSN", c_uint32)]
+
+    return _ProcessSerialNumber
+
+
+def _application_services():
+    import ctypes
+
+    lib = ctypes.CDLL(
+        "/System/Library/Frameworks/ApplicationServices.framework/ApplicationServices"
+    )
+    psn_type = _process_serial_number_type()
+    get_current = lib.GetCurrentProcess
+    get_current.argtypes = [ctypes.POINTER(psn_type)]
+    get_current.restype = ctypes.c_int
+    return lib, psn_type, get_current
+
+
+def _promote_process_to_foreground() -> None:
+    """Promote a terminal-spawned Python process to a foreground GUI app."""
+    try:
+        import ctypes
+
+        lib, psn_type, get_current = _application_services()
+        transform = lib.TransformProcessType
+        transform.argtypes = [ctypes.POINTER(psn_type), ctypes.c_int]
+        transform.restype = ctypes.c_int
+        psn = psn_type()
+        if get_current(ctypes.byref(psn)) != 0:
+            return
+        # kProcessTransformToForegroundApplication
+        transform(ctypes.byref(psn), 1)
+    except Exception:
+        pass
+
+
+def _activate_via_osascript() -> None:
+    """Last-resort activation for terminal launches (System Events by unix pid)."""
+    try:
+        import subprocess
+
+        pid = os.getpid()
+        subprocess.run(
+            [
+                "osascript",
+                "-e",
+                (
+                    'tell application "System Events" to set frontmost of '
+                    f"(first process whose unix id is {pid}) to true"
+                ),
+            ],
+            capture_output=True,
+            timeout=2,
+            check=False,
+        )
+    except Exception:
+        pass
+
+
+def activate_macos_application(*, force: Optional[bool] = None) -> None:
+    """Activate the Cocoa application object (needed for terminal launches)."""
+    if force is None:
+        force = _is_terminal_gui_launch()
+    if force:
+        _promote_process_to_foreground()
+    try:
+        from AppKit import NSApplication, NSRunningApplication
+
+        ns_app = NSApplication.sharedApplication()
+        # NSApplicationActivationPolicyRegular
+        ns_app.setActivationPolicy_(0)
+        if hasattr(ns_app, "finishLaunching") and not ns_app.isFinishedLaunching():
+            ns_app.finishLaunching()
+        if force:
+            ns_app.activateIgnoringOtherApps_(True)
+        running = NSRunningApplication.runningApplicationWithProcessIdentifier_(os.getpid())
+        if running is not None:
+            options = (1 | 2) if force else 1
+            running.activateWithOptions_(options)
+    except Exception:
+        pass
+    if not force:
+        return
+    try:
+        import ctypes
+
+        lib, psn_type, get_current = _application_services()
+        set_front = lib.SetFrontProcess
+        set_front.argtypes = [ctypes.POINTER(psn_type)]
+        set_front.restype = ctypes.c_int
+        psn = psn_type()
+        get_current(ctypes.byref(psn))
+        set_front(ctypes.byref(psn))
+    except Exception:
+        pass
+    if force:
+        _activate_via_osascript()
+
+
+def _make_native_window_key(window: QWidget) -> bool:
+    try:
+        import objc
+        from ctypes import c_void_p
+
+        wid = window.winId()
+        if not wid:
+            return False
+        view = objc.objc_object(c_void_p=int(wid))
+        ns_window = view.window()
+        if ns_window is None:
+            return False
+        if hasattr(ns_window, "orderFrontRegardless"):
+            ns_window.orderFrontRegardless()
+        ns_window.makeKeyAndOrderFront_(None)
+        return True
+    except Exception:
+        return False
+
+
+def activate_application_window(window: Optional[QWidget], *, force: Optional[bool] = None) -> None:
+    """Bring the app and main window to the macOS foreground like a normal app launch."""
+    if window is None:
+        return
+    if force is None:
+        force = _is_terminal_gui_launch()
+
+    activate_macos_application(force=force)
+    try:
+        if not window.isVisible():
+            window.show()
+        window.raise_()
+        window.activateWindow()
+        wh = window.windowHandle()
+        if wh is not None:
+            wh.requestActivate()
+    except Exception:
+        pass
+    _make_native_window_key(window)
+    activate_macos_application(force=force)
+    _make_native_window_key(window)
+
+
+def schedule_startup_activation(window: Optional[QWidget], *, force: Optional[bool] = None) -> None:
+    """Retry activation while the first main window is mapping on screen."""
+    if window is None:
+        return
+    if force is None:
+        force = _is_terminal_gui_launch()
+    for delay_ms in (0, 50, 150, 400, 800, 1500, 2500, 4000):
+        QTimer.singleShot(
+            delay_ms,
+            lambda w=window, f=force: activate_application_window(w, force=f),
+        )
+
+
+class _StartupActivationFilter(QObject):
+    """One-shot activation when the main window is first shown."""
+
+    def __init__(self, window: QWidget):
+        super().__init__(window)
+        self._window = window
+        self._activated = False
+
+    def eventFilter(self, obj, event):
+        if obj is self._window and event.type() == QEvent.Type.Show and not self._activated:
+            self._activated = True
+            force = _is_terminal_gui_launch()
+            activate_application_window(self._window, force=force)
+            schedule_startup_activation(self._window, force=force)
+        return False
+
+
+def install_startup_activation(window: QWidget) -> None:
+    """Ensure terminal launches bring the first main window to the foreground."""
+    filt = _StartupActivationFilter(window)
+    window.installEventFilter(filt)
+    window._startup_activation_filter = filt
 
 
 def ensure_dialog_fits_screen(dialog, parent=None, *, margin: int = 8) -> None:

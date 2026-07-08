@@ -223,6 +223,10 @@ from thumbnails.thumbnail_constants import (
 )
 from theme.theme_service import apply_theme, connect_system_theme_listener
 from utils import (
+    activate_application_window,
+    activate_macos_application,
+    install_startup_activation,
+    schedule_startup_activation,
     set_main_window,
     convert_file_url_to_path,
     validate_image_file,
@@ -529,6 +533,11 @@ Examples:
         action='store_true',
         help='Report PROWSER_*_AI_EXIT environment variables and exit',
     )
+    parser.add_argument(
+        '--splash',
+        action='store_true',
+        help='Reset splash preference and show the startup splash screen',
+    )
 
     return parser.parse_args()
 
@@ -783,9 +792,11 @@ def main():
             print(f"Error: Cannot write to profile directory: {profile_dir}")
             sys.exit(1)
     
+    # Initialize config early so splash and other startup paths share one profile.
+    config = get_config(profile_dir=profile_dir)
+
     # Clean up log directory before anything else
     try:
-        config = get_config(profile_dir=profile_dir)
         logs_dir = config.logs_dir
         if logs_dir.exists():
             shutil.rmtree(logs_dir)
@@ -884,14 +895,25 @@ def main():
     app.setApplicationDisplayName("Prowser")
     app.setApplicationVersion("0.9.0")
     app.setOrganizationName("ImageBrowser")
+    activate_macos_application(force=True)
 
-    try:
-        _theme_cfg = get_config(profile_dir=profile_dir)
-    except Exception:
-        _theme_cfg = get_config()
     connect_system_theme_listener()
-    _ui_theme = _theme_cfg.load_settings().get("ui_theme", "dark")
-    apply_theme(_ui_theme, app=app, persist=False, config=_theme_cfg)
+    _ui_theme = config.load_settings().get("ui_theme", "dark")
+    apply_theme(_ui_theme, app=app, persist=False, config=config)
+
+    if getattr(args, 'splash', False):
+        config.update_setting('show_splash', True)
+    from splash_dialog import (
+        dismiss_splash,
+        on_main_window_shown,
+        on_startup_refresh_complete,
+        on_startup_refresh_scheduled,
+        should_show_startup_splash,
+        show_splash_async,
+    )
+    if should_show_startup_splash(config, args):
+        show_splash_async(config)
+        app.aboutToQuit.connect(dismiss_splash)
 
     # Connect quit handler to ensure proper cleanup
     app.aboutToQuit.connect(handle_application_quit)
@@ -1043,6 +1065,7 @@ def main():
                 args.paths = open_directory_dialog(args)
                 continue  # Try again with new paths
             except SystemExit:
+                dismiss_splash()
                 return 0  # User canceled dialog
         
         # Update args.paths with resolved paths
@@ -1176,6 +1199,7 @@ def main():
                 args.paths = open_directory_dialog(args)
                 continue  # Try again with new paths
             except SystemExit:
+                dismiss_splash()
                 return 0  # User canceled dialog
         
         # If we get here, validation passed - break out of the loop
@@ -1240,6 +1264,7 @@ def main():
             debug_mode=args.debug,
             filter_pattern=window_filter
         )
+        install_startup_activation(window)
         
         # Store global reference for cleanup
         main_window = window
@@ -1361,10 +1386,8 @@ def main():
             print(f"\nWindow.show is starting with configuration: {CYAN}{configuration}{RESET}")
        
         window.show()
-        
-        # Activate and raise window to ensure it's ready for fullscreen
-        window.activateWindow()
-        window.raise_()
+        on_main_window_shown(window)
+        schedule_startup_activation(window, force=True)
         
         # If --fullscreen was explicitly passed OR restoring from fullscreen state,
         # also try entering fullscreen directly here as a backup
@@ -1395,16 +1418,17 @@ def main():
                     window.main_content_widget.setFocus()
                 elif hasattr(window, 'focus_canvas'):
                     window.focus_canvas()
-                window.activateWindow()
-                window.raise_()
+                activate_application_window(window, force=True)
             except Exception:
                 traceback.print_exc()
         
         ensure_startup_focus()
         QTimer.singleShot(50, ensure_startup_focus)
+        QTimer.singleShot(300, lambda: schedule_startup_activation(window, force=True))
 
         # Refresh the browser with the configuration after window is shown
         if configuration:
+            on_startup_refresh_scheduled()
             # Use a longer delay to ensure the window is fully initialized
             def delayed_refresh():
                 try:
@@ -1545,16 +1569,20 @@ def main():
                     import traceback
                     traceback.print_exc()
                     pass
+                finally:
+                    on_startup_refresh_complete(window)
             
             QTimer.singleShot(100, delayed_refresh)
             # delayed_refresh()  # DGN This seems to be OK w/o the qtimer.singleShot(500, delayed_refresh)
-        
+        else:
+            QTimer.singleShot(0, lambda: on_startup_refresh_complete(window))
         
         # Run the application
         result = app.exec()
         return result
         
     except Exception as e:
+        dismiss_splash()
         display_entry_error(message_title="Application Error", message=f"Failed to start application:\n{str(e)}")
         print(f"Failed to start application:\n{str(e)}")
         clipboard = QApplication.clipboard()
