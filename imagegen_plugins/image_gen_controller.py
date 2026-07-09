@@ -554,6 +554,10 @@ class ImageGenController(QObject):
         self._copy_batch_cancelled = False
         self._skip_series_copy_requested = False
         self._stop_copy_cooldown_timer()
+        self._reset_active_job_progress_tracking()
+        self._job_ai_stage_active = False
+        self._active_job_with_ai = False
+        self._task_status_info_html = ""
 
         self._active_plugin = plugin
         self._pending_values = values
@@ -563,6 +567,7 @@ class ImageGenController(QObject):
             pass  # queue pane rebuilds compact HTML from live controller state
 
         self.queue_changed.emit()
+        self.task_status_info_changed.emit()
         if self._pending_job_needs_ai_stage():
             return self._begin_job_ai_stage()
         return self._launch_generation_job()
@@ -578,14 +583,10 @@ class ImageGenController(QObject):
     def _start_job_ai_progress_tracking(self) -> None:
         from imagegen_plugins.model_task_status_info import _AI_REFINE_PROGRESS_TOTAL
 
-        self._job_ai_chars_received = 0
-        self._job_ai_last_progress_bucket = -1
+        self._reset_active_job_progress_tracking()
         self._step_progress_start_time = time.perf_counter()
         self._live_step = 0
         self._live_step_total = _AI_REFINE_PROGRESS_TOTAL
-        self._live_elapsed_seconds = None
-        self._live_estimate_seconds = None
-        self._step_seconds_per_step = None
 
     def _refresh_job_ai_stage_status_html(self, *, running: bool) -> None:
         from imagegen_plugins.model_task_status_info import (
@@ -1370,6 +1371,15 @@ class ImageGenController(QObject):
         self._live_estimate_seconds = None
         self._step_seconds_per_step = None
 
+    def _reset_active_job_progress_tracking(self) -> None:
+        """Clear step/elapsed/timing used by progress bars (not copy-batch counters)."""
+        self._reset_live_queue_progress()
+        self._step_progress_start_time = None
+        self._frozen_elapsed_seconds = None
+        self._job_ai_chars_received = 0
+        self._job_ai_last_progress_bucket = -1
+        self._last_cooldown_ui_second = None
+
     def get_task_queue_status_info_html(self, *, omit_live_steps_row: bool = False) -> str:
         """Compact info table for the job queue pane and sidebar (rebuilt from live state)."""
         plugin = self._active_plugin
@@ -2021,16 +2031,12 @@ class ImageGenController(QObject):
                     self._task_status_info_html = remove_elapsed_row(
                         self._task_status_info_html
                     )
+            self._reset_active_job_progress_tracking()
             self._step_progress_start_time = time.perf_counter()
-            self._live_step = 0
             try:
                 self._live_step_total = int(self._pending_values.get("steps") or 0)
             except (TypeError, ValueError):
                 self._live_step_total = 0
-            self._live_elapsed_seconds = None
-            self._live_estimate_seconds = None
-            self._step_seconds_per_step = None
-            self._frozen_elapsed_seconds = None
             if self._live_step_total > 0 and self._task_status_info_html:
                 self._task_status_info_html = update_status_html_steps_progress(
                     self._task_status_info_html,
@@ -2098,9 +2104,7 @@ class ImageGenController(QObject):
                 and self._copy_batch_active
                 and not self._copy_batch_cancelled
             ):
-                self._reset_live_queue_progress()
-                self._step_progress_start_time = None
-                self._frozen_elapsed_seconds = None
+                self._reset_active_job_progress_tracking()
                 self.queue_changed.emit()
                 self.task_status_info_changed.emit()
                 self._schedule_persist_job_queue()
@@ -2650,30 +2654,21 @@ class ImageGenController(QObject):
         )
 
     def _reset_generation_state(self) -> None:
+        self._stop_copy_cooldown_timer()
         self._suppress_task_failure_ui = False
         self._job_ai_stage_active = False
         self._active_job_with_ai = False
-        self._job_ai_chars_received = 0
-        self._job_ai_last_progress_bucket = -1
         self._active_plugin = None
         self._output_path = ""
         self._pending_values = {}
         self._progressive_browse_opened = False
         self._task_status_info_html = ""
-        self._step_progress_start_time = None
         self._expand_source_path = ""
         self._expand_base_path = ""
         self._aspect_pad_temp_paths = []
         self._task_reference_paths = []
         self._clear_copy_cycle_exif_snapshot()
-        self._live_step = 0
-        self._live_step_total = 0
-        self._live_elapsed_seconds = None
-        self._live_estimate_seconds = None
-        self._step_seconds_per_step = None
-        self._frozen_elapsed_seconds = None
-        self._cooldown_deadline = None
-        self._last_cooldown_ui_second = None
+        self._reset_active_job_progress_tracking()
 
     def _sync_cancel_menu(self) -> None:
         action = getattr(self.main_window, "imagegen_cancel_action", None)

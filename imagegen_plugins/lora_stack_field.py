@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Multi-LoRA stack field: read-only summary combo + checkable popup (OK/Cancel)."""
+"""Multi-LoRA stack field: read-only summary combo + checkable popup (apply on dismiss)."""
 
 from __future__ import annotations
 
@@ -11,8 +11,6 @@ from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QFrame,
-    QHBoxLayout,
-    QPushButton,
     QScrollArea,
     QSizePolicy,
     QVBoxLayout,
@@ -37,7 +35,6 @@ from theme.theme_service import get_active_theme
 
 _POPUP_MAX_VISIBLE_ROWS = 10
 _ROW_HEIGHT_ESTIMATE = 26
-_POPUP_BUTTON_ROW_HEIGHT = 36
 _POPUP_PADDING = 8
 
 
@@ -59,7 +56,7 @@ def lora_stack_summary_text(
 
 
 class LoraSelectionPopup(QFrame):
-    """Checkable LoRA list anchored below the summary combo; OK commits, Cancel discards."""
+    """Checkable LoRA list anchored below the summary combo; dismiss applies, Esc cancels."""
 
     accepted = Signal(list)
     rejected = Signal()
@@ -88,20 +85,6 @@ class LoraSelectionPopup(QFrame):
         self._scroll.setWidget(self._checks_host)
         root.addWidget(self._scroll, 1)
 
-        btn_row = QWidget(self)
-        btn_layout = QHBoxLayout(btn_row)
-        btn_layout.setContentsMargins(_POPUP_PADDING, 4, _POPUP_PADDING, _POPUP_PADDING)
-        btn_layout.setSpacing(8)
-        btn_layout.addStretch(1)
-        cancel_btn = QPushButton("Cancel", btn_row)
-        cancel_btn.clicked.connect(self._on_cancel)
-        ok_btn = QPushButton("OK", btn_row)
-        ok_btn.setDefault(True)
-        ok_btn.clicked.connect(self._on_ok)
-        btn_layout.addWidget(cancel_btn)
-        btn_layout.addWidget(ok_btn)
-        root.addWidget(btn_row, 0)
-
         self._checkboxes: List[Tuple[str, QCheckBox]] = []
         self._committed = False
 
@@ -128,13 +111,16 @@ class LoraSelectionPopup(QFrame):
 
     def keyPressEvent(self, event: QKeyEvent) -> None:
         if event.key() == Qt.Key.Key_Escape:
-            self._on_cancel()
+            self._committed = True
+            self.rejected.emit()
+            self.hide()
             return
         super().keyPressEvent(event)
 
     def hideEvent(self, event) -> None:
         if not self._committed:
-            self.rejected.emit()
+            self._committed = True
+            self.accepted.emit(self._selected_ids())
         super().hideEvent(event)
 
     def _clear_checks(self) -> None:
@@ -171,16 +157,6 @@ class LoraSelectionPopup(QFrame):
             if cb.isChecked():
                 out.append(preset_id)
         return out
-
-    def _on_ok(self) -> None:
-        self._committed = True
-        self.accepted.emit(self._selected_ids())
-        self.hide()
-
-    def _on_cancel(self) -> None:
-        self._committed = True
-        self.rejected.emit()
-        self.hide()
 
     def show_below(self, anchor: QWidget) -> None:
         self._committed = False
@@ -336,7 +312,7 @@ class LoraStackField(QWidget):
             self._update_summary_text()
             tip = (
                 "Select one or more LoRAs (experimental stacking). "
-                "Click to open the list; OK to apply."
+                "Click to open the list; click outside to apply, Esc to cancel."
             )
             self.summary_combo.setToolTip(tip)
             return

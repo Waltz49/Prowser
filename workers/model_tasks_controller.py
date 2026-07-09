@@ -114,6 +114,7 @@ class ModelTasksController(QObject):
         self._worker_result: Optional[Dict[str, Any]] = None
         self._generate_perf_start: Optional[float] = None
         self._cancelling = False
+        self._worker_session_id = 0
 
     def is_running(self) -> bool:
         return bool(self._active_job_id)
@@ -216,10 +217,14 @@ class ModelTasksController(QObject):
         if self._is_worker_alive() and self._worker_ready:
             return True
         self._terminate_worker()
+        self._worker_session_id += 1
+        session = self._worker_session_id
         if self._use_inline_worker():
             thread = FrozenModelTasksWorkerThread(self)
             thread.json_line.connect(self._handle_worker_line)
-            thread.finished.connect(self._on_inline_thread_finished)
+            thread.finished.connect(
+                lambda s=session: self._on_inline_thread_finished(s)
+            )
             self._inline_thread = thread
             self._worker_ready = False
             self._stdout_buffer = ""
@@ -230,7 +235,11 @@ class ModelTasksController(QObject):
         proc.setProcessChannelMode(QProcess.ProcessChannelMode.SeparateChannels)
         proc.readyReadStandardOutput.connect(self._on_stdout)
         proc.readyReadStandardError.connect(self._on_stderr)
-        proc.finished.connect(self._on_process_finished)
+        proc.finished.connect(
+            lambda code, status, s=session: self._on_process_finished(
+                code, status, s
+            )
+        )
         proc.errorOccurred.connect(self._on_process_error)
 
         program, arguments = model_tasks_worker_program_and_args()
@@ -409,6 +418,7 @@ class ModelTasksController(QObject):
         self._active_kind = ""
         self._worker_result = None
         self._generate_perf_start = None
+        self._stderr_buffer = []
 
     def _on_stderr(self) -> None:
         proc = self._process
@@ -420,9 +430,15 @@ class ModelTasksController(QObject):
 
     def _on_process_error(self, _error) -> None:
         if self._process and self._process.state() == QProcess.ProcessState.NotRunning:
-            self._on_process_finished(self._process.exitCode(), self._process.exitStatus())
+            self._on_process_finished(
+                self._process.exitCode(),
+                self._process.exitStatus(),
+                self._worker_session_id,
+            )
 
-    def _on_inline_thread_finished(self) -> None:
+    def _on_inline_thread_finished(self, session_id: int = 0) -> None:
+        if session_id != self._worker_session_id:
+            return
         self._worker_ready = False
         self._inline_thread = None
         if not self._active_job_id or self._cancelling:
@@ -430,7 +446,11 @@ class ModelTasksController(QObject):
         kind = self._active_kind
         self._finish_job(kind, False, "Worker thread exited.")
 
-    def _on_process_finished(self, exit_code: int, exit_status) -> None:
+    def _on_process_finished(
+        self, exit_code: int, exit_status, session_id: int = 0
+    ) -> None:
+        if session_id != self._worker_session_id:
+            return
         if not self._active_job_id or self._cancelling:
             self._worker_ready = False
             self._process = None
