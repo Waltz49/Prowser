@@ -55,6 +55,22 @@ def write_process_stdout_line(line: str) -> None:
         sys.stdout.flush()
 
 
+def write_print_log_file(text: str) -> None:
+    """Write to the View log file only (Tools > Debug > View log), not the terminal."""
+    line = text if text.endswith("\n") else text + "\n"
+    out = sys.stdout
+    if isinstance(out, _StdoutToPrintLog):
+        with _print_log_lock:
+            out._file.write(line)
+            out._file.flush()
+        return
+    path = PRINT_LOG_FILE_PATH or session_print_log_path()
+    with _print_log_lock:
+        with open(path, "a", buffering=1) as log_file:
+            log_file.write(line)
+            log_file.flush()
+
+
 def session_print_log_path() -> str:
     return os.path.join(tempfile.gettempdir(), f'image_browser_print_{os.getuid()}.log')
 

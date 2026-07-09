@@ -125,6 +125,19 @@ class SidebarManager:
             )
             return self.main_window.right_sidebar.is_jobs_visible()
         return False
+
+    def toggle_chat(self):
+        """Toggle the visibility of the chat pane in the left combined sidebar."""
+        def do_toggle():
+            if hasattr(self.main_window, "combined_sidebar"):
+                self.main_window.combined_sidebar.set_chat_visible(
+                    not self.main_window.combined_sidebar.is_chat_visible()
+                )
+
+        if hasattr(self.main_window, "combined_sidebar"):
+            self._leave_browse_then(do_toggle)
+            return self.main_window.combined_sidebar.is_chat_visible()
+        return False
     
     def toggle_preview_fit_mode(self):
         """Toggle preview fit mode"""
@@ -415,6 +428,7 @@ class SidebarManager:
                 if (
                     self.main_window.file_tree_visible
                     or self.main_window.preview_visible
+                    or getattr(self.main_window, 'chat_visible', False)
                 ):
                     self.main_window.combined_sidebar.show()
                     QApplication.processEvents()

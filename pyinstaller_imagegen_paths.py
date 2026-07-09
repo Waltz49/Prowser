@@ -22,6 +22,7 @@ LOCAL_PACKAGES = (
     "thumbnails",
     "settings",
     "imagegen_plugins",
+    "chat_plugins",
 )
 
 

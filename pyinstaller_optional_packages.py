@@ -59,6 +59,7 @@ MIN_EXCLUDE_IMPORT_ROOTS: frozenset[str] = frozenset(
         "uvicorn",
         "starlette",
         "imagegen_plugins",
+        "chat_plugins",
     }
 )
 
@@ -88,6 +89,7 @@ MIN_EXCLUDE_MODULES: tuple[str, ...] = (
     "uvicorn",
     "starlette",
     "imagegen_plugins",
+    "chat_plugins",
     "skimage",
     "imagehash",
 )

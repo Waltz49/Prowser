@@ -62,11 +62,16 @@ def relax_json_for_log(json_string: str) -> str:
     return "".join(output_chars)
 
 
-def _write_log_line(text: str) -> None:
-    print(text, end="" if text.endswith("\n") else "\n", flush=True)
+def _write_log_line(text: str, *, tee_terminal: bool = True) -> None:
+    if tee_terminal:
+        print(text, end="" if text.endswith("\n") else "\n", flush=True)
+        return
+    from print_log_redirect import write_print_log_file
+
+    write_print_log_file(text)
 
 
-def log_exception(exc: BaseException, *, exc_tb: Any | None = None) -> None:
+def log_exception(exc: BaseException, *, exc_tb: Any | None = None, tee_terminal: bool = True) -> None:
     """Write a formatted exception block to the View log."""
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     exc_type = type(exc)
@@ -90,10 +95,10 @@ def log_exception(exc: BaseException, *, exc_tb: Any | None = None) -> None:
         parts.append("".join(traceback.format_tb(exc_tb)).rstrip("\n"))
 
     parts.append(f"{'=' * 50}\n")
-    _write_log_line("\n".join(parts))
+    _write_log_line("\n".join(parts), tee_terminal=tee_terminal)
 
 
-def print_call(func: Callable, wrap: bool = True) -> Callable:
+def print_call(func: Callable, wrap: bool = True, *, tee_terminal: bool = True) -> Callable:
     """
     Log function calls (lmstudio/gradio) to the View log.
     Only the call type and formatted params are logged; results are not logged.
@@ -170,7 +175,7 @@ def print_call(func: Callable, wrap: bool = True) -> Callable:
         call_type = func_name
         if "api_name" in payload:
             call_type = f"{func_name} {payload.get('api_name', '')}"
-        _write_log_line(f"\n[{timestamp}] {call_type}\n{call_str}\n")
+        _write_log_line(f"\n[{timestamp}] {call_type}\n{call_str}\n", tee_terminal=tee_terminal)
 
         return func(*args, **kwargs)
 

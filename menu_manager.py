@@ -688,6 +688,24 @@ class MenuManager:
             self.main_window.toggle_jobs_action.setShortcut(QKeySequence('J'))
             self.main_window.toggle_jobs_action.triggered.connect(self.main_window.toggle_jobs)
             view_menu.addAction(self.main_window.toggle_jobs_action)
+
+        try:
+            from bundle_capabilities import chat_ui_enabled
+
+            _chat_ui = chat_ui_enabled()
+        except ImportError:
+            _chat_ui = True
+        if _chat_ui:
+            self.main_window.toggle_chat_action = QAction('Show Chat', self.main_window)
+            self.main_window.toggle_chat_action.setCheckable(True)
+            self.main_window.toggle_chat_action.setChecked(
+                getattr(self.main_window, 'chat_visible', False)
+            )
+            self.main_window.toggle_chat_action.setShortcut(
+                QKeySequence('Shift+Meta+B')
+            )
+            self.main_window.toggle_chat_action.triggered.connect(self.main_window.toggle_chat)
+            view_menu.addAction(self.main_window.toggle_chat_action)
         
         # Toggle Information Sidebar (right sidebar with EXIF info)
         self.main_window.toggle_information_sidebar_action = QAction("Information Sidebar Toggle", self.main_window)
@@ -740,6 +758,15 @@ class MenuManager:
             if hasattr(self.main_window, 'toggle_jobs_action'):
                 self.main_window.toggle_jobs_action.setText('Hide Jobs' if jobs_visible else 'Show Jobs')
                 self.main_window.toggle_jobs_action.setChecked(jobs_visible)
+            cs = self.main_window.combined_sidebar
+            chat_visible = (
+                cs.is_chat_visible()
+                if hasattr(cs, 'is_chat_visible')
+                else getattr(self.main_window, 'chat_visible', False)
+            )
+            if hasattr(self.main_window, 'toggle_chat_action'):
+                self.main_window.toggle_chat_action.setText('Hide Chat' if chat_visible else 'Show Chat')
+                self.main_window.toggle_chat_action.setChecked(chat_visible)
         
         
         # Toggle List View (shortcut F12)
@@ -3072,6 +3099,7 @@ class MenuManager:
             'toggle_file_tree_action',
             'toggle_preview_action',
             'toggle_jobs_action',
+            'toggle_chat_action',
             'toggle_status_bar_action',
             'browse_view_action',
             'macos_display_mode_action',
@@ -3102,6 +3130,7 @@ class MenuManager:
                 'toggle_file_tree_action': True,
                 'toggle_preview_action': True,
                 'toggle_jobs_action': True,
+                'toggle_chat_action': True,
                 'toggle_status_bar_action': True,
                 'browse_view_action': True,
                 'macos_display_mode_action': True,
@@ -3129,6 +3158,7 @@ class MenuManager:
                 'toggle_file_tree_action': False,
                 'toggle_preview_action': False,
                 'toggle_jobs_action': True,
+                'toggle_chat_action': True,
                 'toggle_status_bar_action': True,
                 'browse_view_action': True,
                 'macos_display_mode_action': True,
@@ -3157,6 +3187,7 @@ class MenuManager:
                 'toggle_file_tree_action': False,
                 'toggle_preview_action': False,
                 'toggle_jobs_action': False,
+                'toggle_chat_action': True,
                 'toggle_status_bar_action': False,
                 'browse_view_action': True,
                 'macos_display_mode_action': True,
@@ -3184,6 +3215,7 @@ class MenuManager:
                 'toggle_file_tree_action': False,
                 'toggle_preview_action': False,
                 'toggle_jobs_action': False,
+                'toggle_chat_action': True,
                 'toggle_status_bar_action': False,
                 'browse_view_action': True,
                 'macos_display_mode_action': True,
@@ -3211,6 +3243,7 @@ class MenuManager:
                 'toggle_file_tree_action': False,
                 'toggle_preview_action': False,
                 'toggle_jobs_action': False,
+                'toggle_chat_action': True,
                 'toggle_status_bar_action': False,
                 'browse_view_action': True,
                 'macos_display_mode_action': True,
@@ -3238,6 +3271,7 @@ class MenuManager:
                 'toggle_file_tree_action': True,  # Enable T key to toggle tree
                 'toggle_preview_action': True,  # Enable P key to toggle preview
                 'toggle_jobs_action': True,  # Enable J key to toggle jobs pane
+                'toggle_chat_action': True,  # Enable Shift+Cmd+B to toggle chat pane
                 'toggle_status_bar_action': True,
                 'browse_view_action': True,
                 'macos_display_mode_action': True,
@@ -3705,3 +3739,14 @@ class MenuManager:
         if hasattr(mw, 'toggle_jobs_action'):
             mw.toggle_jobs_action.setEnabled(show_jobs_toggle)
             mw.toggle_jobs_action.setVisible(show_jobs_toggle)
+        show_chat_toggle = True
+        try:
+            from bundle_capabilities import chat_ui_enabled
+
+            if not chat_ui_enabled():
+                show_chat_toggle = False
+        except ImportError:
+            pass
+        if hasattr(mw, 'toggle_chat_action'):
+            mw.toggle_chat_action.setEnabled(show_chat_toggle)
+            mw.toggle_chat_action.setVisible(show_chat_toggle)

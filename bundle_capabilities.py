@@ -62,6 +62,11 @@ def model_jobs_ui_enabled() -> bool:
     return not is_min_bundle()
 
 
+def chat_ui_enabled() -> bool:
+    """Chat sidebar pane and LM Studio conversation UI."""
+    return not is_min_bundle()
+
+
 def faces_ui_enabled() -> bool:
     """Face recognition search, cache faces, and Faces settings tab."""
     return not is_min_bundle()
