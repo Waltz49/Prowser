@@ -205,6 +205,9 @@ class ChatMessageWidget(QWidget):
             else []
         )
         self.edit_saved.emit(self._message.message_id, text, images)
+        if self._editing:
+            self._message.text = text
+            self.finish_edit(self._message)
 
     def _teardown_edit_ui(self) -> None:
         if not self._editing:

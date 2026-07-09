@@ -4,11 +4,10 @@
 from __future__ import annotations
 
 import os
-from typing import Callable, Optional
 
-from PySide6.QtCore import QEvent, QObject, Qt, Signal
+from PySide6.QtCore import QEvent, Qt, Signal
 from PySide6.QtGui import QDragEnterEvent, QDragMoveEvent, QDropEvent, QTextBlock, QTextLayout, QTextOption
-from PySide6.QtWidgets import QGridLayout, QHBoxLayout, QPlainTextEdit, QSizePolicy, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QGridLayout, QPlainTextEdit, QSizePolicy, QVBoxLayout, QWidget
 
 from chat_plugins.chat_image_store import MAX_CHAT_IMAGES
 from chat_plugins.chat_ui_common import CHAT_THUMB_PX, chat_prompt_edit_stylesheet
@@ -174,10 +173,7 @@ class ChatImageThumb(QWidget):
                 event.accept()
                 return
             row = self.parent()
-            if (
-                isinstance(row, ChatImageThumbRow)
-                and row._main_window is not None
-            ):
+            if isinstance(row, ChatImageThumbRow) and row.can_open_images():
                 self.open_requested.emit()
                 event.accept()
                 return
@@ -185,33 +181,44 @@ class ChatImageThumb(QWidget):
 
 
 class ChatImageThumbRow(QWidget):
-    """Flowing row of up to four 64px thumbnails."""
+    """Flowing row of up to four 64px thumbnails (wraps to fit pane width)."""
 
     images_changed = Signal(list)
+    _THUMB_GAP = 4
 
     def __init__(self, parent=None, *, compact_row: bool = False, main_window=None):
         super().__init__(parent)
         self._paths: list[str] = []
         self._allow_remove = True
-        self._compact_row = compact_row
         self._main_window = main_window
         self._last_grid_cols = -1
         self._last_emitted_paths: list[str] = []
-        if compact_row:
-            self._layout = QHBoxLayout(self)
-            self._layout.setContentsMargins(0, 0, 0, 4)
-            self._layout.setSpacing(4)
-            self._layout.setAlignment(
-                Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop
-            )
-            self.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
-            self.setFixedHeight(CHAT_THUMB_PX + 4)
-        else:
-            self._layout = QGridLayout(self)
-            self._layout.setContentsMargins(0, 0, 0, 4)
-            self._layout.setHorizontalSpacing(4)
-            self._layout.setVerticalSpacing(4)
-            self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self._layout = QGridLayout(self)
+        self._layout.setContentsMargins(0, 0, 0, self._THUMB_GAP)
+        self._layout.setHorizontalSpacing(self._THUMB_GAP)
+        self._layout.setVerticalSpacing(self._THUMB_GAP)
+        self._layout.setAlignment(
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop
+        )
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+
+    def _layout_width(self) -> int:
+        """Width available for wrapping thumbs (parent inner width, not shrunken self width)."""
+        cell = CHAT_THUMB_PX + self._THUMB_GAP
+        width = self.contentsRect().width()
+        parent = self.parentWidget()
+        if parent is not None:
+            inner = parent.width()
+            lay = parent.layout()
+            if lay is not None:
+                m = lay.contentsMargins()
+                inner -= m.left() + m.right()
+            if inner > width:
+                width = inner
+        return max(width, cell)
+
+    def can_open_images(self) -> bool:
+        return self._main_window is not None and bool(self._paths)
 
     def set_main_window(self, main_window) -> None:
         self._main_window = main_window
@@ -231,11 +238,32 @@ class ChatImageThumbRow(QWidget):
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
-        if self._paths and not self._compact_row:
-            cols = max(1, self.width() // (CHAT_THUMB_PX + 4))
-            if cols != self._last_grid_cols:
-                self._last_grid_cols = cols
-                self._rebuild()
+        if not self._paths:
+            return
+        cols = self._cols_for_width(self._layout_width())
+        if cols != self._last_grid_cols:
+            self._rebuild()
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        if not self._paths:
+            return
+        cols = self._cols_for_width(self._layout_width())
+        if cols != self._last_grid_cols:
+            self._rebuild()
+
+    def _cols_for_width(self, width: int) -> int:
+        cell = CHAT_THUMB_PX + self._THUMB_GAP
+        by_width = max(1, width // cell)
+        return min(by_width, len(self._paths))
+
+    def _apply_row_height(self, cols: int) -> None:
+        if not self._paths:
+            return
+        rows = (len(self._paths) + cols - 1) // cols
+        bottom = self._layout.contentsMargins().bottom()
+        height = rows * CHAT_THUMB_PX + max(0, rows - 1) * self._THUMB_GAP + bottom
+        self.setFixedHeight(height)
 
     def _emit_images_changed_if_needed(self) -> None:
         paths = self.image_paths()
@@ -259,22 +287,22 @@ class ChatImageThumbRow(QWidget):
             self._last_grid_cols = -1
             self._emit_images_changed_if_needed()
             return
-        if not self._compact_row:
-            self._last_grid_cols = max(1, self.width() // (CHAT_THUMB_PX + 4))
+        cols = self._cols_for_width(self._layout_width())
+        self._last_grid_cols = cols
+        for c in range(cols):
+            self._layout.setColumnStretch(c, 0)
+            self._layout.setColumnMinimumWidth(c, CHAT_THUMB_PX)
         for idx, path in enumerate(self._paths):
             thumb = ChatImageThumb(path, self, allow_remove=allow_remove)
             thumb.remove_requested.connect(self._on_remove)
             if self._main_window is not None:
                 thumb.open_requested.connect(self._open_attached_images)
                 thumb.setCursor(Qt.CursorShape.PointingHandCursor)
-            if self._compact_row:
-                self._layout.addWidget(thumb)
-            else:
-                cols = self._last_grid_cols
-                row = idx // cols
-                col = idx % cols
-                self._layout.addWidget(thumb, row, col)
+            row = idx // cols
+            col = idx % cols
+            self._layout.addWidget(thumb, row, col)
         self.setVisible(True)
+        self._apply_row_height(cols)
         self._emit_images_changed_if_needed()
         self._sync_open_tooltip()
 

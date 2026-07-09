@@ -3,12 +3,12 @@
 
 from __future__ import annotations
 
-import os
 from typing import Callable, Optional
 
 from PySide6.QtCore import QEvent, QObject, Qt, QTimer, QSize
 from PySide6.QtGui import QIcon, QKeyEvent
 from PySide6.QtWidgets import (
+    QApplication,
     QLabel,
     QMessageBox,
     QPushButton,
@@ -17,12 +17,16 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+from shiboken6 import isValid
 
 from browser_window.sidebar.sidebar_pane_chrome import (
     apply_scroll_area_viewport_background,
     apply_sidebar_pane_background,
 )
-from chat_plugins.chat_delete_confirm import confirm_chat_message_delete
+from chat_plugins.chat_delete_confirm import (
+    confirm_chat_message_delete,
+    confirm_clear_chat,
+)
 from chat_plugins.chat_image_store import ChatImageStore
 from chat_plugins.chat_lmstudio import is_lmstudio_chat_available, lmstudio_unavailable_message
 from chat_plugins.chat_message_widgets import ChatMessageWidget
@@ -57,6 +61,12 @@ class _ChatRedoKeyFilter(QObject):
         self._pane = pane
 
     def eventFilter(self, watched: QObject, event: QEvent) -> bool:
+        if event.type() == QEvent.Type.Destroy:
+            if isinstance(watched, QWidget) and isValid(watched):
+                watched.removeEventFilter(self)
+            return False
+        if not isValid(self._pane):
+            return False
         if not self._pane.isVisible():
             return False
         if event.type() == QEvent.Type.ShortcutOverride:
@@ -76,15 +86,34 @@ class _ChatRedoKeyFilter(QObject):
 
 def _attach_chat_redo_key_filter(host: QWidget) -> None:
     filt = getattr(host, "_chat_redo_key_filter", None)
-    if filt is None:
+    if filt is None or not isValid(host):
         return
     tracked: set[int] = getattr(host, "_chat_redo_key_filter_widgets", None) or set()
     for widget in (host, *host.findChildren(QWidget)):
+        if not isValid(widget):
+            continue
         wid = id(widget)
         if wid in tracked:
             continue
         widget.installEventFilter(filt)
         tracked.add(wid)
+    setattr(host, "_chat_redo_key_filter_widgets", tracked)
+
+
+def _detach_chat_redo_key_filter(host: QWidget) -> None:
+    filt = getattr(host, "_chat_redo_key_filter", None)
+    if filt is None:
+        return
+    tracked: set[int] = getattr(host, "_chat_redo_key_filter_widgets", None) or set()
+    if not isValid(host):
+        tracked.clear()
+        setattr(host, "_chat_redo_key_filter_widgets", tracked)
+        return
+    host.removeEventFilter(filt)
+    for widget in host.findChildren(QWidget):
+        if isValid(widget):
+            widget.removeEventFilter(filt)
+    tracked.clear()
     setattr(host, "_chat_redo_key_filter_widgets", tracked)
 
 
@@ -94,6 +123,10 @@ def install_chat_redo_key_filter(pane: "ChatPaneWidget") -> None:
     if filt is None:
         filt = _ChatRedoKeyFilter(pane, parent=pane)
         setattr(pane, "_chat_redo_key_filter", filt)
+        app = QApplication.instance()
+        if app is not None and not getattr(pane, "_chat_redo_quit_hooked", False):
+            app.aboutToQuit.connect(lambda p=pane: _detach_chat_redo_key_filter(p))
+            pane._chat_redo_quit_hooked = True
     _attach_chat_redo_key_filter(pane)
 
 
@@ -251,14 +284,7 @@ class ChatPaneWidget(QWidget):
 
     def clear_chat(self) -> None:
         if self._session.has_started():
-            reply = QMessageBox.question(
-                self,
-                "Clear Chat",
-                "Clear the entire chat history for this session?",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                QMessageBox.StandardButton.No,
-            )
-            if reply != QMessageBox.StandardButton.Yes:
+            if not confirm_clear_chat(self.main_window):
                 return
         self._cancel_worker()
         self._image_store.reset_session()
@@ -421,8 +447,6 @@ class ChatPaneWidget(QWidget):
                 self._messages_layout.insertWidget(lay_idx, new_widget)
                 self._message_widgets.insert(i, new_widget)
                 _attach_chat_redo_key_filter(self)
-            else:
-                widget.finish_edit(msg)
             break
 
     def _on_redo(self, message_id: str) -> None:

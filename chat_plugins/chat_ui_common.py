@@ -8,6 +8,7 @@ import os
 from PySide6.QtCore import QEvent, QObject, QSize, Qt
 from PySide6.QtGui import QColor, QIcon, QImage, QPalette, QPixmap, qGray
 from PySide6.QtWidgets import QFrame, QGroupBox, QPushButton
+from shiboken6 import isValid
 
 from config import job_queue_cell_background_hex
 from theme.theme_base import asset_path
@@ -147,6 +148,12 @@ class _ChatIconButtonHover(QObject):
         button.installEventFilter(self)
 
     def eventFilter(self, obj: QObject, event: QEvent) -> bool:
+        if event.type() == QEvent.Type.Destroy:
+            if obj is self._button and isValid(self._button):
+                self._button.removeEventFilter(self)
+            return False
+        if not isValid(self._button):
+            return False
         if obj is self._button:
             if event.type() == QEvent.Type.HoverEnter:
                 self._button.setIcon(self._hover_icon)
