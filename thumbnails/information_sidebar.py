@@ -57,6 +57,27 @@ _INFO_VIEWPORT_MARGIN_RIGHT = 18
 _INFO_VIEWPORT_MARGIN_BOTTOM = 15
 _INFO_CONTENT_WIDTH_INSET = _INFO_VIEWPORT_MARGIN_LEFT + _INFO_VIEWPORT_MARGIN_RIGHT
 
+# Persisted collapse keys for information pane headers (generic keys, not per-file values).
+_DEFAULT_INFO_SECTION_EXPANDED = {
+    'filename': True,
+    'references': True,
+    'image_model': True,
+    'prompt': True,
+    'title': True,
+    'description': True,
+    'negative_prompt': True,
+    'input_to_active_job': True,
+}
+_INFO_H4_SECTION_KEY_BY_TITLE = {
+    'references': 'references',
+    'image model': 'image_model',
+    'prompt': 'prompt',
+    'title': 'title',
+    'description': 'description',
+    'negative prompt': 'negative_prompt',
+}
+_INFO_H4_TAG_RE = re.compile(r'<h4>([^<]+)</h4>', re.IGNORECASE)
+
 
 class InformationSidebar(QWidget):
     """Widget for displaying image information (EXIF data) in a right sidebar"""
@@ -71,6 +92,7 @@ class InformationSidebar(QWidget):
         self._gen_timing_path: Optional[str] = None
         self._overlay_has_image_model = False
         self._input_heading_signal_connected = False
+        self._info_section_expanded_cache: Optional[Dict[str, bool]] = None
         self.setup_ui()
 
     def setup_ui(self):
@@ -177,11 +199,12 @@ class InformationSidebar(QWidget):
             f"{ALT_SYMBOL}+click: Show only this image and its direct references "
         ),
     }
+    _INFO_COLLAPSE_TOOLTIP = "Click to expand or collapse this section"
 
     _LEGACY_REF_MD5_LINE = re.compile(r"^[0-9a-fA-F]{32}$")
     _REF_FILEDATE_LINE = re.compile(r"^\d+(?:\.\d+)?$")
     _REF_SECTION_STOP = re.compile(
-        r"^(?:prompt|image model|title|description):$", re.IGNORECASE
+        r"^(?:prompt|image model|title|description|negative prompt):$", re.IGNORECASE
     )
     _REF_FILEDATE_TOLERANCE_S = 1.0
 
@@ -346,6 +369,98 @@ class InformationSidebar(QWidget):
     def _info_heading_hex(self) -> str:
         return get_active_theme().sidebar_heading_color_hex()
 
+    def _load_info_section_expanded(self) -> Dict[str, bool]:
+        state = dict(_DEFAULT_INFO_SECTION_EXPANDED)
+        try:
+            saved = self.main_window.config.load_settings().get('information_section_expanded')
+            if isinstance(saved, dict):
+                for key, value in saved.items():
+                    if key in state and isinstance(value, bool):
+                        state[key] = value
+        except Exception:
+            pass
+        return state
+
+    def _info_section_expanded(self, key: str) -> bool:
+        if self._info_section_expanded_cache is None:
+            self._info_section_expanded_cache = self._load_info_section_expanded()
+        if key in self._info_section_expanded_cache:
+            return self._info_section_expanded_cache[key]
+        return _DEFAULT_INFO_SECTION_EXPANDED.get(key, True)
+
+    def _set_info_section_expanded(self, key: str, expanded: bool) -> None:
+        if key not in _DEFAULT_INFO_SECTION_EXPANDED:
+            return
+        if self._info_section_expanded_cache is None:
+            self._info_section_expanded_cache = self._load_info_section_expanded()
+        if self._info_section_expanded_cache.get(key) is expanded:
+            return
+        self._info_section_expanded_cache[key] = expanded
+        try:
+            if hasattr(self.main_window, 'config'):
+                self.main_window.config.update_setting(
+                    'information_section_expanded',
+                    dict(self._info_section_expanded_cache),
+                )
+        except Exception:
+            pass
+
+    @staticmethod
+    def _info_section_key_from_h4_title(title: str) -> Optional[str]:
+        return _INFO_H4_SECTION_KEY_BY_TITLE.get(unescape(title).strip().lower())
+
+    def _collapsible_header_html(
+        self,
+        section_key: str,
+        title: str,
+        expanded: bool,
+        *,
+        font_size: str = '12pt',
+        margin_bottom: str | None = None,
+        link_color: str | None = None,
+    ) -> str:
+        indicator = '▼' if expanded else '▶'
+        color = link_color or self._info_heading_hex()
+        if margin_bottom is None:
+            margin_bottom = '12px' if expanded else '4px'
+        return (
+            f'<div style="font-weight: bold; font-size: {font_size}; '
+            f'margin-bottom: {margin_bottom};">'
+            f'<a href="infocollapse://{section_key}" '
+            f'style="color: {color}; text-decoration: none; cursor: pointer;">'
+            f'{indicator} {title}</a></div>'
+        )
+
+    def _wrap_description_with_collapsible_sections(self, description_html: str) -> str:
+        """Replace program-added h4 headers with persisted collapsible sections."""
+        if not description_html:
+            return description_html
+        parts = _INFO_H4_TAG_RE.split(description_html)
+        if len(parts) <= 1:
+            return description_html
+        out = [parts[0]]
+        idx = 1
+        while idx + 1 < len(parts):
+            title = parts[idx]
+            body = parts[idx + 1]
+            section_key = self._info_section_key_from_h4_title(title)
+            if section_key:
+                expanded = self._info_section_expanded(section_key)
+                out.append(
+                    self._collapsible_header_html(
+                        section_key,
+                        title,
+                        expanded,
+                        margin_bottom='6px' if expanded else '2px',
+                    )
+                )
+                if expanded:
+                    out.append(body)
+            else:
+                out.append(f'<h4>{title}</h4>{body}')
+            idx += 2
+        return ''.join(out)
+
     def _imagegen_action_cells(self, hovered_anchor, icon_box, spacer_box) -> str:
         """Optional Create / Edit-with-AI icon cells when imagegen plugins are available."""
         try:
@@ -379,6 +494,8 @@ class InformationSidebar(QWidget):
                 pos = event.position().toPoint() if hasattr(event, 'position') else event.pos()
                 anchor = self.info_text_edit.anchorAt(pos)
                 tooltip = self._ANCHOR_TOOLTIPS.get(anchor, "")
+                if not tooltip and anchor.startswith("infocollapse://"):
+                    tooltip = self._INFO_COLLAPSE_TOOLTIP
                 self._show_link_tooltip(tooltip)
                 if anchor != getattr(self, '_hovered_anchor', None):
                     self._hovered_anchor = anchor
@@ -406,6 +523,17 @@ class InformationSidebar(QWidget):
     def _on_anchor_clicked(self, url):
         """Handle click on speak/copy/delete links in the information description area."""
         from exif.exif_utils import truncate_usercomment_before_prompt
+        if url.scheme() == 'infocollapse':
+            section_key = url.host() or ''
+            if section_key:
+                self._set_info_section_expanded(
+                    section_key,
+                    not self._info_section_expanded(section_key),
+                )
+                self._rebuild_overlay_from_cache(
+                    hovered_anchor=getattr(self, '_hovered_anchor', None)
+                )
+            return
         if url.toString() == "reflevel://":
             from PySide6.QtWidgets import QApplication
 
@@ -1029,12 +1157,19 @@ class InformationSidebar(QWidget):
         # Start building HTML - use proper table with 2 columns
         # Use "Courier New" instead of "monospace" to avoid font warning
         text_hex = self._info_text_hex()
-        heading_hex = self._info_heading_hex()
         html_parts = [f'<div style="color: {text_hex}; font-size: 12pt; font-family: \'Courier New\', Monaco, Menlo; line-height: 1.4;">']
-        html_parts.append(f'<div style="font-weight: bold; font-size: 14pt; margin-bottom: 12px; color: {heading_hex};">{filename}</div>')
+        filename_expanded = self._info_section_expanded('filename')
+        html_parts.append(
+            self._collapsible_header_html(
+                'filename',
+                filename,
+                filename_expanded,
+                font_size='14pt',
+            )
+        )
 
         # Build 2-column table (Field | Value)
-        if field_value_pairs:
+        if filename_expanded and field_value_pairs:
             html_parts.append(f'<table style="border: 1px solid {bdr}; border-collapse: collapse; width: 100%;">')
 
             # One row per field-value pair
@@ -1046,16 +1181,31 @@ class InformationSidebar(QWidget):
 
             html_parts.append('</table>')
 
+        description_visible = True
         if show_input_to_active_job_heading:
             active_bdr = _th.current_image_border_color_hex
             active_bdr_w = max(1, int(getattr(_th, "current_image_border_width_index", 2)))
+            input_expanded = self._info_section_expanded('input_to_active_job')
+            description_visible = input_expanded
             html_parts.append(
                 f'<div style="margin-top: 12px; padding-top: 10px; padding-bottom: 4px; '
                 f'border-top: {active_bdr_w}px solid {active_bdr};">'
-                f'<div style="font-weight: bold; font-size: 12pt; color: {active_bdr}; '
-                f'margin-bottom: 6px;">Input to Active Job</div>'
-                f"</div>"
             )
+            html_parts.append(
+                self._collapsible_header_html(
+                    'input_to_active_job',
+                    'Input to Active Job',
+                    input_expanded,
+                    font_size='12pt',
+                    margin_bottom='6px' if input_expanded else '2px',
+                    link_color=active_bdr,
+                )
+            )
+            html_parts.append("</div>")
+
+        if not description_visible:
+            html_parts.append('</div>')
+            return ''.join(html_parts)
 
         # Constants for font size and color
         ACTION_ICON_FONT_SIZE = "16px"
@@ -1148,6 +1298,7 @@ class InformationSidebar(QWidget):
         if description:
             description = description.replace('\x00', '')
             if description.strip() and not (description.strip().startswith("b'") or description.strip().startswith('b"')):
+                description = self._wrap_description_with_collapsible_sections(description)
                 html_parts.append(f'<div style="padding-top: 10px; padding-bottom: 6px; margin-top: 10px; border-top: 1px solid {bdr}; color: {text_hex}; font-size: 12pt;">{action_icons}{description}</div>')
             else:
                 html_parts.append(f'<div style="padding-top: 10px; padding-bottom: 6px; margin-top: 10px; border-top: 1px solid {bdr}; color: {text_hex}; font-size: 12pt;">{action_icons}</div>')
@@ -1330,6 +1481,12 @@ class InformationSidebar(QWidget):
                             disp = re.sub(
                                 r'(?i)(^|<br>)References:\s*<br>',
                                 r'\1<h4>References</h4>',
+                                disp,
+                                count=1,
+                            )
+                            disp = re.sub(
+                                r'(?i)(^|<br>)Negative [Pp]rompt:\s*<br>',
+                                r'\1<h4>Negative prompt</h4>',
                                 disp,
                                 count=1,
                             )

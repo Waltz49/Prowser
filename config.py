@@ -427,6 +427,17 @@ class ImageBrowserConfig:
             'shortcuts_sidebar_visible': False,  # Default to hiding Shortcuts within right_sidebar (O key)
             'shortcuts_sidebar_scroll_position': 0,  # Vertical scroll position for Shortcuts widget
             'shortcuts_splitter_sizes': [150, 250, 120],  # [shortcuts, information, jobs] heights for right sidebar splitter
+            # Collapsed (False) / expanded (True) for information pane EXIF section headers
+            'information_section_expanded': {
+                'filename': True,
+                'references': True,
+                'image_model': True,
+                'prompt': True,
+                'title': True,
+                'description': True,
+                'negative_prompt': True,
+                'input_to_active_job': True,
+            },
             'list_view_row_height': 48,  # Default row height for list view (28-64px)
             
             # External editor settings
