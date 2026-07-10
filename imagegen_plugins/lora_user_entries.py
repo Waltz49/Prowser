@@ -255,7 +255,9 @@ def remove_user_lora_files(entry: FluxLoraEntry) -> None:
 
 
 def validate_safetensors_source(path: str) -> Path:
-    p = Path(path or "").expanduser()
+    from utils import display_to_path
+
+    p = Path(display_to_path(str(path or "").strip()))
     if not p.is_file():
         raise FileNotFoundError(f"LoRA file not found: {path}")
     if p.suffix.lower() != ".safetensors":

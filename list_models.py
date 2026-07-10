@@ -38,7 +38,11 @@ from PySide6.QtWidgets import (
 
 from theme.theme_base import asset_path
 from theme.theme_service import get_active_theme
-from utils import present_auxiliary_dialog, raise_dialog_without_space_hop
+from utils import (
+    normalize_path_for_display,
+    present_auxiliary_dialog,
+    raise_dialog_without_space_hop,
+)
 
 _WEIGHT_SUFFIXES = (".safetensors", ".bin", ".pt", ".ckpt")
 _PIPELINE_MARKERS = (
@@ -535,6 +539,167 @@ def hf_repo_cache_dir(repo) -> Path | None:
     return None
 
 
+def _local_lora_cache_roots() -> tuple[Path, ...]:
+    from imagegen_plugins.lora_entry import DEFAULT_CACHE, _ALT_CACHE
+
+    return (DEFAULT_CACHE, _ALT_CACHE)
+
+
+def scan_local_lora_files() -> list[Path]:
+    """Return .safetensors files under app LoRA cache dirs (not Hugging Face hub)."""
+    seen: set[str] = set()
+    paths: list[Path] = []
+    for root in _local_lora_cache_roots():
+        if not root.is_dir():
+            continue
+        for path in root.rglob("*.safetensors"):
+            if not path.is_file():
+                continue
+            try:
+                if path.stat().st_size < 1024:
+                    continue
+            except OSError:
+                continue
+            try:
+                key = str(path.resolve())
+            except OSError:
+                key = str(path)
+            if key in seen:
+                continue
+            seen.add(key)
+            paths.append(path)
+    return sorted(paths, key=lambda p: p.name.lower())
+
+
+def _lora_id_for_local_file(path: Path, settings: dict) -> Optional[str]:
+    from imagegen_plugins.lora_catalog import catalog_cache_path, merged_lora_catalog
+    from imagegen_plugins.lora_user_entries import (
+        _entry_path_candidates,
+        same_lora_file,
+        user_lora_entries_from_settings,
+    )
+
+    for lid, entry in user_lora_entries_from_settings(settings).items():
+        for cand in _entry_path_candidates(entry):
+            if same_lora_file(path, cand):
+                return lid
+
+    for lid, entry in merged_lora_catalog(settings).items():
+        cache_path = catalog_cache_path(entry)
+        if cache_path is not None and same_lora_file(path, cache_path):
+            return lid
+        local_raw = str(entry.local_path or "").strip()
+        if local_raw and same_lora_file(path, Path(local_raw).expanduser()):
+            return lid
+    return None
+
+
+def _lora_model_assignment_lines(lora_id: str, settings: dict) -> list[str]:
+    from imagegen_plugins.lora_catalog import get_lora_entry
+    from imagegen_plugins.lora_catalog_settings import hidden_lora_ids_for_model
+    from imagegen_plugins.lora_model_registry import (
+        LORA_SETTINGS_MODEL_ORDER,
+        entry_matches_lora_model,
+        lora_settings_model,
+    )
+
+    entry = get_lora_entry(lora_id, settings)
+    if entry is None:
+        return []
+
+    lines: list[str] = []
+    for model_key in LORA_SETTINGS_MODEL_ORDER:
+        if not entry_matches_lora_model(entry, model_key, settings=settings):
+            continue
+        meta = lora_settings_model(model_key)
+        label = meta.display_name if meta else model_key
+        label = _display_model_name(label, strip_org_prefix=True)
+        if lora_id in hidden_lora_ids_for_model(model_key, settings):
+            lines.append(f"{label} (hidden)")
+        else:
+            lines.append(label)
+    return lines
+
+
+def _local_lora_row_tooltip(path: Path, lora_id: Optional[str], settings: dict) -> str:
+    parts: list[str] = [normalize_path_for_display(str(path))]
+    if lora_id:
+        assignment_lines = _lora_model_assignment_lines(lora_id, settings)
+        parts.append("")
+        if assignment_lines:
+            parts.extend(assignment_lines)
+        else:
+            parts.append("Not assigned to any model")
+    else:
+        parts.append("")
+        parts.append("Not in LoRA catalog")
+    return "\n".join(parts)
+
+
+def _lora_unhidden_on_any_model(lora_id: str, settings: dict) -> bool:
+    from imagegen_plugins.lora_catalog import get_lora_entry
+    from imagegen_plugins.lora_catalog_settings import hidden_lora_ids_for_model
+    from imagegen_plugins.lora_model_registry import (
+        LORA_SETTINGS_MODEL_ORDER,
+        entry_matches_lora_model,
+    )
+
+    entry = get_lora_entry(lora_id, settings)
+    if entry is None:
+        return False
+    for model_key in LORA_SETTINGS_MODEL_ORDER:
+        if not entry_matches_lora_model(entry, model_key, settings=settings):
+            continue
+        if lora_id not in hidden_lora_ids_for_model(model_key, settings):
+            return True
+    return False
+
+
+@dataclass(frozen=True)
+class LocalLoraFile:
+    path: Path
+    display_name: str
+    lora_id: Optional[str]
+    size_bytes: int
+    mtime: float
+    unhidden: bool
+    model_tooltip: str
+
+
+def scan_local_lora_rows(settings: dict) -> list[LocalLoraFile]:
+    from imagegen_plugins.lora_catalog import get_lora_entry
+
+    rows: list[LocalLoraFile] = []
+    for path in scan_local_lora_files():
+        lora_id = _lora_id_for_local_file(path, settings)
+        if lora_id:
+            entry = get_lora_entry(lora_id, settings)
+            display_name = entry.display_name if entry else path.stem
+        else:
+            display_name = path.stem
+        try:
+            stat = path.stat()
+            size_bytes = stat.st_size
+            mtime = stat.st_mtime
+        except OSError:
+            size_bytes = 0
+            mtime = 0.0
+        unhidden = bool(lora_id and _lora_unhidden_on_any_model(lora_id, settings))
+        model_tooltip = _local_lora_row_tooltip(path, lora_id, settings)
+        rows.append(
+            LocalLoraFile(
+                path=path,
+                display_name=display_name,
+                lora_id=lora_id,
+                size_bytes=size_bytes,
+                mtime=mtime,
+                unhidden=unhidden,
+                model_tooltip=model_tooltip,
+            )
+        )
+    return rows
+
+
 def scan_lmstudio_models() -> list[LMStudioModel]:
     models_dir = resolve_lmstudio_models_dir()
     if not models_dir.is_dir():
@@ -634,13 +799,16 @@ class ListModelsWindow(QDialog):
         self.lms_table = self._create_table(
             ["Model", "Type", "Format", "Quant", "Size", "Modified", ""]
         )
+        self.lora_table = self._create_table(["Name", "Visible", "Size", "Modified"])
         self.tabs.addTab(self.hf_table, "Hugging Face")
         self.tabs.addTab(self.lms_table, "LM Studio")
+        self.tabs.addTab(self.lora_table, "Local LoRAs")
         self.tabs.currentChanged.connect(self._on_tab_changed)
         layout.addWidget(self.tabs)
 
         self._hf_total_size = 0
         self._lms_total_size = 0
+        self._lora_total_size = 0
         self._lms_models_dir = resolve_lmstudio_models_dir()
         self.load_models()
 
@@ -675,6 +843,7 @@ class ListModelsWindow(QDialog):
         folder = name_item.data(_FOLDER_ROLE)
 
         is_lms = table is self.lms_table
+        is_lora = table is self.lora_table
         kind = ""
         if is_lms:
             type_item = table.item(row, 1)
@@ -684,7 +853,7 @@ class ListModelsWindow(QDialog):
         use_action = None
         if is_lms and kind == "LLM":
             use_action = menu.addAction("Use")
-        copy_action = menu.addAction("Copy Model Name")
+        copy_action = menu.addAction("Copy Path" if is_lora else "Copy Model Name")
         finder_action = menu.addAction("Open in Finder")
         finder_action.setEnabled(bool(folder))
 
@@ -694,7 +863,12 @@ class ListModelsWindow(QDialog):
         elif action == copy_action:
             from copy_feedback import copy_text_to_clipboard
 
-            copy_text_to_clipboard(model_name, anchor=table.viewport())
+            if is_lora:
+                path_text = name_item.data(Qt.ItemDataRole.UserRole)
+                copy_text = str(path_text or folder or model_name)
+            else:
+                copy_text = model_name
+            copy_text_to_clipboard(copy_text, anchor=table.viewport())
         elif action == finder_action and folder:
             self._open_in_finder(folder)
 
@@ -711,6 +885,14 @@ class ListModelsWindow(QDialog):
     def _on_format_toggled(self, checked: bool) -> None:
         self._strip_org_prefix = checked
         self._refresh_name_display()
+
+    def _current_table(self) -> QTableWidget:
+        idx = self.tabs.currentIndex()
+        if idx == 0:
+            return self.hf_table
+        if idx == 1:
+            return self.lms_table
+        return self.lora_table
 
     def _refresh_name_display(self) -> None:
         for table in (self.hf_table, self.lms_table):
@@ -741,7 +923,7 @@ class ListModelsWindow(QDialog):
         return False
 
     def _apply_filter(self):
-        table = self.hf_table if self.tabs.currentIndex() == 0 else self.lms_table
+        table = self._current_table()
         needle = self.filter_edit.text().strip().lower()
         for row in range(table.rowCount()):
             if not needle:
@@ -754,7 +936,8 @@ class ListModelsWindow(QDialog):
         return sum(1 for row in range(table.rowCount()) if not table.isRowHidden(row))
 
     def _update_status(self):
-        if self.tabs.currentIndex() == 0:
+        idx = self.tabs.currentIndex()
+        if idx == 0:
             table = self.hf_table
             total = table.rowCount()
             visible = self._visible_row_count(table)
@@ -765,7 +948,7 @@ class ListModelsWindow(QDialog):
                 self.status_label.setText(
                     f"{visible} of {total} cached repos shown, {total_size} total"
                 )
-        else:
+        elif idx == 1:
             table = self.lms_table
             total = table.rowCount()
             visible = self._visible_row_count(table)
@@ -776,10 +959,22 @@ class ListModelsWindow(QDialog):
                 self.status_label.setText(
                     f"{visible} of {total} LM Studio models shown, {total_size} total"
                 )
+        else:
+            table = self.lora_table
+            total = table.rowCount()
+            visible = self._visible_row_count(table)
+            total_size = _format_size(self._lora_total_size)
+            if visible == total:
+                self.status_label.setText(f"{total} local LoRA files, {total_size} total")
+            else:
+                self.status_label.setText(
+                    f"{visible} of {total} local LoRA files shown, {total_size} total"
+                )
 
     def load_models(self):
         self._load_hf_models()
         self._load_lmstudio_models()
+        self._load_local_lora_models()
         self._apply_filter()
 
     def _load_hf_models(self):
@@ -883,6 +1078,48 @@ class ListModelsWindow(QDialog):
             self.lms_table.setCellWidget(row, 6, delete_btn)
 
         self.lms_table.setSortingEnabled(True)
+
+    def _load_local_lora_models(self):
+        from config import get_config
+
+        self.lora_table.setSortingEnabled(False)
+        self.lora_table.setRowCount(0)
+
+        settings = get_config().load_settings()
+        rows = scan_local_lora_rows(settings)
+        self._lora_total_size = sum(row.size_bytes for row in rows)
+
+        self.lora_table.setRowCount(len(rows))
+        for row_idx, row in enumerate(rows):
+            name_item = QTableWidgetItem(row.display_name)
+            name_item.setData(_FULL_NAME_ROLE, row.display_name)
+            name_item.setData(Qt.ItemDataRole.UserRole, str(row.path))
+            if row.lora_id:
+                name_item.setData(Qt.ItemDataRole.UserRole + 3, row.lora_id)
+            name_item.setData(_FOLDER_ROLE, str(row.path.parent))
+
+            visible_text = "✓" if row.unhidden else ""
+            visible_item = NumericSortItem(visible_text, 1 if row.unhidden else 0)
+            visible_item.setTextAlignment(
+                Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignVCenter
+            )
+
+            size_item = NumericSortItem(_format_size(row.size_bytes), row.size_bytes)
+            size_item.setTextAlignment(
+                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+            )
+
+            modified_item = NumericSortItem(_format_mtime(row.mtime), row.mtime)
+
+            for item in (name_item, visible_item, size_item, modified_item):
+                item.setToolTip(row.model_tooltip)
+
+            self.lora_table.setItem(row_idx, 0, name_item)
+            self.lora_table.setItem(row_idx, 1, visible_item)
+            self.lora_table.setItem(row_idx, 2, size_item)
+            self.lora_table.setItem(row_idx, 3, modified_item)
+
+        self.lora_table.setSortingEnabled(True)
 
     def confirm_delete_hf(self, repo):
         reply = QMessageBox.question(

@@ -32,9 +32,25 @@ from imagegen_plugins.lora_user_entries import (
     find_user_lora_for_source,
     validate_safetensors_source,
 )
-from utils import show_styled_information, show_styled_warning
+from utils import (
+    display_to_path,
+    normalize_path_for_display,
+    show_styled_information,
+    show_styled_warning,
+)
 
 _FORM_CONTROL_HEIGHT = 32
+
+
+def _lora_path_for_display(path: str | Path) -> str:
+    text = str(path or "").strip()
+    if not text:
+        return ""
+    return normalize_path_for_display(display_to_path(text))
+
+
+def _lora_path_for_validation(path: str) -> str:
+    return display_to_path(str(path or "").strip())
 
 
 def _pin_row_height(widget: QWidget, *, width_policy=QSizePolicy.Policy.Expanding) -> None:
@@ -70,7 +86,7 @@ class _SafetensorsPathLineEdit(QLineEdit):
         if path is None:
             event.ignore()
             return
-        self.setText(str(path))
+        self.setText(_lora_path_for_display(path))
         event.acceptProposedAction()
 
 
@@ -361,7 +377,7 @@ class LoraEntryDialog(QDialog):
             return
         path = (entry.local_path or "").strip()
         if path:
-            self._path_edit.setText(path)
+            self._path_edit.setText(_lora_path_for_display(path))
             self._path_edit.setReadOnly(True)
             self._path_edit.setAcceptDrops(False)
             self._browse_btn.setEnabled(False)
@@ -383,14 +399,21 @@ class LoraEntryDialog(QDialog):
         host_id = host_id_for_lora_model(self._model_key)
         if not host_id:
             return
+        resolved_path = _lora_path_for_validation(path)
         try:
-            source = validate_safetensors_source(path)
+            source = validate_safetensors_source(resolved_path)
+            display_path = _lora_path_for_display(source)
+            if display_path and display_path != path:
+                self._set_path_edit_text(display_path)
+                path = display_path
             existing = find_user_lora_for_source(source, host_id=host_id)
         except Exception:
             existing = None
             if not self._name_edit.text().strip():
                 try:
-                    self._name_edit.setText(display_name_from_path(Path(path).expanduser()))
+                    self._name_edit.setText(
+                        display_name_from_path(Path(resolved_path).expanduser())
+                    )
                 except Exception:
                     pass
             self._reuse_lora_id = None
@@ -419,7 +442,12 @@ class LoraEntryDialog(QDialog):
             "Safetensors (*.safetensors);;All Files (*)",
         )
         if path:
-            self._path_edit.setText(path)
+            self._path_edit.setText(_lora_path_for_display(path))
+
+    def _set_path_edit_text(self, text: str) -> None:
+        self._path_edit.blockSignals(True)
+        self._path_edit.setText(text)
+        self._path_edit.blockSignals(False)
 
     def _save_edit(self) -> None:
         if self._edit_entry is None or not self._lora_id:
@@ -460,17 +488,21 @@ class LoraEntryDialog(QDialog):
         if not name:
             show_styled_warning(self, "Add LoRA", "Enter a display name.")
             return
+        resolved_path = _lora_path_for_validation(path)
         try:
-            validate_safetensors_source(path)
+            validate_safetensors_source(resolved_path)
         except (OSError, ValueError) as exc:
             show_styled_warning(self, "Add LoRA", str(exc))
             return
+        display_path = _lora_path_for_display(resolved_path)
+        if display_path and display_path != path:
+            self._set_path_edit_text(display_path)
 
         host_id = host_id_for_lora_model(self._model_key)
         reuse_lora_id = self._reuse_lora_id
         if not reuse_lora_id and host_id:
             try:
-                source = validate_safetensors_source(path)
+                source = validate_safetensors_source(resolved_path)
                 existing = find_user_lora_for_source(source, host_id=host_id)
                 if existing is not None:
                     reuse_lora_id = existing.lora_id
@@ -510,7 +542,7 @@ class LoraEntryDialog(QDialog):
         progress.canceled.connect(lambda: cancel_flag.__setitem__(0, True))
 
         worker = _ImportLoraWorker(
-            source_path=path,
+            source_path=resolved_path,
             display_name=name,
             model_key=self._model_key,
             trigger_word=self._trigger_edit.text().strip(),
