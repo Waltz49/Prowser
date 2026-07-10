@@ -136,7 +136,12 @@ def apply_payload_model_fields_to_values(
     *,
     sync_prompt: bool = True,
 ) -> None:
-    """Persist worker payload fields used for display, dequeue, and EXIF."""
+    """Persist worker payload fields used for display, dequeue, and EXIF.
+
+    Pass ``sync_prompt=False`` for generation payloads: the worker prompt may
+    include silent LoRA triggers and other pipeline-only suffixes that must not
+    be written back to dialog fields or queued job values.
+    """
     hf = payload.get("hf_model_id")
     if hf:
         values["hf_model_id"] = hf

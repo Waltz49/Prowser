@@ -672,7 +672,9 @@ class ImageGenController(QObject):
 
                 preview_path = _preview_output_path()
                 payload = plugin.build_payload(self._pending_values, preview_path)
-                apply_payload_model_fields_to_values(self._pending_values, payload)
+                apply_payload_model_fields_to_values(
+                    self._pending_values, payload, sync_prompt=False
+                )
             except Exception:
                 payload = None
             self._task_status_info_html = format_image_generation_queue_status_html(
@@ -810,7 +812,9 @@ class ImageGenController(QObject):
         self._output_path = output_path
         if isinstance(payload.get("steps"), (int, float)):
             self._pending_values["steps"] = int(payload["steps"])
-        apply_payload_model_fields_to_values(self._pending_values, payload)
+        apply_payload_model_fields_to_values(
+            self._pending_values, payload, sync_prompt=False
+        )
         if self._copies_done == 0:
             from imagegen_plugins.model_task_status_info import (
                 format_image_generation_queue_status_html,
@@ -1154,6 +1158,8 @@ class ImageGenController(QObject):
         remaining = max(1, self._copies_total - self._copies_done)
         values = dict(self._pending_values)
         values["copies"] = remaining
+        from imagegen_plugins.flux_prompt_job import effective_job_prompt_for_tooltip
+
         job = restore_queued_generate_job(
             job_id=self._active_queue_job_id,
             plugin=plugin,
@@ -1161,7 +1167,7 @@ class ImageGenController(QObject):
             function=plugin.function,
             values=values,
             copies_total=remaining,
-            full_prompt=str(values.get("prompt") or "").strip(),
+            full_prompt=effective_job_prompt_for_tooltip(values),
         )
         thumbs = list(self._active_thumbnail_paths) or list(job.thumbnail_paths)
         if thumbs:
@@ -1211,6 +1217,8 @@ class ImageGenController(QObject):
         remaining = max(1, self._copies_total - self._copies_done)
         values = dict(self._pending_values)
         values["copies"] = remaining
+        from imagegen_plugins.flux_prompt_job import effective_job_prompt_for_tooltip
+
         job = restore_queued_generate_job(
             job_id=self._active_queue_job_id,
             plugin=plugin,
@@ -1218,7 +1226,7 @@ class ImageGenController(QObject):
             function=plugin.function,
             values=values,
             copies_total=remaining,
-            full_prompt=str(values.get("prompt") or "").strip(),
+            full_prompt=effective_job_prompt_for_tooltip(values),
         )
         job.thumbnail_paths = list(self._active_thumbnail_paths) or list(
             job.thumbnail_paths

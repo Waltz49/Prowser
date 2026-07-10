@@ -131,9 +131,15 @@ def effective_job_prompt_for_tooltip(values: Dict[str, Any] | None) -> str:
     if not isinstance(values, dict):
         return ""
     current = str(values.get("prompt") or "").strip()
-    if current:
-        return current
-    return flux_prompt_ai_user_prompt(values)
+    if not current:
+        current = flux_prompt_ai_user_prompt(values)
+    if not current:
+        return ""
+    from imagegen_plugins.lora_trigger_prompt_guard import (
+        augment_prompt_with_missing_lora_triggers,
+    )
+
+    return augment_prompt_with_missing_lora_triggers(current, values)
 
 
 def clear_flux_prompt_ai_job(values: Dict[str, Any]) -> None:

@@ -525,9 +525,6 @@ def build_worker_payload(
     run_values = dict(values)
     clear_flux_prompt_ai_job(run_values)
     merged = finalize_run_values(pipeline_id, run_values)
-    from imagegen_plugins.lora_trigger_prompt_guard import apply_lora_triggers_for_run
-
-    apply_lora_triggers_for_run(merged)
     merged["pipeline_id"] = pipeline_id
     merged["output_path"] = output_path
     merged["hf_model_id"] = hf_model_id
@@ -641,6 +638,9 @@ def build_worker_payload(
     merged.pop("aspect_ratio_test", None)
     merged.pop("use_custom_size", None)
     merged.pop("pass_image_to_ai_with_prompt", None)
+    from imagegen_plugins.lora_trigger_prompt_guard import apply_lora_triggers_for_run
+
+    apply_lora_triggers_for_run(merged)
     if apply_image_exit:
         from imagegen_plugins.ai_prompt_exit import apply_image_ai_exit_to_payload
 
