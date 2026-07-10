@@ -5,6 +5,8 @@ from __future__ import annotations
 
 from typing import Callable
 
+from shiboken6 import isValid
+
 from PySide6.QtCore import QEvent, QObject, QPoint, QRect, Qt
 from PySide6.QtGui import QCursor, QGuiApplication
 from PySide6.QtWidgets import QApplication, QLabel, QMenu, QWidget
@@ -92,10 +94,11 @@ class SettingsDialogTooltipFilter(QObject):
         self._stylesheet_fn = stylesheet_fn
         self._label = ensure_tooltip_label(dialog, "_settings_dialog_tooltip_label")
         self._source_widget: QWidget | None = None
+        self._active = True
         app = QApplication.instance()
         if app is not None:
             app.installEventFilter(self)
-            dialog.destroyed.connect(lambda *_: app.removeEventFilter(self))
+            dialog.destroyed.connect(self._on_dialog_destroyed)
 
     def _is_descendant(self, widget: QWidget) -> bool:
         host = widget
@@ -105,11 +108,24 @@ class SettingsDialogTooltipFilter(QObject):
             host = host.parentWidget()
         return False
 
+    def _on_dialog_destroyed(self, *_args) -> None:
+        if not self._active:
+            return
+        self._active = False
+        self._hide_tooltip()
+        app = QApplication.instance()
+        if app is not None:
+            app.removeEventFilter(self)
+
     def _hide_tooltip(self) -> None:
-        self._label.hide()
+        if isValid(self._label):
+            self._label.hide()
         self._source_widget = None
 
     def eventFilter(self, obj: QObject, event: QEvent) -> bool:
+        if not self._active or not isValid(self._dialog):
+            self._on_dialog_destroyed()
+            return False
         if not self._dialog.isVisible():
             return False
         if not isinstance(obj, QWidget) or not self._is_descendant(obj):
