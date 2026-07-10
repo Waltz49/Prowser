@@ -5,15 +5,15 @@ from __future__ import annotations
 
 from typing import Callable, Optional
 
-from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QMouseEvent
+from PySide6.QtCore import QEvent, QObject, QPoint, QRect, Qt, QTimer, Signal
+from PySide6.QtGui import QKeyEvent, QMouseEvent
 from PySide6.QtWidgets import (
+    QApplication,
     QFrame,
     QGroupBox,
     QHBoxLayout,
     QLabel,
     QPlainTextEdit,
-    QPushButton,
     QSizePolicy,
     QVBoxLayout,
     QWidget,
@@ -46,6 +46,31 @@ class _ChatMessageBodyLabel(QLabel):
         super().mouseDoubleClickEvent(event)
 
 
+class _EditClickAwayFilter(QObject):
+    """Commit inline edit when the user clicks outside the message bubble."""
+
+    def __init__(self, message_widget: "ChatMessageWidget") -> None:
+        super().__init__(message_widget)
+        self._message_widget = message_widget
+
+    def eventFilter(self, watched: QObject, event: QEvent) -> bool:
+        del watched
+        if event.type() != QEvent.Type.MouseButtonPress:
+            return False
+        if not isinstance(event, QMouseEvent):
+            return False
+        if not self._message_widget._editing:
+            return False
+        if event.button() != Qt.MouseButton.LeftButton:
+            return False
+        global_pos = event.globalPosition().toPoint()
+        bubble = self._message_widget._bubble
+        bubble_rect = QRect(bubble.mapToGlobal(QPoint(0, 0)), bubble.size())
+        if not bubble_rect.contains(global_pos):
+            self._message_widget._commit_edit()
+        return False
+
+
 class ChatMessageWidget(QWidget):
     """One user or assistant message with action buttons."""
 
@@ -68,9 +93,10 @@ class ChatMessageWidget(QWidget):
         super().__init__(parent)
         self._message = message
         self._editing = False
+        self._suppress_edit_focus_out = False
+        self._click_away_filter: _EditClickAwayFilter | None = None
         self._body_label: _ChatMessageBodyLabel | None = None
         self._edit_input: QPlainTextEdit | None = None
-        self._save_row_widget: QWidget | None = None
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(6, 4, 6, 4)
@@ -125,20 +151,7 @@ class ChatMessageWidget(QWidget):
         )
         self._edit_input.hide()
         bubble_layout.addWidget(self._edit_input)
-
-        self._save_row_widget = QWidget(self._bubble)
-        save_row = QHBoxLayout(self._save_row_widget)
-        save_row.setContentsMargins(0, 0, 0, 0)
-        save_row.setSpacing(4)
-        save_btn = QPushButton("Save", self._save_row_widget)
-        cancel_btn = QPushButton("Cancel", self._save_row_widget)
-        save_btn.clicked.connect(self._commit_edit)
-        cancel_btn.clicked.connect(self._cancel_edit)
-        save_row.addStretch(1)
-        save_row.addWidget(cancel_btn)
-        save_row.addWidget(save_btn)
-        self._save_row_widget.hide()
-        bubble_layout.addWidget(self._save_row_widget)
+        self._edit_input.installEventFilter(self)
 
         self._bubble.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred
@@ -180,6 +193,44 @@ class ChatMessageWidget(QWidget):
     def message_id(self) -> str:
         return self._message.message_id
 
+    def eventFilter(self, watched: QObject, event: QEvent) -> bool:
+        if watched is self._edit_input and self._editing:
+            if event.type() == QEvent.Type.KeyPress and isinstance(event, QKeyEvent):
+                if event.key() == Qt.Key.Key_Escape:
+                    self._cancel_edit()
+                    return True
+            if event.type() == QEvent.Type.FocusOut:
+                QTimer.singleShot(0, self._commit_edit_if_focus_left)
+        return super().eventFilter(watched, event)
+
+    def _focus_left_edit_entry(self) -> bool:
+        focus = QApplication.focusWidget()
+        if focus is None:
+            return True
+        return not self._bubble.isAncestorOf(focus)
+
+    def _commit_edit_if_focus_left(self) -> None:
+        if not self._editing or self._suppress_edit_focus_out:
+            return
+        if self._focus_left_edit_entry():
+            self._commit_edit()
+
+    def _attach_click_away_filter(self) -> None:
+        if self._click_away_filter is not None:
+            return
+        self._click_away_filter = _EditClickAwayFilter(self)
+        app = QApplication.instance()
+        if app is not None:
+            app.installEventFilter(self._click_away_filter)
+
+    def _detach_click_away_filter(self) -> None:
+        if self._click_away_filter is None:
+            return
+        app = QApplication.instance()
+        if app is not None:
+            app.removeEventFilter(self._click_away_filter)
+        self._click_away_filter = None
+
     def _on_create_from_text(self) -> None:
         text = (self._message.text or "").strip()
         if not text:
@@ -206,38 +257,46 @@ class ChatMessageWidget(QWidget):
         if self._body_label is not None:
             self._body_label.hide()
         self._edit_input.setPlainText(self._message.text or "")
+        self._edit_input.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self._edit_input.show()
-        self._save_row_widget.show()
+        self._attach_click_away_filter()
         self._edit_input.setFocus()
 
     def _commit_edit(self) -> None:
         if not self._editing or self._edit_input is None:
             return
-        text = self._edit_input.toPlainText().strip()
-        images = (
-            list(self._message.image_paths)
-            if self._message.role == "user"
-            else []
-        )
-        self.edit_saved.emit(self._message.message_id, text, images)
-        if self._editing:
-            self._message.text = text
-            self.finish_edit(self._message)
+        self._suppress_edit_focus_out = True
+        try:
+            text = self._edit_input.toPlainText().strip()
+            images = (
+                list(self._message.image_paths)
+                if self._message.role == "user"
+                else []
+            )
+            self.edit_saved.emit(self._message.message_id, text, images)
+            if self._editing:
+                self._message.text = text
+                self.finish_edit(self._message)
+        finally:
+            self._suppress_edit_focus_out = False
 
     def _teardown_edit_ui(self) -> None:
         if not self._editing:
             return
+        self._detach_click_away_filter()
         if self._edit_input is not None:
             self._edit_input.hide()
-        if self._save_row_widget is not None:
-            self._save_row_widget.hide()
         if self._body_label is not None:
             self._body_label.show()
         self._editing = False
 
     def _cancel_edit(self) -> None:
-        self._teardown_edit_ui()
-        self._edit_btn.setEnabled(True)
+        self._suppress_edit_focus_out = True
+        try:
+            self._teardown_edit_ui()
+            self._edit_btn.setEnabled(True)
+        finally:
+            self._suppress_edit_focus_out = False
 
     def finish_edit(self, message: ChatMessage | None = None) -> None:
         """Leave edit mode and optionally refresh displayed message text."""

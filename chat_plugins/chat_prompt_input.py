@@ -96,6 +96,7 @@ class ChatImageThumb(QWidget):
         self._hover_remove = False
         self.setFixedSize(CHAT_THUMB_PX, CHAT_THUMB_PX)
         self.setMouseTracking(True)
+        self.setAcceptDrops(True)
         from PySide6.QtGui import QPixmap, QPainter, QColor, QPen
         from PySide6.QtCore import QRect
 
@@ -161,6 +162,27 @@ class ChatImageThumb(QWidget):
                 painter.drawLine(x_rect.topLeft(), x_rect.bottomRight())
                 painter.drawLine(x_rect.topRight(), x_rect.bottomLeft())
 
+    def dragEnterEvent(self, event: QDragEnterEvent) -> None:
+        row = self.parent()
+        if isinstance(row, ChatImageThumbRow):
+            row.dragEnterEvent(event)
+            return
+        event.ignore()
+
+    def dragMoveEvent(self, event: QDragMoveEvent) -> None:
+        row = self.parent()
+        if isinstance(row, ChatImageThumbRow):
+            row.dragMoveEvent(event)
+            return
+        event.ignore()
+
+    def dropEvent(self, event: QDropEvent) -> None:
+        row = self.parent()
+        if isinstance(row, ChatImageThumbRow):
+            row.dropEvent(event)
+            return
+        event.ignore()
+
     def mousePressEvent(self, event) -> None:
         if event.button() == Qt.MouseButton.LeftButton:
             remove_rect = self._remove_rect()
@@ -201,6 +223,27 @@ class ChatImageThumbRow(QWidget):
             Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop
         )
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.setAcceptDrops(True)
+
+    def dragEnterEvent(self, event: QDragEnterEvent) -> None:
+        if _local_paths_from_mime(event.mimeData()):
+            event.acceptProposedAction()
+            return
+        event.ignore()
+
+    def dragMoveEvent(self, event: QDragMoveEvent) -> None:
+        if _local_paths_from_mime(event.mimeData()):
+            event.acceptProposedAction()
+            return
+        event.ignore()
+
+    def dropEvent(self, event: QDropEvent) -> None:
+        paths = _local_paths_from_mime(event.mimeData())
+        if paths:
+            self.add_dropped_paths(paths)
+            event.acceptProposedAction()
+            return
+        event.ignore()
 
     def _layout_width(self) -> int:
         """Width available for wrapping thumbs (parent inner width, not shrunken self width)."""

@@ -3,7 +3,10 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import Any, Dict, FrozenSet, List, Optional, Tuple
+
+from imagegen_plugins.lora_entry import FluxLoraEntry
 
 from imagegen_plugins.lora_catalogs.flux1_fill import FLUX1_FILL_LORAS
 from imagegen_plugins.lora_catalogs.flux1_t2i import FLUX1_T2I_LORAS
@@ -25,10 +28,50 @@ _LEGACY_ENABLED_KEY = "enabled_ids"
 _LEGACY_DELETED_KEY = "deleted_ids"
 _BY_HOST_KEY = "by_host"
 _BY_MODEL_KEY = "by_model"
+ENTRY_OVERRIDES_KEY = "entry_overrides"
 
 
 def _empty_slice() -> Dict[str, List[str]]:
     return {"enabled_ids": [], "hidden_ids": []}
+
+
+def entry_overrides_from_lc(lc: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
+    raw = lc.get(ENTRY_OVERRIDES_KEY)
+    if not isinstance(raw, dict):
+        return {}
+    return {
+        str(lid): dict(raw_slice)
+        for lid, raw_slice in raw.items()
+        if isinstance(raw_slice, dict)
+    }
+
+
+def apply_entry_overrides(
+    entry: FluxLoraEntry,
+    overrides: Optional[Dict[str, Any]],
+) -> FluxLoraEntry:
+    if not overrides:
+        return entry
+    kwargs: Dict[str, Any] = {}
+    if "display_name" in overrides:
+        name = str(overrides.get("display_name") or "").strip()
+        if name:
+            kwargs["display_name"] = name
+    if "trigger_word" in overrides:
+        trigger = overrides.get("trigger_word")
+        trigger_word = str(trigger).strip() if trigger else None
+        kwargs["trigger_word"] = trigger_word or None
+    if "scale" in overrides:
+        try:
+            kwargs["scale"] = float(overrides["scale"])
+        except (TypeError, ValueError):
+            pass
+    if "comment" in overrides:
+        comment = overrides.get("comment")
+        kwargs["comment"] = str(comment).strip() if comment else None
+    if not kwargs:
+        return entry
+    return replace(entry, **kwargs)
 
 
 def default_enabled_lora_ids_by_model() -> Dict[str, Tuple[str, ...]]:
@@ -227,6 +270,10 @@ def migrate_lora_catalog(lc: Dict[str, Any]) -> Dict[str, Any]:
         lc[USER_ENTRIES_KEY] = {}
     elif not isinstance(lc.get(USER_ENTRIES_KEY), dict):
         lc[USER_ENTRIES_KEY] = {}
+    if ENTRY_OVERRIDES_KEY not in lc:
+        lc[ENTRY_OVERRIDES_KEY] = {}
+    elif not isinstance(lc.get(ENTRY_OVERRIDES_KEY), dict):
+        lc[ENTRY_OVERRIDES_KEY] = {}
     return lc
 
 

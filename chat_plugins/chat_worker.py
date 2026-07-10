@@ -12,7 +12,7 @@ from chat_plugins.chat_session import ChatMessage
 class _RunDispatcher(QObject):
     """Main-thread helper to queue work onto the LM Studio worker thread."""
 
-    run_requested = Signal(list)
+    run_requested = Signal(list, str)
 
 
 class _RequestBridge(QObject):
@@ -39,11 +39,11 @@ class _ChatLmStudioWorker(QObject):
     def request_cancel(self) -> None:
         self._cancel_requested = True
 
-    def run_stream(self, messages: list[ChatMessage]) -> None:
+    def run_stream(self, messages: list[ChatMessage], system_prompt: str = "") -> None:
         self._cancel_requested = False
         try:
             accumulated = ""
-            for piece in stream_chat_response(messages):
+            for piece in stream_chat_response(messages, system_prompt=system_prompt):
                 if self._cancel_requested:
                     self.cancelled.emit()
                     return
@@ -127,6 +127,7 @@ class ChatLmStudioService(QObject):
         on_finished,
         on_error,
         on_cancelled=None,
+        system_prompt: str = "",
     ) -> bool:
         """Queue one stream request. Returns False if a stream is already active."""
         if self._busy:
@@ -170,7 +171,7 @@ class ChatLmStudioService(QObject):
         self._worker.finished.connect(bridge.finished, queued)
         self._worker.error.connect(bridge.error, queued)
         self._worker.cancelled.connect(bridge.cancelled, queued)
-        self._dispatch.run_requested.emit(list(messages))
+        self._dispatch.run_requested.emit(list(messages), system_prompt)
         return True
 
     def cancel(self) -> None:
@@ -186,6 +187,7 @@ def run_chat_worker(
     on_finished,
     on_error,
     on_thread_finished=None,
+    system_prompt: str = "",
 ) -> bool:
     """Submit a chat stream to the shared LM Studio service."""
     del on_thread_finished  # legacy kwarg; service thread is never torn down per request
@@ -194,4 +196,5 @@ def run_chat_worker(
         on_chunk=on_chunk,
         on_finished=on_finished,
         on_error=on_error,
+        system_prompt=system_prompt,
     )

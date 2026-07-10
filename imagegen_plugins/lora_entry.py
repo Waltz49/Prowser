@@ -57,3 +57,5 @@ class FluxLoraEntry:
     mflux_compatible: Optional[bool] = None
     # Optional prompt token(s) that activate this LoRA (character/style adapters).
     trigger_word: Optional[str] = None
+    # Optional user notes (Settings → LoRA tab; persisted in settings.json).
+    comment: Optional[str] = None

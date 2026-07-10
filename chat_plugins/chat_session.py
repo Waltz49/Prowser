@@ -19,10 +19,15 @@ class ChatMessage:
 
 
 class ChatSession:
-    """Session-scoped conversation history (not persisted across app restarts)."""
+    """Session-scoped conversation history.
 
-    def __init__(self) -> None:
+    Messages are cleared on Clear Chat and are not persisted across restarts.
+    ``system_prompt`` is initialized from persisted settings and kept for the session.
+    """
+
+    def __init__(self, system_prompt: str = "") -> None:
         self.messages: list[ChatMessage] = []
+        self.system_prompt: str = system_prompt
 
     def clear(self) -> None:
         self.messages.clear()

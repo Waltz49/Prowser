@@ -550,6 +550,9 @@ class ImageBrowserConfig:
             # AI Captioning (LMStudio) settings
             **CAPTION_DEFAULTS,
 
+            # Sidebar chat (LM Studio)
+            **CHAT_DEFAULTS,
+
             # Local image generation plugins (per-model persisted params)
             **IMAGEGEN_DEFAULTS,
         }
@@ -921,6 +924,13 @@ CAPTION_DEFAULTS = {
     'caption_temperature': 0.7,
     # Last LM Studio LLM used for captions (reloaded after unload for image generation)
     'caption_last_lm_model_key': '',
+}
+
+# Sidebar chat system prompt (persisted across restarts)
+CHAT_DEFAULTS = {
+    'chat_system_prompt': (
+        "You are a helpful assistant. Respond clearly and conversationally."
+    ),
 }
 
 # Global configuration instance

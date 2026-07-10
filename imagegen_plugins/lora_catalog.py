@@ -9,8 +9,10 @@ from typing import Any, Dict, FrozenSet, List, Optional, Tuple, TYPE_CHECKING
 
 from imagegen_plugins.lora_catalog_settings import (
     all_hidden_lora_ids,
+    apply_entry_overrides,
     enabled_lora_ids_for_host,
     enabled_lora_ids_for_model,
+    entry_overrides_from_lc,
     hidden_lora_ids_for_host,
     hidden_lora_ids_for_model,
     lora_catalog_from_settings,
@@ -93,10 +95,21 @@ def klein_lora_mismatch_message(entry: FluxLoraEntry, active_hf_model_id: str) -
 
 
 def merged_lora_catalog(settings: Optional[Dict[str, Any]] = None) -> Dict[str, FluxLoraEntry]:
-    from imagegen_plugins.lora_user_entries import user_lora_entries_from_settings
+    from imagegen_plugins.lora_user_entries import (
+        is_user_lora_id,
+        user_lora_entries_from_settings,
+    )
 
+    lc = lora_catalog_from_settings(settings)
+    overrides = entry_overrides_from_lc(lc)
     merged = dict(LORA_CATALOG)
     merged.update(user_lora_entries_from_settings(settings))
+    for lora_id, entry in merged.items():
+        if is_user_lora_id(lora_id):
+            continue
+        override = overrides.get(lora_id)
+        if override:
+            merged[lora_id] = apply_entry_overrides(entry, override)
     return merged
 
 
@@ -127,16 +140,11 @@ def get_lora_entry(
     lora_id: str,
     settings: Optional[Dict[str, Any]] = None,
 ) -> Optional[FluxLoraEntry]:
-    entry = LORA_CATALOG.get(lora_id)
-    if entry is not None:
-        return entry
-    from imagegen_plugins.lora_user_entries import user_lora_entries_from_settings
-
     if settings is None:
         from config import get_config
 
         settings = get_config().load_settings()
-    return user_lora_entries_from_settings(settings).get(lora_id)
+    return merged_lora_catalog(settings).get(lora_id)
 
 
 def catalog_cache_path(entry: FluxLoraEntry) -> Optional[Path]:

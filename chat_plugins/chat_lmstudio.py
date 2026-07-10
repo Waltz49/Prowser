@@ -5,15 +5,25 @@ from __future__ import annotations
 
 from typing import Generator, Iterable
 
-from config import CAPTION_DEFAULTS, get_config
+from config import CAPTION_DEFAULTS, CHAT_DEFAULTS, get_config
 from imagegen_plugins.ai_prompt_exit import apply_text_ai_exit
 from print_call_decorator import log_exception, print_call
 
 from chat_plugins.chat_session import ChatMessage
 
-_CHAT_SYSTEM_PROMPT = (
-    "You are a helpful assistant. Respond clearly and conversationally."
-)
+DEFAULT_CHAT_SYSTEM_PROMPT = CHAT_DEFAULTS["chat_system_prompt"]
+
+
+def load_chat_system_prompt() -> str:
+    settings = get_config().load_settings()
+    prompt = settings.get("chat_system_prompt")
+    if isinstance(prompt, str):
+        return prompt
+    return DEFAULT_CHAT_SYSTEM_PROMPT
+
+
+def save_chat_system_prompt(prompt: str) -> None:
+    get_config().update_setting("chat_system_prompt", prompt)
 
 
 def _strip_think_tags(text: str) -> str:
@@ -36,7 +46,7 @@ def _chat_settings() -> dict:
     return {
         "lms_host": settings.get("caption_lms_host") or CAPTION_DEFAULTS["caption_lms_host"],
         "temperature": settings.get("caption_temperature", CAPTION_DEFAULTS["caption_temperature"]),
-        "system_prompt": _CHAT_SYSTEM_PROMPT,
+        "system_prompt": load_chat_system_prompt(),
     }
 
 
@@ -82,12 +92,18 @@ def _require_vision_if_needed(model, messages: Iterable[ChatMessage]) -> None:
     _require_vision_capable_model(model)
 
 
-def _build_chat(client, messages: list[ChatMessage]):
+def _build_chat(
+    client,
+    messages: list[ChatMessage],
+    *,
+    system_prompt: str | None = None,
+):
     import lmstudio as lms
 
     cfg = _chat_settings()
-    system_prompt = apply_text_ai_exit(cfg["system_prompt"])
-    chat = lms.Chat(system_prompt)
+    prompt_text = system_prompt if system_prompt is not None else cfg["system_prompt"]
+    prompt_text = apply_text_ai_exit(prompt_text)
+    chat = lms.Chat(prompt_text)
     for msg in messages:
         if msg.role == "user":
             handles = []
@@ -107,7 +123,11 @@ def _build_chat(client, messages: list[ChatMessage]):
     return chat
 
 
-def stream_chat_response(messages: list[ChatMessage]) -> Generator[str, None, None]:
+def stream_chat_response(
+    messages: list[ChatMessage],
+    *,
+    system_prompt: str | None = None,
+) -> Generator[str, None, None]:
     """Yield text chunks for the next assistant turn given full history."""
     try:
         import lmstudio as lms
@@ -142,7 +162,7 @@ def stream_chat_response(messages: list[ChatMessage]) -> Generator[str, None, No
             ) from e
 
         _require_vision_if_needed(model, messages)
-        chat = _build_chat(client, messages)
+        chat = _build_chat(client, messages, system_prompt=system_prompt)
         temperature = cfg["temperature"]
         try:
             respond_stream = print_call(model.respond_stream, wrap=True, tee_terminal=False)

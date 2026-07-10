@@ -5525,6 +5525,36 @@ class SettingsDialog(QDialog):
             }}
         """
 
+    def _lora_edit_button_style(self) -> str:
+        _edit_url = f"url({asset_path('edit_icon.png')})"
+        _edit_hover_url = f"url({asset_path('edit_icon_hover.png')})"
+        c = self._settings_chrome()
+        return f"""
+            QPushButton {{
+                background-color: {c.control_bg_hex};
+                border: 1px solid {BORDER_DEFAULT_HEX};
+                border-radius: 3px;
+                padding: 0px 4px 4px 2px;
+                min-width: 18px;
+                max-width: 18px;
+                min-height: 18px;
+                max-height: 18px;
+                image: {_edit_url};
+            }}
+            QPushButton:focus {{
+                border: 1px solid {CURRENT_IMAGE_BORDER_COLOR_HEX};
+                outline: none;
+            }}
+            QPushButton:hover {{
+                background-color: {TAB_BUTTON_HOVER_BG_HEX};
+                border: 1px solid {TAB_BUTTON_HOVER_BG_HEX};
+                image: {_edit_hover_url};
+            }}
+            QPushButton:pressed {{
+                background-color: {SIDEBAR_SPLITTER_HANDLE_HEX};
+            }}
+        """
+
     def _apply_min_bundle_settings_visibility(self) -> None:
         """Hide settings for features omitted from --min PyInstaller bundles."""
         try:
@@ -5899,6 +5929,17 @@ class SettingsDialog(QDialog):
             if mw is not None and hasattr(mw, "refresh_open_imagegen_lora_combos"):
                 mw.refresh_open_imagegen_lora_combos()
 
+    def _open_edit_lora_dialog(self, lora_id: str) -> None:
+        from imagegen_plugins.lora_import_dialog import run_edit_lora_dialog
+
+        self._ensure_lora_tab_ready()
+        model_key = self._current_lora_model_key()
+        if run_edit_lora_dialog(self, lora_id=lora_id, model_key=model_key):
+            self._reload_lora_drafts_and_grid()
+            mw = self.parent()
+            if mw is not None and hasattr(mw, "refresh_open_imagegen_lora_combos"):
+                mw.refresh_open_imagegen_lora_combos()
+
     def _reload_lora_drafts_and_grid(self) -> None:
         from config import get_config
 
@@ -6020,6 +6061,12 @@ class SettingsDialog(QDialog):
             desc_layout.setContentsMargins(0, 0, 0, 0)
             desc_layout.setSpacing(2)
             desc_layout.addWidget(name_lbl)
+            comment_text = (entry.comment or "").strip()
+            if comment_text:
+                comment_lbl = QLabel(comment_text)
+                comment_lbl.setWordWrap(True)
+                comment_lbl.setStyleSheet(self.NOTE_TEXT_STYLE)
+                desc_layout.addWidget(comment_lbl)
             desc_layout.addWidget(status_lbl)
             desc_w.setSizePolicy(
                 QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum
@@ -6053,6 +6100,15 @@ class SettingsDialog(QDialog):
                 lambda checked=False, lid=entry.lora_id: self._hide_lora_catalog_entry(lid)
             )
 
+            edit_btn = QPushButton()
+            edit_btn.setToolTip(
+                f"Edit LoRA details…\n{lora_choice_label(entry, model_key=model_key)}"
+            )
+            edit_btn.setStyleSheet(self._lora_edit_button_style())
+            edit_btn.clicked.connect(
+                lambda checked=False, lid=entry.lora_id: self._open_edit_lora_dialog(lid)
+            )
+
             row_w = QWidget()
             row_layout = QHBoxLayout(row_w)
             row_layout.setContentsMargins(0, 0, 0, 0)
@@ -6066,6 +6122,9 @@ class SettingsDialog(QDialog):
                     install_btn, 0, Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignRight
                 )
             row_layout.addWidget(
+                edit_btn, 0, Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignRight
+            )
+            row_layout.addWidget(
                 del_btn, 0, Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignRight
             )
             row_w.setSizePolicy(
@@ -6076,6 +6135,7 @@ class SettingsDialog(QDialog):
             row_widgets = [cb, desc_w]
             if install_btn is not None:
                 row_widgets.append(install_btn)
+            row_widgets.append(edit_btn)
             row_widgets.append(del_btn)
             self._lora_row_widgets[entry.lora_id] = tuple(row_widgets)
             row_count += 1

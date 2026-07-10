@@ -991,6 +991,65 @@ def register_user_lora(
     _mutate_imagegen_settings(mutate)
 
 
+def update_lora_entry_metadata(
+    lora_id: str,
+    *,
+    display_name: str,
+    trigger_word: Optional[str] = None,
+    scale: float = 1.0,
+    comment: Optional[str] = None,
+) -> None:
+    """Persist user-editable LoRA metadata (name, trigger, scale, comment)."""
+    from imagegen_plugins.lora_catalog import LORA_CATALOG
+    from imagegen_plugins.lora_catalog_settings import (
+        ENTRY_OVERRIDES_KEY,
+        migrate_lora_catalog,
+    )
+    from imagegen_plugins.lora_user_entries import USER_ENTRIES_KEY, is_user_lora_id
+
+    lid = str(lora_id or "").strip()
+    if not lid:
+        return
+    name = (display_name or "").strip()
+    if not name:
+        raise ValueError("Display name is required.")
+    trigger = (trigger_word or "").strip() or None
+    note = (comment or "").strip() or None
+    try:
+        scale_val = float(scale)
+    except (TypeError, ValueError):
+        scale_val = 1.0
+
+    def mutate(imagegen: dict) -> None:
+        lc = migrate_lora_catalog(dict(imagegen.get("lora_catalog") or {}))
+        if is_user_lora_id(lid):
+            raw = dict(lc.get(USER_ENTRIES_KEY) or {})
+            entry_dict = raw.get(lid)
+            if not isinstance(entry_dict, dict):
+                raise ValueError(f"User LoRA {lid!r} was not found.")
+            entry_dict = dict(entry_dict)
+            entry_dict["display_name"] = name
+            entry_dict["trigger_word"] = trigger
+            entry_dict["scale"] = scale_val
+            entry_dict["comment"] = note
+            raw[lid] = entry_dict
+            lc[USER_ENTRIES_KEY] = raw
+        else:
+            if lid not in LORA_CATALOG:
+                raise ValueError(f"LoRA {lid!r} was not found.")
+            overrides = dict(lc.get(ENTRY_OVERRIDES_KEY) or {})
+            overrides[lid] = {
+                "display_name": name,
+                "trigger_word": trigger,
+                "scale": scale_val,
+                "comment": note,
+            }
+            lc[ENTRY_OVERRIDES_KEY] = overrides
+        imagegen["lora_catalog"] = lc
+
+    _mutate_imagegen_settings(mutate)
+
+
 def discard_tentative_user_lora(entry) -> None:
     """Remove a user entry from settings if import failed before registration completed."""
     from imagegen_plugins.lora_catalog_settings import migrate_lora_catalog

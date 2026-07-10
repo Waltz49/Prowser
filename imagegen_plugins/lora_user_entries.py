@@ -33,6 +33,7 @@ def _entry_to_dict(entry: FluxLoraEntry) -> Dict[str, Any]:
         "min_steps": int(entry.min_steps),
         "mflux_compatible": entry.mflux_compatible,
         "trigger_word": entry.trigger_word,
+        "comment": entry.comment,
     }
 
 
@@ -52,6 +53,10 @@ def entry_from_dict(raw: Dict[str, Any]) -> Optional[FluxLoraEntry]:
     trigger_word = str(trigger).strip() if trigger else None
     if trigger_word == "":
         trigger_word = None
+    comment_raw = raw.get("comment")
+    comment = str(comment_raw).strip() if comment_raw else None
+    if comment == "":
+        comment = None
     mflux_raw = raw.get("mflux_compatible")
     mflux_compatible = mflux_raw if isinstance(mflux_raw, bool) else None
     try:
@@ -74,6 +79,7 @@ def entry_from_dict(raw: Dict[str, Any]) -> Optional[FluxLoraEntry]:
         min_steps=min_steps,
         mflux_compatible=mflux_compatible,
         trigger_word=trigger_word,
+        comment=comment,
     )
 
 
@@ -150,6 +156,7 @@ def build_user_lora_entry(
     model_key: str,
     trigger_word: Optional[str] = None,
     scale: float = 1.0,
+    comment: Optional[str] = None,
     settings: Optional[Dict[str, Any]] = None,
 ) -> FluxLoraEntry:
     host_id = host_id_for_lora_model(model_key)
@@ -169,6 +176,7 @@ def build_user_lora_entry(
         min_steps=LORA_MIN_STEPS,
         mflux_compatible=None,
         trigger_word=(trigger_word or "").strip() or None,
+        comment=(comment or "").strip() or None,
     )
 
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Import a downloaded .safetensors LoRA, probe compatibility, and register in settings."""
+"""Import or edit LoRA metadata; probe compatibility on import."""
 
 from __future__ import annotations
 
@@ -96,6 +96,7 @@ class _ImportLoraWorker(QThread):
         model_key: str,
         trigger_word: str,
         scale: float,
+        comment: str,
         cancel_flag: List[bool],
     ) -> None:
         super().__init__()
@@ -104,6 +105,7 @@ class _ImportLoraWorker(QThread):
         self._model_key = model_key
         self._trigger_word = trigger_word
         self._scale = scale
+        self._comment = comment
         self._cancel_flag = cancel_flag
 
     def _cancelled(self) -> bool:
@@ -127,6 +129,7 @@ class _ImportLoraWorker(QThread):
                 model_key=self._model_key,
                 trigger_word=self._trigger_word or None,
                 scale=self._scale,
+                comment=self._comment or None,
             )
             from imagegen_plugins.mflux_lora_presets import _assert_mflux_compatible_lora
 
@@ -164,26 +167,48 @@ class _ImportLoraWorker(QThread):
             self.finished_result.emit(False, str(exc), entry)
 
 
-class AddDownloadedLoraDialog(QDialog):
+class LoraEntryDialog(QDialog):
+    """Add downloaded LoRA or edit metadata for any catalog entry."""
+
     def __init__(
         self,
         parent: Optional[QWidget],
         *,
         model_key: str,
+        mode: str = "add",
+        lora_id: Optional[str] = None,
     ) -> None:
         super().__init__(parent)
         self._model_key = model_key
-        self.setWindowTitle("Add Downloaded LoRA")
+        self._mode = mode
+        self._lora_id = lora_id
+        self._edit_entry = None
+        if mode == "edit":
+            if not lora_id:
+                raise ValueError("lora_id is required for edit mode.")
+            from imagegen_plugins.lora_catalog import get_lora_entry
+
+            self._edit_entry = get_lora_entry(lora_id)
+            if self._edit_entry is None:
+                raise ValueError(f"LoRA {lora_id!r} was not found.")
+
+        is_edit = mode == "edit"
+        self.setWindowTitle("Edit LoRA" if is_edit else "Add Downloaded LoRA")
         self.setWindowModality(Qt.WindowModality.WindowModal)
-        self.resize(580, 280)
+        self.resize(580, 340 if is_edit else 320)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(16, 14, 16, 14)
         layout.setSpacing(12)
-        intro = QLabel(
-            f"Import a .safetensors LoRA for <b>{lora_model_display_name(model_key)}</b>. "
-            "The file is copied into the app cache and tested before it is added."
-        )
+        if is_edit:
+            intro = QLabel(
+                f"Edit LoRA details for <b>{lora_model_display_name(model_key)}</b>."
+            )
+        else:
+            intro = QLabel(
+                f"Import a .safetensors LoRA for <b>{lora_model_display_name(model_key)}</b>. "
+                "The file is copied into the app cache and tested before it is added."
+            )
         intro.setWordWrap(True)
         layout.addWidget(intro)
 
@@ -195,24 +220,24 @@ class AddDownloadedLoraDialog(QDialog):
         form.setFormAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
 
         self._path_edit = _SafetensorsPathLineEdit(self)
-        self._path_edit.textChanged.connect(self._on_path_changed)
-        browse_btn = QPushButton("Browse…")
-        browse_btn.setObjectName("loraImportBrowseButton")
-        browse_btn.setFixedWidth(96)
-        _pin_row_height(browse_btn, width_policy=QSizePolicy.Policy.Fixed)
-        browse_btn.setStyleSheet(
+        self._browse_btn = QPushButton("Browse…")
+        self._browse_btn.setObjectName("loraImportBrowseButton")
+        self._browse_btn.setFixedWidth(96)
+        _pin_row_height(self._browse_btn, width_policy=QSizePolicy.Policy.Fixed)
+        self._browse_btn.setStyleSheet(
             "QPushButton#loraImportBrowseButton { min-width: 96px; padding: 4px 10px; }"
         )
-        browse_btn.clicked.connect(self._browse)
+        self._browse_btn.clicked.connect(self._browse)
         path_row = QHBoxLayout()
         path_row.setContentsMargins(0, 0, 0, 0)
         path_row.setSpacing(8)
         path_row.addWidget(self._path_edit, 1)
-        path_row.addWidget(browse_btn)
-        path_wrap = QWidget()
-        path_wrap.setLayout(path_row)
-        path_wrap.setFixedHeight(_FORM_CONTROL_HEIGHT)
-        form.addRow("File:", path_wrap)
+        path_row.addWidget(self._browse_btn)
+        self._path_wrap = QWidget()
+        self._path_wrap.setLayout(path_row)
+        self._path_wrap.setFixedHeight(_FORM_CONTROL_HEIGHT)
+        self._path_label = "File:"
+        form.addRow(self._path_label, self._path_wrap)
 
         self._name_edit = QLineEdit()
         _pin_row_height(self._name_edit)
@@ -230,7 +255,13 @@ class AddDownloadedLoraDialog(QDialog):
         self._scale_spin.setSingleStep(0.1)
         self._scale_spin.setValue(1.0)
         form.addRow("Scale:", self._scale_spin)
+
+        self._comment_edit = QLineEdit()
+        _pin_row_height(self._comment_edit)
+        self._comment_edit.setPlaceholderText("Optional notes (Settings tab only)")
+        form.addRow("Comment:", self._comment_edit)
         layout.addLayout(form)
+        self._form = form
 
         btn_row = QHBoxLayout()
         btn_row.setSpacing(10)
@@ -238,15 +269,41 @@ class AddDownloadedLoraDialog(QDialog):
         cancel_btn = QPushButton("Cancel")
         _pin_row_height(cancel_btn, width_policy=QSizePolicy.Policy.Fixed)
         cancel_btn.clicked.connect(self.reject)
-        self._add_btn = QPushButton("Test && Add")
-        _pin_row_height(self._add_btn, width_policy=QSizePolicy.Policy.Fixed)
-        self._add_btn.setDefault(True)
-        self._add_btn.clicked.connect(self._start_import)
+        self._action_btn = QPushButton("Save" if is_edit else "Test && Add")
+        _pin_row_height(self._action_btn, width_policy=QSizePolicy.Policy.Fixed)
+        self._action_btn.setDefault(True)
+        self._action_btn.clicked.connect(
+            self._save_edit if is_edit else self._start_import
+        )
         btn_row.addWidget(cancel_btn)
-        btn_row.addWidget(self._add_btn)
+        btn_row.addWidget(self._action_btn)
         layout.addLayout(btn_row)
 
+        if is_edit:
+            self._prime_edit_fields()
+        else:
+            self._path_edit.textChanged.connect(self._on_path_changed)
+
+    def _prime_edit_fields(self) -> None:
+        entry = self._edit_entry
+        if entry is None:
+            return
+        path = (entry.local_path or "").strip()
+        if path:
+            self._path_edit.setText(path)
+            self._path_edit.setReadOnly(True)
+            self._path_edit.setAcceptDrops(False)
+            self._browse_btn.setEnabled(False)
+        else:
+            self._form.removeRow(self._path_wrap)
+        self._name_edit.setText(entry.display_name)
+        self._trigger_edit.setText(entry.trigger_word or "")
+        self._scale_spin.setValue(float(entry.scale))
+        self._comment_edit.setText(entry.comment or "")
+
     def _on_path_changed(self, text: str) -> None:
+        if self._mode != "add":
+            return
         if self._name_edit.text().strip():
             return
         path = (text or "").strip()
@@ -268,6 +325,36 @@ class AddDownloadedLoraDialog(QDialog):
         )
         if path:
             self._path_edit.setText(path)
+
+    def _save_edit(self) -> None:
+        if self._edit_entry is None or not self._lora_id:
+            return
+        name = self._name_edit.text().strip()
+        if not name:
+            show_styled_warning(self, "Edit LoRA", "Enter a display name.")
+            return
+        from imagegen_plugins.image_gen_persistence import update_lora_entry_metadata
+
+        try:
+            update_lora_entry_metadata(
+                self._lora_id,
+                display_name=name,
+                trigger_word=self._trigger_edit.text().strip() or None,
+                scale=float(self._scale_spin.value()),
+                comment=self._comment_edit.text().strip() or None,
+            )
+        except ValueError as exc:
+            show_styled_warning(self, "Edit LoRA", str(exc))
+            return
+        except Exception as exc:
+            show_styled_warning(self, "Edit LoRA", str(exc))
+            return
+        show_styled_information(
+            self,
+            "Edit LoRA",
+            f"«{name}» was updated.",
+        )
+        self.accept()
 
     def _start_import(self) -> None:
         path = self._path_edit.text().strip()
@@ -306,6 +393,7 @@ class AddDownloadedLoraDialog(QDialog):
             model_key=self._model_key,
             trigger_word=self._trigger_edit.text().strip(),
             scale=float(self._scale_spin.value()),
+            comment=self._comment_edit.text().strip(),
             cancel_flag=cancel_flag,
         )
 
@@ -331,11 +419,35 @@ class AddDownloadedLoraDialog(QDialog):
         self._worker = worker
 
 
+# Back-compat alias
+AddDownloadedLoraDialog = LoraEntryDialog
+
+
 def run_add_downloaded_lora_dialog(
     parent: Optional[QWidget],
     *,
     model_key: str,
 ) -> bool:
     """Open import dialog; return True if a LoRA was registered."""
-    dlg = AddDownloadedLoraDialog(parent, model_key=model_key)
+    dlg = LoraEntryDialog(parent, model_key=model_key, mode="add")
+    return dlg.exec() == QDialog.DialogCode.Accepted
+
+
+def run_edit_lora_dialog(
+    parent: Optional[QWidget],
+    *,
+    lora_id: str,
+    model_key: str,
+) -> bool:
+    """Open edit dialog; return True if metadata was saved."""
+    try:
+        dlg = LoraEntryDialog(
+            parent,
+            model_key=model_key,
+            mode="edit",
+            lora_id=lora_id,
+        )
+    except ValueError as exc:
+        show_styled_warning(parent, "Edit LoRA", str(exc))
+        return False
     return dlg.exec() == QDialog.DialogCode.Accepted

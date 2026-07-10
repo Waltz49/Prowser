@@ -28,10 +28,16 @@ from chat_plugins.chat_delete_confirm import (
     confirm_clear_chat,
 )
 from chat_plugins.chat_image_store import ChatImageStore
-from chat_plugins.chat_lmstudio import is_lmstudio_chat_available, lmstudio_unavailable_message
+from chat_plugins.chat_lmstudio import (
+    is_lmstudio_chat_available,
+    load_chat_system_prompt,
+    lmstudio_unavailable_message,
+    save_chat_system_prompt,
+)
 from chat_plugins.chat_message_widgets import ChatMessageWidget
 from chat_plugins.chat_prompt_input import ChatPromptInput
 from chat_plugins.chat_session import ChatMessage, ChatSession
+from chat_plugins.chat_system_prompt_dialog import edit_chat_system_prompt
 from chat_plugins.chat_tools_menu import show_chat_context_menu, show_chat_tools_menu
 from chat_plugins.chat_worker import ChatLmStudioService
 from theme.theme_base import job_pane_tools_icon_path
@@ -136,7 +142,7 @@ class ChatPaneWidget(QWidget):
     def __init__(self, main_window, parent=None):
         super().__init__(parent)
         self.main_window = main_window
-        self._session = ChatSession()
+        self._session = ChatSession(system_prompt=load_chat_system_prompt())
         self._image_store = ChatImageStore()
         self._header_getter: Callable[[], QWidget | None] | None = None
         self._message_widgets: list[ChatMessageWidget] = []
@@ -299,6 +305,16 @@ class ChatPaneWidget(QWidget):
         if not self._lm_available_on_show:
             self._show_unavailable_only(True)
 
+    def edit_system_prompt(self) -> None:
+        result = edit_chat_system_prompt(
+            self.main_window,
+            self._session.system_prompt,
+        )
+        if result is None:
+            return
+        self._session.system_prompt = result
+        save_chat_system_prompt(result)
+
     def _clear_message_widgets(self) -> None:
         while self._messages_layout.count() > 1:
             item = self._messages_layout.takeAt(0)
@@ -392,6 +408,7 @@ class ChatPaneWidget(QWidget):
             on_chunk=on_chunk,
             on_finished=on_finished,
             on_error=on_error,
+            system_prompt=self._session.system_prompt,
         )
         if not started:
             self._session.remove_at(self._session.index_of(placeholder.message_id))
