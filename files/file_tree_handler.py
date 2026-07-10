@@ -2997,34 +2997,60 @@ class FileTreeHandler(QObject):
         except Exception:
             pass
 
+    def _is_tree_pane_visible(self) -> bool:
+        """True when the file-tree section is shown in the combined sidebar."""
+        mw = self.main_window
+        cs = getattr(mw, "combined_sidebar", None)
+        if cs is not None and hasattr(cs, "is_tree_visible"):
+            return cs.is_tree_visible()
+        return bool(getattr(mw, "file_tree_visible", False))
+
+    def _apply_directory_loaded_tree_state(
+        self, directory, displayed_count=None, external_load=None
+    ) -> None:
+        """Sync tree selection/highlight after a directory load (runs off the hot load path)."""
+        try:
+            if not self.is_tree_initialized() or not self._is_tree_pane_visible():
+                return
+            self.update_root_directory(directory)
+            if not self.user_requested_directory:
+                def ensure_directory_highlighted():
+                    if self.is_tree_initialized() and not self.user_requested_directory:
+                        self._highlight_directory_in_tree(directory)
+                QTimer.singleShot(100, ensure_directory_highlighted)
+            if external_load is False and self.main_window.displayed_images:
+                self.apply_filter_pattern(self.main_window.filter_pattern)
+            if (
+                self.main_window.displayed_images
+                and self.main_window.highlight_index < len(self.main_window.displayed_images)
+            ):
+                self.force_expand_directory(directory)
+                self.highlight_current_file()
+                self.main_window.highlight_image()
+            else:
+                self.force_expand_directory(directory)
+                if not self.user_requested_directory:
+                    def highlight_empty_directory():
+                        if self.is_tree_initialized() and not self.user_requested_directory:
+                            self._highlight_directory_in_tree(directory)
+                    QTimer.singleShot(200, highlight_empty_directory)
+                elif self.is_tree_initialized() and self.file_tree:
+                    self.file_tree.viewport().update()
+        except Exception:
+            pass
+
     def _on_directory_loaded(self, directory, displayed_count=None, external_load=None):
         """Handle DIRECTORY_LOADED event - update tree highlighting and state"""
         try:
-            if self.is_tree_initialized():
-                # Update file tree root to show the current directory first
-                self.update_root_directory(directory)
-                if not self.user_requested_directory:
-                    def ensure_directory_highlighted():
-                        if self.is_tree_initialized() and not self.user_requested_directory:
-                            self._highlight_directory_in_tree(directory)
-                    QTimer.singleShot(100, ensure_directory_highlighted)
-                if external_load is False and self.main_window.displayed_images:
-                    self.apply_filter_pattern(self.main_window.filter_pattern)
-                if self.main_window.displayed_images and self.main_window.highlight_index < len(self.main_window.displayed_images):
-                    self.force_expand_directory(directory)
-                    self.highlight_current_file()
-                    self.main_window.highlight_image()
-                else:
-                    self.force_expand_directory(directory)
-                    if not self.user_requested_directory:
-                        def highlight_empty_directory():
-                            if self.is_tree_initialized() and not self.user_requested_directory:
-                                self._highlight_directory_in_tree(directory)
-                        QTimer.singleShot(200, highlight_empty_directory)
-                    else:
-                        if self.is_tree_initialized() and self.file_tree:
-                            self.file_tree.viewport().update()
-                            # Avoid processEvents - can cause GIL deadlock when nested timer fires singleShot
+            if not self.is_tree_initialized():
+                return
+            # Defer tree sync so thumbnail paint can finish before filter/expand work.
+            QTimer.singleShot(
+                0,
+                lambda d=directory, dc=displayed_count, el=external_load: self._apply_directory_loaded_tree_state(
+                    d, dc, el
+                ),
+            )
         except Exception:
             pass
 
@@ -5042,7 +5068,6 @@ class FileTreeHandler(QObject):
                 return False
             self.file_tree.expand(proxy_index)
             self.file_tree.viewport().update()
-            QApplication.processEvents()
             return True
         except Exception:
             return False

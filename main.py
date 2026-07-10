@@ -895,7 +895,7 @@ def main():
     app.setApplicationDisplayName("Prowser")
     app.setApplicationVersion("0.9.0")
     app.setOrganizationName("ImageBrowser")
-    activate_macos_application(force=True)
+    activate_macos_application()
 
     connect_system_theme_listener()
     _ui_theme = config.load_settings().get("ui_theme", "dark")
@@ -1387,7 +1387,6 @@ def main():
        
         window.show()
         on_main_window_shown(window)
-        schedule_startup_activation(window, force=True)
         
         # If --fullscreen was explicitly passed OR restoring from fullscreen state,
         # also try entering fullscreen directly here as a backup
@@ -1418,13 +1417,12 @@ def main():
                     window.main_content_widget.setFocus()
                 elif hasattr(window, 'focus_canvas'):
                     window.focus_canvas()
-                activate_application_window(window, force=True)
+                activate_application_window(window)
             except Exception:
                 traceback.print_exc()
         
         ensure_startup_focus()
         QTimer.singleShot(50, ensure_startup_focus)
-        QTimer.singleShot(300, lambda: schedule_startup_activation(window, force=True))
 
         # Refresh the browser with the configuration after window is shown
         if configuration:

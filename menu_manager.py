@@ -245,6 +245,22 @@ class TextSeparator(QWidget):
 # Delay after initial window layout before priming macOS menu shortcuts (main thread).
 STARTUP_MENU_SHORTCUT_DELAY_MS = 1500
 
+_face_engine_available_cached: Optional[bool] = None
+
+
+def _face_engine_available() -> bool:
+    """Cached face_engine availability (import is expensive on startup)."""
+    global _face_engine_available_cached
+    if _face_engine_available_cached is not None:
+        return _face_engine_available_cached
+    try:
+        from faces.face_engine import is_available as face_available
+
+        _face_engine_available_cached = face_available()
+    except ImportError:
+        _face_engine_available_cached = False
+    return _face_engine_available_cached
+
 
 class MenuManager:
     """Manages menu bar, actions, and theme for the Image Browser"""
@@ -257,6 +273,7 @@ class MenuManager:
         self._startup_menu_shortcut_timer = QTimer()
         self._startup_menu_shortcut_timer.setSingleShot(True)
         self._startup_menu_shortcut_timer.timeout.connect(self._run_startup_menu_shortcut_priming)
+        self._deferred_tools_menu_pending = False
         if hasattr(main_window, 'event_bus') and main_window.event_bus:
             main_window.event_bus.subscribe(SELECTION_CHANGED, self._on_selection_changed)
             main_window.event_bus.subscribe(DIRECTORY_LOADED, self._on_directory_loaded)
@@ -265,6 +282,20 @@ class MenuManager:
     def _on_selection_changed(self, selected=None, highlight_index=None):
         """Handle SELECTION_CHANGED event - update menu enabled states"""
         self.update_edit_menu_states()
+        mw = self.main_window
+        if getattr(mw, "_loading_directory_mode", False) or getattr(
+            mw, "_batch_directory_load", False
+        ):
+            if not self._deferred_tools_menu_pending:
+                self._deferred_tools_menu_pending = True
+
+                def _deferred_menu_updates() -> None:
+                    self._deferred_tools_menu_pending = False
+                    self.update_tools_menu_states()
+                    self.update_search_menu_states()
+
+                QTimer.singleShot(0, _deferred_menu_updates)
+            return
         self.update_tools_menu_states()
         self.update_search_menu_states()
 
@@ -2570,11 +2601,7 @@ class MenuManager:
 
         # Examine image...: enable when face_engine available, single selection, and has current image
         if hasattr(mw, 'examine_image_action'):
-            try:
-                from faces.face_engine import is_available as face_available
-                face_ok = face_available()
-            except ImportError:
-                face_ok = False
+            face_ok = _face_engine_available()
             multiselect = False
             if hasattr(mw, 'selection_manager') and mw.selection_manager:
                 selected = mw.selection_manager.get_selected_files()
@@ -2593,8 +2620,7 @@ class MenuManager:
                 if not faces_ui_enabled():
                     mw.cache_faces_action.setEnabled(False)
                 else:
-                    from faces.face_engine import is_available as face_available
-                    mw.cache_faces_action.setEnabled(face_available())
+                    mw.cache_faces_action.setEnabled(_face_engine_available())
             except ImportError:
                 mw.cache_faces_action.setEnabled(False)
         

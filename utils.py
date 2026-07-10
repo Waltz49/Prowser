@@ -555,9 +555,8 @@ def activate_application_window(window: Optional[QWidget], *, force: Optional[bo
             wh.requestActivate()
     except Exception:
         pass
-    _make_native_window_key(window)
-    activate_macos_application(force=force)
-    _make_native_window_key(window)
+    if force:
+        _make_native_window_key(window)
 
 
 def schedule_startup_activation(window: Optional[QWidget], *, force: Optional[bool] = None) -> None:
@@ -566,7 +565,9 @@ def schedule_startup_activation(window: Optional[QWidget], *, force: Optional[bo
         return
     if force is None:
         force = _is_terminal_gui_launch()
-    for delay_ms in (0, 50, 150, 400, 800, 1500, 2500, 4000):
+    # Terminal launches need more retries; bundled .app launches only need a light nudge.
+    delays = (0, 50, 150, 400, 800, 1500, 2500, 4000) if force else (0, 200)
+    for delay_ms in delays:
         QTimer.singleShot(
             delay_ms,
             lambda w=window, f=force: activate_application_window(w, force=f),
