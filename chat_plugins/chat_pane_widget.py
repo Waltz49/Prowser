@@ -248,10 +248,14 @@ class ChatPaneWidget(QWidget):
             self._scroll.show()
             self._prompt_input.show()
 
+    def prompt_text_edit(self):
+        return self._prompt_input.text_edit()
+
     def ensure_input_focus_policy(self) -> None:
         """Keep the prompt field typable (parent sidebar sets most children to NoFocus)."""
         edit = self._prompt_input.text_edit()
         edit.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        edit.setTabChangesFocus(True)
         edit.setEnabled(True)
 
     def _redo_last_user_message(self) -> None:

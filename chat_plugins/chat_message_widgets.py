@@ -6,6 +6,7 @@ from __future__ import annotations
 from typing import Callable, Optional
 
 from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QMouseEvent
 from PySide6.QtWidgets import (
     QFrame,
     QGroupBox,
@@ -32,6 +33,19 @@ from chat_plugins.chat_ui_common import (
 from theme.theme_service import get_active_theme
 
 
+class _ChatMessageBodyLabel(QLabel):
+    """Message text; double-click opens inline edit (same as the edit button)."""
+
+    edit_requested = Signal()
+
+    def mouseDoubleClickEvent(self, event: QMouseEvent) -> None:
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.edit_requested.emit()
+            event.accept()
+            return
+        super().mouseDoubleClickEvent(event)
+
+
 class ChatMessageWidget(QWidget):
     """One user or assistant message with action buttons."""
 
@@ -54,7 +68,7 @@ class ChatMessageWidget(QWidget):
         super().__init__(parent)
         self._message = message
         self._editing = False
-        self._body_label: QLabel | None = None
+        self._body_label: _ChatMessageBodyLabel | None = None
         self._edit_input: QPlainTextEdit | None = None
         self._save_row_widget: QWidget | None = None
 
@@ -83,7 +97,8 @@ class ChatMessageWidget(QWidget):
             row.set_image_paths(message.image_paths, allow_remove=False)
             bubble_layout.addWidget(row)
 
-        self._body_label = QLabel(message.text, self._bubble)
+        self._body_label = _ChatMessageBodyLabel(message.text, self._bubble)
+        self._body_label.edit_requested.connect(self._start_edit)
         self._body_label.setWordWrap(True)
         self._body_label.setAlignment(
             Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop

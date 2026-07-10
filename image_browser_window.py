@@ -1584,12 +1584,17 @@ class ImageBrowserWindow(QMainWindow):
             if hasattr(child, 'setFocusPolicy'):
                 child.setFocusPolicy(Qt.NoFocus)
         self.tree_container.setFocusPolicy(Qt.StrongFocus)
+        chat_prompt_edit = None
         if getattr(self, "sidebar_chat_widget", None) is not None:
             self.sidebar_chat_widget.ensure_input_focus_policy()
+            chat_prompt_edit = self.sidebar_chat_widget.prompt_text_edit()
  
         self.combined_sidebar.setFocusPolicy(Qt.NoFocus)
         self.main_content_widget.setFocusPolicy(Qt.StrongFocus)
         self.setTabOrder(self.combined_sidebar, self.main_content_widget)
+        if chat_prompt_edit is not None:
+            self.setTabOrder(self.tree_container, chat_prompt_edit)
+            self.setTabOrder(chat_prompt_edit, self.main_content_widget)
         
         # Install event filter to catch keyboard events since main window has NoFocus
         self.installEventFilter(self)
