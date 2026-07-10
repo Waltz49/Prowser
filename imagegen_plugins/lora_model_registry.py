@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
 from imagegen_plugins.hf_model_ids import (
     FLUX1_DEV,
@@ -226,7 +226,52 @@ def klein_lora_model_aliases(model_key: str) -> Tuple[str, ...]:
     return (mk,) if mk else ()
 
 
-def entry_matches_lora_model(entry: FluxLoraEntry, model_key: str) -> bool:
+def _raw_model_support_dict(
+    *,
+    model_support: Optional[Dict[str, Any]] = None,
+    settings: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    if isinstance(model_support, dict):
+        return model_support
+    if isinstance(settings, dict):
+        imagegen = settings.get("imagegen") or {}
+        lc = imagegen.get("lora_catalog") or {}
+        raw = lc.get("model_support")
+        if isinstance(raw, dict):
+            return raw
+    return {}
+
+
+def _user_lora_supported_on_model(
+    entry: FluxLoraEntry,
+    model_key: str,
+    model_support: Dict[str, Any],
+) -> bool:
+    raw = model_support.get(entry.lora_id, ())
+    supported = raw if isinstance(raw, (list, tuple)) else ()
+    if not supported:
+        return False
+    supported_set = {str(x) for x in supported}
+    aliases = klein_lora_model_aliases(model_key)
+    return any(str(m) in supported_set for m in aliases)
+
+
+def entry_matches_lora_model(
+    entry: FluxLoraEntry,
+    model_key: str,
+    *,
+    model_support: Optional[Dict[str, Any]] = None,
+    settings: Optional[Dict[str, Any]] = None,
+) -> bool:
+    from imagegen_plugins.lora_user_entries import is_user_lora_id
+
+    if is_user_lora_id(entry.lora_id):
+        expected_host = host_id_for_lora_model(model_key)
+        if expected_host and entry.host_id != expected_host:
+            return False
+        ms = _raw_model_support_dict(model_support=model_support, settings=settings)
+        if ms and _user_lora_supported_on_model(entry, model_key, ms):
+            return True
     entry_models = lora_models_for_entry(entry)
     return any(m in entry_models for m in klein_lora_model_aliases(model_key))
 

@@ -837,6 +837,7 @@ def save_lora_catalog_state(
             imagegen["lora_catalog"] = lc
         lc = migrate_lora_catalog(lc)
         catalog = merged_lora_catalog({"imagegen": {"lora_catalog": lc}})
+        ms = lc.get("model_support") if isinstance(lc.get("model_support"), dict) else {}
 
         if by_host is not None:
             bh = dict(lc.get("by_host") or {})
@@ -888,14 +889,18 @@ def save_lora_catalog_state(
                         str(x)
                         for x in slice_["enabled_ids"]
                     if str(x) in catalog
-                    and entry_matches_lora_model(catalog[str(x)], mid)
+                    and entry_matches_lora_model(
+                        catalog[str(x)], mid, model_support=ms
+                    )
                     ]
                 if "hidden_ids" in slice_:
                     prev["hidden_ids"] = [
                         str(x)
                         for x in slice_["hidden_ids"]
                     if str(x) in catalog
-                    and entry_matches_lora_model(catalog[str(x)], mid)
+                    and entry_matches_lora_model(
+                        catalog[str(x)], mid, model_support=ms
+                    )
                     ]
                 bm[mid] = prev
             lc["by_model"] = bm
@@ -908,14 +913,18 @@ def save_lora_catalog_state(
                     str(x)
                     for x in enabled_ids
                     if str(x) in catalog
-                    and entry_matches_lora_model(catalog[str(x)], model_id)
+                    and entry_matches_lora_model(
+                        catalog[str(x)], model_id, model_support=ms
+                    )
                 ]
             if hidden is not None:
                 prev["hidden_ids"] = [
                     str(x)
                     for x in hidden
                     if str(x) in catalog
-                    and entry_matches_lora_model(catalog[str(x)], model_id)
+                    and entry_matches_lora_model(
+                        catalog[str(x)], model_id, model_support=ms
+                    )
                 ]
             bm[model_id] = prev
             lc["by_model"] = bm
@@ -976,7 +985,9 @@ def register_user_lora(
         raw[entry.lora_id] = _entry_to_dict(entry)
         lc[USER_ENTRIES_KEY] = raw
         ms = dict(lc.get("model_support") or {})
-        ms[entry.lora_id] = list(supported_models)
+        prev = ms.get(entry.lora_id) or []
+        merged = list(dict.fromkeys([*(prev if isinstance(prev, list) else []), *supported_models]))
+        ms[entry.lora_id] = merged
         lc["model_support"] = ms
         bm = dict(lc.get("by_model") or {})
         slice_ = dict(bm.get(model_key) or {"enabled_ids": [], "hidden_ids": []})

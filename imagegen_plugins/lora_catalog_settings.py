@@ -143,7 +143,9 @@ def _normalize_model_slice(
     model_key: str,
     slice_: Dict[str, Any],
     catalog: Dict[str, Any],
+    model_support: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, List[str]]:
+    ms = model_support if isinstance(model_support, dict) else {}
     enabled = slice_.get("enabled_ids")
     hidden = slice_.get("hidden_ids")
     return {
@@ -151,13 +153,17 @@ def _normalize_model_slice(
             str(x)
             for x in (enabled if isinstance(enabled, list) else [])
             if str(x) in catalog
-            and entry_matches_lora_model(catalog[str(x)], model_key)
+            and entry_matches_lora_model(
+                catalog[str(x)], model_key, model_support=ms
+            )
         ],
         "hidden_ids": [
             str(x)
             for x in (hidden if isinstance(hidden, list) else [])
             if str(x) in catalog
-            and entry_matches_lora_model(catalog[str(x)], model_key)
+            and entry_matches_lora_model(
+                catalog[str(x)], model_key, model_support=ms
+            )
         ],
     }
 
@@ -187,6 +193,7 @@ def _by_model_from_by_host(by_host: Dict[str, Dict[str, List[str]]]) -> Dict[str
 
 def _ensure_by_model(lc: Dict[str, Any], by_host: Dict[str, Dict[str, List[str]]]) -> None:
     catalog = _catalog_for_lc(lc)
+    ms = lc.get("model_support") if isinstance(lc.get("model_support"), dict) else {}
     if _BY_MODEL_KEY not in lc:
         lc[_BY_MODEL_KEY] = _by_model_from_by_host(by_host)
     by_model = dict(lc.get(_BY_MODEL_KEY) or {})
@@ -202,7 +209,9 @@ def _ensure_by_model(lc: Dict[str, Any], by_host: Dict[str, Dict[str, List[str]]
                 "hidden_ids": [],
             }
         else:
-            by_model[model_key] = _normalize_model_slice(model_key, slice_, catalog)
+            by_model[model_key] = _normalize_model_slice(
+                model_key, slice_, catalog, model_support=ms
+            )
     lc[_BY_MODEL_KEY] = by_model
 
 
@@ -336,7 +345,7 @@ def enabled_lora_ids_for_model(
         for x in st["enabled_ids"]
         if x in catalog
         and x not in hidden
-        and entry_matches_lora_model(catalog[x], model_key)
+        and entry_matches_lora_model(catalog[x], model_key, settings=settings)
     )
 
 

@@ -59,3 +59,5 @@ class FluxLoraEntry:
     trigger_word: Optional[str] = None
     # Optional user notes (Settings → LoRA tab; persisted in settings.json).
     comment: Optional[str] = None
+    # Original path selected on first import (for cross-model deduplication).
+    source_path: Optional[str] = None

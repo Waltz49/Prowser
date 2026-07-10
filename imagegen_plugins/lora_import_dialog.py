@@ -25,10 +25,11 @@ from PySide6.QtWidgets import (
 
 from imagegen_plugins.hf_model_ids import lora_model_display_name
 from imagegen_plugins.lora_compatibility_checker import probe_lora_on_model
-from imagegen_plugins.lora_model_registry import lora_probe_model_is_local
+from imagegen_plugins.lora_model_registry import host_id_for_lora_model, klein_lora_model_aliases, lora_probe_model_is_local
 from imagegen_plugins.lora_user_entries import (
     build_user_lora_entry,
     display_name_from_path,
+    find_user_lora_for_source,
     validate_safetensors_source,
 )
 from utils import show_styled_information, show_styled_warning
@@ -98,6 +99,7 @@ class _ImportLoraWorker(QThread):
         scale: float,
         comment: str,
         cancel_flag: List[bool],
+        reuse_lora_id: Optional[str] = None,
     ) -> None:
         super().__init__()
         self._source_path = source_path
@@ -107,9 +109,18 @@ class _ImportLoraWorker(QThread):
         self._scale = scale
         self._comment = comment
         self._cancel_flag = cancel_flag
+        self._reuse_lora_id = (reuse_lora_id or "").strip() or None
+        self._created_new_entry = False
 
     def _cancelled(self) -> bool:
         return bool(self._cancel_flag[0])
+
+    def _model_already_supported(self, lora_id: str) -> bool:
+        from imagegen_plugins.lora_catalog import lora_model_support
+
+        support = lora_model_support().get(lora_id, ())
+        aliases = klein_lora_model_aliases(self._model_key)
+        return any(m in support for m in aliases)
 
     def run(self) -> None:
         entry = None
@@ -123,38 +134,81 @@ class _ImportLoraWorker(QThread):
                     f"The base model ({lora_model_display_name(self._model_key)}) "
                     "is not installed locally. Download it first, then import the LoRA."
                 )
-            entry = build_user_lora_entry(
-                source_path=source,
-                display_name=self._display_name,
-                model_key=self._model_key,
-                trigger_word=self._trigger_word or None,
-                scale=self._scale,
-                comment=self._comment or None,
-            )
+            host_id = host_id_for_lora_model(self._model_key)
+            if not host_id:
+                raise ValueError(f"LoRAs are not supported for model {self._model_key!r}.")
+            if self._reuse_lora_id:
+                from imagegen_plugins.lora_catalog import get_lora_entry
+                from imagegen_plugins.image_gen_persistence import update_lora_entry_metadata
+
+                entry = get_lora_entry(self._reuse_lora_id)
+                if entry is None:
+                    raise ValueError(f"LoRA {self._reuse_lora_id!r} was not found.")
+                if entry.host_id != host_id:
+                    raise ValueError(
+                        "This LoRA file is already imported for a different model family."
+                    )
+                update_lora_entry_metadata(
+                    entry.lora_id,
+                    display_name=self._display_name,
+                    trigger_word=self._trigger_word or None,
+                    scale=self._scale,
+                    comment=self._comment or None,
+                )
+                entry = get_lora_entry(entry.lora_id)
+                if entry is None:
+                    raise ValueError(f"LoRA {self._reuse_lora_id!r} was not found.")
+            else:
+                existing = find_user_lora_for_source(source, host_id=host_id)
+                if existing is not None:
+                    from imagegen_plugins.lora_catalog import get_lora_entry
+                    from imagegen_plugins.image_gen_persistence import update_lora_entry_metadata
+
+                    update_lora_entry_metadata(
+                        existing.lora_id,
+                        display_name=self._display_name,
+                        trigger_word=self._trigger_word or None,
+                        scale=self._scale,
+                        comment=self._comment or None,
+                    )
+                    entry = get_lora_entry(existing.lora_id)
+                    if entry is None:
+                        raise ValueError(f"LoRA {existing.lora_id!r} was not found.")
+                else:
+                    entry = build_user_lora_entry(
+                        source_path=source,
+                        display_name=self._display_name,
+                        model_key=self._model_key,
+                        trigger_word=self._trigger_word or None,
+                        scale=self._scale,
+                        comment=self._comment or None,
+                    )
+                    self._created_new_entry = True
             from imagegen_plugins.mflux_lora_presets import _assert_mflux_compatible_lora
 
             _assert_mflux_compatible_lora(
                 entry.local_path or "",
                 host_id=entry.host_id,
             )
-            ok = probe_lora_on_model(
-                self._model_key,
-                entry.local_path or "",
-                entry.scale,
-                self._cancelled,
-                entry=entry,
-            )
-            if self._cancelled():
-                self.finished_result.emit(False, "Cancelled", entry)
-                return
-            if not ok:
-                self.finished_result.emit(
-                    False,
-                    f"LoRA «{entry.display_name}» failed the compatibility test for "
-                    f"{lora_model_display_name(self._model_key)}.",
-                    entry,
+            if not self._model_already_supported(entry.lora_id):
+                ok = probe_lora_on_model(
+                    self._model_key,
+                    entry.local_path or "",
+                    entry.scale,
+                    self._cancelled,
+                    entry=entry,
                 )
-                return
+                if self._cancelled():
+                    self.finished_result.emit(False, "Cancelled", entry)
+                    return
+                if not ok:
+                    self.finished_result.emit(
+                        False,
+                        f"LoRA «{entry.display_name}» failed the compatibility test for "
+                        f"{lora_model_display_name(self._model_key)}.",
+                        entry,
+                    )
+                    return
             from imagegen_plugins.image_gen_persistence import register_user_lora
 
             register_user_lora(
@@ -211,6 +265,8 @@ class LoraEntryDialog(QDialog):
             )
         intro.setWordWrap(True)
         layout.addWidget(intro)
+        self._intro_label = intro
+        self._reuse_lora_id: Optional[str] = None
 
         form = QFormLayout()
         form.setVerticalSpacing(12)
@@ -284,6 +340,21 @@ class LoraEntryDialog(QDialog):
         else:
             self._path_edit.textChanged.connect(self._on_path_changed)
 
+    def _update_add_intro(self, *, reusing: bool) -> None:
+        if self._mode != "add":
+            return
+        model_label = lora_model_display_name(self._model_key)
+        if reusing:
+            self._intro_label.setText(
+                f"This file is already imported. Adding will enable it for "
+                f"<b>{model_label}</b> using the existing LoRA entry."
+            )
+            return
+        self._intro_label.setText(
+            f"Import a .safetensors LoRA for <b>{model_label}</b>. "
+            "The file is copied into the app cache and tested before it is added."
+        )
+
     def _prime_edit_fields(self) -> None:
         entry = self._edit_entry
         if entry is None:
@@ -304,15 +375,39 @@ class LoraEntryDialog(QDialog):
     def _on_path_changed(self, text: str) -> None:
         if self._mode != "add":
             return
-        if self._name_edit.text().strip():
-            return
         path = (text or "").strip()
         if not path:
+            self._reuse_lora_id = None
+            self._update_add_intro(reusing=False)
+            return
+        host_id = host_id_for_lora_model(self._model_key)
+        if not host_id:
             return
         try:
-            self._name_edit.setText(display_name_from_path(Path(path).expanduser()))
+            source = validate_safetensors_source(path)
+            existing = find_user_lora_for_source(source, host_id=host_id)
         except Exception:
-            pass
+            existing = None
+            if not self._name_edit.text().strip():
+                try:
+                    self._name_edit.setText(display_name_from_path(Path(path).expanduser()))
+                except Exception:
+                    pass
+            self._reuse_lora_id = None
+            self._update_add_intro(reusing=False)
+            return
+        if existing is not None:
+            self._reuse_lora_id = existing.lora_id
+            self._name_edit.setText(existing.display_name)
+            self._trigger_edit.setText(existing.trigger_word or "")
+            self._scale_spin.setValue(float(existing.scale))
+            self._comment_edit.setText(existing.comment or "")
+            self._update_add_intro(reusing=True)
+            return
+        self._reuse_lora_id = None
+        if not self._name_edit.text().strip():
+            self._name_edit.setText(display_name_from_path(source))
+        self._update_add_intro(reusing=False)
 
     def _browse(self) -> None:
         from PySide6.QtWidgets import QFileDialog
@@ -371,6 +466,33 @@ class LoraEntryDialog(QDialog):
             show_styled_warning(self, "Add LoRA", str(exc))
             return
 
+        host_id = host_id_for_lora_model(self._model_key)
+        reuse_lora_id = self._reuse_lora_id
+        if not reuse_lora_id and host_id:
+            try:
+                source = validate_safetensors_source(path)
+                existing = find_user_lora_for_source(source, host_id=host_id)
+                if existing is not None:
+                    reuse_lora_id = existing.lora_id
+            except Exception:
+                pass
+        if reuse_lora_id and host_id:
+            from config import get_config
+            from imagegen_plugins.lora_catalog_settings import model_state
+
+            st = model_state(get_config().load_settings(), self._model_key)
+            enabled = set(st.get("enabled_ids") or [])
+            hidden = set(st.get("hidden_ids") or [])
+            if reuse_lora_id in enabled and reuse_lora_id not in hidden:
+                show_styled_information(
+                    self,
+                    "Add LoRA",
+                    f"«{name}» is already enabled for "
+                    f"{lora_model_display_name(self._model_key)}.",
+                )
+                self.accept()
+                return
+
         progress = QProgressDialog(
             f"Testing LoRA on {lora_model_display_name(self._model_key)}…",
             "Cancel",
@@ -395,6 +517,7 @@ class LoraEntryDialog(QDialog):
             scale=float(self._scale_spin.value()),
             comment=self._comment_edit.text().strip(),
             cancel_flag=cancel_flag,
+            reuse_lora_id=reuse_lora_id,
         )
 
         def on_done(ok: bool, err: str, entry: object) -> None:
@@ -407,7 +530,7 @@ class LoraEntryDialog(QDialog):
                 )
                 self.accept()
                 return
-            if entry is not None:
+            if entry is not None and getattr(worker, "_created_new_entry", False):
                 from imagegen_plugins.lora_user_entries import remove_user_lora_files
 
                 remove_user_lora_files(entry)

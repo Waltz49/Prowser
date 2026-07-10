@@ -5947,38 +5947,44 @@ class SettingsDialog(QDialog):
         self._show_lora_draft_for_model(self._current_lora_model_key())
 
     def _hide_lora_catalog_entry(self, lora_id: str) -> None:
-        """Hide a curated LoRA row, or remove a user-imported LoRA entirely."""
+        """Hide a LoRA row for the current base model."""
+        from imagegen_plugins.hf_model_ids import lora_model_display_name
         from imagegen_plugins.lora_user_entries import is_user_lora_id
 
-        if is_user_lora_id(lora_id):
-            entry = None
-            try:
-                from imagegen_plugins.lora_catalog import get_lora_entry
-
-                entry = get_lora_entry(lora_id)
-            except Exception:
-                pass
-            label = entry.display_name if entry is not None else lora_id
-            reply = QMessageBox.question(
-                self,
-                "Remove LoRA",
-                f"Remove imported LoRA «{label}» and delete its cached copy?",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                QMessageBox.StandardButton.No,
-            )
-            if reply != QMessageBox.StandardButton.Yes:
-                return
-            from imagegen_plugins.image_gen_persistence import remove_user_lora
-
-            remove_user_lora(lora_id)
-            self._reload_lora_drafts_and_grid()
-            mw = self.parent()
-            if mw is not None and hasattr(mw, "refresh_open_imagegen_lora_combos"):
-                mw.refresh_open_imagegen_lora_combos()
-            return
         row = getattr(self, "_lora_row_widgets", {}).get(lora_id)
         if row is None:
             return
+
+        entry = None
+        try:
+            from imagegen_plugins.lora_catalog import get_lora_entry
+
+            entry = get_lora_entry(lora_id)
+        except Exception:
+            pass
+        label = entry.display_name if entry is not None else lora_id
+        model_key = self._current_lora_model_key()
+        model_label = lora_model_display_name(model_key) if model_key else "this model"
+
+        if is_user_lora_id(lora_id):
+            reply = QMessageBox.question(
+                self,
+                "Remove LoRA",
+                f"Remove imported LoRA «{label}» from {model_label}?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+        else:
+            reply = QMessageBox.question(
+                self,
+                "Hide LoRA",
+                f"Hide {label} for {model_label}?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
         self._lora_hidden_ids.add(lora_id)
         widgets = row if isinstance(row, (list, tuple)) else (row,)
         for w in widgets:
@@ -6087,8 +6093,8 @@ class SettingsDialog(QDialog):
 
             if is_user_lora_id(entry.lora_id):
                 del_btn.setToolTip(
-                    "Remove imported LoRA\n"
-                    f"{lora_choice_label(entry, model_key=model_key)}"
+                    f"Remove {lora_choice_label(entry, model_key=model_key)}\n"
+                    "from this base model"
                 )
             else:
                 del_btn.setToolTip(

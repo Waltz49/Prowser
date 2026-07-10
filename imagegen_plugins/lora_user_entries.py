@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import os
 import re
 import shutil
 from pathlib import Path
@@ -34,6 +35,7 @@ def _entry_to_dict(entry: FluxLoraEntry) -> Dict[str, Any]:
         "mflux_compatible": entry.mflux_compatible,
         "trigger_word": entry.trigger_word,
         "comment": entry.comment,
+        "source_path": entry.source_path or "",
     }
 
 
@@ -67,6 +69,10 @@ def entry_from_dict(raw: Dict[str, Any]) -> Optional[FluxLoraEntry]:
         min_steps = int(raw.get("min_steps", LORA_MIN_STEPS))
     except (TypeError, ValueError):
         min_steps = LORA_MIN_STEPS
+    source_raw = raw.get("source_path")
+    source_path = str(source_raw).strip() if source_raw else None
+    if source_path == "":
+        source_path = None
     return FluxLoraEntry(
         host_id=host_id,
         lora_id=lora_id,
@@ -80,6 +86,7 @@ def entry_from_dict(raw: Dict[str, Any]) -> Optional[FluxLoraEntry]:
         mflux_compatible=mflux_compatible,
         trigger_word=trigger_word,
         comment=comment,
+        source_path=source_path,
     )
 
 
@@ -141,6 +148,55 @@ def unique_lora_id(base: str, existing: Dict[str, FluxLoraEntry]) -> str:
     return lid
 
 
+def same_lora_file(a: Path, b: Path) -> bool:
+    """True when two paths refer to the same on-disk LoRA file."""
+    try:
+        a_res = a.expanduser().resolve()
+        b_res = b.expanduser().resolve()
+        if a_res == b_res:
+            return True
+        if a_res.is_file() and b_res.is_file() and os.path.samefile(a_res, b_res):
+            return True
+    except OSError:
+        pass
+    return False
+
+
+def _entry_path_candidates(entry: FluxLoraEntry) -> list[Path]:
+    paths: list[Path] = []
+    for raw in (entry.local_path, entry.source_path):
+        text = str(raw or "").strip()
+        if not text:
+            continue
+        paths.append(Path(text).expanduser())
+    return paths
+
+
+def find_user_lora_for_source(
+    path: Path,
+    *,
+    host_id: str,
+    settings: Optional[Dict[str, Any]] = None,
+) -> Optional[FluxLoraEntry]:
+    """Return an existing user LoRA entry that refers to the same source file."""
+    host = str(host_id or "").strip()
+    if not host:
+        return None
+    try:
+        source = path.expanduser().resolve()
+    except OSError:
+        source = path.expanduser()
+    if not source.is_file():
+        return None
+    for entry in user_lora_entries_from_settings(settings).values():
+        if entry.host_id != host:
+            continue
+        for candidate in _entry_path_candidates(entry):
+            if same_lora_file(source, candidate):
+                return entry
+    return None
+
+
 def copy_lora_to_user_cache(source: Path, lora_id: str) -> Path:
     dest_dir = USER_LORA_CACHE_ROOT / lora_id
     dest_dir.mkdir(parents=True, exist_ok=True)
@@ -165,6 +221,7 @@ def build_user_lora_entry(
     existing = merged_lora_catalog(settings)
     base_id = slugify_lora_id(display_name or source_path.stem)
     lora_id = unique_lora_id(base_id, existing)
+    resolved_source = source_path.resolve()
     dest = copy_lora_to_user_cache(source_path, lora_id)
     return FluxLoraEntry(
         host_id=host_id,
@@ -177,6 +234,7 @@ def build_user_lora_entry(
         mflux_compatible=None,
         trigger_word=(trigger_word or "").strip() or None,
         comment=(comment or "").strip() or None,
+        source_path=str(resolved_source),
     )
 
 

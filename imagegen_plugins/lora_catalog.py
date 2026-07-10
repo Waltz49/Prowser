@@ -262,7 +262,7 @@ def lora_probe_passed_for_model(
     entry = get_lora_entry(lora_id, settings)
     if entry is None or entry.mflux_compatible is False:
         return False
-    if not entry_matches_lora_model(entry, model_key):
+    if not entry_matches_lora_model(entry, model_key, settings=settings):
         return False
     if entry.mflux_compatible is True:
         return True
@@ -354,7 +354,7 @@ def lora_visible_for_run(
     _ = host_id
     if entry.mflux_compatible is False:
         return False
-    if not entry_matches_lora_model(entry, model_key):
+    if not entry_matches_lora_model(entry, model_key, settings=settings):
         return False
     if not lora_probe_passed_for_model(lora_id, model_key, settings):
         return False
