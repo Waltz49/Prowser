@@ -419,6 +419,7 @@ class ImageBrowserConfig:
             'status_bar_visible': True,  # Default to showing status bar
             'thumbnail_filename_visible': False,  # Default to hiding thumbnail filenames
             'preview_visible': False,  # Default to hiding preview panel
+            'chat_visible': True,  # Default to showing chat pane when chat UI is enabled
             'jobs_visible': False,  # Default to hiding jobs pane in right combined sidebar
             'sidebar_width': 300,  # Default width for combined sidebar (tree + preview)
             'right_sidebar_width': 300,  # Default width for right sidebar (info panel)

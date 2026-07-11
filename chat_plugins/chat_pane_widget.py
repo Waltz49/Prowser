@@ -155,7 +155,7 @@ def _chat_tab_direction(event: QKeyEvent) -> int | None:
 
 
 class _ChatTabKeyFilter(QObject):
-    """Route Tab away from chat text fields to tree / main canvas focus."""
+    """Route Tab away from chat text fields to canvas / chat or tree focus."""
 
     def __init__(self, pane: "ChatPaneWidget", parent: QObject | None = None) -> None:
         super().__init__(parent or pane)
@@ -185,8 +185,17 @@ class _ChatTabKeyFilter(QObject):
         if direction > 0:
             if hasattr(mw, "focus_canvas"):
                 mw.focus_canvas()
-        elif hasattr(mw, "focus_tree"):
-            mw.focus_tree()
+        else:
+            cs = getattr(mw, "combined_sidebar", None)
+            if (
+                cs is not None
+                and hasattr(cs, "is_chat_covering_panes")
+                and cs.is_chat_covering_panes()
+                and hasattr(mw, "focus_chat")
+            ):
+                mw.focus_chat()
+            elif hasattr(mw, "focus_tree"):
+                mw.focus_tree()
         event.accept()
         return True
 
@@ -208,7 +217,7 @@ def _attach_chat_tab_key_filter(host: QWidget) -> None:
 
 
 def install_chat_tab_key_filter(pane: "ChatPaneWidget") -> None:
-    """Tab from chat text fields toggles tree vs main canvas (not tab order)."""
+    """Tab from chat text fields toggles canvas vs chat or tree (not tab order)."""
     filt = getattr(pane, "_chat_tab_key_filter", None)
     if filt is None:
         filt = _ChatTabKeyFilter(pane, parent=pane)

@@ -1398,7 +1398,17 @@ class ImageBrowserWindow(QMainWindow):
         # Load preview visibility setting
         self.preview_visible = saved_settings.get('preview_visible', False)
         self.jobs_visible = saved_settings.get('jobs_visible', False)
-        self.chat_visible = saved_settings.get('chat_visible', False)
+        try:
+            from bundle_capabilities import chat_ui_enabled
+            _chat_ui_enabled = chat_ui_enabled()
+        except ImportError:
+            _chat_ui_enabled = True
+        if 'chat_visible' in saved_settings:
+            self.chat_visible = bool(saved_settings['chat_visible'])
+        elif _chat_ui_enabled:
+            self.chat_visible = True
+        else:
+            self.chat_visible = False
         
         # Single width for the combined sidebar widget
         self.sidebar_width = saved_settings.get('sidebar_width', 300)
@@ -1429,6 +1439,7 @@ class ImageBrowserWindow(QMainWindow):
         self.combined_sidebar.tree_visibility_changed.connect(self._on_tree_visibility_changed)
         self.combined_sidebar.preview_visibility_changed.connect(self._on_preview_visibility_changed)
         self.combined_sidebar.chat_visibility_changed.connect(self._on_chat_visibility_changed)
+        self.combined_sidebar.chat_cover_changed.connect(self._on_chat_cover_changed)
         self.combined_sidebar.widget_resized.connect(self._on_sidebar_resized)
         
         # Create focusable container for file tree
@@ -1493,11 +1504,28 @@ class ImageBrowserWindow(QMainWindow):
             if chat_ui_enabled():
                 from browser_window.sidebar.sidebar_chat_widget import SidebarChatWidget
 
+                self.chat_container = QWidget()
+                self.chat_container.setFocusPolicy(Qt.NoFocus)
+                chat_container_layout = QVBoxLayout(self.chat_container)
+                chat_container_layout.setContentsMargins(0, 0, 0, 0)
+                chat_container_layout.setSpacing(0)
+
                 self.sidebar_chat_widget = SidebarChatWidget(self)
                 self.sidebar_chat_widget.setFocusPolicy(Qt.NoFocus)
+                chat_container_layout.addWidget(self.sidebar_chat_widget)
+
+                def chat_container_focus_in(event):
+                    QWidget.focusInEvent(self.chat_container, event)
+                    prompt = getattr(self.sidebar_chat_widget, "_prompt_input", None)
+                    if prompt is not None and prompt.isVisible():
+                        prompt.setFocus(Qt.FocusReason.TabFocusReason)
+
+                self.chat_container.focusInEvent = chat_container_focus_in
             else:
+                self.chat_container = None
                 self.sidebar_chat_widget = None
         except ImportError:
+            self.chat_container = None
             self.sidebar_chat_widget = None
         
         # Set widgets in combined sidebar
@@ -1574,28 +1602,12 @@ class ImageBrowserWindow(QMainWindow):
         main_width = estimated_width - left_width - right_width
         self._set_splitter_sizes_safe([left_width, main_width, right_width])
         
-        # ========================================================================
-        # CRITICAL TAB ORDER FIX - DO NOT MODIFY WITHOUT PERMISSION
-        # ========================================================================
-        # This tab order setup is CRITICAL for proper keyboard navigation.
-        # ONLY the tree_container and main_content_widget should be in the tab order.
-        # 
-        # WARNING: DO NOT ADD ANY OTHER WIDGETS TO THE TAB ORDER!
-        # WARNING: DO NOT CHANGE THE FOCUS POLICIES OF THESE WIDGETS!
-        # WARNING: DO NOT ADD setTabOrder() CALLS FOR OTHER WIDGETS!
-        # 
-        # The tab key should ONLY cycle between:
-        # 1. combined_sidebar (file tree and preview)
-        # 2. main_content_widget (canvas/browse area)
-        # 
-        # All other widgets (stacked_widget, thumbnail_container, file_tree, etc.) have
-        # NoFocus policy to prevent them from being in the tab order.
-        # 
-        # If you need to add new widgets, make sure they have NoFocus policy
-        # unless they are specifically meant to be part of the tab order.
-        # ========================================================================
+        # Tab order: chat_container or tree_container (left sidebar) <-> main_content_widget.
+        # _sync_left_sidebar_tab_order() picks the active left tab stop when chat covers panes.
         self.tree_container.setFocusPolicy(Qt.NoFocus)
         self.preview_widget.setFocusPolicy(Qt.NoFocus)
+        if getattr(self, "chat_container", None) is not None:
+            self.chat_container.setFocusPolicy(Qt.NoFocus)
         # Set NoFocus on sidebar chrome; keep text fields typable.
         for child in self.combined_sidebar.findChildren(QWidget):
             if isinstance(child, (QPlainTextEdit, QTextEdit, QLineEdit)):
@@ -1608,7 +1620,7 @@ class ImageBrowserWindow(QMainWindow):
 
         self.combined_sidebar.setFocusPolicy(Qt.NoFocus)
         self.main_content_widget.setFocusPolicy(Qt.StrongFocus)
-        self.setTabOrder(self.combined_sidebar, self.main_content_widget)
+        self._sync_left_sidebar_tab_order()
         
         # Install event filter to catch keyboard events since main window has NoFocus
         self.installEventFilter(self)
@@ -2648,6 +2660,33 @@ class ImageBrowserWindow(QMainWindow):
                     hasattr(self.file_tree_handler, 'file_tree') and 
                     self.file_tree_handler.file_tree):
                     self.file_tree_handler.file_tree.setFocus()
+
+    def focus_chat(self):
+        """Give focus to the chat container (prompt input when available)."""
+        container = getattr(self, "chat_container", None)
+        if container is not None and container.isVisible():
+            container.setFocus()
+
+    def _sync_left_sidebar_tab_order(self) -> None:
+        """Tab cycles chat<->canvas in cover mode, else tree<->canvas when tree is displayed."""
+        if not getattr(self, "main_content_widget", None):
+            return
+        cs = getattr(self, "combined_sidebar", None)
+        use_chat = (
+            getattr(self, "chat_container", None) is not None
+            and cs is not None
+            and hasattr(cs, "is_chat_covering_panes")
+            and cs.is_chat_covering_panes()
+        )
+        tree = getattr(self, "tree_container", None)
+        chat = getattr(self, "chat_container", None)
+        if tree is not None:
+            tree.setFocusPolicy(Qt.FocusPolicy.StrongFocus if not use_chat else Qt.FocusPolicy.NoFocus)
+        if chat is not None:
+            chat.setFocusPolicy(Qt.FocusPolicy.StrongFocus if use_chat else Qt.FocusPolicy.NoFocus)
+        left_stop = chat if use_chat else tree
+        if left_stop is not None:
+            self.setTabOrder(left_stop, self.main_content_widget)
     
     def focus_canvas(self):
         """Give focus to the canvas area"""
@@ -2770,7 +2809,11 @@ class ImageBrowserWindow(QMainWindow):
         
         # Update canvas layout
         QTimer.singleShot(50, self.update_max_thumbnail_size)
+        self._sync_left_sidebar_tab_order()
     
+    def _on_chat_cover_changed(self, _covering: bool) -> None:
+        self._sync_left_sidebar_tab_order()
+
     def _on_preview_visibility_changed(self, visible):
         """Handle preview visibility changes from combined sidebar"""
         # Check if transitioning from hidden to visible
@@ -2855,6 +2898,7 @@ class ImageBrowserWindow(QMainWindow):
         # Update canvas layout only if sidebar width changed (to avoid unnecessary thumbnail refresh)
         if sidebar_width_changed:
             QTimer.singleShot(50, self.update_max_thumbnail_size)
+        self._sync_left_sidebar_tab_order()
 
     def _on_chat_visibility_changed(self, visible):
         """Handle chat pane visibility changes from combined sidebar."""
@@ -2910,6 +2954,7 @@ class ImageBrowserWindow(QMainWindow):
         self.config.update_setting("sidebar_width", self.sidebar_width)
         if sidebar_width_changed:
             QTimer.singleShot(50, self.update_max_thumbnail_size)
+        self._sync_left_sidebar_tab_order()
 
     def _calculate_max_sidebar_width(self):
         """Calculate the maximum sidebar width to allow one column of thumbnails, accounting for right sidebar"""
@@ -10069,6 +10114,11 @@ class ImageBrowserWindow(QMainWindow):
             'left_tree_visible': cs.is_tree_visible(),
             'left_preview_visible': cs.is_preview_visible(),
             'left_chat_visible': cs.is_chat_visible() if hasattr(cs, 'is_chat_visible') else False,
+            'left_chat_covers_panes': (
+                cs.is_chat_covering_panes()
+                if hasattr(cs, 'is_chat_covering_panes')
+                else False
+            ),
             'left_splitter_sizes': (
                 list(cs.saved_splitter_sizes)
                 if cs.saved_splitter_sizes
@@ -10120,8 +10170,15 @@ class ImageBrowserWindow(QMainWindow):
             rs.saved_splitter_sizes = list(right_sizes)
         cs.set_tree_visible(layout.get('left_tree_visible', False))
         cs.set_preview_visible(layout.get('left_preview_visible', False))
+        chat_vis = layout.get('left_chat_visible', False)
+        covers = layout.get('left_chat_covers_panes', chat_vis)
         if hasattr(cs, 'set_chat_visible'):
-            cs.set_chat_visible(layout.get('left_chat_visible', False))
+            if chat_vis:
+                cs.set_chat_visible(True, enter_cover=covers)
+            else:
+                cs.set_chat_visible(False)
+        elif hasattr(cs, 'set_chat_covers_panes') and covers:
+            cs.set_chat_covers_panes(True)
         rs.set_information_visible(layout.get('right_information_visible', False))
         rs.set_shortcuts_visible(layout.get('right_shortcuts_visible', False))
         rs.set_jobs_visible(layout.get('right_jobs_visible', False))
@@ -10143,6 +10200,7 @@ class ImageBrowserWindow(QMainWindow):
         else:
             self._update_chrome_menu_actions()
             self._peek_layout_update()
+        self._sync_left_sidebar_tab_order()
 
     def _after_chrome_status_restore(self):
         self._update_chrome_menu_actions()

@@ -12,9 +12,14 @@ from chat_plugins.chat_ui_common import (
     _local_paths_from_mime,
     chat_prompt_edit_stylesheet,
 )
+from browser_window.managers.window_event_filters import CURSOR_PEEK_ZONE_HEIGHT
 
 CHAT_PROMPT_MIN_LINES = 2
 CHAT_PROMPT_MAX_LINES = 12
+CHAT_PROMPT_BOTTOM_PADDING_EXTRA_PX = 10
+CHAT_PROMPT_BOTTOM_PADDING_PX = (
+    CHAT_PROMPT_BOTTOM_PADDING_EXTRA_PX + CURSOR_PEEK_ZONE_HEIGHT
+)
 _PROMPT_STYLE_PADDING_V = 12
 _PROMPT_STYLE_BORDER_V = 2
 
@@ -168,7 +173,7 @@ class ChatPromptInput(QWidget):
     def __init__(self, parent=None, *, main_window=None):
         super().__init__(parent)
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(6, 4, 6, 6)
+        layout.setContentsMargins(6, 4, 6, CHAT_PROMPT_BOTTOM_PADDING_PX)
         layout.setSpacing(4)
         self._thumb_row = ChatImageThumbRow(
             self, compact_row=True, main_window=main_window

@@ -412,6 +412,7 @@ class CombinedSidebarWidget(QWidget):
     tree_visibility_changed = Signal(bool)
     preview_visibility_changed = Signal(bool)
     chat_visibility_changed = Signal(bool)
+    chat_cover_changed = Signal(bool)
     widget_resized = Signal()
     
     def __init__(self, main_window, parent=None):
@@ -432,10 +433,11 @@ class CombinedSidebarWidget(QWidget):
         except ImportError:
             self._chat_feature_enabled = True
         self.chat_visible = (
-            bool(settings.get('chat_visible', False))
+            bool(settings.get('chat_visible', True))
             if self._chat_feature_enabled
             else False
         )
+        self.chat_covers_panes = False
         self.chat_widget = None
         self.chat_section = None
         self.chat_header = None
@@ -454,13 +456,17 @@ class CombinedSidebarWidget(QWidget):
         self.setup_ui()
         
     def focusInEvent(self, event):
-        """Handle focus in events - forward focus to tree view if visible"""
+        """Handle focus in events - forward focus to tree view if displayed"""
         super().focusInEvent(event)
-        if self.tree_visible and self.tree_widget:
-            # Forward focus to the tree view
+        if self.chat_covers_panes:
+            mw = getattr(self, "main_window", None)
+            if mw is not None and hasattr(mw, "focus_chat"):
+                mw.focus_chat()
+            return
+        disp = self._display_pane_visibility()
+        if disp[0] and self.tree_widget:
             self.tree_widget.setFocus()
-        elif self.preview_visible and self.preview_widget:
-            # If only preview is visible, focus the preview
+        elif disp[1] and self.preview_widget:
             self.preview_widget.setFocus()
         
     def setup_ui(self):
@@ -505,7 +511,11 @@ class CombinedSidebarWidget(QWidget):
         self.splitter.splitterMoved.connect(self._on_splitter_moved)
         
         layout.addWidget(self.splitter)
-        self._update_splitter_sizes()
+        if self.chat_visible and self._chat_feature_enabled:
+            self._enter_chat_cover()
+        else:
+            self._apply_display_sections()
+            self._update_splitter_sizes()
         
     def _apply_splitter_theme_styles(self):
         w = get_active_theme().view_border_width_px
@@ -630,7 +640,21 @@ class CombinedSidebarWidget(QWidget):
                 self.chat_widget.setParent(None)
             self.chat_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
             layout = self.chat_content.layout()
-            layout.addWidget(self.chat_widget)
+            container = getattr(self.main_window, "chat_container", None)
+            if container is not None:
+                if container.parent():
+                    container.setParent(None)
+                container.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+                container_layout = container.layout()
+                if container_layout is None:
+                    container_layout = QVBoxLayout(container)
+                    container_layout.setContentsMargins(0, 0, 0, 0)
+                    container_layout.setSpacing(0)
+                if self.chat_widget.parent() is not container:
+                    container_layout.addWidget(self.chat_widget)
+                layout.addWidget(container)
+            else:
+                layout.addWidget(self.chat_widget)
             self.chat_widget.show()
             if hasattr(self.chat_widget, "attach_titlebar_tools"):
                 self.chat_widget.attach_titlebar_tools()
@@ -685,46 +709,100 @@ class CombinedSidebarWidget(QWidget):
             
     def _toggle_tree(self):
         """Toggle tree visibility"""
-        self.tree_visible = not self.tree_visible
-        self.tree_content.setVisible(self.tree_visible)
-        
-        # Update header button text
-        self.tree_header.hide_button.setText("−" if self.tree_visible else "+")
-        
-        # Update splitter sizes based on visibility
-        self._update_splitter_sizes()
-        
-        # Emit signal
-        self.tree_visibility_changed.emit(self.tree_visible)
-        
-        # If both are hidden, hide the entire widget
-        self._update_overall_visibility()
-        
-        
+        if self.chat_covers_panes:
+            self.set_tree_visible(True)
+        else:
+            self.set_tree_visible(not self.tree_visible)
+
     def _toggle_preview(self):
         """Toggle preview visibility"""
-        self.preview_visible = not self.preview_visible
-        self.preview_content.setVisible(self.preview_visible)
-        
-        # Update header button text
-        self.preview_header.hide_button.setText("−" if self.preview_visible else "+")
-        
-        # Update splitter sizes based on visibility
-        self._update_splitter_sizes()
-        
-        # Emit signal
-        self.preview_visibility_changed.emit(self.preview_visible)
-        
-        # If all panes are hidden, hide the entire widget
-        self._update_overall_visibility()
+        if self.chat_covers_panes:
+            self.set_preview_visible(True)
+        else:
+            self.set_preview_visible(not self.preview_visible)
 
     def _toggle_chat(self):
         """Toggle chat visibility (also triggered by F9)"""
         self.set_chat_visible(not self.chat_visible)
-        
-    def _pane_visibility(self) -> list[bool]:
+
+    def is_chat_covering_panes(self) -> bool:
+        return bool(self.chat_covers_panes)
+
+    def enter_chat_cover(self) -> None:
+        """Show chat only at full sidebar height (logical tree/preview unchanged)."""
+        self._enter_chat_cover()
+
+    def set_chat_covers_panes(self, covers: bool) -> None:
+        if covers:
+            self._enter_chat_cover()
+        else:
+            self._exit_chat_cover()
+
+    def _logical_pane_visibility(self) -> list[bool]:
         chat_vis = self.chat_visible if self._chat_feature_enabled else False
         return [self.tree_visible, self.preview_visible, chat_vis]
+
+    def _display_pane_visibility(self) -> list[bool]:
+        if self.chat_covers_panes and self._chat_feature_enabled and self.chat_visible:
+            return [False, False, True]
+        return self._logical_pane_visibility()
+
+    def _pane_visibility(self) -> list[bool]:
+        return self._display_pane_visibility()
+
+    def _apply_display_sections(self) -> None:
+        disp = self._display_pane_visibility()
+        if getattr(self, "tree_section", None):
+            self.tree_section.setVisible(disp[0])
+        if getattr(self, "preview_section", None):
+            self.preview_section.setVisible(disp[1])
+        if getattr(self, "chat_section", None) and self._chat_feature_enabled:
+            self.chat_section.setVisible(disp[2])
+        if getattr(self, "tree_content", None):
+            self.tree_content.setVisible(self.tree_visible)
+        if getattr(self, "preview_content", None):
+            self.preview_content.setVisible(self.preview_visible)
+        if getattr(self, "chat_content", None):
+            self.chat_content.setVisible(self.chat_visible)
+        if getattr(self, "tree_header", None):
+            self.tree_header.hide_button.setText("−" if self.tree_visible else "+")
+        if getattr(self, "preview_header", None):
+            self.preview_header.hide_button.setText("−" if self.preview_visible else "+")
+        if getattr(self, "chat_header", None):
+            self.chat_header.hide_button.setText("−" if self.chat_visible else "+")
+
+    def _notify_cover_changed(self) -> None:
+        self.chat_cover_changed.emit(self.chat_covers_panes)
+        mw = getattr(self, "main_window", None)
+        if mw is not None and hasattr(mw, "_sync_left_sidebar_tab_order"):
+            mw._sync_left_sidebar_tab_order()
+
+    def _enter_chat_cover(self) -> None:
+        if not self._chat_feature_enabled or not self.chat_visible:
+            return
+        was_covering = self.chat_covers_panes
+        self.chat_covers_panes = True
+        self._apply_display_sections()
+        self._update_splitter_sizes()
+        if not was_covering:
+            self._notify_cover_changed()
+
+    def _exit_chat_cover(self) -> None:
+        if not self.chat_covers_panes:
+            return
+        self.chat_covers_panes = False
+        self._apply_display_sections()
+        self._update_splitter_sizes()
+        self._notify_cover_changed()
+
+    def _maybe_reenter_chat_cover(self) -> None:
+        if (
+            self._chat_feature_enabled
+            and self.chat_visible
+            and not self.tree_visible
+            and not self.preview_visible
+        ):
+            self._enter_chat_cover()
 
     def _header_height_for_pane(self, pane_idx: int) -> int:
         if pane_idx == 0 and self.tree_header:
@@ -993,11 +1071,13 @@ class CombinedSidebarWidget(QWidget):
         self._toggle_pane_fit(1)
 
     def _expand_chat_pane_to_fit(self) -> None:
+        if self.chat_covers_panes:
+            return
         self._toggle_pane_fit(2)
 
     def _persist_splitter_sizes(self) -> None:
-        """Merge current splitter sizes for visible panes into saved settings."""
-        vis = self._pane_visibility()
+        """Merge current splitter sizes for displayed panes into saved settings."""
+        vis = self._display_pane_visibility()
         sizes = self.splitter.sizes()
         if len(sizes) != 3:
             return
@@ -1012,8 +1092,8 @@ class CombinedSidebarWidget(QWidget):
         self.saved_splitter_sizes = saved
 
     def _update_splitter_sizes(self):
-        """Update splitter sizes based on which panes are visible. Order: [tree, preview, chat]."""
-        vis = self._pane_visibility()
+        """Update splitter sizes based on which panes are displayed. Order: [tree, preview, chat]."""
+        vis = self._display_pane_visibility()
         if not any(vis):
             return
         current_height = max(self.height(), 1)
@@ -1051,7 +1131,7 @@ class CombinedSidebarWidget(QWidget):
     
     def _update_overall_visibility(self):
         """Update overall widget visibility based on section visibility"""
-        if not any(self._pane_visibility()):
+        if not any(self._logical_pane_visibility()):
             self.hide()
             return
         mw = getattr(self, "main_window", None)
@@ -1069,52 +1149,56 @@ class CombinedSidebarWidget(QWidget):
         self.widget_resized.emit()
         
     def set_tree_visible(self, visible):
-        """Set tree visibility programmatically"""
+        """Set tree visibility programmatically (logical; may exit chat cover)."""
+        if visible and self.chat_covers_panes:
+            self._exit_chat_cover()
+
         if self.tree_visible != visible:
             self.tree_visible = visible
-            self.tree_content.setVisible(visible)
-            
-            # Update header button text
-            self.tree_header.hide_button.setText("−" if visible else "+")
-            
-            # Update splitter sizes based on visibility
+            self._apply_display_sections()
             self._update_splitter_sizes()
-            
-            # Emit signal
             self.tree_visibility_changed.emit(visible)
-            
-            # If both are hidden, hide the entire widget
             self._update_overall_visibility()
         elif visible and self.tree_widget:
-            # If setting to visible and tree widget exists, ensure it's properly shown
             self.tree_widget.show()
-        
-            
+
+        if not visible:
+            self._maybe_reenter_chat_cover()
+
     def set_preview_visible(self, visible):
-        """Set preview visibility programmatically"""
+        """Set preview visibility programmatically (logical; may exit chat cover)."""
+        if visible and self.chat_covers_panes:
+            self._exit_chat_cover()
+
         if self.preview_visible != visible:
             self.preview_visible = visible
-            self.preview_content.setVisible(visible)
-            
-            # Update header button text
-            self.preview_header.hide_button.setText("−" if visible else "+")
-            
-            # Update splitter sizes based on visibility
+            self._apply_display_sections()
             self._update_splitter_sizes()
-            
-            # Emit signal
             self.preview_visibility_changed.emit(visible)
-            
-            # If both are hidden, hide the entire widget
             self._update_overall_visibility()
-            
-    def set_chat_visible(self, visible):
-        """Set chat visibility programmatically (e.g. from F9)"""
+
+        if not visible:
+            self._maybe_reenter_chat_cover()
+
+    def set_chat_visible(self, visible, *, enter_cover: bool | None = None):
+        """Set chat visibility programmatically (e.g. from F9).
+
+        enter_cover: when showing chat, True forces cover mode, False leaves multi-pane layout,
+        None defaults to entering cover mode.
+        """
         if not self._chat_feature_enabled:
             return
         if self.chat_visible != visible:
             self.chat_visible = visible
-            self.chat_content.setVisible(visible)
+            if visible:
+                if enter_cover is False:
+                    self.chat_covers_panes = False
+                    self._apply_display_sections()
+                else:
+                    self._enter_chat_cover()
+            else:
+                self.chat_covers_panes = False
+                self._apply_display_sections()
             self.chat_header.hide_button.setText("−" if visible else "+")
             if visible and self.chat_widget and hasattr(self.chat_widget, "on_pane_activated"):
                 self.chat_widget.on_pane_activated()
@@ -1126,7 +1210,14 @@ class CombinedSidebarWidget(QWidget):
             self.chat_visibility_changed.emit(visible)
             self.widget_resized.emit()
             self._update_chat_header_focus(self._chat_pane_has_focus())
+            if not visible:
+                self._notify_cover_changed()
         elif visible and self.chat_widget:
+            if enter_cover is False:
+                if self.chat_covers_panes:
+                    self._exit_chat_cover()
+            else:
+                self._enter_chat_cover()
             self.chat_widget.show()
             if hasattr(self.chat_widget, "on_pane_activated"):
                 self.chat_widget.on_pane_activated()
