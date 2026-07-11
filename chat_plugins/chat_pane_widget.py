@@ -31,7 +31,9 @@ from chat_plugins.chat_delete_confirm import (
     confirm_clear_chat,
 )
 from chat_plugins.chat_cleanup import purge_chat_disk_and_logs
+from chat_plugins.chat_image_gen_trigger import user_message_has_image_command
 from chat_plugins.chat_image_store import ChatImageStore, reset_image_store_session
+from chat_plugins.chat_ui_common import chat_create_from_text_available
 from chat_plugins.chat_lmstudio import (
     is_lmstudio_chat_available,
     load_chat_system_prompt,
@@ -528,10 +530,21 @@ class ChatPaneWidget(QWidget):
             for m in self._session.messages
             if m.message_id != placeholder.message_id
         ]
+        auto_generate_from_text = False
+        for msg in reversed(history):
+            if msg.role == "user":
+                auto_generate_from_text = user_message_has_image_command(msg.text)
+                break
+
+        def on_finished_with_auto_generate(final: str) -> None:
+            on_finished(final)
+            if auto_generate_from_text:
+                self._auto_create_from_text_if_available(final)
+
         started = self._lm_service.submit(
             history,
             on_chunk=on_chunk,
-            on_finished=on_finished,
+            on_finished=on_finished_with_auto_generate,
             on_error=on_error,
             system_prompt=self._session.system_prompt,
         )
@@ -614,6 +627,14 @@ class ChatPaneWidget(QWidget):
             w.deleteLater()
         self._streaming_widget = None
         self._request_assistant_response()
+
+    def _auto_create_from_text_if_available(self, text: str) -> None:
+        if not chat_create_from_text_available():
+            return
+        prompt = (text or "").strip()
+        if not prompt:
+            return
+        self._on_create_from_text(prompt, option_held=True)
 
     def _on_create_from_text(self, text: str, option_held: bool = False) -> None:
         try:

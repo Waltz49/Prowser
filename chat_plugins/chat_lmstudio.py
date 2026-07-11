@@ -9,6 +9,7 @@ from config import CAPTION_DEFAULTS, CHAT_DEFAULTS, get_config
 from imagegen_plugins.ai_prompt_exit import apply_text_ai_exit
 
 from chat_plugins.chat_session import ChatMessage
+from chat_plugins.chat_image_gen_trigger import strip_image_command_from_user_message
 
 DEFAULT_CHAT_SYSTEM_PROMPT = CHAT_DEFAULTS["chat_system_prompt"]
 
@@ -113,10 +114,11 @@ def _build_chat(
                     raise RuntimeError(
                         f"Could not prepare image for the model.\n\nDetail: {e}"
                     ) from e
+            user_text = strip_image_command_from_user_message(msg.text)
             if handles:
-                chat.add_user_message(msg.text, images=handles)
+                chat.add_user_message(user_text, images=handles)
             else:
-                chat.add_user_message(msg.text)
+                chat.add_user_message(user_text)
         else:
             chat.add_assistant_response(msg.text)
     return chat
