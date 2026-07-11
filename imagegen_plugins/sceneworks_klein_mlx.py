@@ -40,6 +40,16 @@ def normalize_mlx_tier(value: Any) -> str:
     return tier
 
 
+def mlx_tier_status_quant_label(tier: Any) -> str | None:
+    """Job/EXIF Q: label digits for a pre-quantized MLX tier (q4 -> 4, bf16 -> 16)."""
+    normalized = normalize_mlx_tier(tier)
+    if normalized == "bf16":
+        return "16"
+    if normalized.startswith("q") and normalized[1:].isdigit():
+        return normalized[1:]
+    return normalized or None
+
+
 def tier_allow_patterns(tier: str) -> list[str]:
     tier = normalize_mlx_tier(tier)
     return [f"{tier}/**"]

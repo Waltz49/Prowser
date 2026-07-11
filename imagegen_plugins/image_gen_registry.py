@@ -19,6 +19,32 @@ from imagegen_plugins.image_gen_pipeline_modes import (
     worker_script_path,
 )
 
+_MFLUX_QUANT_STATUS_PIPELINES = frozenset(
+    {
+        "flux_schnell_mflux_play",
+        "mflux_fill_expand",
+        "mflux_fill_infill",
+        "mflux_flux2_klein_create",
+        "mflux_flux2_klein_edit",
+        "mflux_flux2_klein_expand",
+    }
+)
+
+
+def format_quantize_status_value(key: str, value: Any) -> str | None:
+    """Display digits for job status / EXIF Q: from a plugin quantize_status_key."""
+    if value is None:
+        return None
+    if key == "mlx_tier":
+        from imagegen_plugins.sceneworks_klein_mlx import mlx_tier_status_quant_label
+
+        return mlx_tier_status_quant_label(value)
+    try:
+        return str(int(value))
+    except (TypeError, ValueError):
+        text = str(value).strip()
+        return text or None
+
 
 class ImageGenModelPlugin:
     """One image-gen model; delegates run/fields to a pipeline."""
@@ -36,6 +62,7 @@ class ImageGenModelPlugin:
         lora_host_id: Optional[str] = None,
         max_generation_dimension: int = 1024,
         field_layout_builder: Optional[FieldLayoutBuilder] = None,
+        quantize_status_key: str = "mflux_quantize",
     ):
         # AI/dev: ``function`` is create | edit | expand | infill. Multiple plugins may
         # share a pipeline; the user picks the model in the function dialog dropdown.
@@ -50,6 +77,32 @@ class ImageGenModelPlugin:
         self.lora_host_id = lora_host_id
         self.max_generation_dimension = int(max_generation_dimension)
         self.field_layout_builder = field_layout_builder
+        self.quantize_status_key = quantize_status_key
+
+    def pipeline_reports_quantization(self) -> bool:
+        return self.pipeline_id in _MFLUX_QUANT_STATUS_PIPELINES
+
+    def quantize_status_value(
+        self, values: Optional[Dict[str, Any]] = None
+    ) -> str | None:
+        if not self.pipeline_reports_quantization():
+            return None
+        data = dict(values or {})
+        return format_quantize_status_value(
+            self.quantize_status_key,
+            data.get(self.quantize_status_key),
+        )
+
+    def quantize_for_exif(
+        self, values: Optional[Dict[str, Any]] = None
+    ) -> Optional[int]:
+        label = self.quantize_status_value(values)
+        if label is None:
+            return None
+        try:
+            return int(label)
+        except ValueError:
+            return None
 
     def is_available(self) -> bool:
         return pipeline_is_available(self.pipeline_id)
@@ -68,6 +121,8 @@ class ImageGenModelPlugin:
         from imagegen_plugins.image_gen_pipeline_modes import clamp_output_dims_in_values
 
         out = merge_defaults(self.pipeline_id, self.model_defaults, saved)
+        if self.quantize_status_key != "mflux_quantize":
+            out.pop("mflux_quantize", None)
         if self.hf_model_id:
             out["hf_model_id"] = self.hf_model_id
         effective_max = effective_max_for_plugin(self)

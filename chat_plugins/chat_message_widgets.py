@@ -79,6 +79,9 @@ class _EditClickAwayFilter(QObject):
             return False
         if event.button() != Qt.MouseButton.LeftButton:
             return False
+        if self._message_widget._ignore_next_click_away_release:
+            self._message_widget._ignore_next_click_away_release = False
+            return False
         global_pos = event.globalPosition().toPoint()
         if not self._message_widget._point_in_edit_cell(global_pos):
             self._message_widget._commit_edit()
@@ -89,6 +92,7 @@ class ChatMessageWidget(QWidget):
     """One user or assistant message with action buttons."""
 
     edit_saved = Signal(str, str, list)
+    edit_ended = Signal()
     redo_requested = Signal(str)
     delete_requested = Signal(str)
     create_from_text_requested = Signal(str, bool)
@@ -99,6 +103,7 @@ class ChatMessageWidget(QWidget):
         parent=None,
         *,
         on_edit_saved: Optional[Callable[[str, str, list], None]] = None,
+        on_exclusive_edit_begin: Optional[Callable[["ChatMessageWidget"], None]] = None,
         on_redo: Optional[Callable[[str], None]] = None,
         on_delete: Optional[Callable[[str], None]] = None,
         on_create_from_text: Optional[Callable[[str, bool], None]] = None,
@@ -107,7 +112,9 @@ class ChatMessageWidget(QWidget):
         super().__init__(parent)
         self._message = message
         self._editing = False
+        self._exclusive_edit_begin = on_exclusive_edit_begin
         self._suppress_edit_focus_out = False
+        self._ignore_next_click_away_release = False
         self._click_away_filter: _EditClickAwayFilter | None = None
         self._body_label: _ChatMessageBodyLabel | None = None
         self._edit_input: QPlainTextEdit | None = None
@@ -141,6 +148,8 @@ class ChatMessageWidget(QWidget):
             else:
                 self._thumb_row.hide()
             bubble_layout.addWidget(self._thumb_row)
+            self._bubble.setAcceptDrops(True)
+            self._bubble.installEventFilter(self)
 
         self._body_label = _ChatMessageBodyLabel(message.text, self._bubble)
         self._body_label.edit_requested.connect(self._start_edit)
@@ -156,6 +165,11 @@ class ChatMessageWidget(QWidget):
             f"color: {th.dialog_text_color_hex}; background-color: transparent;"
         )
         bubble_layout.addWidget(self._body_label)
+        if message.role == "user":
+            self._body_label.setAcceptDrops(True)
+            self._body_label.installEventFilter(self)
+            if self._thumb_row is not None:
+                self._thumb_row.installEventFilter(self)
 
         self._edit_input = QPlainTextEdit(self._bubble)
         self._edit_input.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
@@ -217,8 +231,49 @@ class ChatMessageWidget(QWidget):
     def message_id(self) -> str:
         return self._message.message_id
 
+    def is_editing(self) -> bool:
+        return self._editing
+
+    def _user_drop_targets(self) -> tuple[QWidget, ...]:
+        targets: list[QWidget] = []
+        if self._bubble is not None:
+            targets.append(self._bubble)
+        if self._body_label is not None:
+            targets.append(self._body_label)
+        if self._thumb_row is not None:
+            targets.append(self._thumb_row)
+        return tuple(targets)
+
+    def _arm_drop_click_away_suppression(self) -> None:
+        """Ignore the mouse release that completes a drag-and-drop onto this message."""
+        self._ignore_next_click_away_release = True
+
+    def _handle_user_image_drop(self, paths: list[str]) -> bool:
+        if self._message.role != "user" or not paths:
+            return False
+        self._arm_drop_click_away_suppression()
+        if not self._editing:
+            if self._exclusive_edit_begin is not None:
+                self._exclusive_edit_begin(self)
+            else:
+                self._enter_edit_mode()
+        if self._thumb_row is not None:
+            self._thumb_row.add_dropped_paths(paths)
+        if self._editing and self._edit_input is not None:
+            self._edit_input.setFocus()
+        return True
+
     def _edit_cell_global_rects(self) -> list[QRect]:
         rects: list[QRect] = []
+        if (
+            self._message.role == "user"
+            and self._editing
+            and self._bubble is not None
+        ):
+            rects.append(
+                QRect(self._bubble.mapToGlobal(QPoint(0, 0)), self._bubble.size())
+            )
+            return rects
         if self._edit_input is not None and self._edit_input.isVisible():
             rects.append(
                 QRect(self._edit_input.mapToGlobal(QPoint(0, 0)), self._edit_input.size())
@@ -236,6 +291,27 @@ class ChatMessageWidget(QWidget):
         return False
 
     def eventFilter(self, watched: QObject, event: QEvent) -> bool:
+        if watched in self._user_drop_targets():
+            if event.type() in (
+                QEvent.Type.DragEnter,
+                QEvent.Type.DragMove,
+            ):
+                drag_event = event
+                if isinstance(drag_event, (QDragEnterEvent, QDragMoveEvent)):
+                    if _local_paths_from_mime(drag_event.mimeData()):
+                        drag_event.acceptProposedAction()
+                        return True
+                    drag_event.ignore()
+                    return True
+            if event.type() == QEvent.Type.Drop:
+                drop_event = event
+                if isinstance(drop_event, QDropEvent):
+                    paths = _local_paths_from_mime(drop_event.mimeData())
+                    if paths and self._handle_user_image_drop(paths):
+                        drop_event.acceptProposedAction()
+                        return True
+                    drop_event.ignore()
+                    return True
         if watched is self._edit_input and self._editing:
             if event.type() in (
                 QEvent.Type.DragEnter,
@@ -253,7 +329,10 @@ class ChatMessageWidget(QWidget):
                 if isinstance(drop_event, QDropEvent) and self._thumb_row is not None:
                     paths = _local_paths_from_mime(drop_event.mimeData())
                     if paths:
+                        self._arm_drop_click_away_suppression()
                         self._thumb_row.add_dropped_paths(paths)
+                        if self._edit_input is not None:
+                            self._edit_input.setFocus()
                         drop_event.acceptProposedAction()
                         return True
                     drop_event.ignore()
@@ -286,6 +365,8 @@ class ChatMessageWidget(QWidget):
 
     def _commit_edit_if_focus_left(self) -> None:
         if not self._editing or self._suppress_edit_focus_out:
+            return
+        if self._ignore_next_click_away_release:
             return
         if QApplication.mouseButtons() & Qt.MouseButton.LeftButton:
             return
@@ -327,6 +408,14 @@ class ChatMessageWidget(QWidget):
         self._sync_from_text_button()
 
     def _start_edit(self) -> None:
+        if self._editing:
+            return
+        if self._exclusive_edit_begin is not None:
+            self._exclusive_edit_begin(self)
+            return
+        self._enter_edit_mode()
+
+    def _enter_edit_mode(self) -> None:
         if self._editing:
             return
         self._editing = True
@@ -378,6 +467,7 @@ class ChatMessageWidget(QWidget):
         if self._body_label is not None:
             self._body_label.show()
         self._editing = False
+        self.edit_ended.emit()
 
     def _cancel_edit(self) -> None:
         self._suppress_edit_focus_out = True

@@ -950,20 +950,9 @@ def _collect_generation_status_fields(
         except (TypeError, ValueError):
             pass
 
-    if pipeline_id in (
-        "flux_schnell_mflux_play",
-        "mflux_fill_expand",
-        "mflux_fill_infill",
-        "mflux_flux2_klein_create",
-        "mflux_flux2_klein_edit",
-        "mflux_flux2_klein_expand",
-    ):
-        quant = effective.get("mflux_quantize")
-        if quant is not None:
-            try:
-                fields["quant"] = str(int(quant))
-            except (TypeError, ValueError):
-                pass
+    quant = plugin.quantize_status_value(effective)
+    if quant is not None:
+        fields["quant"] = quant
 
     prompt = _truncate(str(effective.get("prompt") or ""))
     if prompt:

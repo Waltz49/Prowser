@@ -249,6 +249,7 @@ def _plugin(
         max_generation_dimension=2048,
         field_layout_builder=field_layout_builder,
         model_defaults=model_defaults,
+        quantize_status_key="mlx_tier",
     )
 
 

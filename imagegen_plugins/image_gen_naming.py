@@ -704,6 +704,7 @@ def format_exif_comment_from_mflux_metadata(
     elapsed_seconds: Optional[float] = None,
     seed: Optional[int] = None,
     include_quantization: bool = True,
+    quantization: Optional[int] = None,
 ) -> str:
     """Build Image Model / Prompt EXIF body from mflux JSON metadata."""
     values = dict(values or {})
@@ -718,9 +719,12 @@ def format_exif_comment_from_mflux_metadata(
         steps = meta.get("steps")
     quant = None
     if include_quantization:
-        quant = values.get("mflux_quantize")
-        if quant is None:
-            quant = meta.get("quantize")
+        if quantization is not None:
+            quant = quantization
+        else:
+            quant = values.get("mflux_quantize")
+            if quant is None:
+                quant = meta.get("quantize")
     guidance = values.get("guidance_scale")
     if guidance is None:
         guidance = meta.get("guidance")
@@ -795,6 +799,7 @@ def make_readable_user_comment_before_browse(
     reference_entries: Optional[List[Tuple[str, Optional[str]]]] = None,
     allow_cross_directory_references: bool = False,
     include_quantization: bool = True,
+    quantization: Optional[int] = None,
 ) -> None:
     """Write final-style Image Model / Prompt EXIF for in-progress step previews."""
     if not image_path or not os.path.isfile(image_path):
@@ -821,6 +826,7 @@ def make_readable_user_comment_before_browse(
             elapsed_seconds=elapsed_seconds,
             seed=seed,
             include_quantization=include_quantization,
+            quantization=quantization,
         )
     else:
         from imagegen_plugins.mflux_lora_presets import lora_name_for_exif_from_values
@@ -837,9 +843,13 @@ def make_readable_user_comment_before_browse(
             seed=seed,
             steps=values.get("steps"),
             quantization=(
-                values.get("mflux_quantize")
-                if include_quantization
-                else None
+                quantization
+                if quantization is not None
+                else (
+                    values.get("mflux_quantize")
+                    if include_quantization
+                    else None
+                )
             ),
             lora=lora_name_for_exif_from_values(values),
             guidance=values.get("guidance_scale"),

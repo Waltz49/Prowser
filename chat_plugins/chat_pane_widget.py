@@ -242,6 +242,7 @@ class ChatPaneWidget(QWidget):
         self._image_store = ChatImageStore()
         self._header_getter: Callable[[], QWidget | None] | None = None
         self._message_widgets: list[ChatMessageWidget] = []
+        self._editing_message_widget: ChatMessageWidget | None = None
         self._lm_service = ChatLmStudioService.instance()
         self._streaming_widget: ChatMessageWidget | None = None
         self._lm_available_on_show = True
@@ -425,16 +426,38 @@ class ChatPaneWidget(QWidget):
         self._message_widgets.clear()
         self._streaming_widget = None
 
+    def _wire_message_widget(self, widget: ChatMessageWidget) -> None:
+        widget.edit_ended.connect(
+            lambda w=widget: self._exclusive_edit_end(w)
+        )
+
+    def _exclusive_edit_begin(self, widget: ChatMessageWidget) -> None:
+        current = self._editing_message_widget
+        if (
+            current is not None
+            and current is not widget
+            and current.is_editing()
+        ):
+            current._commit_edit()
+        self._editing_message_widget = widget
+        widget._enter_edit_mode()
+
+    def _exclusive_edit_end(self, widget: ChatMessageWidget) -> None:
+        if self._editing_message_widget is widget:
+            self._editing_message_widget = None
+
     def _append_message_widget(self, message: ChatMessage) -> ChatMessageWidget:
         widget = ChatMessageWidget(
             message,
             self._messages_host,
             on_edit_saved=self._on_edit_saved,
+            on_exclusive_edit_begin=self._exclusive_edit_begin,
             on_redo=self._on_redo,
             on_delete=self._on_delete,
             on_create_from_text=self._on_create_from_text,
             main_window=self.main_window,
         )
+        self._wire_message_widget(widget)
         insert_at = max(0, self._messages_layout.count() - 1)
         self._messages_layout.insertWidget(insert_at, widget)
         self._message_widgets.append(widget)
@@ -555,6 +578,8 @@ class ChatPaneWidget(QWidget):
                 continue
             if images_changed:
                 lay_idx = self._messages_layout.indexOf(widget)
+                if self._editing_message_widget is widget:
+                    self._editing_message_widget = None
                 self._messages_layout.removeWidget(widget)
                 widget.deleteLater()
                 self._message_widgets.pop(i)
@@ -562,11 +587,13 @@ class ChatPaneWidget(QWidget):
                     msg,
                     self._messages_host,
                     on_edit_saved=self._on_edit_saved,
+                    on_exclusive_edit_begin=self._exclusive_edit_begin,
                     on_redo=self._on_redo,
                     on_delete=self._on_delete,
                     on_create_from_text=self._on_create_from_text,
                     main_window=self.main_window,
                 )
+                self._wire_message_widget(new_widget)
                 self._messages_layout.insertWidget(lay_idx, new_widget)
                 self._message_widgets.insert(i, new_widget)
                 _attach_chat_redo_key_filter(self)

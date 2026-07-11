@@ -4,7 +4,8 @@ Hidden Gems Help Dialog — modifier + click (and related modifier + drag) actio
 
 MAINTAINER: When you add or change behavior that uses Option, Control, Command, or
 Shift together with a mouse click or drag, update ``_get_markdown_content()`` below
-and keep the in-app tooltips in sync where they exist.
+and keep the in-app tooltips in sync where they exist. Also update drag-and-drop
+drop targets / drag sources and chat-pane shortcuts when those change.
 """
 
 from markdown_dialog import MarkdownDialog
@@ -64,14 +65,35 @@ Throughout Prowser, **{cmd}+click** means Command, **{ctrl}+click** means Contro
 
 #
 
-## Drag and drop (modifier held while dragging)
+## Drag and drop (where supported)
+
+### Drop targets (receive files)
+
+| Where | Action |
+|-------|--------|
+| **Folder tree** | Move or copy image files onto a folder (highlight shows the target folder). |
+| **Thumbnail grid** or **list view** | Reorder thumbnails within the current folder (insertion indicator shows drop position). |
+| **Chat** — prompt input | Attach dropped image files to the outgoing message (up to four images). |
+| **Chat** — user message bubble | Attach images to that message; opens inline edit if needed. |
+| **Image generation** — edit dialog source previews | Add source images or reorder existing ones (up to four total). |
+| **Image generation** — LoRA import path field | Drop a `.safetensors` file to fill the path. |
+
+### Drag sources (drag files out)
+
+| Where | Action |
+|-------|--------|
+| **Thumbnail grid** or **list view** | Drag selected image(s) to Finder, another folder, or another app. Multiselect drags all selected files. |
+| **Browse mode** | Drag the current image out of the viewer. |
+| **Image generation** — edit dialog source thumbnails | Drag thumbnails to reorder within the source list. |
+
+### Modifier keys while dragging
 
 | Modifier | Where | Action |
 |----------|-------|--------|
-| **{opt}** (hold while dragging) | Thumbnail grid | Force **copy** when dragging files to another folder or app. Default is move (macOS still copies across volumes). |
+| **{opt}** (hold while dragging) | Thumbnail grid or list view | Force **copy** when dragging files to another folder or app. Default is move (macOS still copies across volumes). |
 | **{opt}** (hold while dragging) | Browse mode | Force **copy** when dragging the current image out of the viewer. |
 | **{cmd}** (hold while dragging) | Browse mode | When the image is zoomed enough to pan, prefer **file drag** over panning. |
-| **{opt}** (at drop) | Folder tree drop | Copy **locked** files instead of moving them (move is blocked for locked files). |
+| **{opt}** (at drop) | Folder tree | Copy **locked** files instead of moving them (move is blocked for locked files). |
 
 #
 
@@ -109,6 +131,24 @@ These links appear in the information pane when a user comment is present.
 
 #
 
+## Chat pane
+
+| Modifier + click / key | Where | Action |
+|------------------------|-------|--------|
+| click | Assistant message — **Create from text** button (image icon) | Open the create-from-text dialog with this message as the prompt. |
+| **{opt}+click** | Assistant message — **Create from text** button | Same, but **submit the generation job immediately** (skip the extra Generate click). |
+| **{cmd}+Return** | Message inline editor | **Save** the edit and exit edit mode. |
+| **Escape** | Message inline editor | Cancel edit and discard changes. |
+
+Related (drag and drop, not click):
+
+| Where | Action |
+|-------|--------|
+| Chat prompt input | Drop image files to attach to the next message. |
+| User message bubble (view or edit) | Drop image files onto the bubble to attach them to that message. |
+
+#
+
 ## Image generation
 
 | Modifier + click | Where | Action |
@@ -127,7 +167,7 @@ Related (modifier + drag, not click):
 
 ## Not finding something?
 
-Press **F1** or **/** for the full keyboard-shortcut list. This page only covers **mouse** actions with modifier keys.
+Press **F1** or **/** for the full keyboard-shortcut list. This page covers modifier + click actions, drag-and-drop locations, and a few related shortcuts (such as **{cmd}+Return** in the chat editor).
 """
 
 

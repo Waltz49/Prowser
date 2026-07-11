@@ -519,15 +519,8 @@ class ImageGenController(QObject):
         return max(_COPIES_MIN, min(_COPIES_MAX, copies))
 
     @staticmethod
-    def _pipeline_supports_quantization(pipeline_id: str) -> bool:
-        return pipeline_id in (
-            "flux_schnell_mflux_play",
-            "mflux_fill_expand",
-            "mflux_fill_infill",
-            "mflux_flux2_klein_create",
-            "mflux_flux2_klein_edit",
-            "mflux_flux2_klein_expand",
-        )
+    def _pipeline_supports_quantization(plugin: ImageGenModelPlugin) -> bool:
+        return plugin.pipeline_reports_quantization()
 
     def _start_generation_now(
         self,
@@ -2126,9 +2119,7 @@ class ImageGenController(QObject):
 
         if success and plugin and output_path:
             try:
-                include_quantization = self._pipeline_supports_quantization(
-                    plugin.pipeline_id
-                )
+                include_quantization = self._pipeline_supports_quantization(plugin)
                 elapsed_seconds = resolve_generation_elapsed_seconds(
                     worker_result,
                     output_path,
@@ -2148,7 +2139,7 @@ class ImageGenController(QObject):
                     seed=used_seed,
                     steps=values.get("steps"),
                     quantization=(
-                        values.get("mflux_quantize")
+                        plugin.quantize_for_exif(values)
                         if include_quantization
                         else None
                     ),
@@ -2426,8 +2417,9 @@ class ImageGenController(QObject):
                         reference_entries=ref_entries,
                         allow_cross_directory_references=allow_cross_dir,
                         include_quantization=self._pipeline_supports_quantization(
-                            plugin.pipeline_id
+                            plugin
                         ),
+                        quantization=plugin.quantize_for_exif(values),
                     )
                     current = getattr(mw, "current_image_path", None)
                     sidebar = getattr(mw, "right_sidebar", None)
