@@ -1229,6 +1229,13 @@ class ImageBrowserWindow(QMainWindow):
         except Exception:
             pass
 
+        try:
+            from chat_plugins.chat_cleanup import purge_all_chat_ephemeral_data
+
+            purge_all_chat_ephemeral_data(self)
+        except ImportError:
+            pass
+
     def initialize_components(self):
         """Initialize components after UI is ready"""
         self.status_notification = StatusNotification(self)
@@ -1354,6 +1361,13 @@ class ImageBrowserWindow(QMainWindow):
             from files.map_manager import cleanup_kml_directory
             cleanup_kml_directory()
         except Exception:
+            pass
+
+        try:
+            from chat_plugins.chat_cleanup import purge_all_chat_ephemeral_data
+
+            purge_all_chat_ephemeral_data(self)
+        except ImportError:
             pass
         
         super().closeEvent(event)
@@ -3737,7 +3751,12 @@ class ImageBrowserWindow(QMainWindow):
             return
         self.load_file_with_directory_thumbnails(new_first)
 
-    def load_file_with_directory_thumbnails(self, target_file: str, external_load: bool = False):
+    def load_file_with_directory_thumbnails(
+        self,
+        target_file: str,
+        external_load: bool = False,
+        skip_filter_pattern: bool = False,
+    ):
         """Load a specific file in browse while building thumbnails from its directory in the background"""
         if not target_file or not os.path.exists(target_file):
             show_styled_warning(self, "Invalid File", 
@@ -3789,7 +3808,10 @@ class ImageBrowserWindow(QMainWindow):
         if not all_images:
             return
         
-        if self.filter_pattern:
+        if (
+            not skip_filter_pattern
+            and self.filter_pattern
+        ):
             all_images = self.sorting_manager.filter_images_by_pattern(all_images)
             if not all_images:
                 self.status_bar_manager.show_message(f"No images found matching pattern '{self.filter_pattern}' in directory {directory}")
@@ -5435,11 +5457,11 @@ class ImageBrowserWindow(QMainWindow):
                 except Exception:
                     pass
 
-    def show_settings(self, tab_index=None, focus_widget=None, auto_extract_faces=False):
+    def show_settings(self, tab_id=None, focus_widget=None, auto_extract_faces=False):
         """Show settings dialog
         
         Args:
-            tab_index: Optional tab index to navigate to (0 = General)
+            tab_id: Optional stable tab id to navigate to (e.g. 'lora_settings', 'favorites')
             focus_widget: Optional widget to focus on after showing dialog
             auto_extract_faces: If True, open on Faces tab and trigger Examine current image when ready
         """
@@ -5466,24 +5488,27 @@ class ImageBrowserWindow(QMainWindow):
         # Navigate to specified tab if provided, or Faces tab when auto_extract_faces
         if auto_extract_faces:
             dlg = self.settings_dialog
-            faces_idx = dlg.tab_widget.indexOf(dlg.faces_tab)
-            if faces_idx >= 0:
+            faces_widget = dlg.tab_widget_for_id("faces_tab")
+            if faces_widget is not None:
                 dlg.request_extract_faces_when_faces_ready()
+                faces_idx = dlg.tab_widget.indexOf(faces_widget)
                 # Already on Faces: setCurrentIndex no-ops so on_tab_changed won't schedule examine.
                 prev_tab_index = dlg.tab_widget.currentIndex()
-                dlg.tab_widget.setCurrentIndex(faces_idx)
+                if faces_idx >= 0:
+                    dlg.tab_widget.setCurrentIndex(faces_idx)
                 # Only schedule if on_tab_changed did not already consume _auto_extract_faces
                 # (setCurrentIndex can still emit currentChanged on some platforms when index unchanged).
                 if (
-                    prev_tab_index == faces_idx
+                    faces_idx >= 0
+                    and prev_tab_index == faces_idx
                     and getattr(dlg, '_faces_tab_setup_done', False)
                     and getattr(dlg, '_auto_extract_faces', False)
                 ):
                     dlg._auto_extract_faces = False
                     from PySide6.QtCore import QTimer
                     QTimer.singleShot(0, dlg._faces_examine_current_image)
-        elif tab_index is not None:
-            self.settings_dialog.tab_widget.setCurrentIndex(tab_index)
+        elif tab_id is not None:
+            self.settings_dialog.show_tab_by_id(tab_id)
         
         present_auxiliary_dialog(self.settings_dialog)
         

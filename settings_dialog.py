@@ -702,8 +702,8 @@ class SettingsDialog(QDialog):
     THEME_INNER_WIDTH_EXTRA = 48  # HBox spacing + vertical scrollbar / frame margin
     THEME_LIVE_PREVIEW_DEBOUNCE_MS = 120
     
-    # Session-only: remember last tab index (not persisted across sessions)
-    _last_tab_index = None
+    # Session-only: remember last tab id (not persisted across sessions)
+    _last_tab_id = None
     
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -922,11 +922,9 @@ class SettingsDialog(QDialog):
         # Connect tab change signal to resize dialog
         self.tab_widget.currentChanged.connect(self.on_tab_changed)
         
-        # Restore last tab index if available (session-only)
-        if SettingsDialog._last_tab_index is not None:
-            tab_count = len(self.tab_widget.tabs)
-            if 0 <= SettingsDialog._last_tab_index < tab_count:
-                self.tab_widget.setCurrentIndex(SettingsDialog._last_tab_index)
+        # Restore last tab if available (session-only)
+        if SettingsDialog._last_tab_id is not None:
+            self.show_tab_by_id(SettingsDialog._last_tab_id)
         
         # Setup each tab's content
         self.setup_app_settings_tab()
@@ -1111,6 +1109,45 @@ class SettingsDialog(QDialog):
             if widget == tab_widget:
                 return label
         return "this"
+
+    def _tab_widgets_by_id(self) -> dict[str, QWidget]:
+        """Map stable tab ids to tab page widgets (includes optional tabs)."""
+        return {
+            "app_settings": self.app_settings_tab,
+            "favorites": self.favorites_tab,
+            "directories": self.directories_tab,
+            "extensions": self.extensions_tab,
+            "move_destinations": self.move_destinations_tab,
+            "exclude_destinations": self.exclude_destinations_tab,
+            "faces_tab": self.faces_tab,
+            "captioning_settings": self.captioning_settings_tab,
+            "lora_settings": self.lora_settings_tab,
+            "map_settings": self.map_settings_tab,
+            "slideshow_settings": self.slideshow_settings_tab,
+            "similarity_settings": self.similarity_settings_tab,
+            "theme_settings": self.theme_settings_tab,
+            "cache_management": self.cache_management_tab,
+        }
+
+    def tab_widget_for_id(self, tab_id: str):
+        """Return the tab page widget for a stable tab id, or None if absent/hidden."""
+        widget = self._tab_widgets_by_id().get(tab_id)
+        if widget is None:
+            return None
+        if self.tab_widget.indexOf(widget) < 0:
+            return None
+        return widget
+
+    def show_tab_by_id(self, tab_id: str) -> bool:
+        """Select a settings tab by stable id; returns False if the tab is unavailable."""
+        widget = self.tab_widget_for_id(tab_id)
+        if widget is None:
+            return False
+        idx = self.tab_widget.indexOf(widget)
+        if idx < 0:
+            return False
+        self.tab_widget.setCurrentIndex(idx)
+        return True
     
     def _get_tab_settings(self, tab_widget):
         """Get current settings for a specific tab"""
@@ -5021,7 +5058,7 @@ class SettingsDialog(QDialog):
         self.temporary_files_directory_input_field.setToolTip(
             "Folder for temporary work files (infill, masking, image\n"
             "generation, wallpaper).\n"
-            "Leave blank to use the default location."
+            f"Leave blank to use the default:\n{_default_temp_dir}"
         )
         self.temporary_files_directory_input_field.setMinimumHeight(28)
         temp_files_row_layout.addWidget(self.temporary_files_directory_input_field)
@@ -7705,11 +7742,14 @@ class SettingsDialog(QDialog):
                 payload['_limit_or_filter_changed'] = False
                 self.settings_changed.emit(payload)
 
-            # Save current tab index for next time (session-only)
-            current_tab = self.tab_widget.currentIndex()
-            # Only save if it's a valid integer index (not False/None - use type() not isinstance() because bool is subclass of int!)
-            if type(current_tab) is int and current_tab >= 0:
-                SettingsDialog._last_tab_index = current_tab
+            # Save current tab for next time (session-only)
+            current_idx = self.tab_widget.currentIndex()
+            if current_idx >= 0:
+                current_widget = self.tab_widget.widget(current_idx)
+                if current_widget is not None:
+                    tab_id = self._get_tab_name(current_widget)
+                    if tab_id:
+                        SettingsDialog._last_tab_id = tab_id
 
             # Close dialog (_schedule_post_settings_menu_refresh runs via accepted signal)
             super().accept()
@@ -7724,11 +7764,14 @@ class SettingsDialog(QDialog):
     def reject(self):
         """Cancel dialog and close"""
         self._restore_theme_snapshot_at_open()
-        # Save current tab index for next time (session-only)
-        current_tab = self.tab_widget.currentIndex()
-        # Only save if it's a valid integer index (not False/None - use type() not isinstance() because bool is subclass of int!)
-        if type(current_tab) is int and current_tab >= 0:
-            SettingsDialog._last_tab_index = current_tab
+        # Save current tab for next time (session-only)
+        current_idx = self.tab_widget.currentIndex()
+        if current_idx >= 0:
+            current_widget = self.tab_widget.widget(current_idx)
+            if current_widget is not None:
+                tab_id = self._get_tab_name(current_widget)
+                if tab_id:
+                    SettingsDialog._last_tab_id = tab_id
         super().reject()
 
     def get_settings(self):

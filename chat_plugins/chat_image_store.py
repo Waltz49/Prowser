@@ -14,6 +14,31 @@ CHAT_TEMP_SUBDIR = "chat_conversation"
 MAX_CHAT_IMAGES = 4
 
 
+def chat_storage_root() -> str:
+    from prowser_temp_files import ensure_temporary_files_directory
+
+    return os.path.join(ensure_temporary_files_directory(), CHAT_TEMP_SUBDIR)
+
+
+def cleanup_all_chat_storage() -> None:
+    """Remove every chat temp session folder (current and prior app runs)."""
+    root = chat_storage_root()
+    try:
+        if os.path.isdir(root):
+            shutil.rmtree(root, ignore_errors=True)
+    except OSError:
+        pass
+
+
+def reset_image_store_session(image_store: "ChatImageStore") -> None:
+    image_store._session_id = uuid.uuid4().hex
+    image_store._session_dir = os.path.join(
+        prowser_temp_subdir(CHAT_TEMP_SUBDIR),
+        image_store._session_id,
+    )
+    os.makedirs(image_store._session_dir, mode=0o700, exist_ok=True)
+
+
 class ChatImageStore:
     """Copy dropped images into a session folder so chat context stays stable."""
 
@@ -30,18 +55,9 @@ class ChatImageStore:
         return self._session_dir
 
     def reset_session(self) -> None:
-        """Clear stored images and start a new session folder."""
-        try:
-            if os.path.isdir(self._session_dir):
-                shutil.rmtree(self._session_dir, ignore_errors=True)
-        except OSError:
-            pass
-        self._session_id = uuid.uuid4().hex
-        self._session_dir = os.path.join(
-            prowser_temp_subdir(CHAT_TEMP_SUBDIR),
-            self._session_id,
-        )
-        os.makedirs(self._session_dir, mode=0o700, exist_ok=True)
+        """Clear all chat temp images (any session) and start a fresh folder."""
+        cleanup_all_chat_storage()
+        reset_image_store_session(self)
 
     def store_images(
         self,
@@ -86,12 +102,15 @@ class ChatImageStore:
         return kept
 
     def remove_message_images(self, image_paths: list[str]) -> None:
+        chat_root = os.path.abspath(
+            os.path.join(os.path.abspath(self._session_dir), os.pardir)
+        )
         for path in image_paths:
             if not path:
                 continue
             try:
                 ap = os.path.abspath(path)
-                if ap.startswith(os.path.abspath(self._session_dir)) and os.path.isfile(ap):
+                if ap.startswith(chat_root + os.sep) and os.path.isfile(ap):
                     os.unlink(ap)
             except OSError:
                 pass

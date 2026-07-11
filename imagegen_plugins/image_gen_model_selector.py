@@ -9,7 +9,10 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QComboBox, QLabel, QSizePolicy, QVBoxLayout, QWidget
 
 from imagegen_plugins.image_gen_fields import FieldSpec
-from imagegen_plugins.image_gen_form_layout import ImageGenFieldsPanel
+from imagegen_plugins.image_gen_form_layout import (
+    ImageGenFieldsPanel,
+    create_image_gen_settings_gear_button,
+)
 from imagegen_plugins.image_gen_persistence import load_plugin_dialog_settings
 from imagegen_plugins.image_gen_registry import ImageGenModelPlugin
 from imagegen_plugins.lora_host_registry import HOST_SD15
@@ -305,11 +308,17 @@ def mount_image_gen_lora_field(
 
     field = LoraStackField(parent)
     field.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
+    lora_settings_btn = create_image_gen_settings_gear_button(
+        "lora_settings",
+        parent,
+        tooltip="Open LoRA settings",
+    )
     group = panel.add_labeled_field(
         "LoRA",
         field,
         to_outer=True,
         stretch_control=False,
+        label_accessory=lora_settings_btn,
     )
     group.hide()
     return group, field

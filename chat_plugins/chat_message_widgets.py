@@ -3,10 +3,10 @@
 
 from __future__ import annotations
 
-from typing import Callable, Optional
+from typing import Optional
 
 from PySide6.QtCore import QEvent, QObject, QPoint, QRect, Qt, QTimer, Signal
-from PySide6.QtGui import QKeyEvent, QMouseEvent
+from PySide6.QtGui import QCursor, QDragEnterEvent, QDragMoveEvent, QDropEvent, QKeyEvent, QMouseEvent
 from PySide6.QtWidgets import (
     QApplication,
     QFrame,
@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
 
 from chat_plugins.chat_session import ChatMessage
 from chat_plugins.chat_ui_common import (
+    ChatImageThumbRow,
     apply_chat_user_bubble_chrome,
     chat_assistant_message_stylesheet,
     chat_create_from_text_available,
@@ -29,6 +30,7 @@ from chat_plugins.chat_ui_common import (
     create_chat_edit_button,
     create_chat_from_text_button,
     create_chat_redo_button,
+    _local_paths_from_mime,
 )
 from theme.theme_service import get_active_theme
 
@@ -47,7 +49,7 @@ class _ChatMessageBodyLabel(QLabel):
 
 
 class _EditClickAwayFilter(QObject):
-    """Commit inline edit when the user clicks outside the message bubble."""
+    """Commit inline edit when the user releases a click outside the edit cell."""
 
     def __init__(self, message_widget: "ChatMessageWidget") -> None:
         super().__init__(message_widget)
@@ -55,18 +57,16 @@ class _EditClickAwayFilter(QObject):
 
     def eventFilter(self, watched: QObject, event: QEvent) -> bool:
         del watched
-        if event.type() != QEvent.Type.MouseButtonPress:
+        if not self._message_widget._editing:
             return False
         if not isinstance(event, QMouseEvent):
             return False
-        if not self._message_widget._editing:
+        if event.type() != QEvent.Type.MouseButtonRelease:
             return False
         if event.button() != Qt.MouseButton.LeftButton:
             return False
         global_pos = event.globalPosition().toPoint()
-        bubble = self._message_widget._bubble
-        bubble_rect = QRect(bubble.mapToGlobal(QPoint(0, 0)), bubble.size())
-        if not bubble_rect.contains(global_pos):
+        if not self._message_widget._point_in_edit_cell(global_pos):
             self._message_widget._commit_edit()
         return False
 
@@ -97,6 +97,7 @@ class ChatMessageWidget(QWidget):
         self._click_away_filter: _EditClickAwayFilter | None = None
         self._body_label: _ChatMessageBodyLabel | None = None
         self._edit_input: QPlainTextEdit | None = None
+        self._thumb_row: ChatImageThumbRow | None = None
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(6, 4, 6, 4)
@@ -114,14 +115,18 @@ class ChatMessageWidget(QWidget):
         bubble_layout.setContentsMargins(8, 8, 8, 8)
         bubble_layout.setSpacing(6)
 
-        if message.image_paths:
-            from chat_plugins.chat_prompt_input import ChatImageThumbRow
-
-            row = ChatImageThumbRow(
+        if message.role == "user":
+            self._thumb_row = ChatImageThumbRow(
                 self._bubble, compact_row=True, main_window=main_window
             )
-            row.set_image_paths(message.image_paths, allow_remove=False)
-            bubble_layout.addWidget(row)
+            self._thumb_row._allow_remove_when = lambda: self._editing
+            if message.image_paths:
+                self._thumb_row.set_image_paths(
+                    message.image_paths, allow_remove=False
+                )
+            else:
+                self._thumb_row.hide()
+            bubble_layout.addWidget(self._thumb_row)
 
         self._body_label = _ChatMessageBodyLabel(message.text, self._bubble)
         self._body_label.edit_requested.connect(self._start_edit)
@@ -152,6 +157,7 @@ class ChatMessageWidget(QWidget):
         self._edit_input.hide()
         bubble_layout.addWidget(self._edit_input)
         self._edit_input.installEventFilter(self)
+        self._edit_input.setAcceptDrops(True)
 
         self._bubble.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred
@@ -193,8 +199,47 @@ class ChatMessageWidget(QWidget):
     def message_id(self) -> str:
         return self._message.message_id
 
+    def _edit_cell_global_rects(self) -> list[QRect]:
+        rects: list[QRect] = []
+        if self._edit_input is not None and self._edit_input.isVisible():
+            rects.append(
+                QRect(self._edit_input.mapToGlobal(QPoint(0, 0)), self._edit_input.size())
+            )
+        if self._thumb_row is not None and self._thumb_row.isVisible():
+            rects.append(
+                QRect(self._thumb_row.mapToGlobal(QPoint(0, 0)), self._thumb_row.size())
+            )
+        return rects
+
+    def _point_in_edit_cell(self, global_pos: QPoint) -> bool:
+        for rect in self._edit_cell_global_rects():
+            if rect.contains(global_pos):
+                return True
+        return False
+
     def eventFilter(self, watched: QObject, event: QEvent) -> bool:
         if watched is self._edit_input and self._editing:
+            if event.type() in (
+                QEvent.Type.DragEnter,
+                QEvent.Type.DragMove,
+            ):
+                drag_event = event
+                if isinstance(drag_event, (QDragEnterEvent, QDragMoveEvent)):
+                    if _local_paths_from_mime(drag_event.mimeData()):
+                        drag_event.acceptProposedAction()
+                        return True
+                    drag_event.ignore()
+                    return True
+            if event.type() == QEvent.Type.Drop:
+                drop_event = event
+                if isinstance(drop_event, QDropEvent) and self._thumb_row is not None:
+                    paths = _local_paths_from_mime(drop_event.mimeData())
+                    if paths:
+                        self._thumb_row.add_dropped_paths(paths)
+                        drop_event.acceptProposedAction()
+                        return True
+                    drop_event.ignore()
+                    return True
             if event.type() == QEvent.Type.KeyPress and isinstance(event, QKeyEvent):
                 if event.key() == Qt.Key.Key_Escape:
                     self._cancel_edit()
@@ -205,12 +250,23 @@ class ChatMessageWidget(QWidget):
 
     def _focus_left_edit_entry(self) -> bool:
         focus = QApplication.focusWidget()
-        if focus is None:
+        if focus is not None:
+            if self._edit_input is not None and (
+                focus is self._edit_input or self._edit_input.isAncestorOf(focus)
+            ):
+                return False
+            if self._thumb_row is not None and (
+                focus is self._thumb_row or self._thumb_row.isAncestorOf(focus)
+            ):
+                return False
             return True
-        return not self._bubble.isAncestorOf(focus)
+        global_pos = QCursor.pos()
+        return not self._point_in_edit_cell(global_pos)
 
     def _commit_edit_if_focus_left(self) -> None:
         if not self._editing or self._suppress_edit_focus_out:
+            return
+        if QApplication.mouseButtons() & Qt.MouseButton.LeftButton:
             return
         if self._focus_left_edit_entry():
             self._commit_edit()
@@ -256,6 +312,11 @@ class ChatMessageWidget(QWidget):
         self._edit_btn.setEnabled(False)
         if self._body_label is not None:
             self._body_label.hide()
+        if self._thumb_row is not None and self._message.role == "user":
+            self._thumb_row.set_image_paths(
+                self._message.image_paths, allow_remove=True
+            )
+            self._thumb_row.refresh_hover_under_cursor()
         self._edit_input.setPlainText(self._message.text or "")
         self._edit_input.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self._edit_input.show()
@@ -269,8 +330,8 @@ class ChatMessageWidget(QWidget):
         try:
             text = self._edit_input.toPlainText().strip()
             images = (
-                list(self._message.image_paths)
-                if self._message.role == "user"
+                self._thumb_row.image_paths()
+                if self._thumb_row is not None and self._message.role == "user"
                 else []
             )
             self.edit_saved.emit(self._message.message_id, text, images)
@@ -286,6 +347,14 @@ class ChatMessageWidget(QWidget):
         self._detach_click_away_filter()
         if self._edit_input is not None:
             self._edit_input.hide()
+        if self._thumb_row is not None:
+            if self._message.image_paths:
+                self._thumb_row.set_image_paths(
+                    self._message.image_paths, allow_remove=False
+                )
+            else:
+                self._thumb_row.clear_images()
+                self._thumb_row.hide()
         if self._body_label is not None:
             self._body_label.show()
         self._editing = False

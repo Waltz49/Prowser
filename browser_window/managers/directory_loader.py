@@ -535,7 +535,11 @@ class DirectoryLoader:
             # Use the windowing logic for single file loads
             target_file = file_paths[0]
             self.main_window.clear_reference_graph_presentation()
-            self.load_file_with_directory_thumbnails(target_file, external_load=external_load)
+            self.load_file_with_directory_thumbnails(
+                target_file,
+                external_load=external_load,
+                skip_filter_pattern=skip_filter_pattern,
+            )
             return
         
         # Non-reference specific-files loads clear graph presentation unless already set
@@ -696,7 +700,12 @@ class DirectoryLoader:
                 first_file_dir = os.path.dirname(self.main_window.displayed_images[0])
                 self.main_window.file_tree_handler.update_root_directory(first_file_dir)
     
-    def load_file_with_directory_thumbnails(self, target_file: str, external_load: bool = False):
+    def load_file_with_directory_thumbnails(
+        self,
+        target_file: str,
+        external_load: bool = False,
+        skip_filter_pattern: bool = False,
+    ):
         """Load a specific file in browse while building thumbnails from its directory in the background"""
         if not target_file or not os.path.exists(target_file):
             show_styled_warning(self.main_window, "Invalid File", 
@@ -747,8 +756,11 @@ class DirectoryLoader:
         if not all_images:
             return
         
-        if hasattr(self.main_window, 'filter_pattern') and self.main_window.filter_pattern:
-            original_count = len(all_images)
+        if (
+            not skip_filter_pattern
+            and hasattr(self.main_window, 'filter_pattern')
+            and self.main_window.filter_pattern
+        ):
             all_images = self.main_window.sorting_manager.filter_images_by_pattern(all_images)
             if not all_images:
                 self.main_window.status_bar_manager.show_message(f"No images found matching pattern '{self.main_window.filter_pattern}' in directory {directory}")

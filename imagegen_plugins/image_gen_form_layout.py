@@ -26,6 +26,7 @@ from theme.theme_service import get_active_theme
 
 IMAGE_GEN_FIELD_RESET_BTN_SIZE = 26
 _IMAGE_GEN_TRASH_ICON_PX = 16
+_IMAGE_GEN_GEAR_ICON_PX = 18
 IMAGE_GEN_PROMPT_CLEAR_BTN_SCALE = 0.8
 IMAGE_GEN_PROMPT_CLEAR_BTN_SIZE = round(
     IMAGE_GEN_FIELD_RESET_BTN_SIZE * IMAGE_GEN_PROMPT_CLEAR_BTN_SCALE
@@ -827,6 +828,139 @@ class _ImageGenFieldResetButton(QPushButton):
         self._hovered = False
         self._apply_icon()
         super().leaveEvent(event)
+
+
+class _ImageGenGearSettingsButton(QPushButton):
+    """Gear icon that opens a Settings dialog tab by stable id."""
+
+    def __init__(
+        self,
+        tab_id: str,
+        parent: Optional[QWidget] = None,
+        *,
+        tooltip: str = "Open settings",
+        object_name: str = "imageGenSettingsGearBtn",
+    ) -> None:
+        super().__init__("", parent)
+        self._tab_id = tab_id
+        self.setObjectName(object_name)
+        self.setToolTip(tooltip)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._normal_icon = QIcon(asset_path("gear.svg"))
+        self._hover_icon = QIcon(asset_path("gear_hover.svg"))
+        self._hovered = False
+        self._apply_icon()
+        self.setStyleSheet(
+            image_gen_gear_settings_btn_stylesheet(selector="QPushButton")
+        )
+        self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        self.setFixedSize(
+            IMAGE_GEN_FIELD_RESET_BTN_SIZE, IMAGE_GEN_FIELD_RESET_BTN_SIZE
+        )
+        self.clicked.connect(self._open_settings_tab)
+
+    def _apply_icon(self) -> None:
+        icon = self._hover_icon if self._hovered else self._normal_icon
+        px = _IMAGE_GEN_GEAR_ICON_PX
+        self.setIcon(icon)
+        self.setIconSize(QSize(px, px))
+
+    def enterEvent(self, event: QEnterEvent) -> None:
+        self._hovered = True
+        self._apply_icon()
+        super().enterEvent(event)
+
+    def leaveEvent(self, event: QEvent) -> None:
+        self._hovered = False
+        self._apply_icon()
+        super().leaveEvent(event)
+
+    def _open_settings_tab(self) -> None:
+        from utils import get_main_window
+
+        mw = get_main_window()
+        if mw is not None and hasattr(mw, "show_settings"):
+            mw.show_settings(tab_id=self._tab_id)
+
+
+def image_gen_gear_settings_btn_stylesheet(
+    *,
+    selector: str = "QPushButton",
+) -> str:
+    """Small gear icon button beside a field heading."""
+    from imagegen_plugins.image_gen_dialog import image_gen_preview_client_background_hex
+
+    t = get_active_theme()
+    chrome_bg = image_gen_preview_client_background_hex()
+    sz = IMAGE_GEN_FIELD_RESET_BTN_SIZE
+    return f"""
+        {selector} {{
+            background-color: {chrome_bg};
+            border: 1px solid {t.border_default_hex};
+            border-radius: 3px;
+            padding: 0px;
+            min-width: {sz}px;
+            max-width: {sz}px;
+            min-height: {sz}px;
+            max-height: {sz}px;
+        }}
+        {selector}:focus {{
+            border: 1px solid {t.current_image_border_color_hex};
+            outline: none;
+        }}
+        {selector}:hover {{
+            background-color: {t.tab_button_hover_bg_hex};
+            border: 1px solid {t.tab_button_hover_bg_hex};
+        }}
+        {selector}:pressed {{
+            background-color: {t.sidebar_splitter_handle_hex};
+        }}
+    """
+
+
+def image_gen_gear_settings_btn_dialog_stylesheet() -> str:
+    return image_gen_gear_settings_btn_stylesheet(
+        selector="#imageGenDialog QPushButton#imageGenSettingsGearBtn"
+    )
+
+
+def create_image_gen_settings_gear_button(
+    tab_id: str,
+    parent: Optional[QWidget] = None,
+    *,
+    tooltip: str = "Open settings",
+    object_name: str = "imageGenSettingsGearBtn",
+) -> QPushButton:
+    return _ImageGenGearSettingsButton(
+        tab_id,
+        parent,
+        tooltip=tooltip,
+        object_name=object_name,
+    )
+
+
+def make_image_gen_field_label_row(
+    label_text: str,
+    accessory: QWidget,
+    parent: Optional[QWidget] = None,
+    *,
+    label_row_object_name: str = "imageGenFieldLabelRow",
+) -> QWidget:
+    """Field heading with an accessory button to the right of the label."""
+    row = QWidget(parent)
+    row.setObjectName(label_row_object_name)
+    row.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+    layout = QHBoxLayout(row)
+    layout.setContentsMargins(0, 4, 0, 0)
+    layout.setSpacing(6)
+    layout.addWidget(make_image_gen_field_label(label_text, row), 0)
+    layout.addWidget(
+        accessory,
+        0,
+        Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+    )
+    layout.addStretch(1)
+    return row
 
 
 def image_gen_field_reset_btn_dialog_stylesheet() -> str:
@@ -2021,6 +2155,7 @@ class ImageGenFieldsPanel:
         to_outer: bool = False,
         copy_from_edit: Optional[QPlainTextEdit] = None,
         flow_role: Optional[str] = None,
+        label_accessory: Optional[QWidget] = None,
     ) -> QWidget:
         parent = self.widget if to_outer else self._controls_host
         group = QWidget(parent)
@@ -2029,7 +2164,15 @@ class ImageGenFieldsPanel:
         col.setContentsMargins(1, 0, edge_pad, 0)
         col.setSpacing(IMAGE_GEN_FIELD_LABEL_SPACING)
         if label_text:
-            col.addWidget(make_image_gen_field_label(label_text, group), 0)
+            if label_accessory is not None:
+                col.addWidget(
+                    make_image_gen_field_label_row(
+                        label_text, label_accessory, group
+                    ),
+                    0,
+                )
+            else:
+                col.addWidget(make_image_gen_field_label(label_text, group), 0)
         display_control = control
         if copy_from_edit is not None:
             display_control = wrap_image_gen_prompt_row_with_copy(
@@ -2236,6 +2379,6 @@ def image_gen_field_label_stylesheet() -> str:
     #imageGenDialog QLineEdit {{
         padding: 5px 8px;
     }}
-    """ + image_gen_custom_size_group_stylesheet() + image_gen_field_reset_btn_dialog_stylesheet() + image_gen_prompt_copy_btn_dialog_stylesheet() + image_gen_prompt_clear_btn_dialog_stylesheet() + image_gen_prompt_voice_mic_btn_dialog_stylesheet() + image_gen_system_prompt_copy_btn_dialog_stylesheet() + image_gen_system_prompt_clear_btn_dialog_stylesheet() + image_gen_system_prompt_voice_mic_btn_dialog_stylesheet()
+    """ + image_gen_custom_size_group_stylesheet() + image_gen_field_reset_btn_dialog_stylesheet() + image_gen_gear_settings_btn_dialog_stylesheet() + image_gen_prompt_copy_btn_dialog_stylesheet() + image_gen_prompt_clear_btn_dialog_stylesheet() + image_gen_prompt_voice_mic_btn_dialog_stylesheet() + image_gen_system_prompt_copy_btn_dialog_stylesheet() + image_gen_system_prompt_clear_btn_dialog_stylesheet() + image_gen_system_prompt_voice_mic_btn_dialog_stylesheet()
 
 

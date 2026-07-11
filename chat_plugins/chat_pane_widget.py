@@ -27,7 +27,8 @@ from chat_plugins.chat_delete_confirm import (
     confirm_chat_message_delete,
     confirm_clear_chat,
 )
-from chat_plugins.chat_image_store import ChatImageStore
+from chat_plugins.chat_cleanup import purge_chat_disk_and_logs
+from chat_plugins.chat_image_store import ChatImageStore, reset_image_store_session
 from chat_plugins.chat_lmstudio import (
     is_lmstudio_chat_available,
     load_chat_system_prompt,
@@ -292,16 +293,21 @@ class ChatPaneWidget(QWidget):
             ).chat_prompt_edit_stylesheet()
         )
 
-    def clear_chat(self) -> None:
-        if self._session.has_started():
-            if not confirm_clear_chat(self.main_window):
-                return
+    def discard_all_data(self) -> None:
+        """Remove in-memory history, temp images, and chat API log entries."""
         self._cancel_worker()
-        self._image_store.reset_session()
         self._session.clear()
         self._chat_started = False
         self._clear_message_widgets()
         self._prompt_input.clear_content()
+        purge_chat_disk_and_logs()
+        reset_image_store_session(self._image_store)
+
+    def clear_chat(self) -> None:
+        if self._session.has_started():
+            if not confirm_clear_chat(self.main_window):
+                return
+        self.discard_all_data()
         if not self._lm_available_on_show:
             self._show_unavailable_only(True)
 

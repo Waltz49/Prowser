@@ -7,7 +7,6 @@ from typing import Generator, Iterable
 
 from config import CAPTION_DEFAULTS, CHAT_DEFAULTS, get_config
 from imagegen_plugins.ai_prompt_exit import apply_text_ai_exit
-from print_call_decorator import log_exception, print_call
 
 from chat_plugins.chat_session import ChatMessage
 
@@ -165,8 +164,7 @@ def stream_chat_response(
         chat = _build_chat(client, messages, system_prompt=system_prompt)
         temperature = cfg["temperature"]
         try:
-            respond_stream = print_call(model.respond_stream, wrap=True, tee_terminal=False)
-            prediction_stream = respond_stream(
+            prediction_stream = model.respond_stream(
                 chat,
                 config={"temperature": temperature},
             )
@@ -174,7 +172,6 @@ def stream_chat_response(
                 if fragment.content:
                     yield fragment.content
         except Exception as e:
-            log_exception(e, tee_terminal=False)
             err_lower = str(e).lower()
             if any(
                 k in err_lower

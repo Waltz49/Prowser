@@ -703,7 +703,7 @@ class EditExifUserCommentDialog(QDialog):
     def _on_open_captioning_settings(self):
         parent = self.parent()
         if parent and hasattr(parent, 'show_settings'):
-            parent.show_settings(tab_index=7)
+            parent.show_settings(tab_id="captioning_settings")
 
     def _on_read_aloud(self):
         text = self.text_edit.toPlainText().strip()

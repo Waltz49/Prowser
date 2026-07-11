@@ -491,11 +491,11 @@ class ShortcutsSidebar(QWidget):
         """Handle click on favorite, move, or settings link."""
         if url == "settings:favorites":
             if hasattr(self.main_window, 'show_settings'):
-                self.main_window.show_settings(tab_index=1)
+                self.main_window.show_settings(tab_id="favorites")
             return
         if url == "settings:move":
             if hasattr(self.main_window, 'show_settings'):
-                self.main_window.show_settings(tab_index=4)
+                self.main_window.show_settings(tab_id="move_destinations")
             return
         if url == "lastdrop":
             return
