@@ -36,6 +36,19 @@ from chat_plugins.chat_ui_common import (
 from theme.theme_service import get_active_theme
 
 
+def _cmd_enter_pressed(event: QKeyEvent) -> bool:
+    if event.key() not in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+        return False
+    mods = event.modifiers() & ~Qt.KeyboardModifier.KeypadModifier
+    cmd = mods & (Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.MetaModifier)
+    if not cmd:
+        return False
+    other = mods & ~(
+        Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.MetaModifier
+    )
+    return other in (Qt.KeyboardModifier.NoModifier, 0)
+
+
 class _ChatMessageBodyLabel(QLabel):
     """Message text; double-click opens inline edit (same as the edit button)."""
 
@@ -248,6 +261,9 @@ class ChatMessageWidget(QWidget):
             if event.type() == QEvent.Type.KeyPress and isinstance(event, QKeyEvent):
                 if event.key() == Qt.Key.Key_Escape:
                     self._cancel_edit()
+                    return True
+                if _cmd_enter_pressed(event):
+                    self._commit_edit()
                     return True
             if event.type() == QEvent.Type.FocusOut:
                 QTimer.singleShot(0, self._commit_edit_if_focus_left)
