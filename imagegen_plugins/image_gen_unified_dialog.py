@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import os
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 from PySide6.QtCore import QEvent, QObject, QTimer, Qt
@@ -157,6 +158,7 @@ class ImageGenUnifiedDialog(QDialog):
         self._installed_context_by_function: Dict[
             str, Tuple[List[ImageGenModelPlugin], Dict[str, ImageGenModelPlugin], Dict[str, bool]]
         ] = {}
+        self._edit_source_paths_override: Optional[List[str]] = None
 
         apply_image_gen_dialog_shell(
             self,
@@ -225,6 +227,24 @@ class ImageGenUnifiedDialog(QDialog):
         installed, by_id, flags = build_installed_plugin_maps(plugins)
         self._installed_context_by_function[function] = (installed, by_id, flags)
 
+    def set_edit_source_paths_override(
+        self, paths: Optional[List[str]]
+    ) -> None:
+        if not paths:
+            self._edit_source_paths_override = None
+            return
+        normalized = [
+            os.path.abspath(p)
+            for p in paths
+            if p and os.path.isfile(p)
+        ][:MAX_EDIT_SOURCE_IMAGES]
+        self._edit_source_paths_override = normalized or None
+
+    def _resolve_edit_source_paths(self) -> List[str]:
+        if self._edit_source_paths_override:
+            return list(self._edit_source_paths_override)
+        return active_image_paths_for_edit(self._main_window)
+
     def finish_panel_load(
         self,
         function: str,
@@ -234,10 +254,13 @@ class ImageGenUnifiedDialog(QDialog):
         auto_generate: bool = False,
         seed_state: Optional[FunctionSessionState] = None,
         replace_job_id: Optional[str] = None,
+        edit_source_paths: Optional[List[str]] = None,
     ) -> bool:
         """Build the first function panel before the shell is shown."""
         if self._dismissing:
             return False
+        if edit_source_paths:
+            self.set_edit_source_paths_override(edit_source_paths)
         self._panel_load_token += 1
         token = self._panel_load_token
         try:
@@ -247,6 +270,7 @@ class ImageGenUnifiedDialog(QDialog):
                 auto_import_available=auto_import_available,
                 auto_generate=auto_generate,
                 seed_state=seed_state,
+                edit_source_paths=edit_source_paths,
             ):
                 if token == self._panel_load_token:
                     self._cancel_pending_panel_load()
@@ -320,12 +344,27 @@ class ImageGenUnifiedDialog(QDialog):
         auto_import_available: bool = False,
         auto_generate: bool = False,
         seed_state: Optional[FunctionSessionState] = None,
+        edit_source_paths: Optional[List[str]] = None,
     ) -> bool:
         """Show a function panel; return False if prerequisites are not met."""
         if function != self._function:
             self._clear_queue_replace_context()
 
+        if function == FUNCTION_EDIT:
+            if edit_source_paths:
+                self.set_edit_source_paths_override(edit_source_paths)
+            else:
+                self.set_edit_source_paths_override(None)
+
         if function == self._function and self._current_panel is not None:
+            if (
+                function == FUNCTION_EDIT
+                and self._edit_source_paths_override
+                and hasattr(self._current_panel, "_set_edit_source_paths")
+            ):
+                self._current_panel._set_edit_source_paths(
+                    list(self._edit_source_paths_override)
+                )
             if initial_prompt and self._current_panel is not None:
                 restore = getattr(self._current_panel, "restore_state", None)
                 if restore is not None and initial_prompt:
@@ -619,7 +658,9 @@ class ImageGenUnifiedDialog(QDialog):
                 **panel_kw,
             )
         elif function == FUNCTION_EDIT:
-            source_paths = active_image_paths_for_edit(self._main_window)
+            source_paths = self._resolve_edit_source_paths()
+            if not source_paths:
+                return False
             panel = ImageGenEditDialog(
                 registered,
                 function,
@@ -671,6 +712,16 @@ class ImageGenUnifiedDialog(QDialog):
 
     def _validate_function(self, function: str) -> bool:
         if function == FUNCTION_EDIT:
+            source_paths = self._resolve_edit_source_paths()
+            if source_paths:
+                if len(source_paths) > MAX_EDIT_SOURCE_IMAGES:
+                    show_styled_warning(
+                        self,
+                        "Edit",
+                        f"Select at most {MAX_EDIT_SOURCE_IMAGES} images before using edit.",
+                    )
+                    return False
+                return True
             if (
                 self._main_window.current_view_mode == "thumbnail"
                 and hasattr(self._main_window, "selection_manager")

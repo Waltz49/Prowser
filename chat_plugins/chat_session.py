@@ -5,9 +5,10 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass, field
-from typing import Literal
+from typing import Literal, Optional
 
 ChatRole = Literal["user", "assistant"]
+ImageGenAutoMode = Literal["create", "edit"]
 
 
 @dataclass
@@ -16,6 +17,7 @@ class ChatMessage:
     text: str
     message_id: str = field(default_factory=lambda: uuid.uuid4().hex)
     image_paths: list[str] = field(default_factory=list)
+    image_gen_auto: Optional[ImageGenAutoMode] = None
 
 
 class ChatSession:

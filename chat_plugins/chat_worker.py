@@ -5,7 +5,12 @@ from __future__ import annotations
 
 from PySide6.QtCore import QObject, QThread, Signal, Qt
 
-from chat_plugins.chat_lmstudio import finalize_chat_response, stream_chat_response
+from chat_plugins.chat_lmstudio import (
+    CHAT_REJECTION_MAX_RETRIES,
+    chat_response_contains_rejected_phrase,
+    finalize_chat_response,
+    stream_chat_response,
+)
 from chat_plugins.chat_session import ChatMessage
 
 
@@ -19,18 +24,20 @@ class _RequestBridge(QObject):
     """Relays worker-thread signals onto the main GUI thread."""
 
     chunk = Signal(str)
-    finished = Signal(str)
+    finished = Signal(str, bool)
     error = Signal(str)
     cancelled = Signal()
+    restarted = Signal()
 
 
 class _ChatLmStudioWorker(QObject):
     """Runs on a dedicated long-lived QThread; one stream at a time."""
 
     chunk = Signal(str)
-    finished = Signal(str)
+    finished = Signal(str, bool)
     error = Signal(str)
     cancelled = Signal()
+    restarted = Signal()
 
     def __init__(self) -> None:
         super().__init__()
@@ -42,21 +49,39 @@ class _ChatLmStudioWorker(QObject):
     def run_stream(self, messages: list[ChatMessage], system_prompt: str = "") -> None:
         self._cancel_requested = False
         try:
-            accumulated = ""
-            for piece in stream_chat_response(messages, system_prompt=system_prompt):
+            for attempt in range(1, CHAT_REJECTION_MAX_RETRIES + 1):
+                accumulated = ""
+                suppress_auto_image_gen = False
+                retry_stream = False
+                for piece in stream_chat_response(
+                    messages, system_prompt=system_prompt
+                ):
+                    if self._cancel_requested:
+                        self.cancelled.emit()
+                        return
+                    accumulated += piece
+                    if chat_response_contains_rejected_phrase(accumulated):
+                        if attempt < CHAT_REJECTION_MAX_RETRIES:
+                            print(
+                                f"[chat] rejected phrase in attempt {attempt}/"
+                                f"{CHAT_REJECTION_MAX_RETRIES}, restarting"
+                            )
+                            self.restarted.emit()
+                            retry_stream = True
+                            break
+                        suppress_auto_image_gen = True
+                    self.chunk.emit(piece)
                 if self._cancel_requested:
                     self.cancelled.emit()
                     return
-                accumulated += piece
-                self.chunk.emit(piece)
-            if self._cancel_requested:
-                self.cancelled.emit()
+                if retry_stream:
+                    continue
+                final = finalize_chat_response(accumulated)
+                if not final:
+                    self.error.emit("The model returned an empty response.")
+                    return
+                self.finished.emit(final, suppress_auto_image_gen)
                 return
-            final = finalize_chat_response(accumulated)
-            if not final:
-                self.error.emit("The model returned an empty response.")
-                return
-            self.finished.emit(final)
         except Exception as e:
             if self._cancel_requested:
                 self.cancelled.emit()
@@ -108,6 +133,7 @@ class ChatLmStudioService(QObject):
             (self._worker.finished, bridge.finished),
             (self._worker.error, bridge.error),
             (self._worker.cancelled, bridge.cancelled),
+            (self._worker.restarted, bridge.restarted),
         ):
             try:
                 worker_sig.disconnect(bridge_sig)
@@ -127,6 +153,7 @@ class ChatLmStudioService(QObject):
         on_finished,
         on_error,
         on_cancelled=None,
+        on_restarted=None,
         system_prompt: str = "",
     ) -> bool:
         """Queue one stream request. Returns False if a stream is already active."""
@@ -145,9 +172,9 @@ class ChatLmStudioService(QObject):
                 self._active_bridge = None
             bridge.deleteLater()
 
-        def _finished(final: str) -> None:
+        def _finished(final: str, suppress_auto_image_gen: bool) -> None:
             _release()
-            on_finished(final)
+            on_finished(final, suppress_auto_image_gen)
 
         def _errored(err: str) -> None:
             _release()
@@ -164,6 +191,8 @@ class ChatLmStudioService(QObject):
             bridge.error: _errored,
             bridge.cancelled: _cancelled,
         }
+        if on_restarted is not None:
+            handlers[bridge.restarted] = on_restarted
         for bridge_sig, handler in handlers.items():
             bridge_sig.connect(handler)
 
@@ -171,6 +200,7 @@ class ChatLmStudioService(QObject):
         self._worker.finished.connect(bridge.finished, queued)
         self._worker.error.connect(bridge.error, queued)
         self._worker.cancelled.connect(bridge.cancelled, queued)
+        self._worker.restarted.connect(bridge.restarted, queued)
         self._dispatch.run_requested.emit(list(messages), system_prompt)
         return True
 

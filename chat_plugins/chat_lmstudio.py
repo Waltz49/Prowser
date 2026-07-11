@@ -7,11 +7,22 @@ from typing import Generator, Iterable
 
 from config import CAPTION_DEFAULTS, CHAT_DEFAULTS, get_config
 from imagegen_plugins.ai_prompt_exit import apply_text_ai_exit
+from thumbnails.thumbnail_constants import CHAT_REJECTED_RESPONSE_PHRASES
 
 from chat_plugins.chat_session import ChatMessage
-from chat_plugins.chat_image_gen_trigger import strip_image_command_from_user_message
+from chat_plugins.chat_image_gen_trigger import strip_image_gen_commands_from_user_message
+from chat_plugins.chat_selection_image_trigger import strip_selection_image_trigger
 
 DEFAULT_CHAT_SYSTEM_PROMPT = CHAT_DEFAULTS["chat_system_prompt"]
+CHAT_REJECTION_MAX_RETRIES = 5
+
+
+def chat_response_contains_rejected_phrase(text: str) -> bool:
+    """True when *text* contains any apology/refusal phrase (case-insensitive)."""
+    if not text:
+        return False
+    lower = text.lower()
+    return any(phrase.lower() in lower for phrase in CHAT_REJECTED_RESPONSE_PHRASES)
 
 
 def load_chat_system_prompt() -> str:
@@ -114,7 +125,9 @@ def _build_chat(
                     raise RuntimeError(
                         f"Could not prepare image for the model.\n\nDetail: {e}"
                     ) from e
-            user_text = strip_image_command_from_user_message(msg.text)
+            user_text = strip_image_gen_commands_from_user_message(
+                strip_selection_image_trigger(msg.text)
+            )
             if handles:
                 chat.add_user_message(user_text, images=handles)
             else:

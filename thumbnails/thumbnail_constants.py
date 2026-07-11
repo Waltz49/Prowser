@@ -129,6 +129,27 @@ TREE_DRAG_AUTO_SCROLL_SPEEDS: List[tuple] = [
 # Face scanning (face_engine): max dimension; larger images are downscaled for faster detection
 FACE_SCANNING_DOWNSCALE_THRESHOLD = 2000
 
+# Chat LM Studio: apology/refusal phrases that trigger response retry (case-insensitive match)
+CHAT_REJECTED_RESPONSE_PHRASES: List[str] = [
+    "an AI"
+    "I'm sorry",
+    "I apologize",
+    "I'm unable",
+    "I am unable",
+    "i cannot",
+    "I can not",
+    "I cannot",
+    "I won't",
+    "I can't",
+    "I will not",
+    "not comply",
+    "harmful",
+    "ethical",
+    "guidelines",
+    "norms",
+    "standards",
+]
+
 # File tree constants
 EXPANSION_LEVELS = 5          # Number of levels to expand the file tree
 TREE_UPDATE_DEBOUNCE_TIMER = 130  # ms - debounce when holding scroll key to coalesce rapid updates

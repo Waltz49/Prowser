@@ -234,15 +234,19 @@ def _open_or_switch_unified_dialog(
     seed_state: Optional[FunctionSessionState] = None,
     replace_job_id: Optional[str] = None,
     function_plugins: Optional[List[ImageGenModelPlugin]] = None,
+    source_image_paths: Optional[List[str]] = None,
 ) -> None:
     existing = getattr(main_window, "_imagegen_function_dialog", None)
     if isinstance(existing, ImageGenUnifiedDialog) and existing.isVisible():
+        if source_image_paths:
+            existing.set_edit_source_paths_override(source_image_paths)
         if not existing.switch_to_function(
             function,
             initial_prompt=initial_prompt,
             auto_import_available=auto_import_available,
             auto_generate=auto_generate,
             seed_state=seed_state,
+            edit_source_paths=source_image_paths,
         ):
             return
         existing.set_queue_replace_context(replace_job_id)
@@ -251,6 +255,8 @@ def _open_or_switch_unified_dialog(
 
     begin_imagegen_dialog_build(main_window)
     dlg = ImageGenUnifiedDialog(main_window, controller, main_window)
+    if source_image_paths:
+        dlg.set_edit_source_paths_override(source_image_paths)
     if function_plugins is not None:
         dlg.set_function_plugins(function, function_plugins)
     apply_preserved_imagegen_dialog_geometry(dlg, geometry_hex)
@@ -261,6 +267,7 @@ def _open_or_switch_unified_dialog(
         auto_generate=auto_generate,
         seed_state=seed_state,
         replace_job_id=replace_job_id,
+        edit_source_paths=source_image_paths,
     ):
         return
     _show_imagegen_function_dialog(main_window, controller, function, dlg)
@@ -411,6 +418,34 @@ def imagegen_edit_plugins_available() -> bool:
         return False
 
 
+def imagegen_edit_from_text_available() -> bool:
+    """True when Edit-with-AI can run (plugin registered and pipeline backend installed)."""
+    try:
+        from bundle_capabilities import imagegen_ui_enabled
+
+        if not imagegen_ui_enabled():
+            return False
+        if not function_has_plugins(FUNCTION_EDIT):
+            return False
+        from imagegen_plugins.image_gen_model_selector import available_plugins
+
+        return bool(available_plugins(plugins_for_function(FUNCTION_EDIT)))
+    except Exception:
+        return False
+
+
+def _normalize_edit_source_paths(
+    paths: Optional[List[str]],
+) -> List[str]:
+    if not paths:
+        return []
+    return [
+        os.path.abspath(p)
+        for p in paths
+        if p and os.path.isfile(p)
+    ][:MAX_EDIT_SOURCE_IMAGES]
+
+
 def imagegen_create_from_text_available() -> bool:
     """True when Create-from-text can run (plugin registered and pipeline backend installed)."""
     try:
@@ -460,6 +495,30 @@ def open_imagegen_create_from_text_dialog(
         controller,
         initial_prompt=initial_prompt_from_usercomment(user_comment),
         auto_generate=auto_generate,
+    )
+
+
+def open_imagegen_edit_from_text_dialog(
+    main_window,
+    *,
+    user_comment: Optional[str] = None,
+    auto_generate: bool = False,
+    source_image_paths: Optional[List[str]] = None,
+) -> None:
+    """Open Edit > Edit image with AI..., optionally primed from chat."""
+    paths = _normalize_edit_source_paths(source_image_paths)
+    if not paths:
+        return
+    if not function_has_plugins(FUNCTION_EDIT):
+        return
+    controller = get_imagegen_controller(main_window)
+    _schedule_open_dialog_for_function(
+        FUNCTION_EDIT,
+        main_window,
+        controller,
+        initial_prompt=initial_prompt_from_usercomment(user_comment),
+        auto_generate=auto_generate,
+        source_image_paths=paths,
     )
 
 
@@ -520,6 +579,7 @@ def _open_dialog_for_function(
     auto_import_available: bool = False,
     auto_generate: bool = False,
     geometry_hex: Optional[str] = None,
+    source_image_paths: Optional[List[str]] = None,
 ) -> None:
     all_plugins = discover_plugins()
     function_plugins = plugins_for_function(function, all_plugins)
@@ -557,28 +617,38 @@ def _open_dialog_for_function(
         )
         return
     if function == FUNCTION_EDIT:
-        if (
-            main_window.current_view_mode == "thumbnail"
-            and hasattr(main_window, "selection_manager")
-            and main_window.selection_manager
-            and getattr(main_window, "selected_files", None)
-            and len(main_window.selection_manager.get_selected_files())
-            > MAX_EDIT_SOURCE_IMAGES
-        ):
-            show_styled_warning(
-                main_window,
-                "Edit",
-                f"Select at most {MAX_EDIT_SOURCE_IMAGES} images before using edit.",
-            )
-            return
-        if not active_image_paths_for_edit(main_window):
-            show_styled_warning(
-                main_window,
-                "Edit",
-                "Select an image in browse view, or select up to "
-                f"{MAX_EDIT_SOURCE_IMAGES} thumbnails, before using edit.",
-            )
-            return
+        explicit_paths = _normalize_edit_source_paths(source_image_paths)
+        if explicit_paths:
+            if len(explicit_paths) > MAX_EDIT_SOURCE_IMAGES:
+                show_styled_warning(
+                    main_window,
+                    "Edit",
+                    f"Select at most {MAX_EDIT_SOURCE_IMAGES} images before using edit.",
+                )
+                return
+        else:
+            if (
+                main_window.current_view_mode == "thumbnail"
+                and hasattr(main_window, "selection_manager")
+                and main_window.selection_manager
+                and getattr(main_window, "selected_files", None)
+                and len(main_window.selection_manager.get_selected_files())
+                > MAX_EDIT_SOURCE_IMAGES
+            ):
+                show_styled_warning(
+                    main_window,
+                    "Edit",
+                    f"Select at most {MAX_EDIT_SOURCE_IMAGES} images before using edit.",
+                )
+                return
+            if not active_image_paths_for_edit(main_window):
+                show_styled_warning(
+                    main_window,
+                    "Edit",
+                    "Select an image in browse view, or select up to "
+                    f"{MAX_EDIT_SOURCE_IMAGES} thumbnails, before using edit.",
+                )
+                return
 
     _open_or_switch_unified_dialog(
         main_window,
@@ -589,6 +659,7 @@ def _open_dialog_for_function(
         auto_generate=auto_generate,
         geometry_hex=geometry_hex,
         function_plugins=function_plugins,
+        source_image_paths=_normalize_edit_source_paths(source_image_paths) or None,
     )
 
 
@@ -601,6 +672,7 @@ def _schedule_open_dialog_for_function(
     auto_import_available: bool = False,
     auto_generate: bool = False,
     geometry_hex: Optional[str] = None,
+    source_image_paths: Optional[List[str]] = None,
 ) -> None:
     """Open the function dialog on the next event-loop turn (after menu handlers)."""
     QTimer.singleShot(
@@ -613,6 +685,7 @@ def _schedule_open_dialog_for_function(
             auto_import_available=auto_import_available,
             auto_generate=auto_generate,
             geometry_hex=geometry_hex,
+            source_image_paths=source_image_paths,
         ),
     )
 

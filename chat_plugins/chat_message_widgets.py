@@ -403,7 +403,7 @@ class ChatMessageWidget(QWidget):
 
     def update_message(self, message: ChatMessage) -> None:
         self._message = message
-        if not self._editing and self._body_label is not None:
+        if self._body_label is not None:
             self._body_label.setText(message.text)
         self._sync_from_text_button()
 
@@ -445,8 +445,7 @@ class ChatMessageWidget(QWidget):
             )
             self.edit_saved.emit(self._message.message_id, text, images)
             if self._editing:
-                self._message.text = text
-                self.finish_edit(self._message)
+                self.finish_edit()
         finally:
             self._suppress_edit_focus_out = False
 
@@ -477,11 +476,9 @@ class ChatMessageWidget(QWidget):
         finally:
             self._suppress_edit_focus_out = False
 
-    def finish_edit(self, message: ChatMessage | None = None) -> None:
-        """Leave edit mode and optionally refresh displayed message text."""
+    def finish_edit(self) -> None:
+        """Leave edit mode; message content is refreshed by the pane on save."""
         self._cancel_edit()
-        if message is not None:
-            self.update_message(message)
 
     def refresh_theme_styles(self) -> None:
         if self._message.role == "user":

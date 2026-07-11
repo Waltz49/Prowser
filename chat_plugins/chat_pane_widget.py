@@ -31,7 +31,10 @@ from chat_plugins.chat_delete_confirm import (
     confirm_clear_chat,
 )
 from chat_plugins.chat_cleanup import purge_chat_disk_and_logs
-from chat_plugins.chat_image_gen_trigger import user_message_has_image_command
+from chat_plugins.chat_image_gen_trigger import (
+    classify_user_message_image_gen_command,
+    prepare_user_message_for_storage,
+)
 from chat_plugins.chat_image_store import ChatImageStore, reset_image_store_session
 from chat_plugins.chat_ui_common import chat_create_from_text_available
 from chat_plugins.chat_lmstudio import (
@@ -477,9 +480,14 @@ class ChatPaneWidget(QWidget):
             return
         if not self._lm_available_on_show and not self._chat_started:
             return
+        text, image_paths, image_gen_auto = prepare_user_message_for_storage(
+            text, image_paths, self.main_window
+        )
+        if not text and not image_paths:
+            return
         self._show_unavailable_only(False)
         self._chat_started = True
-        msg = ChatMessage(role="user", text=text)
+        msg = ChatMessage(role="user", text=text, image_gen_auto=image_gen_auto)
         if image_paths:
             msg.image_paths = self._image_store.store_images(
                 image_paths,
@@ -512,6 +520,14 @@ class ChatPaneWidget(QWidget):
             self._streaming_widget = None
             self._scroll_to_bottom()
 
+        def on_restarted() -> None:
+            if self._streaming_widget is None:
+                return
+            idx = self._session.index_of(placeholder.message_id)
+            if idx >= 0:
+                self._session.messages[idx].text = "…"
+                self._streaming_widget.update_message(self._session.messages[idx])
+
         def on_error(err: str) -> None:
             idx = self._session.index_of(placeholder.message_id)
             if idx >= 0:
@@ -530,22 +546,36 @@ class ChatPaneWidget(QWidget):
             for m in self._session.messages
             if m.message_id != placeholder.message_id
         ]
-        auto_generate_from_text = False
+        auto_image_gen_mode = None
+        auto_image_gen_user_paths: list[str] = []
         for msg in reversed(history):
             if msg.role == "user":
-                auto_generate_from_text = user_message_has_image_command(msg.text)
+                auto_image_gen_mode = classify_user_message_image_gen_command(
+                    msg.text,
+                    has_user_images=bool(msg.image_paths),
+                )
+                auto_image_gen_user_paths = list(msg.image_paths or [])
                 break
 
-        def on_finished_with_auto_generate(final: str) -> None:
+        def on_finished_with_auto_generate(
+            final: str, suppress_auto_image_gen: bool
+        ) -> None:
             on_finished(final)
-            if auto_generate_from_text:
+            if suppress_auto_image_gen:
+                return
+            if auto_image_gen_mode == "create":
                 self._auto_create_from_text_if_available(final)
+            elif auto_image_gen_mode == "edit":
+                self._auto_edit_from_text_if_available(
+                    final, auto_image_gen_user_paths
+                )
 
         started = self._lm_service.submit(
             history,
             on_chunk=on_chunk,
             on_finished=on_finished_with_auto_generate,
             on_error=on_error,
+            on_restarted=on_restarted,
             system_prompt=self._session.system_prompt,
         )
         if not started:
@@ -574,8 +604,16 @@ class ChatPaneWidget(QWidget):
         if idx < 0:
             return
         msg = self._session.messages[idx]
+        image_gen_auto = msg.image_gen_auto
+        if msg.role == "user":
+            text, image_paths, image_gen_auto = prepare_user_message_for_storage(
+                text, image_paths, self.main_window
+            )
         old_image_paths = list(msg.image_paths) if msg.role == "user" else []
+        old_text = msg.text
         msg.text = text
+        if msg.role == "user":
+            msg.image_gen_auto = image_gen_auto
         if msg.role == "user":
             msg.image_paths = self._image_store.replace_message_images(
                 msg.image_paths,
@@ -586,6 +624,7 @@ class ChatPaneWidget(QWidget):
             msg.role == "user"
             and sorted(old_image_paths) != sorted(msg.image_paths)
         )
+        text_changed = msg.text != old_text
         for i, widget in enumerate(self._message_widgets):
             if widget.message_id() != message_id:
                 continue
@@ -611,6 +650,8 @@ class ChatPaneWidget(QWidget):
                 self._message_widgets.insert(i, new_widget)
                 _attach_chat_redo_key_filter(self)
                 _attach_chat_tab_key_filter(self)
+            elif text_changed:
+                widget.update_message(msg)
             break
 
     def _on_redo(self, message_id: str) -> None:
@@ -635,6 +676,34 @@ class ChatPaneWidget(QWidget):
         if not prompt:
             return
         self._on_create_from_text(prompt, option_held=True)
+
+    def _auto_edit_from_text_if_available(
+        self, text: str, source_image_paths: list[str]
+    ) -> None:
+        prompt = (text or "").strip()
+        if not prompt:
+            return
+        paths = [p for p in source_image_paths if p]
+        if not paths:
+            self._auto_create_from_text_if_available(text)
+            return
+        try:
+            from imagegen_plugins.image_gen_menu import (
+                imagegen_edit_from_text_available,
+                open_imagegen_edit_from_text_dialog,
+            )
+        except ImportError:
+            self._auto_create_from_text_if_available(text)
+            return
+        if not imagegen_edit_from_text_available():
+            self._auto_create_from_text_if_available(text)
+            return
+        open_imagegen_edit_from_text_dialog(
+            self.main_window,
+            user_comment=prompt,
+            auto_generate=True,
+            source_image_paths=paths,
+        )
 
     def _on_create_from_text(self, text: str, option_held: bool = False) -> None:
         try:

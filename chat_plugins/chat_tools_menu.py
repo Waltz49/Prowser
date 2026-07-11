@@ -6,6 +6,7 @@ from __future__ import annotations
 from PySide6.QtCore import QPoint
 from PySide6.QtWidgets import QMenu, QPushButton
 
+from chat_plugins.chat_tips_dialog import show_chat_tips_dialog
 from theme.theme_service import get_active_theme
 
 
@@ -14,6 +15,9 @@ def _populate_chat_menu(menu: QMenu, chat_pane) -> None:
     prompt_action.triggered.connect(chat_pane.edit_system_prompt)
     clear_action = menu.addAction("Clear Chat")
     clear_action.triggered.connect(chat_pane.clear_chat)
+    menu.addSeparator()
+    tips_action = menu.addAction("Tips…")
+    tips_action.triggered.connect(lambda: show_chat_tips_dialog(chat_pane))
 
 
 def show_chat_tools_menu(chat_pane, anchor: QPushButton) -> None:
