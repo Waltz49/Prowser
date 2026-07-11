@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from typing import Optional
+from typing import Callable, Optional
 
 from PySide6.QtCore import QEvent, QObject, QPoint, QRect, Qt, QTimer, Signal
 from PySide6.QtGui import QCursor, QDragEnterEvent, QDragMoveEvent, QDropEvent, QKeyEvent, QMouseEvent
@@ -28,6 +28,7 @@ from chat_plugins.chat_ui_common import (
     chat_prompt_edit_stylesheet,
     create_chat_delete_button,
     create_chat_edit_button,
+    connect_chat_from_text_button_with_option_modifier,
     create_chat_from_text_button,
     create_chat_redo_button,
     _local_paths_from_mime,
@@ -77,7 +78,7 @@ class ChatMessageWidget(QWidget):
     edit_saved = Signal(str, str, list)
     redo_requested = Signal(str)
     delete_requested = Signal(str)
-    create_from_text_requested = Signal(str)
+    create_from_text_requested = Signal(str, bool)
 
     def __init__(
         self,
@@ -87,7 +88,7 @@ class ChatMessageWidget(QWidget):
         on_edit_saved: Optional[Callable[[str, str, list], None]] = None,
         on_redo: Optional[Callable[[str], None]] = None,
         on_delete: Optional[Callable[[str], None]] = None,
-        on_create_from_text: Optional[Callable[[str], None]] = None,
+        on_create_from_text: Optional[Callable[[str, bool], None]] = None,
         main_window=None,
     ):
         super().__init__(parent)
@@ -172,7 +173,9 @@ class ChatMessageWidget(QWidget):
         self._from_text_btn = None
         if message.role == "assistant" and chat_create_from_text_available():
             self._from_text_btn = create_chat_from_text_button(self)
-            self._from_text_btn.clicked.connect(self._on_create_from_text)
+            connect_chat_from_text_button_with_option_modifier(
+                self._from_text_btn, self._on_create_from_text
+            )
             if on_create_from_text is not None:
                 self.create_from_text_requested.connect(on_create_from_text)
         self._edit_btn = create_chat_edit_button(self)
@@ -289,11 +292,11 @@ class ChatMessageWidget(QWidget):
             app.removeEventFilter(self._click_away_filter)
         self._click_away_filter = None
 
-    def _on_create_from_text(self) -> None:
+    def _on_create_from_text(self, *, option_held: bool = False) -> None:
         text = (self._message.text or "").strip()
         if not text:
             return
-        self.create_from_text_requested.emit(text)
+        self.create_from_text_requested.emit(text, option_held)
 
     def _sync_from_text_button(self) -> None:
         if self._from_text_btn is None:

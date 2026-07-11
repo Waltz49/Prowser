@@ -579,7 +579,7 @@ class ChatPaneWidget(QWidget):
         self._streaming_widget = None
         self._request_assistant_response()
 
-    def _on_create_from_text(self, text: str) -> None:
+    def _on_create_from_text(self, text: str, option_held: bool = False) -> None:
         try:
             from imagegen_plugins.image_gen_menu import open_imagegen_create_from_text_dialog
         except ImportError:
@@ -587,6 +587,7 @@ class ChatPaneWidget(QWidget):
         open_imagegen_create_from_text_dialog(
             self.main_window,
             user_comment=text,
+            auto_generate=option_held,
         )
 
     def _on_delete(self, message_id: str) -> None:

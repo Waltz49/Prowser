@@ -577,8 +577,36 @@ def create_chat_from_text_button(parent=None):
         parent,
         "fromText.png",
         hover_icon_name="fromText_hover.png",
-        tooltip="Create an image from text with\nthis message as the prompt",
+        tooltip=(
+            "Create an image from text with\n"
+            "this message as the prompt\n"
+            "(⌥-click to generate immediately)"
+        ),
     )
+
+
+def connect_chat_from_text_button_with_option_modifier(
+    btn: QPushButton,
+    on_click: Callable[..., None],
+) -> None:
+    """Wire from-text button; pass ``option_held=True`` when Option/Alt was down at press.
+
+    ``QPushButton.clicked`` on macOS often runs after modifiers are cleared; read them
+    from the press event instead (same pattern as option+click copy in EXIF editor).
+    """
+
+    def mouse_press(event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            on_click(
+                option_held=bool(
+                    event.modifiers() & Qt.KeyboardModifier.AltModifier
+                )
+            )
+            event.accept()
+            return
+        QPushButton.mousePressEvent(btn, event)
+
+    btn.mousePressEvent = mouse_press
 
 
 def chat_create_from_text_available() -> bool:

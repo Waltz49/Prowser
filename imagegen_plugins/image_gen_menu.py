@@ -229,6 +229,7 @@ def _open_or_switch_unified_dialog(
     *,
     initial_prompt: Optional[str] = None,
     auto_import_available: bool = False,
+    auto_generate: bool = False,
     geometry_hex: Optional[str] = None,
     seed_state: Optional[FunctionSessionState] = None,
     replace_job_id: Optional[str] = None,
@@ -240,6 +241,7 @@ def _open_or_switch_unified_dialog(
             function,
             initial_prompt=initial_prompt,
             auto_import_available=auto_import_available,
+            auto_generate=auto_generate,
             seed_state=seed_state,
         ):
             return
@@ -256,6 +258,7 @@ def _open_or_switch_unified_dialog(
         function,
         initial_prompt=initial_prompt,
         auto_import_available=auto_import_available,
+        auto_generate=auto_generate,
         seed_state=seed_state,
         replace_job_id=replace_job_id,
     ):
@@ -445,7 +448,7 @@ def open_imagegen_prompt_dialog(
 
 
 def open_imagegen_create_from_text_dialog(
-    main_window, *, user_comment: Optional[str] = None
+    main_window, *, user_comment: Optional[str] = None, auto_generate: bool = False
 ) -> None:
     """Open Create > Create an image from text..., optionally primed."""
     if not function_has_plugins(FUNCTION_CREATE):
@@ -456,6 +459,7 @@ def open_imagegen_create_from_text_dialog(
         main_window,
         controller,
         initial_prompt=initial_prompt_from_usercomment(user_comment),
+        auto_generate=auto_generate,
     )
 
 
@@ -514,6 +518,7 @@ def _open_dialog_for_function(
     *,
     initial_prompt: Optional[str] = None,
     auto_import_available: bool = False,
+    auto_generate: bool = False,
     geometry_hex: Optional[str] = None,
 ) -> None:
     all_plugins = discover_plugins()
@@ -581,6 +586,7 @@ def _open_dialog_for_function(
         function,
         initial_prompt=initial_prompt,
         auto_import_available=auto_import_available,
+        auto_generate=auto_generate,
         geometry_hex=geometry_hex,
         function_plugins=function_plugins,
     )
@@ -593,6 +599,7 @@ def _schedule_open_dialog_for_function(
     *,
     initial_prompt: Optional[str] = None,
     auto_import_available: bool = False,
+    auto_generate: bool = False,
     geometry_hex: Optional[str] = None,
 ) -> None:
     """Open the function dialog on the next event-loop turn (after menu handlers)."""
@@ -604,6 +611,7 @@ def _schedule_open_dialog_for_function(
             controller,
             initial_prompt=initial_prompt,
             auto_import_available=auto_import_available,
+            auto_generate=auto_generate,
             geometry_hex=geometry_hex,
         ),
     )

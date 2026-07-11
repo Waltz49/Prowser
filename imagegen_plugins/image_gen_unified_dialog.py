@@ -231,6 +231,7 @@ class ImageGenUnifiedDialog(QDialog):
         *,
         initial_prompt: Optional[str] = None,
         auto_import_available: bool = False,
+        auto_generate: bool = False,
         seed_state: Optional[FunctionSessionState] = None,
         replace_job_id: Optional[str] = None,
     ) -> bool:
@@ -244,6 +245,7 @@ class ImageGenUnifiedDialog(QDialog):
                 function,
                 initial_prompt=initial_prompt,
                 auto_import_available=auto_import_available,
+                auto_generate=auto_generate,
                 seed_state=seed_state,
             ):
                 if token == self._panel_load_token:
@@ -316,6 +318,7 @@ class ImageGenUnifiedDialog(QDialog):
         *,
         initial_prompt: Optional[str] = None,
         auto_import_available: bool = False,
+        auto_generate: bool = False,
         seed_state: Optional[FunctionSessionState] = None,
     ) -> bool:
         """Show a function panel; return False if prerequisites are not met."""
@@ -327,6 +330,8 @@ class ImageGenUnifiedDialog(QDialog):
                 restore = getattr(self._current_panel, "restore_state", None)
                 if restore is not None and initial_prompt:
                     restore(None, initial_prompt=initial_prompt)
+            if auto_generate:
+                self._schedule_auto_generate()
             return True
 
         if self._current_panel is not None:
@@ -363,6 +368,8 @@ class ImageGenUnifiedDialog(QDialog):
             self._update_chrome()
             if auto_import_available and hasattr(panel, "_on_import_available"):
                 panel._on_import_available()
+            if auto_generate:
+                self._schedule_auto_generate()
             self._activate_panel_layouts()
             self._sync_shell_minimum_width()
             self._attach_dialog_event_filters(panel)
@@ -704,6 +711,17 @@ class ImageGenUnifiedDialog(QDialog):
                 )
                 return False
         return True
+
+    def _schedule_auto_generate(self) -> None:
+        QTimer.singleShot(0, self._run_auto_generate)
+
+    def _run_auto_generate(self) -> None:
+        if self._current_panel is None or self._dismissing:
+            return
+        self._close_on_generate_cb.blockSignals(True)
+        self._close_on_generate_cb.setChecked(True)
+        self._close_on_generate_cb.blockSignals(False)
+        self._on_generate()
 
     def _on_close_on_generate_changed(self, checked: bool) -> None:
         try:
