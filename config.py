@@ -932,6 +932,8 @@ CHAT_DEFAULTS = {
     'chat_system_prompt': (
         "You are a helpful assistant. Respond clearly and conversationally."
     ),
+    'chat_named_system_prompts': [],
+    'chat_active_named_prompt_id': '',
 }
 
 # Global configuration instance

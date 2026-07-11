@@ -3,20 +3,27 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import QEvent, QObject, Qt
-from PySide6.QtGui import QKeyEvent
+from PySide6.QtCore import QEvent, QObject, QSize, Qt
+from PySide6.QtGui import QEnterEvent, QIcon, QKeyEvent
 from PySide6.QtWidgets import (
     QDialog,
     QHBoxLayout,
     QLabel,
     QPlainTextEdit,
     QPushButton,
+    QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
 
+from chat_plugins.chat_named_system_prompts import run_chat_system_prompt_library
 from chat_plugins.chat_ui_common import chat_prompt_edit_stylesheet
+from theme.theme_base import asset_path
+from theme.theme_service import get_active_theme
 from utils import get_button_style, get_dialog_shell_stylesheet
+
+CHAT_GEAR_BTN_SIZE = 26
+_CHAT_GEAR_ICON_PX = 18
 
 
 def _cmd_enter_pressed(event: QKeyEvent) -> bool:
@@ -48,6 +55,63 @@ class _CmdEnterAcceptFilter(QObject):
         return super().eventFilter(watched, event)
 
 
+def _chat_gear_button_stylesheet() -> str:
+    t = get_active_theme()
+    sz = CHAT_GEAR_BTN_SIZE
+    return f"""
+        QPushButton#chatSystemPromptGearBtn {{
+            background-color: {t.dialog_background_hex};
+            border: 1px solid {t.border_default_hex};
+            border-radius: 3px;
+            padding: 0px;
+            min-width: {sz}px;
+            max-width: {sz}px;
+            min-height: {sz}px;
+            max-height: {sz}px;
+        }}
+        QPushButton#chatSystemPromptGearBtn:focus {{
+            border: 1px solid {t.current_image_border_color_hex};
+            outline: none;
+        }}
+        QPushButton#chatSystemPromptGearBtn:hover {{
+            background-color: {t.tab_button_hover_bg_hex};
+            border: 1px solid {t.tab_button_hover_bg_hex};
+        }}
+        QPushButton#chatSystemPromptGearBtn:pressed {{
+            background-color: {t.sidebar_splitter_handle_hex};
+        }}
+    """
+
+
+class _ChatSystemPromptGearButton(QPushButton):
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__("", parent)
+        self.setObjectName("chatSystemPromptGearBtn")
+        self.setToolTip("Manage saved system prompts")
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._normal_icon = QIcon(asset_path("gear.svg"))
+        self._hover_icon = QIcon(asset_path("gear_hover.svg"))
+        self._hovered = False
+        self._apply_icon()
+        self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        self.setFixedSize(CHAT_GEAR_BTN_SIZE, CHAT_GEAR_BTN_SIZE)
+
+    def _apply_icon(self) -> None:
+        icon = self._hover_icon if self._hovered else self._normal_icon
+        self.setIcon(icon)
+        self.setIconSize(QSize(_CHAT_GEAR_ICON_PX, _CHAT_GEAR_ICON_PX))
+
+    def enterEvent(self, event: QEnterEvent) -> None:
+        self._hovered = True
+        self._apply_icon()
+        super().enterEvent(event)
+
+    def leaveEvent(self, event: QEvent) -> None:
+        self._hovered = False
+        self._apply_icon()
+        super().leaveEvent(event)
+
+
 def edit_chat_system_prompt(parent: QWidget | None, current: str) -> str | None:
     """Show System Prompt for Chat dialog. Returns new text on OK, else None."""
     dialog = QDialog(parent)
@@ -71,6 +135,18 @@ def edit_chat_system_prompt(parent: QWidget | None, current: str) -> str | None:
     edit.installEventFilter(_CmdEnterAcceptFilter(dialog))
 
     button_row = QHBoxLayout()
+    gear_button = _ChatSystemPromptGearButton(dialog)
+
+    def _open_prompt_library() -> None:
+        _, selected_text = run_chat_system_prompt_library(
+            dialog,
+            suggestion_text=edit.toPlainText(),
+        )
+        if selected_text is not None:
+            edit.setPlainText(selected_text)
+
+    gear_button.clicked.connect(_open_prompt_library)
+    button_row.addWidget(gear_button)
     button_row.addStretch(1)
     cancel_button = QPushButton("Cancel")
     ok_button = QPushButton("OK")
@@ -78,17 +154,22 @@ def edit_chat_system_prompt(parent: QWidget | None, current: str) -> str | None:
     button_row.addWidget(ok_button)
     layout.addLayout(button_row)
 
-    for widget in (edit, cancel_button, ok_button):
+    for widget in (edit, gear_button, cancel_button, ok_button):
         widget.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
     ok_button.setDefault(True)
     ok_button.setAutoDefault(True)
 
-    QWidget.setTabOrder(edit, cancel_button)
+    QWidget.setTabOrder(edit, gear_button)
+    QWidget.setTabOrder(gear_button, cancel_button)
     QWidget.setTabOrder(cancel_button, ok_button)
 
     ok_button.clicked.connect(dialog.accept)
     cancel_button.clicked.connect(dialog.reject)
-    dialog.setStyleSheet(get_dialog_shell_stylesheet() + get_button_style())
+    dialog.setStyleSheet(
+        get_dialog_shell_stylesheet()
+        + get_button_style()
+        + _chat_gear_button_stylesheet()
+    )
     edit.setFocus()
 
     if dialog.exec() != QDialog.DialogCode.Accepted:
