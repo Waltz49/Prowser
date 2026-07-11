@@ -126,6 +126,21 @@ def configure_lora_combo(combo: QComboBox) -> None:
         view.setTextElideMode(Qt.TextElideMode.ElideNone)
 
 
+def resolve_active_lora_model_key(widget: Optional[QWidget] = None) -> Optional[str]:
+    """Map the active image-gen dialog's selected plugin to a Settings → LoRA model key."""
+    from imagegen_plugins.lora_model_registry import lora_model_key_for_plugin
+
+    host = widget
+    while host is not None:
+        plugin = getattr(host, "plugin", None)
+        if plugin is not None and getattr(plugin, "lora_host_id", None):
+            model_key = lora_model_key_for_plugin(plugin)
+            if model_key:
+                return model_key
+        host = host.parentWidget()
+    return None
+
+
 def plugin_supports_lora(plugin: Optional[ImageGenModelPlugin]) -> bool:
     """True when the plugin can use LoRAs (host configured on the plugin)."""
     return plugin is not None and bool(getattr(plugin, "lora_host_id", None))

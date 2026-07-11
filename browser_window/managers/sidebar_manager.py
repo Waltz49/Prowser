@@ -51,34 +51,43 @@ class SidebarManager:
             QTimer.singleShot(50, callback)
         else:
             callback()
+
+    def _leave_browse_then_toggle_pane(self, is_visible_fn, set_visible_fn):
+        """Exit browse then reveal a pane; outside browse, toggle normally.
+
+        In browse mode the combined sidebar is hidden but pane visibility flags stay
+        set. A naive toggle after close_browse_view would hide a pane that was already
+        visible before browse (e.g. F9 with chat + tree showing).
+        """
+        was_browse = getattr(self.main_window, "current_view_mode", None) == "browse"
+        was_visible = is_visible_fn()
+
+        def callback():
+            if was_browse:
+                if not was_visible:
+                    set_visible_fn(True)
+            else:
+                set_visible_fn(not is_visible_fn())
+
+        self._leave_browse_then(callback)
     
     def toggle_file_tree(self):
         """Toggle the visibility of the file tree and resize canvas accordingly"""
-        def do_toggle():
-            if hasattr(self.main_window, 'combined_sidebar'):
-                self.main_window.combined_sidebar.set_tree_visible(
-                    not self.main_window.combined_sidebar.is_tree_visible()
-                )
-            else:
-                self.main_window.view_manager.toggle_file_tree()
-
-        self._leave_browse_then(do_toggle)
         if hasattr(self.main_window, 'combined_sidebar'):
-            return self.main_window.combined_sidebar.is_tree_visible()
+            cs = self.main_window.combined_sidebar
+            self._leave_browse_then_toggle_pane(cs.is_tree_visible, cs.set_tree_visible)
+            return cs.is_tree_visible()
+        def do_toggle():
+            self.main_window.view_manager.toggle_file_tree()
+        self._leave_browse_then(do_toggle)
         return getattr(self.main_window, 'file_tree_visible', False)
     
     def toggle_preview(self):
         """Toggle the visibility of the preview widget and resize canvas accordingly"""
-        def do_toggle():
-            if hasattr(self.main_window, 'combined_sidebar'):
-                self.main_window.combined_sidebar.set_preview_visible(
-                    not self.main_window.combined_sidebar.is_preview_visible()
-                )
-                return
-
         if hasattr(self.main_window, 'combined_sidebar'):
-            self._leave_browse_then(do_toggle)
-            return self.main_window.combined_sidebar.is_preview_visible()
+            cs = self.main_window.combined_sidebar
+            self._leave_browse_then_toggle_pane(cs.is_preview_visible, cs.set_preview_visible)
+            return cs.is_preview_visible()
         else:
             # Fallback to old behavior if combined sidebar not available
             if not hasattr(self.main_window, 'preview_widget'):
@@ -128,15 +137,10 @@ class SidebarManager:
 
     def toggle_chat(self):
         """Toggle the visibility of the chat pane in the left combined sidebar."""
-        def do_toggle():
-            if hasattr(self.main_window, "combined_sidebar"):
-                self.main_window.combined_sidebar.set_chat_visible(
-                    not self.main_window.combined_sidebar.is_chat_visible()
-                )
-
         if hasattr(self.main_window, "combined_sidebar"):
-            self._leave_browse_then(do_toggle)
-            return self.main_window.combined_sidebar.is_chat_visible()
+            cs = self.main_window.combined_sidebar
+            self._leave_browse_then_toggle_pane(cs.is_chat_visible, cs.set_chat_visible)
+            return cs.is_chat_visible()
         return False
     
     def toggle_preview_fit_mode(self):

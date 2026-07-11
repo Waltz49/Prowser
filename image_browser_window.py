@@ -170,7 +170,12 @@ from workers.window_background_workers import (
     PersonSearchPrepWorker,
     ThumbnailLoadingWorker,
 )
-from browser_window.managers.window_event_filters import ChromeToggleShortcutFilter, ShiftCmdEShortcutFilter, StatusBarPeekFilter
+from browser_window.managers.window_event_filters import (
+    ChromeToggleShortcutFilter,
+    ShiftCmdEShortcutFilter,
+    StatusBarPeekFilter,
+    ToggleChatShortcutFilter,
+)
 
 STATUS_BAR_ANIM_HEIGHT = 24  # Height for status bar slide animation
 STATUS_BAR_ANIM_MS = 250 # Animation duration in milliseconds
@@ -1620,6 +1625,10 @@ class ImageBrowserWindow(QMainWindow):
         # F4, . toggle chrome (sidebars + status bar)
         self._chrome_toggle_filter = ChromeToggleShortcutFilter(self)
         QApplication.instance().installEventFilter(self._chrome_toggle_filter)
+
+        # F9 toggle chat (prompt QPlainTextEdit can steal QAction shortcuts)
+        self._toggle_chat_filter = ToggleChatShortcutFilter(self)
+        QApplication.instance().installEventFilter(self._toggle_chat_filter)
         
         # Install app-level filter for status bar peek (catch MouseMove from any child widget)
         self._status_bar_peek_filter = StatusBarPeekFilter(self)
@@ -2284,7 +2293,7 @@ class ImageBrowserWindow(QMainWindow):
         return False
 
     def toggle_chat(self):
-        """Toggle the chat pane in the left combined sidebar (Shift+Cmd+B)."""
+        """Toggle the chat pane in the left combined sidebar (F9)."""
         self._chrome_suppressed = False
         if hasattr(self, "sidebar_manager"):
             return self.sidebar_manager.toggle_chat()
@@ -5457,13 +5466,23 @@ class ImageBrowserWindow(QMainWindow):
                 except Exception:
                     pass
 
-    def show_settings(self, tab_id=None, focus_widget=None, auto_extract_faces=False):
+    def show_settings(
+        self,
+        tab_id=None,
+        focus_widget=None,
+        auto_extract_faces=False,
+        *,
+        lora_model_key=None,
+        tab_index=None,
+    ):
         """Show settings dialog
         
         Args:
             tab_id: Optional stable tab id to navigate to (e.g. 'lora_settings', 'favorites')
             focus_widget: Optional widget to focus on after showing dialog
             auto_extract_faces: If True, open on Faces tab and trigger Examine current image when ready
+            lora_model_key: When opening the LoRA tab, select this base model key (hf_model_id)
+            tab_index: Deprecated; use tab_id. Resolved from the live tab order when tab_id is omitted.
         """
         current_theme_id = getattr(get_active_theme(), "theme_id", "dark")
         if (
@@ -5484,6 +5503,13 @@ class ImageBrowserWindow(QMainWindow):
         # Refresh match count to use current directory
         if hasattr(self.settings_dialog, 'update_match_count'):
             self.settings_dialog.update_match_count(self.settings_dialog.filter_pattern_input.text())
+
+        if tab_id is None and tab_index is not None:
+            dlg = self.settings_dialog
+            if type(tab_index) is int and tab_index >= 0:
+                widget = dlg.tab_widget.widget(tab_index)
+                if widget is not None:
+                    tab_id = dlg._get_tab_name(widget)
         
         # Navigate to specified tab if provided, or Faces tab when auto_extract_faces
         if auto_extract_faces:
@@ -5509,6 +5535,8 @@ class ImageBrowserWindow(QMainWindow):
                     QTimer.singleShot(0, dlg._faces_examine_current_image)
         elif tab_id is not None:
             self.settings_dialog.show_tab_by_id(tab_id)
+            if tab_id == "lora_settings" and lora_model_key:
+                self.settings_dialog.select_lora_model_key(lora_model_key)
         
         present_auxiliary_dialog(self.settings_dialog)
         

@@ -74,3 +74,29 @@ class ShiftCmdEShortcutFilter(QObject):
                         self.main_window.create_screen_size_copy()
                         return True
         return False
+
+
+class ToggleChatShortcutFilter(QObject):
+    """App-level filter for F9 so chat toggle works when the chat prompt field has focus."""
+
+    def __init__(self, main_window, parent=None):
+        super().__init__(parent)
+        self.main_window = main_window
+
+    def eventFilter(self, obj, event):
+        if event.type() != QEvent.KeyPress or not isinstance(event, QKeyEvent):
+            return False
+        if event.key() != Qt.Key_F9 or event.modifiers():
+            return False
+        mw = self.main_window
+        if not mw.isVisible():
+            return False
+        if QApplication.activeWindow() != mw:
+            return False
+        action = getattr(mw, 'toggle_chat_action', None)
+        if action is None or not action.isEnabled():
+            return False
+        if hasattr(mw, 'toggle_chat'):
+            mw.toggle_chat()
+            return True
+        return False

@@ -879,8 +879,18 @@ class _ImageGenGearSettingsButton(QPushButton):
         from utils import get_main_window
 
         mw = get_main_window()
-        if mw is not None and hasattr(mw, "show_settings"):
-            mw.show_settings(tab_id=self._tab_id)
+        if mw is None or not hasattr(mw, "show_settings"):
+            return
+        kwargs: dict[str, Any] = {}
+        if self._tab_id == "lora_settings":
+            from imagegen_plugins.image_gen_model_selector import (
+                resolve_active_lora_model_key,
+            )
+
+            model_key = resolve_active_lora_model_key(self)
+            if model_key:
+                kwargs["lora_model_key"] = model_key
+        mw.show_settings(tab_id=self._tab_id, **kwargs)
 
 
 def image_gen_gear_settings_btn_stylesheet(

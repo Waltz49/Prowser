@@ -1148,6 +1148,26 @@ class SettingsDialog(QDialog):
             return False
         self.tab_widget.setCurrentIndex(idx)
         return True
+
+    def select_lora_model_key(self, model_key: str) -> bool:
+        """Select a base model on the LoRA settings tab (call after show_tab_by_id)."""
+        mk = (model_key or "").strip()
+        if not mk:
+            return False
+        self._ensure_lora_tab_ready()
+        if not hasattr(self, "_lora_model_combo"):
+            return False
+        idx = self._lora_model_combo.findData(mk)
+        if idx < 0:
+            return False
+        previous_model_key = getattr(self, "_lora_model_key", None)
+        if previous_model_key and previous_model_key != mk:
+            self._save_lora_widgets_to_draft(previous_model_key)
+        self._lora_model_combo.blockSignals(True)
+        self._lora_model_combo.setCurrentIndex(idx)
+        self._lora_model_combo.blockSignals(False)
+        self._show_lora_draft_for_model(mk)
+        return True
     
     def _get_tab_settings(self, tab_widget):
         """Get current settings for a specific tab"""

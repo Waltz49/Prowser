@@ -732,9 +732,8 @@ class MenuManager:
             self.main_window.toggle_chat_action.setChecked(
                 getattr(self.main_window, 'chat_visible', False)
             )
-            self.main_window.toggle_chat_action.setShortcut(
-                QKeySequence('Shift+Meta+B')
-            )
+            self.main_window.toggle_chat_action.setShortcuts([QKeySequence('F9'), QKeySequence(',')])
+       
             self.main_window.toggle_chat_action.triggered.connect(self.main_window.toggle_chat)
             view_menu.addAction(self.main_window.toggle_chat_action)
         
@@ -1010,7 +1009,9 @@ class MenuManager:
         # Edit destinations (opens settings to Move Keys tab)
         edit_destinations_action = QAction("Edit Destinations...", self.main_window)
         edit_destinations_action.setIcon(create_gear_icon("#808890"))
-        edit_destinations_action.triggered.connect(lambda: self.main_window.show_settings(tab_index=4))
+        edit_destinations_action.triggered.connect(
+            lambda: self.main_window.show_settings(tab_id="move_destinations")
+        )
         self.move_menu.addAction(edit_destinations_action)
         
         # Connect aboutToShow signal to update menu action states
@@ -3297,7 +3298,7 @@ class MenuManager:
                 'toggle_file_tree_action': True,  # Enable T key to toggle tree
                 'toggle_preview_action': True,  # Enable P key to toggle preview
                 'toggle_jobs_action': True,  # Enable J key to toggle jobs pane
-                'toggle_chat_action': True,  # Enable Shift+Cmd+B to toggle chat pane
+                'toggle_chat_action': True,  # Enable F9 to toggle chat pane
                 'toggle_status_bar_action': True,
                 'browse_view_action': True,
                 'macos_display_mode_action': True,
@@ -3534,7 +3535,7 @@ class MenuManager:
         favorites_menu.addSeparator()
         edit_action = QAction("Edit Favorites...", favorites_menu)
         edit_action.setIcon(create_gear_icon("#808890"))
-        edit_action.triggered.connect(lambda: mw.show_settings(tab_index=1))
+        edit_action.triggered.connect(lambda: mw.show_settings(tab_id="favorites"))
         favorites_menu.addAction(edit_action)
 
     def update_file_menu_recent_directories(self):

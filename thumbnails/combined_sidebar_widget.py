@@ -719,7 +719,7 @@ class CombinedSidebarWidget(QWidget):
         self._update_overall_visibility()
 
     def _toggle_chat(self):
-        """Toggle chat visibility (also triggered by Shift+Cmd+B)"""
+        """Toggle chat visibility (also triggered by F9)"""
         self.set_chat_visible(not self.chat_visible)
         
     def _pane_visibility(self) -> list[bool]:
@@ -1109,7 +1109,7 @@ class CombinedSidebarWidget(QWidget):
             self._update_overall_visibility()
             
     def set_chat_visible(self, visible):
-        """Set chat visibility programmatically (e.g. from Shift+Cmd+B)"""
+        """Set chat visibility programmatically (e.g. from F9)"""
         if not self._chat_feature_enabled:
             return
         if self.chat_visible != visible:
