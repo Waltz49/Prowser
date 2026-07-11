@@ -89,8 +89,8 @@ class ChatPromptPlainTextEdit(QPlainTextEdit):
         self._last_layout_width = -1
         self.setLineWrapMode(QPlainTextEdit.LineWrapMode.WidgetWidth)
         self.setAcceptDrops(True)
-        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
-        self.setTabChangesFocus(True)
+        self.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
+        self.setTabChangesFocus(False)
         self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.setStyleSheet(chat_prompt_edit_stylesheet())
         self.document().contentsChanged.connect(self._apply_height)

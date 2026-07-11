@@ -144,6 +144,8 @@ class ChatMessageWidget(QWidget):
         bubble_layout.addWidget(self._body_label)
 
         self._edit_input = QPlainTextEdit(self._bubble)
+        self._edit_input.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
+        self._edit_input.setTabChangesFocus(False)
         self._edit_input.setLineWrapMode(QPlainTextEdit.LineWrapMode.WidgetWidth)
         self._edit_input.setStyleSheet(chat_prompt_edit_stylesheet())
         self._edit_input.setMinimumHeight(72)
@@ -318,7 +320,6 @@ class ChatMessageWidget(QWidget):
             )
             self._thumb_row.refresh_hover_under_cursor()
         self._edit_input.setPlainText(self._message.text or "")
-        self._edit_input.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self._edit_input.show()
         self._attach_click_away_filter()
         self._edit_input.setFocus()

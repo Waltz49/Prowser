@@ -10,10 +10,13 @@ from PySide6.QtGui import QIcon, QKeyEvent
 from PySide6.QtWidgets import (
     QApplication,
     QLabel,
+    QLineEdit,
     QMessageBox,
+    QPlainTextEdit,
     QPushButton,
     QScrollArea,
     QSizePolicy,
+    QTextEdit,
     QVBoxLayout,
     QWidget,
 )
@@ -137,6 +140,89 @@ def install_chat_redo_key_filter(pane: "ChatPaneWidget") -> None:
     _attach_chat_redo_key_filter(pane)
 
 
+def _is_chat_text_field(widget: QWidget | None) -> bool:
+    return isinstance(widget, (QPlainTextEdit, QTextEdit, QLineEdit))
+
+
+def _chat_tab_direction(event: QKeyEvent) -> int | None:
+    if event.key() == Qt.Key.Key_Backtab:
+        return -1
+    if event.key() != Qt.Key.Key_Tab:
+        return None
+    if event.modifiers() & Qt.KeyboardModifier.ShiftModifier:
+        return -1
+    return 1
+
+
+class _ChatTabKeyFilter(QObject):
+    """Route Tab away from chat text fields to tree / main canvas focus."""
+
+    def __init__(self, pane: "ChatPaneWidget", parent: QObject | None = None) -> None:
+        super().__init__(parent or pane)
+        self._pane = pane
+
+    def eventFilter(self, watched: QObject, event: QEvent) -> bool:
+        del watched
+        if event.type() != QEvent.Type.KeyPress:
+            return False
+        if not isValid(self._pane):
+            return False
+        if not self._pane.isVisible():
+            return False
+        if not isinstance(event, QKeyEvent):
+            return False
+        direction = _chat_tab_direction(event)
+        if direction is None:
+            return False
+        focus = QApplication.focusWidget()
+        if focus is None:
+            return False
+        if focus is not self._pane and not self._pane.isAncestorOf(focus):
+            return False
+        if not _is_chat_text_field(focus):
+            return False
+        mw = self._pane.main_window
+        if direction > 0:
+            if hasattr(mw, "focus_canvas"):
+                mw.focus_canvas()
+        elif hasattr(mw, "focus_tree"):
+            mw.focus_tree()
+        event.accept()
+        return True
+
+
+def _attach_chat_tab_key_filter(host: QWidget) -> None:
+    filt = getattr(host, "_chat_tab_key_filter", None)
+    if filt is None or not isValid(host):
+        return
+    tracked: set[int] = getattr(host, "_chat_tab_key_filter_widgets", None) or set()
+    for widget in (host, *host.findChildren(QWidget)):
+        if not isValid(widget):
+            continue
+        wid = id(widget)
+        if wid in tracked:
+            continue
+        widget.installEventFilter(filt)
+        tracked.add(wid)
+    setattr(host, "_chat_tab_key_filter_widgets", tracked)
+
+
+def install_chat_tab_key_filter(pane: "ChatPaneWidget") -> None:
+    """Tab from chat text fields toggles tree vs main canvas (not tab order)."""
+    filt = getattr(pane, "_chat_tab_key_filter", None)
+    if filt is None:
+        filt = _ChatTabKeyFilter(pane, parent=pane)
+        setattr(pane, "_chat_tab_key_filter", filt)
+    _attach_chat_tab_key_filter(pane)
+
+
+def _apply_chat_text_field_focus_policies(host: QWidget) -> None:
+    for widget in host.findChildren(QWidget):
+        if _is_chat_text_field(widget):
+            widget.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
+            widget.setTabChangesFocus(False)
+
+
 class ChatPaneWidget(QWidget):
     """Scrollable chat history with LM Studio backend."""
 
@@ -153,6 +239,7 @@ class ChatPaneWidget(QWidget):
         self._chat_started = False
         self._setup_ui()
         install_chat_redo_key_filter(self)
+        install_chat_tab_key_filter(self)
 
     def set_header_getter(self, getter: Callable[[], QWidget | None] | None) -> None:
         self._header_getter = getter
@@ -242,6 +329,7 @@ class ChatPaneWidget(QWidget):
             self._show_unavailable_only(False)
         self.ensure_input_focus_policy()
         _attach_chat_redo_key_filter(self)
+        _attach_chat_tab_key_filter(self)
         QTimer.singleShot(0, lambda: self._prompt_input.text_edit().setFocus())
 
     def _show_unavailable_only(self, show: bool) -> None:
@@ -259,11 +347,9 @@ class ChatPaneWidget(QWidget):
         return self._prompt_input.text_edit()
 
     def ensure_input_focus_policy(self) -> None:
-        """Keep the prompt field typable (parent sidebar sets most children to NoFocus)."""
-        edit = self._prompt_input.text_edit()
-        edit.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
-        edit.setTabChangesFocus(True)
-        edit.setEnabled(True)
+        """Keep chat text fields typable on click but out of the Tab focus chain."""
+        _apply_chat_text_field_focus_policies(self)
+        install_chat_tab_key_filter(self)
 
     def _redo_last_user_message(self) -> None:
         if not self.isVisible():
@@ -344,6 +430,7 @@ class ChatPaneWidget(QWidget):
         self._messages_layout.insertWidget(insert_at, widget)
         self._message_widgets.append(widget)
         _attach_chat_redo_key_filter(self)
+        _attach_chat_tab_key_filter(self)
         QTimer.singleShot(0, self._scroll_to_bottom)
         return widget
 
@@ -474,6 +561,7 @@ class ChatPaneWidget(QWidget):
                 self._messages_layout.insertWidget(lay_idx, new_widget)
                 self._message_widgets.insert(i, new_widget)
                 _attach_chat_redo_key_filter(self)
+                _attach_chat_tab_key_filter(self)
             break
 
     def _on_redo(self, message_id: str) -> None:

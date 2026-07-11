@@ -577,7 +577,7 @@ def create_chat_from_text_button(parent=None):
         parent,
         "fromText.png",
         hover_icon_name="fromText_hover.png",
-        tooltip="Create an image from text with this message as the prompt",
+        tooltip="Create an image from text with\nthis message as the prompt",
     )
 
 
