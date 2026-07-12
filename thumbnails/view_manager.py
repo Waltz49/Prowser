@@ -1354,17 +1354,6 @@ class ViewManager:
             return False
         self.main_window.stacked_widget.setCurrentIndex(1)
         self.main_window.current_view_mode = 'browse'
-        if getattr(self.main_window, 'combined_sidebar', None):
-            self.main_window.combined_sidebar.hide()
-        if hasattr(self.main_window, 'main_splitter'):
-            total_width = self.main_window.main_splitter.width()
-            if total_width > 0:
-                right_width = 0
-                if getattr(self.main_window, 'right_sidebar_visible', False):
-                    right_width = getattr(self.main_window, 'right_sidebar_width', 0)
-                self.main_window._set_splitter_sizes_safe(
-                    [0, total_width - right_width, right_width]
-                )
         self.main_window.manage_sidebar_visibility_for_view_mode('browse')
         if hasattr(self.main_window, 'browse_view_action') and self.main_window.browse_view_action:
             self.main_window.browse_view_action.setEnabled(False)
@@ -2098,10 +2087,7 @@ class ViewManager:
             self.main_window.thumbnail_container.set_highlighted_index(self.main_window.highlight_index)
         
         if self.main_window.current_view_mode == 'browse':
-            # Ensure sidebar is hidden visually - NEVER show in fullscreen
-            # Don't change the saved state, just hide it visually
-            if hasattr(self.main_window, 'combined_sidebar'):
-                self.main_window.combined_sidebar.hide()
+            self.main_window.manage_sidebar_visibility_for_view_mode('browse')
             # Ensure image container is properly sized for current screen
             if hasattr(self.main_window, 'image_container'):
                 available_size = self.main_window.get_effective_display_size()
@@ -2126,11 +2112,6 @@ class ViewManager:
                 browse_view_widget = self.main_window.stacked_widget.widget(1)
                 if browse_view_widget:
                     browse_view_widget.setStyleSheet(get_active_theme().browse_view_shell_stylesheet())
-            
-            # Hide left sidebar visually for clean browse view - NEVER show in browse mode
-            # Don't change the saved state, just hide it visually
-            if hasattr(self.main_window, 'combined_sidebar'):
-                self.main_window.combined_sidebar.hide()
             
             # Manage sidebar visibility for browse mode (handles right sidebar too)
             self.main_window.manage_sidebar_visibility_for_view_mode('browse')

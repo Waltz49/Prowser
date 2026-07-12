@@ -259,6 +259,15 @@ class BrowseViewHandler:
                 # Account for right sidebar if visible (should be hidden in browse mode, but check anyway)
                 if hasattr(self.main_window, 'right_sidebar') and self.main_window.right_sidebar.isVisible():
                     window_width -= self.main_window.right_sidebar.width()
+
+                # Account for chat sidebar if visible in browse
+                if (
+                    hasattr(self.main_window, '_browse_shows_chat_sidebar')
+                    and self.main_window._browse_shows_chat_sidebar()
+                    and hasattr(self.main_window, 'combined_sidebar')
+                    and self.main_window.combined_sidebar.isVisible()
+                ):
+                    window_width -= self.main_window.combined_sidebar.width()
                 
                 # Account for status bar height if it's visible
                 if self.main_window.status_bar_visible:

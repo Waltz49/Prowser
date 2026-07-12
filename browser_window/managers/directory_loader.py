@@ -718,14 +718,6 @@ class DirectoryLoader:
         if switch_to_browse_view:
             self.main_window.stacked_widget.setCurrentIndex(1)  # Switch to browse view
             self.main_window.current_view_mode = 'browse'
-            # Hide sidebar visually for clean browse view - NEVER show in browse view
-            # Don't change the saved state, just hide it visually
-            if hasattr(self.main_window, 'combined_sidebar'):
-                self.main_window.combined_sidebar.hide()
-            # Also ensure splitter gives full width to canvas
-            if hasattr(self.main_window, 'main_splitter'):
-                total_width = self.main_window.main_splitter.width()
-                self.main_window.main_splitter.setSizes([0, total_width])
             self.main_window.manage_sidebar_visibility_for_view_mode('browse')
             # Set up browse view state immediately
             self.main_window.browse_view_action.setEnabled(False)

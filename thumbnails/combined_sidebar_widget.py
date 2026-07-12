@@ -743,9 +743,14 @@ class CombinedSidebarWidget(QWidget):
         return [self.tree_visible, self.preview_visible, chat_vis]
 
     def _display_pane_visibility(self) -> list[bool]:
-        if self.chat_covers_panes and self._chat_feature_enabled and self.chat_visible:
+        mw = getattr(self, "main_window", None)
+        if mw and getattr(mw, "current_view_mode", None) == "browse":
+            if self._chat_feature_enabled and self.chat_visible:
+                return [False, False, True]
+            return [False, False, False]
+        if self._chat_feature_enabled and self.chat_visible:
             return [False, False, True]
-        return self._logical_pane_visibility()
+        return [self.tree_visible, self.preview_visible, False]
 
     def _pane_visibility(self) -> list[bool]:
         return self._display_pane_visibility()
@@ -1136,7 +1141,10 @@ class CombinedSidebarWidget(QWidget):
             return
         mw = getattr(self, "main_window", None)
         if mw and getattr(mw, "current_view_mode", None) == "browse":
-            self.hide()
+            if hasattr(mw, "_browse_shows_chat_sidebar") and mw._browse_shows_chat_sidebar():
+                self.show()
+            else:
+                self.hide()
             return
         self.show()
             
@@ -1149,9 +1157,9 @@ class CombinedSidebarWidget(QWidget):
         self.widget_resized.emit()
         
     def set_tree_visible(self, visible):
-        """Set tree visibility programmatically (logical; may exit chat cover)."""
-        if visible and self.chat_covers_panes:
-            self._exit_chat_cover()
+        """Set tree visibility programmatically (logical; hides chat when shown)."""
+        if visible and self.chat_visible:
+            self.set_chat_visible(False)
 
         if self.tree_visible != visible:
             self.tree_visible = visible
@@ -1166,9 +1174,9 @@ class CombinedSidebarWidget(QWidget):
             self._maybe_reenter_chat_cover()
 
     def set_preview_visible(self, visible):
-        """Set preview visibility programmatically (logical; may exit chat cover)."""
-        if visible and self.chat_covers_panes:
-            self._exit_chat_cover()
+        """Set preview visibility programmatically (logical; hides chat when shown)."""
+        if visible and self.chat_visible:
+            self.set_chat_visible(False)
 
         if self.preview_visible != visible:
             self.preview_visible = visible
@@ -1191,11 +1199,7 @@ class CombinedSidebarWidget(QWidget):
         if self.chat_visible != visible:
             self.chat_visible = visible
             if visible:
-                if enter_cover is False:
-                    self.chat_covers_panes = False
-                    self._apply_display_sections()
-                else:
-                    self._enter_chat_cover()
+                self._enter_chat_cover()
             else:
                 self.chat_covers_panes = False
                 self._apply_display_sections()
@@ -1213,11 +1217,7 @@ class CombinedSidebarWidget(QWidget):
             if not visible:
                 self._notify_cover_changed()
         elif visible and self.chat_widget:
-            if enter_cover is False:
-                if self.chat_covers_panes:
-                    self._exit_chat_cover()
-            else:
-                self._enter_chat_cover()
+            self._enter_chat_cover()
             self.chat_widget.show()
             if hasattr(self.chat_widget, "on_pane_activated"):
                 self.chat_widget.on_pane_activated()

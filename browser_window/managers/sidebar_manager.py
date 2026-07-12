@@ -139,7 +139,7 @@ class SidebarManager:
         """Toggle the visibility of the chat pane in the left combined sidebar."""
         if hasattr(self.main_window, "combined_sidebar"):
             cs = self.main_window.combined_sidebar
-            self._leave_browse_then_toggle_pane(cs.is_chat_visible, cs.set_chat_visible)
+            cs.set_chat_visible(not cs.is_chat_visible())
             return cs.is_chat_visible()
         return False
     
@@ -422,9 +422,14 @@ class SidebarManager:
     def manage_sidebar_visibility_for_view_mode(self, view_mode):
         """Manage sidebar visibility based on view mode"""
         if view_mode == 'browse':
-            # Hide sidebar in browse mode
             if hasattr(self.main_window, 'combined_sidebar'):
-                self.main_window.combined_sidebar.hide()
+                if (
+                    hasattr(self.main_window, '_browse_shows_chat_sidebar')
+                    and self.main_window._browse_shows_chat_sidebar()
+                ):
+                    self.main_window.combined_sidebar.show()
+                else:
+                    self.main_window.combined_sidebar.hide()
                 QApplication.processEvents()
         elif view_mode == 'thumbnail':
             # Show sidebar in thumbnail mode if it was visible before

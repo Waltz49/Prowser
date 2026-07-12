@@ -2538,16 +2538,22 @@ class ImageBrowserWindow(QMainWindow):
             main_width = total_width
             self._set_splitter_sizes_safe([0, main_width, 0])
         else:
-            # In browse mode, hide left sidebar but show right sidebar if it was visible
-            if self.combined_sidebar.isVisible():
-                # Hide the entire left sidebar
-                self.combined_sidebar.hide()
-            
+            # In browse mode, left sidebar only when chat pane is visible
+            if self._browse_shows_chat_sidebar():
+                self.combined_sidebar.show()
+                self.combined_sidebar._apply_display_sections()
+                self.combined_sidebar._update_splitter_sizes()
+                left_width = self.sidebar_width
+            else:
+                if self.combined_sidebar.isVisible():
+                    self.combined_sidebar.hide()
+                left_width = 0
+
             # Restore right sidebar visibility if it was saved before slideshow
             if getattr(self, '_right_sidebar_visible_before_slideshow', None) is not None:
                 self.right_sidebar_visible = self._right_sidebar_visible_before_slideshow
                 self._right_sidebar_visible_before_slideshow = None
-            
+
             # Show right sidebar if it was visible
             if getattr(self, 'right_sidebar_visible', None):
                 if hasattr(self, 'right_sidebar'):
@@ -2558,10 +2564,10 @@ class ImageBrowserWindow(QMainWindow):
                 if hasattr(self, 'right_sidebar'):
                     self.right_sidebar.hide()
                     self.right_sidebar.hide_info()
-            
+
             # Set splitter sizes: [left_sidebar, main_content, right_sidebar]
-            main_width = total_width - right_width
-            self._set_splitter_sizes_safe([0, main_width, right_width])
+            main_width = total_width - left_width - right_width
+            self._set_splitter_sizes_safe([left_width, main_width, right_width])
         
         self._sync_right_sidebar_chrome()
 
@@ -2739,6 +2745,14 @@ class ImageBrowserWindow(QMainWindow):
             )
         return False
 
+    def _browse_shows_chat_sidebar(self) -> bool:
+        """Left sidebar is allowed in browse only when chat pane is visible."""
+        if getattr(self, "_chrome_suppressed", False):
+            return False
+        if getattr(self, "combined_sidebar", None) and self.combined_sidebar.is_chat_visible():
+            return True
+        return bool(getattr(self, "chat_visible", False))
+
     def _on_tree_visibility_changed(self, visible):
         """Handle tree visibility changes from combined sidebar"""
         self.file_tree_visible = visible
@@ -2750,10 +2764,9 @@ class ImageBrowserWindow(QMainWindow):
                     "Hide File Tree" if visible else "Show File Tree"
                 )
             self.config.update_setting("file_tree_visible", visible)
-            if hasattr(self, "combined_sidebar"):
-                self.combined_sidebar.hide()
+            self.manage_sidebar_visibility_for_view_mode("browse")
             return
-        
+
         # Ensure tree is initialized when it becomes visible
         if visible:
             self.ensure_tree_initialized()
@@ -2832,10 +2845,9 @@ class ImageBrowserWindow(QMainWindow):
                 )
             self.config.update_setting("preview_visible", visible)
             self._preview_was_visible = visible
-            if hasattr(self, "combined_sidebar"):
-                self.combined_sidebar.hide()
+            self.manage_sidebar_visibility_for_view_mode("browse")
             return
-        
+
         if visible:
             if transitioning_to_visible:
                 self.preview_widget.current_pixmap = None
@@ -2904,17 +2916,6 @@ class ImageBrowserWindow(QMainWindow):
         """Handle chat pane visibility changes from combined sidebar."""
         self.chat_visible = visible
 
-        if self.current_view_mode == "browse":
-            if hasattr(self, "toggle_chat_action"):
-                self.toggle_chat_action.setChecked(visible)
-                self.toggle_chat_action.setText(
-                    "Hide Chat" if visible else "Show Chat"
-                )
-            self.config.update_setting("chat_visible", visible)
-            if hasattr(self, "combined_sidebar"):
-                self.combined_sidebar.hide()
-            return
-
         if hasattr(self, "toggle_chat_action"):
             self.toggle_chat_action.setChecked(visible)
             self.toggle_chat_action.setText(
@@ -2938,7 +2939,18 @@ class ImageBrowserWindow(QMainWindow):
         )
         current_left_width = current_sizes[0] if len(current_sizes) > 0 else 0
 
-        if visible or self.combined_sidebar.is_tree_visible() or self.combined_sidebar.is_preview_visible():
+        if self.current_view_mode == "browse":
+            if visible:
+                self.combined_sidebar.show()
+                self.combined_sidebar._apply_display_sections()
+                self.combined_sidebar._update_splitter_sizes()
+                new_left_width = self.sidebar_width
+            else:
+                self.combined_sidebar.hide()
+                new_left_width = 0
+            main_width = total_width - new_left_width - right_width
+            self._set_splitter_sizes_safe([new_left_width, main_width, right_width])
+        elif visible or self.combined_sidebar.is_tree_visible() or self.combined_sidebar.is_preview_visible():
             if self.current_view_mode in ("thumbnail", "list"):
                 self.combined_sidebar.show()
             new_left_width = self.sidebar_width
@@ -2952,7 +2964,10 @@ class ImageBrowserWindow(QMainWindow):
         sidebar_width_changed = current_left_width != new_left_width
         self.config.update_setting("chat_visible", visible)
         self.config.update_setting("sidebar_width", self.sidebar_width)
-        if sidebar_width_changed:
+        if self.current_view_mode == "browse":
+            if sidebar_width_changed:
+                QTimer.singleShot(100, self._resize_browse_view_image_container)
+        elif sidebar_width_changed:
             QTimer.singleShot(50, self.update_max_thumbnail_size)
         self._sync_left_sidebar_tab_order()
 
@@ -3819,14 +3834,6 @@ class ImageBrowserWindow(QMainWindow):
             self.stacked_widget.setCurrentIndex(1)  # Switch to browse view
             self.current_view_mode = 'browse'
             self._emit_view_mode_changed()
-            # Hide sidebar visually for clean browse view - NEVER show in browse view
-            # Don't change the saved state, just hide it visually
-            if hasattr(self, 'combined_sidebar'):
-                self.combined_sidebar.hide()
-            # Also ensure splitter gives full width to canvas
-            if hasattr(self, 'main_splitter'):
-                total_width = self.main_splitter.width()
-                self._set_splitter_sizes_safe([0, total_width])
             self.manage_sidebar_visibility_for_view_mode('browse')
             # Set up browse view state immediately
             self.browse_view_action.setEnabled(False)
@@ -10580,9 +10587,6 @@ class ImageBrowserWindow(QMainWindow):
                 # Ensure sidebars are hidden and layout is updated before recalculating
                 def update_image_for_fullscreen():
                     if self.isFullScreen() and self.current_view_mode == 'browse':
-                        # Ensure sidebars are properly hidden for browse mode
-                        if hasattr(self, 'combined_sidebar'):
-                            self.combined_sidebar.hide()
                         self.manage_sidebar_visibility_for_view_mode('browse')
                         
                         # Force layout update to ensure splitter and widgets have correct sizes

@@ -3743,7 +3743,7 @@ class MenuManager:
         """Update sidebar menu actions enabled state based on view mode"""
         mw = self.main_window
         # T / P / J / F4 shortcuts are QAction-based; they only fire when the actions are enabled.
-        # Left combined sidebar is thumbnail/list only — not browse or slideshow modes.
+        # Tree/preview toggles are thumbnail/list only; chat (F9) is also available in browse.
         show_tree_preview_toggles = view_mode in ('thumbnail', 'list')
         show_jobs_toggle = view_mode in ('thumbnail', 'list', 'browse')
         try:

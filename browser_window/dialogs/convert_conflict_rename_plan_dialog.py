@@ -54,8 +54,6 @@ def _open_plan_thumbnail_in_browse(main_window, file_path: str) -> None:
         if hasattr(main_window, "stacked_widget"):
             main_window.stacked_widget.setCurrentIndex(1)
         main_window.current_view_mode = "browse"
-        if hasattr(main_window, "combined_sidebar"):
-            main_window.combined_sidebar.hide()
         if hasattr(main_window, "manage_sidebar_visibility_for_view_mode"):
             main_window.manage_sidebar_visibility_for_view_mode("browse")
         if hasattr(main_window, "browse_view_action"):
