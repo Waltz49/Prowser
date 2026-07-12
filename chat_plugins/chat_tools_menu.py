@@ -13,6 +13,8 @@ from theme.theme_service import get_active_theme
 def _populate_chat_menu(menu: QMenu, chat_pane) -> None:
     prompt_action = menu.addAction("System Prompt for Chat…")
     prompt_action.triggered.connect(chat_pane.edit_system_prompt)
+    fav_action = menu.addAction("Favorite User Prompts…")
+    fav_action.triggered.connect(chat_pane.open_favorite_user_prompts)
     clear_action = menu.addAction("Clear Chat")
     clear_action.triggered.connect(chat_pane.clear_chat)
     menu.addSeparator()

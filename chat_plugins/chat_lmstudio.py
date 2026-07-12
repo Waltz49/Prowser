@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from typing import Generator, Iterable
 
+from chat_plugins.chat_prompt_config import load_system_prompt_config, save_system_prompt_config
 from config import CAPTION_DEFAULTS, CHAT_DEFAULTS, get_config
 from imagegen_plugins.ai_prompt_exit import apply_text_ai_exit
 from thumbnails.thumbnail_constants import CHAT_REJECTED_RESPONSE_PHRASES
@@ -26,15 +27,17 @@ def chat_response_contains_rejected_phrase(text: str) -> bool:
 
 
 def load_chat_system_prompt() -> str:
-    settings = get_config().load_settings()
-    prompt = settings.get("chat_system_prompt")
-    if isinstance(prompt, str):
+    config = load_system_prompt_config()
+    prompt = config.get("system_prompt")
+    if isinstance(prompt, str) and prompt.strip():
         return prompt
     return DEFAULT_CHAT_SYSTEM_PROMPT
 
 
 def save_chat_system_prompt(prompt: str) -> None:
-    get_config().update_setting("chat_system_prompt", prompt)
+    config = load_system_prompt_config()
+    config["system_prompt"] = prompt
+    save_system_prompt_config(config)
 
 
 def _strip_think_tags(text: str) -> str:

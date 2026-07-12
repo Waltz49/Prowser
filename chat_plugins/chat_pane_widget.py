@@ -46,6 +46,10 @@ from chat_plugins.chat_lmstudio import (
 from chat_plugins.chat_message_widgets import ChatMessageWidget
 from chat_plugins.chat_prompt_input import ChatPromptInput
 from chat_plugins.chat_session import ChatMessage, ChatSession
+from chat_plugins.chat_named_user_prompts import (
+    run_chat_user_prompt_library,
+    run_chat_user_prompt_save_dialog,
+)
 from chat_plugins.chat_system_prompt_dialog import edit_chat_system_prompt
 from chat_plugins.chat_tools_menu import show_chat_context_menu, show_chat_tools_menu
 from chat_plugins.chat_worker import ChatLmStudioService
@@ -422,6 +426,39 @@ class ChatPaneWidget(QWidget):
         self._session.system_prompt = result
         save_chat_system_prompt(result)
 
+    def open_favorite_user_prompts(self) -> None:
+        current_text = self._prompt_input.text_edit().toPlainText()
+        current_images = self._prompt_input.image_paths()
+        entry = run_chat_user_prompt_library(
+            self.main_window,
+            suggestion_text=current_text,
+            suggestion_images=current_images,
+            main_window=self.main_window,
+        )
+        if entry is None:
+            return
+        self._prompt_input.set_content(entry.text, entry.image_paths)
+
+    def _on_favorite_user_prompt(self, message_id: str) -> None:
+        idx = self._session.index_of(message_id)
+        if idx < 0:
+            return
+        msg = self._session.messages[idx]
+        if msg.role != "user":
+            return
+        image_paths = list(msg.image_paths or [])
+        if not image_paths:
+            for widget in self._message_widgets:
+                if widget.message_id() == message_id:
+                    image_paths = widget.displayed_image_paths()
+                    break
+        run_chat_user_prompt_save_dialog(
+            self.main_window,
+            text=msg.text,
+            image_paths=image_paths,
+            main_window=self.main_window,
+        )
+
     def _clear_message_widgets(self) -> None:
         while self._messages_layout.count() > 1:
             item = self._messages_layout.takeAt(0)
@@ -460,6 +497,7 @@ class ChatPaneWidget(QWidget):
             on_redo=self._on_redo,
             on_delete=self._on_delete,
             on_create_from_text=self._on_create_from_text,
+            on_favorite=self._on_favorite_user_prompt,
             main_window=self.main_window,
         )
         self._wire_message_widget(widget)
@@ -643,6 +681,7 @@ class ChatPaneWidget(QWidget):
                     on_redo=self._on_redo,
                     on_delete=self._on_delete,
                     on_create_from_text=self._on_create_from_text,
+                    on_favorite=self._on_favorite_user_prompt,
                     main_window=self.main_window,
                 )
                 self._wire_message_widget(new_widget)

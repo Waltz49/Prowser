@@ -12,13 +12,24 @@ from PySide6.QtGui import (
     QDragEnterEvent,
     QDragMoveEvent,
     QDropEvent,
+    QFont,
+    QFontMetrics,
     QIcon,
     QImage,
     QPalette,
     QPixmap,
+    QTextDocument,
     qGray,
 )
-from PySide6.QtWidgets import QFrame, QGridLayout, QGroupBox, QPushButton, QSizePolicy, QWidget
+from PySide6.QtWidgets import (
+    QFrame,
+    QGridLayout,
+    QGroupBox,
+    QLabel,
+    QPushButton,
+    QSizePolicy,
+    QWidget,
+)
 from shiboken6 import isValid
 
 from chat_plugins.chat_image_store import MAX_CHAT_IMAGES
@@ -443,6 +454,175 @@ def chat_prompt_edit_stylesheet() -> str:
     """
 
 
+CHAT_PROMPT_LIBRARY_PREVIEW_MAX_LINES = 4
+_PROMPT_PREVIEW_STYLE_PADDING_V = 12
+_PROMPT_PREVIEW_STYLE_BORDER_V = 2
+
+
+def chat_prompt_preview_stylesheet() -> str:
+    th = get_active_theme()
+    return f"""
+        QLabel#chatPromptLibraryPreview {{
+            background-color: {th.sidebar_background_color_hex};
+            color: {th.dialog_text_color_hex};
+            border: 1px solid {th.border_default_hex};
+            border-radius: 6px;
+            padding: 6px;
+        }}
+    """
+
+
+def _wrapped_line_count_at_width(text: str, font: QFont, width: int) -> int:
+    doc = QTextDocument()
+    doc.setDefaultFont(font)
+    doc.setPlainText(text.replace("\r\n", "\n").replace("\r", "\n"))
+    if width > 1:
+        doc.setTextWidth(float(width))
+    fm = QFontMetrics(font)
+    line_h = max(1, fm.lineSpacing())
+    layout = doc.documentLayout()
+    total = 0
+    block = doc.firstBlock()
+    while block.isValid():
+        br = layout.blockBoundingRect(block)
+        total += max(1, int((br.height() + line_h - 1) // line_h))
+        block = block.next()
+    return max(1, total)
+
+
+def elide_prompt_library_preview(
+    text: str,
+    font: QFont,
+    width: int,
+    max_lines: int = CHAT_PROMPT_LIBRARY_PREVIEW_MAX_LINES,
+) -> str:
+    plain = (text or "(empty prompt)").replace("\r\n", "\n").replace("\r", "\n")
+    if width <= 1 or _wrapped_line_count_at_width(plain, font, width) <= max_lines:
+        return plain
+
+    fm = QFontMetrics(font)
+    lo, hi = 0, len(plain)
+    best = 0
+    while lo <= hi:
+        mid = (lo + hi) // 2
+        candidate = plain[:mid].rstrip("\n")
+        if _wrapped_line_count_at_width(candidate, font, width) <= max_lines:
+            best = mid
+            lo = mid + 1
+        else:
+            hi = mid - 1
+
+    trimmed = plain[:best].rstrip("\n")
+    if not trimmed:
+        return fm.elidedText(plain, Qt.TextElideMode.ElideRight, width)
+
+    if best < len(plain.rstrip()):
+        lines = trimmed.split("\n")
+        last = lines[-1] if lines else ""
+        lines[-1] = fm.elidedText(
+            last.rstrip() + "…",
+            Qt.TextElideMode.ElideRight,
+            width,
+        )
+        return "\n".join(lines)
+    return trimmed
+
+
+def prompt_library_preview_height_px(
+    font: QFont,
+    lines: int = CHAT_PROMPT_LIBRARY_PREVIEW_MAX_LINES,
+) -> int:
+    fm = QFontMetrics(font)
+    return (
+        fm.lineSpacing() * lines
+        + _PROMPT_PREVIEW_STYLE_PADDING_V
+        + _PROMPT_PREVIEW_STYLE_BORDER_V
+    )
+
+
+class ChatPromptLibraryPreview(QLabel):
+    """Read-only multi-line prompt preview for system/user prompt library dialogs."""
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setObjectName("chatPromptLibraryPreview")
+        self._full_text = ""
+        self.setWordWrap(True)
+        self.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.setStyleSheet(chat_prompt_preview_stylesheet())
+
+    def set_prompt_text(self, text: str) -> None:
+        self._full_text = text
+        self._refresh()
+
+    def resizeEvent(self, event) -> None:  # noqa: N802
+        super().resizeEvent(event)
+        self._refresh()
+
+    def _refresh(self) -> None:
+        font = self.font()
+        self.setFixedHeight(
+            prompt_library_preview_height_px(font, CHAT_PROMPT_LIBRARY_PREVIEW_MAX_LINES)
+        )
+        width = self.contentsRect().width()
+        if width > 1:
+            self.setText(elide_prompt_library_preview(self._full_text, font, width))
+        else:
+            self.setText(self._full_text or "(empty prompt)")
+
+
+_CHAT_LIBRARY_ICON_BTN_SIZE = 22
+
+
+def _chat_library_icon_button_stylesheet(
+    icon_name: str,
+    *,
+    hover_icon_name: str | None = None,
+) -> str:
+    icon_url = f"url({asset_path(icon_name)})"
+    if hover_icon_name:
+        hover_url = f"url({asset_path(hover_icon_name)})"
+    else:
+        hover_url = icon_url.replace(".png", "_hover.png")
+    sz = _CHAT_LIBRARY_ICON_BTN_SIZE
+    return f"""
+        QPushButton {{
+            background-color: #f4f4f4;
+            border: 1px solid #c8c8c8;
+            border-radius: 3px;
+            padding: 0px;
+            min-width: {sz}px;
+            max-width: {sz}px;
+            min-height: {sz}px;
+            max-height: {sz}px;
+            image: {icon_url};
+        }}
+        QPushButton:hover {{
+            background-color: #e8e8e8;
+            border: 1px solid #b0b0b0;
+            image: {hover_url};
+        }}
+        QPushButton:pressed {{
+            background-color: #d0d0d0;
+        }}
+    """
+
+
+def chat_library_edit_button_stylesheet() -> str:
+    return _chat_library_icon_button_stylesheet(
+        "edit_icon.png",
+        hover_icon_name="edit_icon_hover.png",
+    )
+
+
+def chat_library_trash_button_stylesheet() -> str:
+    return _chat_library_icon_button_stylesheet(
+        "trash_icon.png",
+        hover_icon_name="trash_icon_hover.png",
+    )
+
+
 def _icon_button_chrome_stylesheet() -> str:
     th = get_active_theme()
     sz = _ICON_BTN_SIZE
@@ -472,6 +652,45 @@ def _load_icon_pixmap(icon_name: str, size_px: int) -> QPixmap:
     pixmap = QPixmap(asset_path(icon_name))
     if pixmap.isNull():
         return QPixmap()
+    return pixmap.scaled(
+        size_px,
+        size_px,
+        Qt.AspectRatioMode.KeepAspectRatio,
+        Qt.TransformationMode.SmoothTransformation,
+    )
+
+
+def _pixmap_matte_black_transparent(pixmap: QPixmap, *, threshold: int = 42) -> QPixmap:
+    """Drop near-black matte backgrounds from chat asset PNGs."""
+    if pixmap.isNull():
+        return pixmap
+    image = pixmap.toImage().convertToFormat(QImage.Format.Format_ARGB32)
+    for y in range(image.height()):
+        for x in range(image.width()):
+            color = QColor(image.pixelColor(x, y))
+            if color.alpha() == 0:
+                continue
+            if (
+                color.red() <= threshold
+                and color.green() <= threshold
+                and color.blue() <= threshold
+            ):
+                color.setAlpha(0)
+                image.setPixelColor(x, y, color)
+    return QPixmap.fromImage(image)
+
+
+def _load_chat_asset_icon_pixmap(
+    icon_name: str,
+    *,
+    size_px: int = _ICON_DISPLAY_PX,
+    matte_black: bool = False,
+) -> QPixmap:
+    pixmap = QPixmap(asset_path(icon_name))
+    if pixmap.isNull():
+        return QPixmap()
+    if matte_black:
+        pixmap = _pixmap_matte_black_transparent(pixmap)
     return pixmap.scaled(
         size_px,
         size_px,
@@ -583,6 +802,27 @@ def create_chat_from_text_button(parent=None):
             "(⌥-click to generate immediately)"
         ),
     )
+
+
+def create_chat_favorite_button(parent=None):
+    btn = QPushButton(parent)
+    btn.setToolTip("Save as favorite user prompt")
+    icon_px = _ICON_DISPLAY_PX
+    normal_pm = _load_chat_asset_icon_pixmap(
+        "chatfav.png", size_px=icon_px, matte_black=True
+    )
+    hover_pm = _load_chat_asset_icon_pixmap(
+        "chatfav_hover.png", size_px=icon_px, matte_black=True
+    )
+    normal_icon = QIcon(normal_pm)
+    hover_icon = QIcon(hover_pm if not hover_pm.isNull() else normal_pm)
+    btn.setAttribute(Qt.WidgetAttribute.WA_Hover, True)
+    btn.setIcon(normal_icon)
+    btn.setIconSize(QSize(icon_px, icon_px))
+    btn.setFixedSize(_ICON_BTN_SIZE, _ICON_BTN_SIZE)
+    btn.setStyleSheet(_icon_button_chrome_stylesheet())
+    _ChatIconButtonHover(btn, normal_icon, hover_icon)
+    return btn
 
 
 def connect_chat_from_text_button_with_option_modifier(

@@ -28,6 +28,7 @@ from chat_plugins.chat_ui_common import (
     chat_prompt_edit_stylesheet,
     create_chat_delete_button,
     create_chat_edit_button,
+    create_chat_favorite_button,
     connect_chat_from_text_button_with_option_modifier,
     create_chat_from_text_button,
     create_chat_redo_button,
@@ -96,6 +97,7 @@ class ChatMessageWidget(QWidget):
     redo_requested = Signal(str)
     delete_requested = Signal(str)
     create_from_text_requested = Signal(str, bool)
+    favorite_requested = Signal(str)
 
     def __init__(
         self,
@@ -107,6 +109,7 @@ class ChatMessageWidget(QWidget):
         on_redo: Optional[Callable[[str], None]] = None,
         on_delete: Optional[Callable[[str], None]] = None,
         on_create_from_text: Optional[Callable[[str, bool], None]] = None,
+        on_favorite: Optional[Callable[[str], None]] = None,
         main_window=None,
     ):
         super().__init__(parent)
@@ -198,6 +201,7 @@ class ChatMessageWidget(QWidget):
         actions.setContentsMargins(4, 0, 4, 0)
         actions.setSpacing(4)
         self._from_text_btn = None
+        self._favorite_btn = None
         if message.role == "assistant" and chat_create_from_text_available():
             self._from_text_btn = create_chat_from_text_button(self)
             connect_chat_from_text_button_with_option_modifier(
@@ -205,6 +209,13 @@ class ChatMessageWidget(QWidget):
             )
             if on_create_from_text is not None:
                 self.create_from_text_requested.connect(on_create_from_text)
+        if message.role == "user":
+            self._favorite_btn = create_chat_favorite_button(self)
+            self._favorite_btn.clicked.connect(
+                lambda: self.favorite_requested.emit(message.message_id)
+            )
+            if on_favorite is not None:
+                self.favorite_requested.connect(on_favorite)
         self._edit_btn = create_chat_edit_button(self)
         self._redo_btn = create_chat_redo_button(self)
         self._delete_btn = create_chat_delete_button(self)
@@ -222,6 +233,8 @@ class ChatMessageWidget(QWidget):
         actions.addStretch(1)
         if self._from_text_btn is not None:
             actions.addWidget(self._from_text_btn)
+        if self._favorite_btn is not None:
+            actions.addWidget(self._favorite_btn)
         actions.addWidget(self._edit_btn)
         actions.addWidget(self._redo_btn)
         actions.addWidget(self._delete_btn)
@@ -230,6 +243,13 @@ class ChatMessageWidget(QWidget):
 
     def message_id(self) -> str:
         return self._message.message_id
+
+    def displayed_image_paths(self) -> list[str]:
+        if self._thumb_row is not None:
+            paths = self._thumb_row.image_paths()
+            if paths:
+                return paths
+        return list(self._message.image_paths or [])
 
     def is_editing(self) -> bool:
         return self._editing
