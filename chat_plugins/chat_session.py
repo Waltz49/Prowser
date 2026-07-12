@@ -23,7 +23,8 @@ class ChatMessage:
 class ChatSession:
     """Session-scoped conversation history.
 
-    Messages are cleared on Clear Chat and are not persisted across restarts.
+    Messages are cleared on Clear Chat. When preserve-across-sessions is enabled,
+    messages are also saved under the profile data directory.
     ``system_prompt`` is initialized from persisted settings and kept for the session.
     """
 

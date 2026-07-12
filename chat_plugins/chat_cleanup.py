@@ -94,10 +94,23 @@ def purge_chat_disk_and_logs() -> None:
 
 def purge_all_chat_ephemeral_data(main_window=None) -> None:
     """Purge chat UI state when possible; always wipe disk and log remnants."""
+    preserve_enabled = False
+    try:
+        from chat_plugins.chat_persistence import is_preserve_chat_across_sessions
+
+        preserve_enabled = is_preserve_chat_across_sessions()
+    except ImportError:
+        pass
+
     combined_sidebar = getattr(main_window, "combined_sidebar", None) if main_window else None
     chat_widget = (
         getattr(combined_sidebar, "chat_widget", None) if combined_sidebar else None
     )
+    if preserve_enabled:
+        if chat_widget is not None and hasattr(chat_widget, "persist_chat_for_next_session"):
+            chat_widget.persist_chat_for_next_session()
+        scrub_chat_entries_from_print_log()
+        return
     if chat_widget is not None and hasattr(chat_widget, "discard_all_data"):
         chat_widget.discard_all_data()
         return

@@ -16,7 +16,9 @@ from PySide6.QtGui import (
     QFontMetrics,
     QIcon,
     QImage,
+    QPainter,
     QPalette,
+    QPen,
     QPixmap,
     QTextDocument,
     qGray,
@@ -802,6 +804,41 @@ def create_chat_from_text_button(parent=None):
             "(⌥-click to generate immediately)"
         ),
     )
+
+
+def _draw_chat_stop_x_icon(painter: QPainter, size: int) -> None:
+    """Corner-to-corner red X (same stroke as chat image-thumb delete overlay)."""
+    pad = 2
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+    painter.setPen(QPen(QColor(220, 40, 40), 2))
+    painter.drawLine(pad, pad, size - pad, size - pad)
+    painter.drawLine(size - pad, pad, pad, size - pad)
+
+
+def _chat_stop_icon_pixmap(*, size_px: int = _ICON_DISPLAY_PX) -> QPixmap:
+    pixmap = QPixmap(size_px, size_px)
+    pixmap.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(pixmap)
+    _draw_chat_stop_x_icon(painter, size_px)
+    painter.end()
+    return pixmap
+
+
+def create_chat_stop_button(parent=None):
+    """Stop control — red X drawn like the chat image-thumb delete overlay."""
+    btn = QPushButton(parent)
+    btn.setToolTip("Stop generation")
+    icon_px = _ICON_DISPLAY_PX
+    color_pm = _chat_stop_icon_pixmap(size_px=icon_px)
+    stop_icon = QIcon(color_pm)
+    btn.setAttribute(Qt.WidgetAttribute.WA_Hover, True)
+    btn.setIcon(stop_icon)
+    btn.setIconSize(QSize(icon_px, icon_px))
+    btn.setFixedSize(_ICON_BTN_SIZE, _ICON_BTN_SIZE)
+    btn.setStyleSheet(_icon_button_chrome_stylesheet())
+    _ChatIconButtonHover(btn, stop_icon, stop_icon)
+    btn.hide()
+    return btn
 
 
 def create_chat_favorite_button(parent=None):

@@ -6,6 +6,7 @@ from __future__ import annotations
 from PySide6.QtCore import QPoint
 from PySide6.QtWidgets import QMenu, QPushButton
 
+from chat_plugins.chat_persistence import is_preserve_chat_across_sessions
 from chat_plugins.chat_tips_dialog import show_chat_tips_dialog
 from theme.theme_service import get_active_theme
 
@@ -15,6 +16,12 @@ def _populate_chat_menu(menu: QMenu, chat_pane) -> None:
     prompt_action.triggered.connect(chat_pane.edit_system_prompt)
     fav_action = menu.addAction("Favorite User Prompts…")
     fav_action.triggered.connect(chat_pane.open_favorite_user_prompts)
+    preserve_action = menu.addAction("Preserve Chat Across Sessions")
+    preserve_action.setCheckable(True)
+    preserve_action.setChecked(is_preserve_chat_across_sessions())
+    preserve_action.triggered.connect(
+        lambda checked: chat_pane.set_preserve_chat_across_sessions(bool(checked))
+    )
     clear_action = menu.addAction("Clear Chat")
     clear_action.triggered.connect(chat_pane.clear_chat)
     menu.addSeparator()

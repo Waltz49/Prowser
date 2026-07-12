@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Persist chat image snapshots under the configured temporary files directory."""
+"""Persist chat image snapshots under temp or profile data directories."""
 
 from __future__ import annotations
 
@@ -30,7 +30,22 @@ def cleanup_all_chat_storage() -> None:
         pass
 
 
-def reset_image_store_session(image_store: "ChatImageStore") -> None:
+def reset_image_store_session(
+    image_store: "ChatImageStore",
+    *,
+    persistent: bool | None = None,
+) -> None:
+    if persistent is None:
+        persistent = image_store.is_persistent
+    if persistent:
+        from chat_plugins.chat_persistence import session_images_dir
+
+        image_store._persistent = True
+        image_store._session_id = "persisted"
+        image_store._session_dir = str(session_images_dir())
+        os.makedirs(image_store._session_dir, mode=0o700, exist_ok=True)
+        return
+    image_store._persistent = False
     image_store._session_id = uuid.uuid4().hex
     image_store._session_dir = os.path.join(
         prowser_temp_subdir(CHAT_TEMP_SUBDIR),
@@ -42,22 +57,41 @@ def reset_image_store_session(image_store: "ChatImageStore") -> None:
 class ChatImageStore:
     """Copy dropped images into a session folder so chat context stays stable."""
 
-    def __init__(self) -> None:
-        self._session_id = uuid.uuid4().hex
-        self._session_dir = os.path.join(
-            prowser_temp_subdir(CHAT_TEMP_SUBDIR),
-            self._session_id,
-        )
+    def __init__(self, *, persistent: bool = False) -> None:
+        self._persistent = persistent
+        if persistent:
+            from chat_plugins.chat_persistence import session_images_dir
+
+            self._session_id = "persisted"
+            self._session_dir = str(session_images_dir())
+        else:
+            self._session_id = uuid.uuid4().hex
+            self._session_dir = os.path.join(
+                prowser_temp_subdir(CHAT_TEMP_SUBDIR),
+                self._session_id,
+            )
         os.makedirs(self._session_dir, mode=0o700, exist_ok=True)
+
+    @property
+    def is_persistent(self) -> bool:
+        return self._persistent
 
     @property
     def session_dir(self) -> str:
         return self._session_dir
 
     def reset_session(self) -> None:
-        """Clear all chat temp images (any session) and start a fresh folder."""
+        """Clear chat images for the current storage mode and start fresh."""
+        if self._persistent:
+            try:
+                if os.path.isdir(self._session_dir):
+                    shutil.rmtree(self._session_dir, ignore_errors=True)
+            except OSError:
+                pass
+            reset_image_store_session(self, persistent=True)
+            return
         cleanup_all_chat_storage()
-        reset_image_store_session(self)
+        reset_image_store_session(self, persistent=False)
 
     def store_images(
         self,
@@ -114,3 +148,13 @@ class ChatImageStore:
                     os.unlink(ap)
             except OSError:
                 pass
+
+    def restage_message_images(self, messages) -> None:
+        """Copy message images into the current session directory and update paths."""
+        for msg in messages:
+            if msg.role != "user" or not msg.image_paths:
+                continue
+            msg.image_paths = self.store_images(
+                msg.image_paths,
+                message_id=msg.message_id,
+            )

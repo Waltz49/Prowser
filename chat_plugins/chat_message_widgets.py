@@ -32,6 +32,7 @@ from chat_plugins.chat_ui_common import (
     connect_chat_from_text_button_with_option_modifier,
     create_chat_from_text_button,
     create_chat_redo_button,
+    create_chat_stop_button,
     _local_paths_from_mime,
 )
 from theme.theme_service import get_active_theme
@@ -98,6 +99,7 @@ class ChatMessageWidget(QWidget):
     delete_requested = Signal(str)
     create_from_text_requested = Signal(str, bool)
     favorite_requested = Signal(str)
+    stop_requested = Signal()
 
     def __init__(
         self,
@@ -200,6 +202,7 @@ class ChatMessageWidget(QWidget):
         actions = QHBoxLayout()
         actions.setContentsMargins(4, 0, 4, 0)
         actions.setSpacing(4)
+        self._stop_btn = None
         self._from_text_btn = None
         self._favorite_btn = None
         if message.role == "assistant" and chat_create_from_text_available():
@@ -210,6 +213,8 @@ class ChatMessageWidget(QWidget):
             if on_create_from_text is not None:
                 self.create_from_text_requested.connect(on_create_from_text)
         if message.role == "user":
+            self._stop_btn = create_chat_stop_button(self)
+            self._stop_btn.clicked.connect(self.stop_requested.emit)
             self._favorite_btn = create_chat_favorite_button(self)
             self._favorite_btn.clicked.connect(
                 lambda: self.favorite_requested.emit(message.message_id)
@@ -234,6 +239,8 @@ class ChatMessageWidget(QWidget):
         if self._from_text_btn is not None:
             actions.addWidget(self._from_text_btn)
         if self._favorite_btn is not None:
+            if self._stop_btn is not None:
+                actions.addWidget(self._stop_btn)
             actions.addWidget(self._favorite_btn)
         actions.addWidget(self._edit_btn)
         actions.addWidget(self._redo_btn)
@@ -243,6 +250,10 @@ class ChatMessageWidget(QWidget):
 
     def message_id(self) -> str:
         return self._message.message_id
+
+    def set_stop_visible(self, visible: bool) -> None:
+        if self._stop_btn is not None:
+            self._stop_btn.setVisible(visible)
 
     def displayed_image_paths(self) -> list[str]:
         if self._thumb_row is not None:

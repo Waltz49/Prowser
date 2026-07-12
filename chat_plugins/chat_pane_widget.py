@@ -36,6 +36,13 @@ from chat_plugins.chat_image_gen_trigger import (
     prepare_user_message_for_storage,
 )
 from chat_plugins.chat_image_store import ChatImageStore, reset_image_store_session
+from chat_plugins.chat_persistence import (
+    clear_persisted_chat_files,
+    is_preserve_chat_across_sessions,
+    load_chat_session_messages,
+    save_chat_session_messages,
+    set_preserve_chat_across_sessions as persist_preserve_setting,
+)
 from chat_plugins.chat_ui_common import chat_create_from_text_available
 from chat_plugins.chat_lmstudio import (
     is_lmstudio_chat_available,
@@ -248,17 +255,25 @@ class ChatPaneWidget(QWidget):
         super().__init__(parent)
         self.main_window = main_window
         self._session = ChatSession(system_prompt=load_chat_system_prompt())
-        self._image_store = ChatImageStore()
+        self._preserve_across_sessions = is_preserve_chat_across_sessions()
+        self._image_store = ChatImageStore(persistent=self._preserve_across_sessions)
         self._header_getter: Callable[[], QWidget | None] | None = None
         self._message_widgets: list[ChatMessageWidget] = []
         self._editing_message_widget: ChatMessageWidget | None = None
         self._lm_service = ChatLmStudioService.instance()
         self._streaming_widget: ChatMessageWidget | None = None
+        self._generating_user_widget: ChatMessageWidget | None = None
         self._lm_available_on_show = True
         self._chat_started = False
         self._setup_ui()
         install_chat_redo_key_filter(self)
         install_chat_tab_key_filter(self)
+        if self._preserve_across_sessions:
+            self._restore_persisted_session()
+        app = QApplication.instance()
+        if app is not None and not getattr(self, "_chat_persist_quit_hooked", False):
+            app.aboutToQuit.connect(self._persist_on_quit_if_enabled)
+            self._chat_persist_quit_hooked = True
 
     def set_header_getter(self, getter: Callable[[], QWidget | None] | None) -> None:
         self._header_getter = getter
@@ -405,8 +420,57 @@ class ChatPaneWidget(QWidget):
         self._chat_started = False
         self._clear_message_widgets()
         self._prompt_input.clear_content()
+        if self._preserve_across_sessions:
+            clear_persisted_chat_files()
         purge_chat_disk_and_logs()
-        reset_image_store_session(self._image_store)
+        reset_image_store_session(
+            self._image_store,
+            persistent=self._preserve_across_sessions,
+        )
+
+    def persist_chat_for_next_session(self) -> None:
+        """Save the current conversation when preserve-across-sessions is enabled."""
+        if not self._preserve_across_sessions:
+            return
+        if self._session.has_started():
+            save_chat_session_messages(self._session.messages)
+        else:
+            clear_persisted_chat_files()
+
+    def _persist_on_quit_if_enabled(self) -> None:
+        self.persist_chat_for_next_session()
+
+    def _maybe_persist_session(self) -> None:
+        if self._preserve_across_sessions:
+            self.persist_chat_for_next_session()
+
+    def set_preserve_chat_across_sessions(self, enabled: bool) -> None:
+        enabled = bool(enabled)
+        if enabled == self._preserve_across_sessions:
+            return
+        self._preserve_across_sessions = enabled
+        persist_preserve_setting(enabled)
+        if enabled:
+            reset_image_store_session(self._image_store, persistent=True)
+            if self._session.has_started():
+                self._image_store.restage_message_images(self._session.messages)
+                self.persist_chat_for_next_session()
+            return
+        clear_persisted_chat_files()
+        reset_image_store_session(self._image_store, persistent=False)
+        if self._session.has_started():
+            self._image_store.restage_message_images(self._session.messages)
+
+    def _restore_persisted_session(self) -> None:
+        messages = load_chat_session_messages()
+        if not messages:
+            return
+        self._show_unavailable_only(False)
+        self._chat_started = True
+        for message in messages:
+            self._session.append(message)
+            self._append_message_widget(message)
+        self._maybe_persist_session()
 
     def clear_chat(self) -> None:
         if self._session.has_started():
@@ -467,11 +531,40 @@ class ChatPaneWidget(QWidget):
                 w.deleteLater()
         self._message_widgets.clear()
         self._streaming_widget = None
+        self._generating_user_widget = None
 
     def _wire_message_widget(self, widget: ChatMessageWidget) -> None:
         widget.edit_ended.connect(
             lambda w=widget: self._exclusive_edit_end(w)
         )
+        widget.stop_requested.connect(self._on_stop_generation)
+
+    def _set_generation_stop_ui(self, active: bool) -> None:
+        if not active:
+            for widget in self._message_widgets:
+                widget.set_stop_visible(False)
+            self._generating_user_widget = None
+            return
+        user_idx = self._session.last_user_index()
+        user_widget: ChatMessageWidget | None = None
+        if 0 <= user_idx < len(self._message_widgets):
+            user_widget = self._message_widgets[user_idx]
+        self._generating_user_widget = user_widget
+        for widget in self._message_widgets:
+            widget.set_stop_visible(widget is user_widget)
+
+    def _on_stop_generation(self) -> None:
+        if self._is_worker_active():
+            self._cancel_worker()
+
+    def _remove_streaming_widget(self) -> None:
+        if self._streaming_widget is None:
+            return
+        self._messages_layout.removeWidget(self._streaming_widget)
+        self._streaming_widget.deleteLater()
+        if self._streaming_widget in self._message_widgets:
+            self._message_widgets.remove(self._streaming_widget)
+        self._streaming_widget = None
 
     def _exclusive_edit_begin(self, widget: ChatMessageWidget) -> None:
         current = self._editing_message_widget
@@ -533,6 +626,7 @@ class ChatPaneWidget(QWidget):
             )
         self._session.append(msg)
         self._append_message_widget(msg)
+        self._maybe_persist_session()
         self._request_assistant_response()
 
     def _request_assistant_response(self) -> None:
@@ -556,7 +650,9 @@ class ChatPaneWidget(QWidget):
                 if self._streaming_widget is not None:
                     self._streaming_widget.update_message(self._session.messages[idx])
             self._streaming_widget = None
+            self._set_generation_stop_ui(False)
             self._scroll_to_bottom()
+            self._maybe_persist_session()
 
         def on_restarted() -> None:
             if self._streaming_widget is None:
@@ -570,14 +666,26 @@ class ChatPaneWidget(QWidget):
             idx = self._session.index_of(placeholder.message_id)
             if idx >= 0:
                 self._session.remove_at(idx)
-            if self._streaming_widget is not None:
-                lay = self._messages_layout
-                lay.removeWidget(self._streaming_widget)
-                self._streaming_widget.deleteLater()
-                if self._streaming_widget in self._message_widgets:
-                    self._message_widgets.remove(self._streaming_widget)
-            self._streaming_widget = None
+            self._remove_streaming_widget()
+            self._set_generation_stop_ui(False)
+            self._maybe_persist_session()
             QMessageBox.warning(self, "Chat Error", err)
+
+        def on_cancelled() -> None:
+            idx = self._session.index_of(placeholder.message_id)
+            if idx >= 0:
+                text = (self._session.messages[idx].text or "").strip()
+                if text in ("", "…"):
+                    self._session.remove_at(idx)
+                    self._remove_streaming_widget()
+                elif self._streaming_widget is not None:
+                    self._streaming_widget.update_message(self._session.messages[idx])
+                    self._streaming_widget = None
+            else:
+                self._remove_streaming_widget()
+            self._set_generation_stop_ui(False)
+            self._scroll_to_bottom()
+            self._maybe_persist_session()
 
         history = [
             m
@@ -613,23 +721,20 @@ class ChatPaneWidget(QWidget):
             on_chunk=on_chunk,
             on_finished=on_finished_with_auto_generate,
             on_error=on_error,
+            on_cancelled=on_cancelled,
             on_restarted=on_restarted,
             system_prompt=self._session.system_prompt,
         )
         if not started:
             self._session.remove_at(self._session.index_of(placeholder.message_id))
-            if self._streaming_widget is not None:
-                lay = self._messages_layout
-                lay.removeWidget(self._streaming_widget)
-                self._streaming_widget.deleteLater()
-                if self._streaming_widget in self._message_widgets:
-                    self._message_widgets.remove(self._streaming_widget)
-            self._streaming_widget = None
+            self._remove_streaming_widget()
             QMessageBox.warning(
                 self,
                 "Chat Busy",
                 "Please wait for the current response to finish.",
             )
+            return
+        self._set_generation_stop_ui(True)
 
     def _is_worker_active(self) -> bool:
         return self._lm_service.is_busy()
@@ -692,6 +797,7 @@ class ChatPaneWidget(QWidget):
             elif text_changed:
                 widget.update_message(msg)
             break
+        self._maybe_persist_session()
 
     def _on_redo(self, message_id: str) -> None:
         user_idx = self._session.user_index_for_redo(message_id)
@@ -706,6 +812,7 @@ class ChatPaneWidget(QWidget):
             self._messages_layout.removeWidget(w)
             w.deleteLater()
         self._streaming_widget = None
+        self._set_generation_stop_ui(False)
         self._request_assistant_response()
 
     def _auto_create_from_text_if_available(self, text: str) -> None:
@@ -768,3 +875,4 @@ class ChatPaneWidget(QWidget):
             w = self._message_widgets.pop(idx)
             self._messages_layout.removeWidget(w)
             w.deleteLater()
+        self._maybe_persist_session()
