@@ -6,7 +6,11 @@ from __future__ import annotations
 from PySide6.QtCore import QPoint
 from PySide6.QtWidgets import QMenu, QPushButton
 
-from chat_plugins.chat_persistence import is_preserve_chat_across_sessions
+from chat_plugins.chat_persistence import (
+    is_automatic_create,
+    is_copy_images_to_assistant,
+    is_preserve_chat_across_sessions,
+)
 from chat_plugins.chat_tips_dialog import show_chat_tips_dialog
 from theme.theme_service import get_active_theme
 
@@ -21,6 +25,18 @@ def _populate_chat_menu(menu: QMenu, chat_pane) -> None:
     preserve_action.setChecked(is_preserve_chat_across_sessions())
     preserve_action.triggered.connect(
         lambda checked: chat_pane.set_preserve_chat_across_sessions(bool(checked))
+    )
+    copy_images_action = menu.addAction("Copy images to Assistant's reply")
+    copy_images_action.setCheckable(True)
+    copy_images_action.setChecked(is_copy_images_to_assistant())
+    copy_images_action.triggered.connect(
+        lambda checked: chat_pane.set_copy_images_to_assistant(bool(checked))
+    )
+    automatic_create_action = menu.addAction("Automatic /create")
+    automatic_create_action.setCheckable(True)
+    automatic_create_action.setChecked(is_automatic_create())
+    automatic_create_action.triggered.connect(
+        lambda checked: chat_pane.set_automatic_create(bool(checked))
     )
     clear_action = menu.addAction("Clear Chat")
     clear_action.triggered.connect(chat_pane.clear_chat)

@@ -32,6 +32,7 @@ from chat_plugins.chat_ui_common import (
     ChatPromptLibraryPreview,
     chat_library_edit_button_stylesheet,
     chat_library_trash_button_stylesheet,
+    chat_prompt_edit_stylesheet,
 )
 from config import CHAT_DEFAULTS
 from utils import get_button_style, get_dialog_shell_stylesheet
@@ -143,6 +144,7 @@ class ChatPromptEditDialog(QDialog):
         self.text_edit = QTextEdit()
         self.text_edit.setPlainText(text)
         self.text_edit.setMinimumHeight(180)
+        self.text_edit.setStyleSheet(chat_prompt_edit_stylesheet())
         layout.addWidget(self.text_edit)
 
         buttons = QDialogButtonBox(
@@ -171,15 +173,7 @@ class ChatPromptDeleteConfirmDialog(QDialog):
         preview.setPlainText(entry.text or "(empty prompt)")
         preview.setMinimumHeight(120)
         preview.setMaximumHeight(260)
-        preview.setStyleSheet(
-            "QTextEdit {"
-            "  border: 1px solid #aaa;"
-            "  border-radius: 4px;"
-            "  padding: 8px;"
-            "  background: #fafafa;"
-            "  color: #333;"
-            "}"
-        )
+        preview.setStyleSheet(chat_prompt_edit_stylesheet())
         layout.addWidget(preview)
 
         buttons = QDialogButtonBox(

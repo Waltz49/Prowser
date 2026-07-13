@@ -9,6 +9,7 @@ from PySide6.QtCore import QEvent, QObject, Qt, QTimer, QSize
 from PySide6.QtGui import QIcon, QKeyEvent
 from PySide6.QtWidgets import (
     QApplication,
+    QHBoxLayout,
     QLabel,
     QLineEdit,
     QMessageBox,
@@ -31,17 +32,31 @@ from chat_plugins.chat_delete_confirm import (
     confirm_clear_chat,
 )
 from chat_plugins.chat_cleanup import purge_chat_disk_and_logs
+from chat_plugins.chat_assistant_image_paths import (
+    normalize_assistant_message_image_paths,
+)
+from chat_plugins.chat_image_paths import (
+    align_source_image_paths,
+    chat_paths_referenced_by_messages,
+    paths_for_image_gen,
+    sources_for_new_attachments,
+)
 from chat_plugins.chat_image_gen_trigger import (
-    classify_user_message_image_gen_command,
+    effective_image_gen_auto_mode,
     prepare_user_message_for_storage,
+    user_message_wants_assistant_sources,
 )
 from chat_plugins.chat_image_store import ChatImageStore, reset_image_store_session
 from chat_plugins.chat_persistence import (
     clear_persisted_chat_files,
     is_preserve_chat_across_sessions,
+    is_automatic_create,
+    is_copy_images_to_assistant,
     load_chat_session_messages,
     save_chat_session_messages,
     set_preserve_chat_across_sessions as persist_preserve_setting,
+    set_automatic_create as persist_automatic_create,
+    set_copy_images_to_assistant as persist_copy_images_to_assistant,
 )
 from chat_plugins.chat_ui_common import chat_create_from_text_available
 from chat_plugins.chat_lmstudio import (
@@ -62,6 +77,7 @@ from chat_plugins.chat_tools_menu import show_chat_context_menu, show_chat_tools
 from chat_plugins.chat_worker import ChatLmStudioService
 from theme.theme_base import job_pane_tools_icon_path
 from theme.theme_service import get_active_theme
+from utils import get_button_style
 
 MIN_CHAT_PANE_WIDTH = 250
 MIN_CHAT_CONTENT_HEIGHT = 80
@@ -256,6 +272,8 @@ class ChatPaneWidget(QWidget):
         self.main_window = main_window
         self._session = ChatSession(system_prompt=load_chat_system_prompt())
         self._preserve_across_sessions = is_preserve_chat_across_sessions()
+        self._copy_images_to_assistant = is_copy_images_to_assistant()
+        self._automatic_create = is_automatic_create()
         self._image_store = ChatImageStore(persistent=self._preserve_across_sessions)
         self._header_getter: Callable[[], QWidget | None] | None = None
         self._message_widgets: list[ChatMessageWidget] = []
@@ -270,6 +288,8 @@ class ChatPaneWidget(QWidget):
         install_chat_tab_key_filter(self)
         if self._preserve_across_sessions:
             self._restore_persisted_session()
+        if not self._copy_images_to_assistant:
+            self._clear_assistant_message_images(refresh_widgets=True)
         app = QApplication.instance()
         if app is not None and not getattr(self, "_chat_persist_quit_hooked", False):
             app.aboutToQuit.connect(self._persist_on_quit_if_enabled)
@@ -303,16 +323,34 @@ class ChatPaneWidget(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
+        self._unavailable_host = QWidget()
+        unavailable_layout = QVBoxLayout(self._unavailable_host)
+        unavailable_layout.setContentsMargins(16, 16, 16, 16)
+        unavailable_layout.setSpacing(12)
+        unavailable_layout.addStretch(1)
+
         self._unavailable_label = QLabel()
         self._unavailable_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._unavailable_label.setWordWrap(True)
-        self._unavailable_label.hide()
-        self._style_unavailable_label()
+        unavailable_layout.addWidget(self._unavailable_label)
+
+        self._unavailable_lmstudio_btn = QPushButton("LM Studio")
+        self._unavailable_lmstudio_btn.clicked.connect(self._on_open_lmstudio)
+        lmstudio_btn_row = QHBoxLayout()
+        lmstudio_btn_row.addStretch(1)
+        lmstudio_btn_row.addWidget(self._unavailable_lmstudio_btn)
+        lmstudio_btn_row.addStretch(1)
+        unavailable_layout.addLayout(lmstudio_btn_row)
+        unavailable_layout.addStretch(1)
+
+        self._unavailable_host.hide()
+        self._style_unavailable_panel()
 
         self._scroll = QScrollArea()
         self._scroll.setWidgetResizable(True)
         self._scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self._scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        self._scroll.setStyleSheet(th.sidebar_pane_scroll_area_stylesheet())
         apply_scroll_area_viewport_background(self._scroll)
 
         self._messages_host = QWidget()
@@ -338,7 +376,7 @@ class ChatPaneWidget(QWidget):
         )
         self.ensure_input_focus_policy()
 
-        layout.addWidget(self._unavailable_label, 1)
+        layout.addWidget(self._unavailable_host, 1)
         layout.addWidget(self._scroll, 1)
         layout.addWidget(self._prompt_input, 0)
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
@@ -346,12 +384,20 @@ class ChatPaneWidget(QWidget):
             lambda pos: show_chat_context_menu(self, self.mapToGlobal(pos))
         )
 
-    def _style_unavailable_label(self) -> None:
+    def _style_unavailable_panel(self) -> None:
         th = get_active_theme()
         self._unavailable_label.setStyleSheet(
-            f"color: {th.sidebar_text_color_hex}; font-size: 12px; padding: 16px;"
+            f"color: {th.sidebar_text_color_hex}; font-size: 12px;"
         )
         self._unavailable_label.setText(lmstudio_unavailable_message())
+        self._unavailable_lmstudio_btn.setStyleSheet(get_button_style())
+
+    def _on_open_lmstudio(self) -> None:
+        from browser_window.managers.lmstudio_launcher import (
+            open_lmstudio_or_show_install_help,
+        )
+
+        open_lmstudio_or_show_install_help(self)
 
     def on_pane_activated(self) -> None:
         """Called when the user shows the chat pane; check LM Studio once."""
@@ -368,12 +414,12 @@ class ChatPaneWidget(QWidget):
 
     def _show_unavailable_only(self, show: bool) -> None:
         if show:
-            self._style_unavailable_label()
-            self._unavailable_label.show()
+            self._style_unavailable_panel()
+            self._unavailable_host.show()
             self._scroll.hide()
             self._prompt_input.hide()
         else:
-            self._unavailable_label.hide()
+            self._unavailable_host.hide()
             self._scroll.show()
             self._prompt_input.show()
 
@@ -403,8 +449,9 @@ class ChatPaneWidget(QWidget):
         apply_sidebar_pane_background(self, pane_bg)
         apply_sidebar_pane_background(self._messages_host, pane_bg)
         apply_sidebar_pane_background(self._prompt_input, pane_bg)
+        self._scroll.setStyleSheet(th.sidebar_pane_scroll_area_stylesheet())
         apply_scroll_area_viewport_background(self._scroll)
-        self._style_unavailable_label()
+        self._style_unavailable_panel()
         for widget in self._message_widgets:
             widget.refresh_theme_styles()
         self._prompt_input.text_edit().setStyleSheet(
@@ -433,9 +480,29 @@ class ChatPaneWidget(QWidget):
         if not self._preserve_across_sessions:
             return
         if self._session.has_started():
-            save_chat_session_messages(self._session.messages)
+            messages = self._messages_for_persistence()
+            save_chat_session_messages(messages)
         else:
             clear_persisted_chat_files()
+
+    def _messages_for_persistence(self) -> list[ChatMessage]:
+        if self._copy_images_to_assistant:
+            return list(self._session.messages)
+        out: list[ChatMessage] = []
+        for msg in self._session.messages:
+            if msg.role == "assistant" and msg.image_paths:
+                copy = ChatMessage(
+                    role=msg.role,
+                    text=msg.text,
+                    message_id=msg.message_id,
+                    image_paths=[],
+                    source_image_paths=[],
+                    image_gen_auto=msg.image_gen_auto,
+                )
+                out.append(copy)
+            else:
+                out.append(msg)
+        return out
 
     def _persist_on_quit_if_enabled(self) -> None:
         self.persist_chat_for_next_session()
@@ -460,6 +527,48 @@ class ChatPaneWidget(QWidget):
         reset_image_store_session(self._image_store, persistent=False)
         if self._session.has_started():
             self._image_store.restage_message_images(self._session.messages)
+
+    def set_automatic_create(self, enabled: bool) -> None:
+        enabled = bool(enabled)
+        if enabled == self._automatic_create:
+            return
+        self._automatic_create = enabled
+        persist_automatic_create(enabled)
+
+    def set_copy_images_to_assistant(self, enabled: bool) -> None:
+        enabled = bool(enabled)
+        if enabled == self._copy_images_to_assistant:
+            return
+        self._copy_images_to_assistant = enabled
+        persist_copy_images_to_assistant(enabled)
+        if not enabled:
+            self._clear_assistant_message_images(refresh_widgets=True)
+            self._maybe_persist_session()
+
+    def _clear_assistant_message_images(self, *, refresh_widgets: bool) -> None:
+        for msg in self._session.messages:
+            if msg.role == "assistant":
+                msg.image_paths = []
+        if not refresh_widgets:
+            return
+        for msg, widget in zip(self._session.messages, self._message_widgets):
+            if msg.role == "assistant":
+                widget.update_message(msg)
+
+    def _apply_assistant_reference_images(
+        self,
+        message_id: str,
+        user_image_paths: list[str],
+    ) -> list[str]:
+        # Display only the preceding user bubble's attachments (no EXIF expansion).
+        paths = normalize_assistant_message_image_paths(user_image_paths)
+        idx = self._session.index_of(message_id)
+        if idx < 0:
+            return paths
+        self._session.messages[idx].image_paths = paths
+        if 0 <= idx < len(self._message_widgets):
+            self._message_widgets[idx].update_message(self._session.messages[idx])
+        return paths
 
     def _restore_persisted_session(self) -> None:
         messages = load_chat_session_messages()
@@ -612,7 +721,7 @@ class ChatPaneWidget(QWidget):
         if not self._lm_available_on_show and not self._chat_started:
             return
         text, image_paths, image_gen_auto = prepare_user_message_for_storage(
-            text, image_paths, self.main_window
+            text, image_paths, self.main_window, automatic_create=self._automatic_create
         )
         if not text and not image_paths:
             return
@@ -620,9 +729,13 @@ class ChatPaneWidget(QWidget):
         self._chat_started = True
         msg = ChatMessage(role="user", text=text, image_gen_auto=image_gen_auto)
         if image_paths:
+            sources = sources_for_new_attachments(image_paths)
             msg.image_paths = self._image_store.store_images(
                 image_paths,
                 message_id=msg.message_id,
+            )
+            msg.source_image_paths = align_source_image_paths(
+                msg.image_paths, sources
             )
         self._session.append(msg)
         self._append_message_widget(msg)
@@ -694,13 +807,24 @@ class ChatPaneWidget(QWidget):
         ]
         auto_image_gen_mode = None
         auto_image_gen_user_paths: list[str] = []
+        attach_assistant_sources = False
         for msg in reversed(history):
             if msg.role == "user":
-                auto_image_gen_mode = classify_user_message_image_gen_command(
+                auto_image_gen_mode = effective_image_gen_auto_mode(
                     msg.text,
                     has_user_images=bool(msg.image_paths),
+                    image_gen_auto=msg.image_gen_auto,
+                    automatic_create=self._automatic_create,
                 )
-                auto_image_gen_user_paths = list(msg.image_paths or [])
+                auto_image_gen_user_paths = paths_for_image_gen(msg)
+                attach_assistant_sources = user_message_wants_assistant_sources(
+                    msg.text,
+                    has_user_images=bool(msg.image_paths),
+                ) or (
+                    self._copy_images_to_assistant
+                    and auto_image_gen_mode == "edit"
+                    and bool(auto_image_gen_user_paths)
+                )
                 break
 
         def on_finished_with_auto_generate(
@@ -709,12 +833,18 @@ class ChatPaneWidget(QWidget):
             on_finished(final)
             if suppress_auto_image_gen:
                 return
+            edit_source_paths: list[str] = []
+            if attach_assistant_sources and auto_image_gen_user_paths:
+                edit_source_paths = self._apply_assistant_reference_images(
+                    placeholder.message_id,
+                    auto_image_gen_user_paths,
+                )
+                self._scroll_to_bottom()
             if auto_image_gen_mode == "create":
                 self._auto_create_from_text_if_available(final)
             elif auto_image_gen_mode == "edit":
-                self._auto_edit_from_text_if_available(
-                    final, auto_image_gen_user_paths
-                )
+                paths = list(auto_image_gen_user_paths)
+                self._auto_edit_from_text_if_available(final, paths)
 
         started = self._lm_service.submit(
             history,
@@ -750,23 +880,39 @@ class ChatPaneWidget(QWidget):
         image_gen_auto = msg.image_gen_auto
         if msg.role == "user":
             text, image_paths, image_gen_auto = prepare_user_message_for_storage(
-                text, image_paths, self.main_window
+                text,
+                image_paths,
+                self.main_window,
+                automatic_create=self._automatic_create,
             )
-        old_image_paths = list(msg.image_paths) if msg.role == "user" else []
+        old_image_paths = list(msg.image_paths or [])
+        old_source_paths = list(msg.source_image_paths) if msg.role == "user" else []
         old_text = msg.text
         msg.text = text
         if msg.role == "user":
             msg.image_gen_auto = image_gen_auto
         if msg.role == "user":
+            still_referenced = chat_paths_referenced_by_messages(
+                self._session.messages,
+                except_message_id=msg.message_id,
+            )
+            new_sources = sources_for_new_attachments(
+                image_paths,
+                old_stored_paths=old_image_paths,
+                old_source_paths=old_source_paths,
+            )
             msg.image_paths = self._image_store.replace_message_images(
                 msg.image_paths,
                 image_paths,
                 message_id=msg.message_id,
+                still_referenced=still_referenced,
             )
-        images_changed = (
-            msg.role == "user"
-            and sorted(old_image_paths) != sorted(msg.image_paths)
-        )
+            msg.source_image_paths = align_source_image_paths(
+                msg.image_paths, new_sources
+            )
+        elif msg.role == "assistant":
+            msg.image_paths = normalize_assistant_message_image_paths(image_paths)
+        images_changed = sorted(old_image_paths) != sorted(msg.image_paths or [])
         text_changed = msg.text != old_text
         for i, widget in enumerate(self._message_widgets):
             if widget.message_id() != message_id:
@@ -806,7 +952,13 @@ class ChatPaneWidget(QWidget):
         self._cancel_worker()
         while len(self._session.messages) > user_idx + 1:
             removed = self._session.messages.pop()
-            self._image_store.remove_message_images(removed.image_paths)
+            still_referenced = chat_paths_referenced_by_messages(
+                self._session.messages
+            )
+            self._image_store.remove_message_images(
+                removed.image_paths,
+                still_referenced=still_referenced,
+            )
         while len(self._message_widgets) > user_idx + 1:
             w = self._message_widgets.pop()
             self._messages_layout.removeWidget(w)
@@ -851,7 +1003,30 @@ class ChatPaneWidget(QWidget):
             source_image_paths=paths,
         )
 
-    def _on_create_from_text(self, text: str, option_held: bool = False) -> None:
+    def _on_create_from_text(
+        self,
+        text: str,
+        option_held: bool = False,
+        source_image_paths: list[str] | None = None,
+    ) -> None:
+        paths = [p for p in (source_image_paths or []) if p]
+        if paths and self._copy_images_to_assistant:
+            try:
+                from imagegen_plugins.image_gen_menu import (
+                    imagegen_edit_from_text_available,
+                    open_imagegen_edit_from_text_dialog,
+                )
+            except ImportError:
+                paths = []
+            else:
+                if imagegen_edit_from_text_available():
+                    open_imagegen_edit_from_text_dialog(
+                        self.main_window,
+                        user_comment=text,
+                        auto_generate=option_held,
+                        source_image_paths=paths,
+                    )
+                    return
         try:
             from imagegen_plugins.image_gen_menu import open_imagegen_create_from_text_dialog
         except ImportError:
@@ -870,7 +1045,13 @@ class ChatPaneWidget(QWidget):
             return
         removed = self._session.remove_at(idx)
         if removed is not None:
-            self._image_store.remove_message_images(removed.image_paths)
+            still_referenced = chat_paths_referenced_by_messages(
+                self._session.messages
+            )
+            self._image_store.remove_message_images(
+                removed.image_paths,
+                still_referenced=still_referenced,
+            )
         if 0 <= idx < len(self._message_widgets):
             w = self._message_widgets.pop(idx)
             self._messages_layout.removeWidget(w)

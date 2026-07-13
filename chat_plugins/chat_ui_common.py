@@ -36,6 +36,7 @@ from shiboken6 import isValid
 
 from chat_plugins.chat_image_store import MAX_CHAT_IMAGES
 from config import job_queue_cell_background_hex
+from theme.theme import macos_scrollbar_for_surface
 from theme.theme_base import asset_path
 from theme.theme_service import get_active_theme
 from utils import validate_image_file
@@ -71,6 +72,7 @@ class ChatImageThumb(QWidget):
         self._hover_remove = False
         self.setFixedSize(CHAT_THUMB_PX, CHAT_THUMB_PX)
         self.setMouseTracking(True)
+        self.setAttribute(Qt.WidgetAttribute.WA_Hover, True)
         self.setAcceptDrops(True)
         from PySide6.QtGui import QPainter, QPen
         from PySide6.QtCore import QRect
@@ -108,6 +110,14 @@ class ChatImageThumb(QWidget):
         self._hover_remove = False
         self.update()
         super().leaveEvent(event)
+
+    def mouseMoveEvent(self, event) -> None:
+        if self._effective_allow_remove():
+            hover = self.rect().contains(event.pos())
+            if hover != self._hover_remove:
+                self._hover_remove = hover
+                self.update()
+        super().mouseMoveEvent(event)
 
     def _remove_rect(self):
         if not self._effective_allow_remove():
@@ -274,8 +284,13 @@ class ChatImageThumbRow(QWidget):
         return list(self._paths)
 
     def set_image_paths(self, paths: list[str], *, allow_remove: bool = True) -> None:
+        new_paths = [os.path.abspath(p) for p in (paths or []) if p][:MAX_CHAT_IMAGES]
         self._allow_remove = allow_remove
-        self._paths = [os.path.abspath(p) for p in paths if p][:MAX_CHAT_IMAGES]
+        if new_paths == self._paths:
+            if self.effective_allow_remove():
+                self.refresh_hover_under_cursor()
+            return
+        self._paths = new_paths
         self._rebuild()
 
     def clear_images(self) -> None:
@@ -351,6 +366,8 @@ class ChatImageThumbRow(QWidget):
         self._apply_row_height(cols)
         self._emit_images_changed_if_needed()
         self._sync_open_tooltip()
+        if self.effective_allow_remove():
+            self.refresh_hover_under_cursor()
 
     def _sync_open_tooltip(self) -> None:
         if self._main_window is None or not self._paths:
@@ -445,14 +462,16 @@ def chat_assistant_message_stylesheet() -> str:
 
 def chat_prompt_edit_stylesheet() -> str:
     th = get_active_theme()
+    bg = th.sidebar_background_color_hex
     return f"""
-        QPlainTextEdit {{
-            background-color: {th.sidebar_background_color_hex};
+        QPlainTextEdit, QTextEdit {{
+            background-color: {bg};
             color: {th.dialog_text_color_hex};
             border: 1px solid {th.border_default_hex};
             border-radius: 6px;
             padding: 6px;
         }}
+        {macos_scrollbar_for_surface(th, bg)}
     """
 
 

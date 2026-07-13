@@ -25,16 +25,24 @@ _CHAT_TIPS_HTML = """
     <b>Triggers</b>
     <ul style="margin-top: 0; margin-bottom: 0; padding-left: 1.2em; list-style-type: none;">
       <li style="margin-bottom: 1em; list-style-type: none;">
-        <b>/image</b> trigger &mdash; 
-        Include <code>/image</code> (or <code>/im</code>) in your message to automatically generate images.<br>
-        Uses the values set in <b>Image &rarr; Create</b> or <b>Edit</b>, so set them up first.<br>
-        When the reply finishes, generation runs automatically.<br>
-        (Uses the <b>Edit</b> dialog if images are attached, <b>Create</b> dialog if not.)<br>
-        The <code>/image</code> token stays in chat history but is removed from the text sent to the model.
+        <b>/create</b>
+        <div style="margin-left: 1.2em;margin-bottom: 0.5em;">
+          Automatically create an image upon reply completion.  <code>/cr</code><br>
+          Uses the <b>Edit</b> dialog if images are attached, <b>Create</b> dialog if not.
+          <p><b>Note:</b> The context menu's <b>Automatic /create</b> option implies /create.
       </li>
       <li style="margin-bottom: 1em; list-style-type: none;">
-        <b>{}</b> trigger &mdash;<br>
-        Include <code>{}</code> in your message to attach the current browse/thumbnail selection (up to 4 images). This replaces any images already on the message.
+        <b>/source</b>
+        <div style="margin-left: 1.2em;margin-bottom: 0.5em;">
+          Copy source image references onto the assistant reply, without starting generation.<br>
+          Enable <b>Copy images to Assistant</b> in the chat menu to do the same for <code>/create</code> edit jobs.
+        </div>
+      </li>
+      <li style="margin-bottom: 1em; list-style-type: none;">
+        <b>{}</b>
+        <div style="margin-left: 1.2em;margin-bottom: 0.5em;">
+          Include <code>{}</code> in your message to attach the current browse/thumbnail selection (up to 4 images). This replaces any images already on the message.
+        </div>
       </li>
     </ul>
   </li>

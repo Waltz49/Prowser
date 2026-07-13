@@ -169,6 +169,17 @@ def is_lmstudio_sdk_available() -> bool:
 def unload_all_lmstudio_models() -> None:
     """Unload every LLM currently loaded in the LM Studio server (frees RAM for image models)."""
     try:
+        from chat_plugins.chat_lmstudio_activity import is_chat_lmstudio_prediction_active
+
+        if is_chat_lmstudio_prediction_active():
+            print(
+                "[lmstudio] skipping model unload while chat prediction is active",
+                flush=True,
+            )
+            return
+    except ImportError:
+        pass
+    try:
         import lmstudio as lms
     except ImportError:
         return

@@ -12,6 +12,7 @@ from thumbnails.thumbnail_constants import CHAT_REJECTED_RESPONSE_PHRASES
 
 from chat_plugins.chat_session import ChatMessage
 from chat_plugins.chat_image_gen_trigger import strip_image_gen_commands_from_user_message
+from chat_plugins.chat_image_paths import paths_for_vision_model
 from chat_plugins.chat_selection_image_trigger import strip_selection_image_trigger
 
 DEFAULT_CHAT_SYSTEM_PROMPT = CHAT_DEFAULTS["chat_system_prompt"]
@@ -121,7 +122,7 @@ def _build_chat(
     for msg in messages:
         if msg.role == "user":
             handles = []
-            for path in msg.image_paths:
+            for path in paths_for_vision_model(msg):
                 try:
                     handles.append(client.files.prepare_image(path))
                 except Exception as e:

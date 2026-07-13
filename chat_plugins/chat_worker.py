@@ -11,6 +11,7 @@ from chat_plugins.chat_lmstudio import (
     finalize_chat_response,
     stream_chat_response,
 )
+from chat_plugins.chat_lmstudio_activity import set_chat_lmstudio_prediction_active
 from chat_plugins.chat_session import ChatMessage
 
 
@@ -102,6 +103,7 @@ class ChatLmStudioService(QObject):
 
     def __init__(self) -> None:
         super().__init__()
+        set_chat_lmstudio_prediction_active(False)
         self._thread = QThread(self)
         self._worker = _ChatLmStudioWorker()
         self._worker.moveToThread(self._thread)
@@ -160,6 +162,7 @@ class ChatLmStudioService(QObject):
         if self._busy:
             return False
         self._busy = True
+        set_chat_lmstudio_prediction_active(True)
 
         bridge = _RequestBridge(self)
         self._active_bridge = bridge
@@ -167,6 +170,7 @@ class ChatLmStudioService(QObject):
 
         def _release() -> None:
             self._busy = False
+            set_chat_lmstudio_prediction_active(False)
             self._disconnect_request(bridge, handlers)
             if self._active_bridge is bridge:
                 self._active_bridge = None

@@ -17,6 +17,7 @@ class ChatMessage:
     text: str
     message_id: str = field(default_factory=lambda: uuid.uuid4().hex)
     image_paths: list[str] = field(default_factory=list)
+    source_image_paths: list[str] = field(default_factory=list)
     image_gen_auto: Optional[ImageGenAutoMode] = None
 
 

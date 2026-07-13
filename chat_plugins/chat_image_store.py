@@ -126,24 +126,35 @@ class ChatImageStore:
         new_source_paths: list[str],
         *,
         message_id: str,
+        still_referenced: set[str] | None = None,
     ) -> list[str]:
         """Update stored images for a message, removing files no longer referenced."""
         kept = self.store_images(new_source_paths, message_id=message_id)
         kept_set = set(kept)
         for path in old_paths:
             if path not in kept_set:
-                self.remove_message_images([path])
+                self.remove_message_images(
+                    [path], still_referenced=still_referenced
+                )
         return kept
 
-    def remove_message_images(self, image_paths: list[str]) -> None:
+    def remove_message_images(
+        self,
+        image_paths: list[str],
+        *,
+        still_referenced: set[str] | None = None,
+    ) -> None:
         chat_root = os.path.abspath(
             os.path.join(os.path.abspath(self._session_dir), os.pardir)
         )
+        keep = still_referenced or set()
         for path in image_paths:
             if not path:
                 continue
             try:
                 ap = os.path.abspath(path)
+                if ap in keep:
+                    continue
                 if ap.startswith(chat_root + os.sep) and os.path.isfile(ap):
                     os.unlink(ap)
             except OSError:
@@ -151,10 +162,16 @@ class ChatImageStore:
 
     def restage_message_images(self, messages) -> None:
         """Copy message images into the current session directory and update paths."""
+        from chat_plugins.chat_image_paths import align_source_image_paths
+
         for msg in messages:
             if msg.role != "user" or not msg.image_paths:
                 continue
+            sources = list(msg.source_image_paths or msg.image_paths)
             msg.image_paths = self.store_images(
                 msg.image_paths,
                 message_id=msg.message_id,
+            )
+            msg.source_image_paths = align_source_image_paths(
+                msg.image_paths, sources
             )

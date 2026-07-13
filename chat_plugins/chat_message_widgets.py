@@ -97,7 +97,7 @@ class ChatMessageWidget(QWidget):
     edit_ended = Signal()
     redo_requested = Signal(str)
     delete_requested = Signal(str)
-    create_from_text_requested = Signal(str, bool)
+    create_from_text_requested = Signal(str, bool, list)
     favorite_requested = Signal(str)
     stop_requested = Signal()
 
@@ -141,20 +141,16 @@ class ChatMessageWidget(QWidget):
         bubble_layout.setContentsMargins(8, 8, 8, 8)
         bubble_layout.setSpacing(6)
 
-        if message.role == "user":
+        self._thumb_row = None
+        if message.role in ("user", "assistant"):
             self._thumb_row = ChatImageThumbRow(
                 self._bubble, compact_row=True, main_window=main_window
             )
             self._thumb_row._allow_remove_when = lambda: self._editing
-            if message.image_paths:
-                self._thumb_row.set_image_paths(
-                    message.image_paths, allow_remove=False
-                )
-            else:
-                self._thumb_row.hide()
             bubble_layout.addWidget(self._thumb_row)
             self._bubble.setAcceptDrops(True)
             self._bubble.installEventFilter(self)
+        self._sync_image_thumb_row()
 
         self._body_label = _ChatMessageBodyLabel(message.text, self._bubble)
         self._body_label.edit_requested.connect(self._start_edit)
@@ -170,11 +166,12 @@ class ChatMessageWidget(QWidget):
             f"color: {th.dialog_text_color_hex}; background-color: transparent;"
         )
         bubble_layout.addWidget(self._body_label)
-        if message.role == "user":
+        if message.role in ("user", "assistant"):
             self._body_label.setAcceptDrops(True)
             self._body_label.installEventFilter(self)
             if self._thumb_row is not None:
                 self._thumb_row.installEventFilter(self)
+                self._raise_image_thumb_row()
 
         self._edit_input = QPlainTextEdit(self._bubble)
         self._edit_input.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
@@ -262,10 +259,32 @@ class ChatMessageWidget(QWidget):
                 return paths
         return list(self._message.image_paths or [])
 
+    def _raise_image_thumb_row(self) -> None:
+        if self._thumb_row is None:
+            return
+        self._thumb_row.raise_()
+        if self._body_label is not None:
+            self._body_label.stackUnder(self._thumb_row)
+
+    def _sync_image_thumb_row(self) -> None:
+        if self._thumb_row is None:
+            return
+        paths = list(self._message.image_paths or [])
+        if paths:
+            allow_remove = self._message.role in ("user", "assistant") and self._editing
+            self._thumb_row.set_image_paths(paths, allow_remove=allow_remove)
+            self._thumb_row.show()
+            self._raise_image_thumb_row()
+        else:
+            self._thumb_row.clear_images()
+            self._thumb_row.hide()
+
     def is_editing(self) -> bool:
         return self._editing
 
-    def _user_drop_targets(self) -> tuple[QWidget, ...]:
+    def _image_drop_targets(self) -> tuple[QWidget, ...]:
+        if self._message.role not in ("user", "assistant"):
+            return ()
         targets: list[QWidget] = []
         if self._bubble is not None:
             targets.append(self._bubble)
@@ -279,8 +298,8 @@ class ChatMessageWidget(QWidget):
         """Ignore the mouse release that completes a drag-and-drop onto this message."""
         self._ignore_next_click_away_release = True
 
-    def _handle_user_image_drop(self, paths: list[str]) -> bool:
-        if self._message.role != "user" or not paths:
+    def _handle_image_drop(self, paths: list[str]) -> bool:
+        if self._message.role not in ("user", "assistant") or not paths:
             return False
         self._arm_drop_click_away_suppression()
         if not self._editing:
@@ -297,7 +316,7 @@ class ChatMessageWidget(QWidget):
     def _edit_cell_global_rects(self) -> list[QRect]:
         rects: list[QRect] = []
         if (
-            self._message.role == "user"
+            self._message.role in ("user", "assistant")
             and self._editing
             and self._bubble is not None
         ):
@@ -322,7 +341,7 @@ class ChatMessageWidget(QWidget):
         return False
 
     def eventFilter(self, watched: QObject, event: QEvent) -> bool:
-        if watched in self._user_drop_targets():
+        if watched in self._image_drop_targets():
             if event.type() in (
                 QEvent.Type.DragEnter,
                 QEvent.Type.DragMove,
@@ -338,7 +357,7 @@ class ChatMessageWidget(QWidget):
                 drop_event = event
                 if isinstance(drop_event, QDropEvent):
                     paths = _local_paths_from_mime(drop_event.mimeData())
-                    if paths and self._handle_user_image_drop(paths):
+                    if paths and self._handle_image_drop(paths):
                         drop_event.acceptProposedAction()
                         return True
                     drop_event.ignore()
@@ -424,7 +443,12 @@ class ChatMessageWidget(QWidget):
         text = (self._message.text or "").strip()
         if not text:
             return
-        self.create_from_text_requested.emit(text, option_held)
+        source_paths = (
+            self.displayed_image_paths()
+            if self._message.role == "assistant"
+            else []
+        )
+        self.create_from_text_requested.emit(text, option_held, source_paths)
 
     def _sync_from_text_button(self) -> None:
         if self._from_text_btn is None:
@@ -435,7 +459,9 @@ class ChatMessageWidget(QWidget):
     def update_message(self, message: ChatMessage) -> None:
         self._message = message
         if self._body_label is not None:
-            self._body_label.setText(message.text)
+            self._body_label.setText(message.text or "")
+        if not self._editing:
+            self._sync_image_thumb_row()
         self._sync_from_text_button()
 
     def _start_edit(self) -> None:
@@ -453,11 +479,11 @@ class ChatMessageWidget(QWidget):
         self._edit_btn.setEnabled(False)
         if self._body_label is not None:
             self._body_label.hide()
-        if self._thumb_row is not None and self._message.role == "user":
+        if self._thumb_row is not None and self._message.role in ("user", "assistant"):
             self._thumb_row.set_image_paths(
-                self._message.image_paths, allow_remove=True
+                list(self._message.image_paths or []), allow_remove=True
             )
-            self._thumb_row.refresh_hover_under_cursor()
+            self._raise_image_thumb_row()
         self._edit_input.setPlainText(self._message.text or "")
         self._edit_input.show()
         self._attach_click_away_filter()
@@ -471,7 +497,8 @@ class ChatMessageWidget(QWidget):
             text = self._edit_input.toPlainText().strip()
             images = (
                 self._thumb_row.image_paths()
-                if self._thumb_row is not None and self._message.role == "user"
+                if self._thumb_row is not None
+                and self._message.role in ("user", "assistant")
                 else []
             )
             self.edit_saved.emit(self._message.message_id, text, images)
@@ -486,24 +513,19 @@ class ChatMessageWidget(QWidget):
         self._detach_click_away_filter()
         if self._edit_input is not None:
             self._edit_input.hide()
-        if self._thumb_row is not None:
-            if self._message.image_paths:
-                self._thumb_row.set_image_paths(
-                    self._message.image_paths, allow_remove=False
-                )
-            else:
-                self._thumb_row.clear_images()
-                self._thumb_row.hide()
-        if self._body_label is not None:
-            self._body_label.show()
         self._editing = False
+        if self._thumb_row is not None:
+            self._sync_image_thumb_row()
+        if self._body_label is not None:
+            self._body_label.setText(self._message.text or "")
+            self._body_label.show()
+        self._edit_btn.setEnabled(True)
         self.edit_ended.emit()
 
     def _cancel_edit(self) -> None:
         self._suppress_edit_focus_out = True
         try:
             self._teardown_edit_ui()
-            self._edit_btn.setEnabled(True)
         finally:
             self._suppress_edit_focus_out = False
 
