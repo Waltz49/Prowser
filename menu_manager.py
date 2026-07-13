@@ -1534,7 +1534,7 @@ class MenuManager:
             )
             return
         # +F: GNU less forward-forever / follow appended data (like tail -f). -S: chop long lines.
-        cmd = f"less -S +F {shlex.quote(path)}; exit"
+        cmd = f"command less +F {shlex.quote(path)}; exit"
         run_terminal_script(cmd)
 
     def _debug_random_images(self):

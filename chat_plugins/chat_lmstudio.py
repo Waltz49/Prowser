@@ -10,6 +10,7 @@ from config import CAPTION_DEFAULTS, CHAT_DEFAULTS, get_config
 from imagegen_plugins.ai_prompt_exit import apply_text_ai_exit
 from thumbnails.thumbnail_constants import CHAT_REJECTED_RESPONSE_PHRASES
 
+from chat_plugins.chat_debug_log import log_chat_llm_input
 from chat_plugins.chat_session import ChatMessage
 from chat_plugins.chat_image_gen_trigger import strip_image_gen_commands_from_user_message
 from chat_plugins.chat_image_paths import paths_for_vision_model
@@ -19,12 +20,15 @@ DEFAULT_CHAT_SYSTEM_PROMPT = CHAT_DEFAULTS["chat_system_prompt"]
 CHAT_REJECTION_MAX_RETRIES = 5
 
 
-def chat_response_contains_rejected_phrase(text: str) -> bool:
-    """True when *text* contains any apology/refusal phrase (case-insensitive)."""
+def chat_response_contains_rejected_phrase(text: str) -> str | None:
+    """Return the matched apology/refusal phrase, or None (case-insensitive)."""
     if not text:
-        return False
+        return None
     lower = text.lower()
-    return any(phrase.lower() in lower for phrase in CHAT_REJECTED_RESPONSE_PHRASES)
+    for phrase in CHAT_REJECTED_RESPONSE_PHRASES:
+        if phrase.lower() in lower:
+            return phrase
+    return None
 
 
 def load_chat_system_prompt() -> str:
@@ -107,6 +111,23 @@ def _require_vision_if_needed(model, messages: Iterable[ChatMessage]) -> None:
     _require_vision_capable_model(model)
 
 
+def _messages_as_sent_to_llm(messages: list[ChatMessage]) -> list[dict]:
+    out: list[dict] = []
+    for msg in messages:
+        if msg.role == "user":
+            user_text = strip_image_gen_commands_from_user_message(
+                strip_selection_image_trigger(msg.text)
+            )
+            entry: dict = {"role": "user", "text": user_text}
+            vision_paths = paths_for_vision_model(msg)
+            if vision_paths:
+                entry["image_paths"] = vision_paths
+            out.append(entry)
+        else:
+            out.append({"role": "assistant", "text": msg.text})
+    return out
+
+
 def _build_chat(
     client,
     messages: list[ChatMessage],
@@ -180,8 +201,15 @@ def stream_chat_response(
             ) from e
 
         _require_vision_if_needed(model, messages)
+        prompt_text = system_prompt if system_prompt is not None else cfg["system_prompt"]
+        prompt_text = apply_text_ai_exit(prompt_text)
         chat = _build_chat(client, messages, system_prompt=system_prompt)
         temperature = cfg["temperature"]
+        log_chat_llm_input(
+            _messages_as_sent_to_llm(messages),
+            system_prompt=prompt_text,
+            temperature=temperature,
+        )
         try:
             prediction_stream = model.respond_stream(
                 chat,

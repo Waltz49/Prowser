@@ -484,6 +484,7 @@ class ChatPaneWidget(QWidget):
             save_chat_session_messages(messages)
         else:
             clear_persisted_chat_files()
+            reset_image_store_session(self._image_store, persistent=True)
 
     def _messages_for_persistence(self) -> list[ChatMessage]:
         if self._copy_images_to_assistant:

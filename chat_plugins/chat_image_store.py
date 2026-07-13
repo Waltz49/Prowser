@@ -101,6 +101,7 @@ class ChatImageStore:
     ) -> list[str]:
         """Copy up to MAX_CHAT_IMAGES valid images into the session directory."""
         stored: list[str] = []
+        os.makedirs(self._session_dir, mode=0o700, exist_ok=True)
         session_root = os.path.abspath(self._session_dir)
         for idx, src in enumerate(source_paths[:MAX_CHAT_IMAGES]):
             if not src or not os.path.isfile(src):

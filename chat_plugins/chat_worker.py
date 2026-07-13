@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from PySide6.QtCore import QObject, QThread, Signal, Qt
 
+from chat_plugins.chat_debug_log import log_chat_llm_output
 from chat_plugins.chat_lmstudio import (
     CHAT_REJECTION_MAX_RETRIES,
     chat_response_contains_rejected_phrase,
@@ -61,11 +62,15 @@ class _ChatLmStudioWorker(QObject):
                         self.cancelled.emit()
                         return
                     accumulated += piece
-                    if chat_response_contains_rejected_phrase(accumulated):
+                    rejected_phrase = chat_response_contains_rejected_phrase(
+                        accumulated
+                    )
+                    if rejected_phrase:
                         if attempt < CHAT_REJECTION_MAX_RETRIES:
                             print(
-                                f"[chat] rejected phrase in attempt {attempt}/"
-                                f"{CHAT_REJECTION_MAX_RETRIES}, restarting"
+                                f"[chat] rejected phrase {rejected_phrase!r} in "
+                                f"attempt {attempt}/{CHAT_REJECTION_MAX_RETRIES}, "
+                                "restarting"
                             )
                             self.restarted.emit()
                             retry_stream = True
@@ -81,6 +86,7 @@ class _ChatLmStudioWorker(QObject):
                 if not final:
                     self.error.emit("The model returned an empty response.")
                     return
+                log_chat_llm_output(final)
                 self.finished.emit(final, suppress_auto_image_gen)
                 return
         except Exception as e:
