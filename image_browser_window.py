@@ -1695,10 +1695,13 @@ class ImageBrowserWindow(QMainWindow):
             self._sync_right_sidebar_chrome()
             
             # Set visibility states (handlers are disconnected so they won't override sizes)
+            # Preserve chat visibility: set_tree/preview_visible hide chat when shown, which
+            # would mutate self.chat_visible before we restore the saved chat pane state.
+            desired_chat_visible = self.chat_visible
             self.combined_sidebar.set_tree_visible(self.file_tree_visible)
             self.combined_sidebar.set_preview_visible(self.preview_visible)
             if hasattr(self.combined_sidebar, "set_chat_visible"):
-                self.combined_sidebar.set_chat_visible(self.chat_visible)
+                self.combined_sidebar.set_chat_visible(desired_chat_visible)
             self.right_sidebar.set_jobs_visible(self.jobs_visible)
             self.right_sidebar_visible = (
                 self.right_sidebar.is_information_visible()
