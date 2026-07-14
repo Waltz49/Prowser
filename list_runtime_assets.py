@@ -39,6 +39,7 @@ _APP_PACKAGES = frozenset(
         "thumbnails",
         "settings",
         "imagegen_plugins",
+        "chat_plugins",
     }
 )
 
@@ -165,6 +166,15 @@ def collect_runtime_asset_names(*, from_main: bool = False) -> list[str]:
     return _asset_names_from_py_files(py_files)
 
 
+def reachable_root_py_filenames() -> list[str]:
+    """Root-level .py modules imported (transitively) from main.py."""
+    return sorted(
+        p.name
+        for p in _reachable_py_files_from_main()
+        if p.parent == _REPO_ROOT and p.suffix == ".py"
+    )
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -173,12 +183,21 @@ def main() -> int:
         help="Only scan Python reachable from main.py (omit dev-only modules).",
     )
     parser.add_argument(
+        "--reachable-root-py",
+        action="store_true",
+        help="Print root-level .py filenames reachable from main.py (one per line).",
+    )
+    parser.add_argument(
         "--format",
         choices=("paths", "pyinstaller"),
         default="paths",
         help="paths: assets/<name> per line; pyinstaller: Analysis datas tuples",
     )
     args = parser.parse_args()
+    if args.reachable_root_py:
+        for name in reachable_root_py_filenames():
+            print(name)
+        return 0
     names = collect_runtime_asset_names(from_main=args.from_main)
     if args.format == "paths":
         for name in names:

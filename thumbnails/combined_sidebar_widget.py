@@ -481,6 +481,7 @@ class CombinedSidebarWidget(QWidget):
         
         # Create vertical splitter
         self.splitter = QSplitter(Qt.Vertical)
+        self.splitter.setFocusPolicy(Qt.NoFocus)
         self.splitter.setHandleWidth(get_active_theme().view_border_width_px)
         self._apply_splitter_theme_styles()
         
@@ -755,8 +756,21 @@ class CombinedSidebarWidget(QWidget):
     def _pane_visibility(self) -> list[bool]:
         return self._display_pane_visibility()
 
+    def _ensure_parent_visible_before_pane_layout(self) -> None:
+        """Show the combined sidebar before inner splitter panes update (macOS Qt warning)."""
+        if self.isVisible() or not any(self._logical_pane_visibility()):
+            return
+        mw = getattr(self, "main_window", None)
+        if mw and getattr(mw, "current_view_mode", None) == "browse":
+            if hasattr(mw, "_browse_shows_chat_sidebar") and mw._browse_shows_chat_sidebar():
+                self.show()
+            return
+        self.show()
+
     def _apply_display_sections(self) -> None:
         disp = self._display_pane_visibility()
+        if any(disp):
+            self._ensure_parent_visible_before_pane_layout()
         if getattr(self, "tree_section", None):
             self.tree_section.setVisible(disp[0])
         if getattr(self, "preview_section", None):
@@ -1141,10 +1155,7 @@ class CombinedSidebarWidget(QWidget):
             return
         mw = getattr(self, "main_window", None)
         if mw and getattr(mw, "current_view_mode", None) == "browse":
-            if hasattr(mw, "_browse_shows_chat_sidebar") and mw._browse_shows_chat_sidebar():
-                self.show()
-            else:
-                self.hide()
+            # Browse show/hide is owned by ImageBrowserWindow (splitter width + show/hide).
             return
         self.show()
             
@@ -1218,7 +1229,8 @@ class CombinedSidebarWidget(QWidget):
                 self._notify_cover_changed()
         elif visible and self.chat_widget:
             self._enter_chat_cover()
-            self.chat_widget.show()
+            if self.isVisible():
+                self.chat_widget.show()
             if hasattr(self.chat_widget, "on_pane_activated"):
                 self.chat_widget.on_pane_activated()
             if hasattr(self.chat_widget, "ensure_input_focus_policy"):

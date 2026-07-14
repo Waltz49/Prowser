@@ -47,21 +47,24 @@ FEATURE_PACKAGES=(
     thumbnails
     settings
     imagegen_plugins
+    chat_plugins
     pyinstaller_hooks
 )
 
 # Root-level Python files that are dev-only — not shipped in source copies.
+# Keep in sync with reachable modules from main.py (see list_runtime_assets.py).
 ROOT_PY_EXCLUDE=(
     block_test.py
+    create_sample_images.py
     defsize.py
     fast_test.py
-    gemma4_voice_vision_demo.py
     generate_minimal_requirements.py
     generate_minimal_requirements_questionable.py
     hfmodels.py
     jit_test.py
     random_images_launcher.py
     send_one_file.py
+    text_exit.py
 )
 
 # Required after copy (paths relative to target).
@@ -70,10 +73,12 @@ REQUIRED_PATHS=(
     image_browser_window.py
     event_bus.py
     sorting_manager.py
+    instance_lock.py
     minimal_requirements.txt
     setup.sh
     run.sh
     browser_window/__init__.py
+    chat_plugins/__init__.py
 )
 
 # Required for ./pyInstallerBuild.sh (including --min minimal bundles).
@@ -205,6 +210,12 @@ list_runtime_asset_paths() {
     "$python_cmd" "$SCRIPT_DIR/list_runtime_assets.py" --from-main
 }
 
+list_reachable_root_py() {
+    local python_cmd
+    python_cmd="$(resolve_python_cmd)"
+    "$python_cmd" "$SCRIPT_DIR/list_runtime_assets.py" --reachable-root-py
+}
+
 verify_copy() {
     print_info "Verifying copied project..."
     local missing=0
@@ -229,6 +240,15 @@ verify_copy() {
             missing=1
         fi
     done < <(list_runtime_asset_paths)
+
+    local py_name
+    while IFS= read -r py_name; do
+        [ -n "$py_name" ] || continue
+        if [ ! -f "$TARGET_DIR/$py_name" ]; then
+            print_error "Missing runtime module (reachable from main.py): $py_name"
+            missing=1
+        fi
+    done < <(list_reachable_root_py)
 
     if [ "$missing" -ne 0 ]; then
         return 1

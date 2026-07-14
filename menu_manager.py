@@ -765,7 +765,7 @@ class MenuManager:
         self.main_window.toggle_chrome_action.setText(
             'Hide Panes' if chrome_visible else 'Show Panes'
         )
-        self.main_window.toggle_chrome_action.setShortcuts([QKeySequence('F4'), QKeySequence("'")])
+        self.main_window.toggle_chrome_action.setShortcuts([QKeySequence('F4'), QKeySequence("."),QKeySequence('Ctrl+.')])
    
         self.main_window.toggle_chrome_action.triggered.connect(self.main_window.toggle_chrome)
         view_menu.addAction(self.main_window.toggle_chrome_action)

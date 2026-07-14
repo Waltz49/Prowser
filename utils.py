@@ -546,13 +546,17 @@ def activate_application_window(window: Optional[QWidget], *, force: Optional[bo
 
     activate_macos_application(force=force)
     try:
-        if not window.isVisible():
-            window.show()
-        window.raise_()
-        window.activateWindow()
-        wh = window.windowHandle()
-        if wh is not None:
-            wh.requestActivate()
+        top = window.window() if window is not None else None
+        if top is None:
+            return
+        if not top.isVisible():
+            top.show()
+        top.raise_()
+        top.activateWindow()
+        if top.isWindow():
+            wh = top.windowHandle()
+            if wh is not None:
+                wh.requestActivate()
     except Exception:
         pass
     if force:

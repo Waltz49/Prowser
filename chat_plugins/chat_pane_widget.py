@@ -371,6 +371,7 @@ class ChatPaneWidget(QWidget):
 
         self._prompt_input = ChatPromptInput(self, main_window=self.main_window)
         self._prompt_input.submit_requested.connect(self._on_user_submit)
+        self._prompt_input.set_automatic_create_active(self._automatic_create)
         apply_sidebar_pane_background(
             self._prompt_input, th.sidebar_background_color_hex
         )
@@ -454,11 +455,7 @@ class ChatPaneWidget(QWidget):
         self._style_unavailable_panel()
         for widget in self._message_widgets:
             widget.refresh_theme_styles()
-        self._prompt_input.text_edit().setStyleSheet(
-            __import__(
-                "chat_plugins.chat_ui_common", fromlist=["chat_prompt_edit_stylesheet"]
-            ).chat_prompt_edit_stylesheet()
-        )
+        self._prompt_input.refresh_theme_styles()
 
     def discard_all_data(self) -> None:
         """Remove in-memory history, temp images, and chat API log entries."""
@@ -535,6 +532,7 @@ class ChatPaneWidget(QWidget):
             return
         self._automatic_create = enabled
         persist_automatic_create(enabled)
+        self._prompt_input.set_automatic_create_active(enabled)
 
     def set_copy_images_to_assistant(self, enabled: bool) -> None:
         enabled = bool(enabled)

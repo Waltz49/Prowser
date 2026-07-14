@@ -5,12 +5,13 @@ from __future__ import annotations
 
 from PySide6.QtCore import QEvent, Qt, Signal
 from PySide6.QtGui import QDragEnterEvent, QDragMoveEvent, QDropEvent, QTextBlock, QTextLayout, QTextOption
-from PySide6.QtWidgets import QPlainTextEdit, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QLabel, QPlainTextEdit, QVBoxLayout, QWidget
 
 from chat_plugins.chat_ui_common import (
     ChatImageThumbRow,
     _local_paths_from_mime,
     chat_prompt_edit_stylesheet,
+    chat_peek_zone_note_stylesheet,
 )
 from browser_window.managers.window_event_filters import CURSOR_PEEK_ZONE_HEIGHT
 
@@ -173,7 +174,7 @@ class ChatPromptInput(QWidget):
     def __init__(self, parent=None, *, main_window=None):
         super().__init__(parent)
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(6, 4, 6, CHAT_PROMPT_BOTTOM_PADDING_PX)
+        layout.setContentsMargins(6, 4, 6, CHAT_PROMPT_BOTTOM_PADDING_EXTRA_PX)
         layout.setSpacing(4)
         self._thumb_row = ChatImageThumbRow(
             self, compact_row=True, main_window=main_window
@@ -186,6 +187,15 @@ class ChatPromptInput(QWidget):
         self._edit.images_dropped.connect(self._thumb_row.add_dropped_paths)
         self._thumb_row.images_changed.connect(self.images_changed.emit)
         layout.addWidget(self._edit)
+        self._create_indicator = QLabel(self)
+        self._create_indicator.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self._create_indicator.setFixedHeight(CURSOR_PEEK_ZONE_HEIGHT)
+        self._create_indicator.setAlignment(
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+        )
+        layout.addWidget(self._create_indicator)
+        self._automatic_create_active = False
+        self._style_create_indicator()
 
     def set_main_window(self, main_window) -> None:
         self._thumb_row.set_main_window(main_window)
@@ -205,6 +215,21 @@ class ChatPromptInput(QWidget):
     def clear_content(self) -> None:
         self._edit.clear()
         self._thumb_row.clear_images()
+
+    def set_automatic_create_active(self, active: bool) -> None:
+        self._automatic_create_active = bool(active)
+        state = "active" if self._automatic_create_active else "inactive"
+        self._create_indicator.setText(f"/create : {state}")
+        self._style_create_indicator()
+
+    def refresh_theme_styles(self) -> None:
+        self._edit.setStyleSheet(chat_prompt_edit_stylesheet())
+        self._style_create_indicator()
+
+    def _style_create_indicator(self) -> None:
+        self._create_indicator.setStyleSheet(
+            chat_peek_zone_note_stylesheet(active=self._automatic_create_active)
+        )
 
     def _on_submit(self) -> None:
         text = self._edit.toPlainText().strip()
