@@ -9,7 +9,6 @@ import fnmatch
 import hashlib
 import os
 import random
-import shlex
 import sys
 import traceback
 from typing import Any, Dict, List, Optional
@@ -43,7 +42,6 @@ from theme.theme_service import get_active_theme
 from event_bus import SELECTION_CHANGED, DIRECTORY_LOADED, FILE_OPERATION_COMPLETE
 from cache.cache_prepopulator import prepopulate_cache
 from files.external_editor import edit_current_image_with_editor
-from macos_process import run_terminal_script
 from config import get_config
 from files.file_tree_handler import _get_excluded_paths, _is_excluded_path
 from thumbnails.thumbnail_constants import RED, RESET, SKIPPED_PATTERNS, get_image_extensions
@@ -1522,8 +1520,9 @@ class MenuManager:
         run_list_models_window(self.main_window)
 
     def _debug_view_print_log(self):
-        """Open Terminal with less on the print() log (stdout redirect file)."""
+        """Open the in-app live print() log viewer."""
         import print_log_redirect
+        from print_log_dialog import show_print_log_dialog
 
         path = print_log_redirect.PRINT_LOG_FILE_PATH
         if not path:
@@ -1533,9 +1532,7 @@ class MenuManager:
                 "Print log path is not available.",
             )
             return
-        # +F: GNU less forward-forever / follow appended data (like tail -f). -S: chop long lines.
-        cmd = f"command less +F {shlex.quote(path)}; exit"
-        run_terminal_script(cmd)
+        show_print_log_dialog(self.main_window, path)
 
     def _debug_random_images(self):
         """Handle Tools > Debug > Random Images - load 200 random images from recent dirs"""

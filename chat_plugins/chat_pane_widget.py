@@ -814,7 +814,6 @@ class ChatPaneWidget(QWidget):
                 auto_image_gen_mode = effective_image_gen_auto_mode(
                     msg.text,
                     has_user_images=bool(msg.image_paths),
-                    image_gen_auto=msg.image_gen_auto,
                     automatic_create=self._automatic_create,
                 )
                 auto_image_gen_user_paths = paths_for_image_gen(msg)

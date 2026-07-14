@@ -71,6 +71,26 @@ def write_print_log_file(text: str) -> None:
             log_file.flush()
 
 
+def clear_print_log_file() -> None:
+    """Truncate the shared print log file and reset any active stdout tee handle."""
+    path = PRINT_LOG_FILE_PATH or session_print_log_path()
+    with _print_log_lock:
+        out = sys.stdout
+        if isinstance(out, _StdoutToPrintLog) and out._path == path:
+            try:
+                out._file.close()
+            except OSError:
+                pass
+            open(path, "w").close()
+            out._file = open(path, "a", buffering=1)
+        else:
+            open(path, "w").close()
+        try:
+            os.chmod(path, 0o600)
+        except OSError:
+            pass
+
+
 def session_print_log_path() -> str:
     return os.path.join(tempfile.gettempdir(), f'image_browser_print_{os.getuid()}.log')
 

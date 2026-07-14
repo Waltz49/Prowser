@@ -82,12 +82,9 @@ def effective_image_gen_auto_mode(
     text: str,
     *,
     has_user_images: bool,
-    image_gen_auto: Optional[ImageGenChatCommand] = None,
     automatic_create: bool = False,
 ) -> Optional[ImageGenChatCommand]:
-    """Resolve auto image-gen mode from stored intent, setting, or slash commands."""
-    if image_gen_auto is not None:
-        return image_gen_auto
+    """Resolve auto image-gen mode from the live setting or explicit slash commands."""
     if automatic_create:
         return "edit" if has_user_images else "create"
     return classify_user_message_image_gen_command(
