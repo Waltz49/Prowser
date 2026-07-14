@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from imagegen_plugins.active_job_strip_widget import ActiveJobStripWidget
 from imagegen_plugins.image_gen_controller import get_imagegen_controller
 from imagegen_plugins.job_queue_common import (
     _ACTION_COL_WIDTH,
@@ -36,17 +37,9 @@ from imagegen_plugins.job_prompt_tooltip import (
     install_delayed_prompt_tooltip,
     update_delayed_prompt_tooltip,
 )
-from imagegen_plugins.model_task_status_info import (
-    _ACTIVE_JOB_STRIP_FRAME_CHROME_V,
-    active_job_strip_layout_widths,
-    build_active_job_timing_cell_html,
-    wrap_active_job_timing_table_html,
-)
 from status_bar_config import (
     _apply_task_info_html_to_browser,
-    _wrap_task_info_html,
     configure_task_info_text_browser,
-    handle_task_info_reference_link_clicked,
 )
 from theme.theme_base import job_pane_tools_icon_path
 from theme.theme_service import get_active_theme
@@ -56,7 +49,6 @@ from utils import create_job_status_thumbnail_label
 
 _THUMB_SIZE = 55
 _THUMB_GAP = 14
-_ACTIVE_JOB_STRIP_MARGIN = 8  # left + right QLayout margins on the strip (4+4)
 
 # Sidebar Job Control pane minimum content width (px).
 MIN_JOBS_PANE_WIDTH = 250
@@ -117,49 +109,6 @@ def show_jobs_tools_menu(main_window, controller, anchor: QPushButton) -> None:
     skip_copy_action.triggered.connect(controller.skip_active_series_copy)
 
     menu.exec(anchor.mapToGlobal(QPoint(0, anchor.height())))
-
-
-def _active_job_strip_browser_stylesheet() -> str:
-    t = get_active_theme()
-    return f"""
-        QTextBrowser {{
-            color: {t.sidebar_text_color_hex};
-            background: transparent;
-            padding: 0;
-            margin: 0;
-            border: none;
-        }}
-    """
-
-
-def _active_job_strip_frame_stylesheet() -> str:
-    t = get_active_theme()
-    bdr = t.default_border_color_hex
-    return f"""
-        QFrame#activeJobStripFrame {{
-            border: 1px solid {bdr};
-            padding: 4px;
-            background: transparent;
-        }}
-    """
-
-
-def _apply_active_job_strip_html(
-    browser: QTextBrowser, body_html: str, *, content_width: int
-) -> int:
-    """Size the active-job strip browser to the bordered table (no trailing fill box)."""
-    browser.setFixedWidth(content_width)
-    browser.setHtml(_wrap_task_info_html(body_html))
-    browser.document().setDocumentMargin(0)
-    browser.document().setTextWidth(content_width)
-    doc = browser.document()
-    layout_h = doc.documentLayout().documentSize().height()
-    doc_h = doc.size().height()
-    content_h = max(doc_h, layout_h, browser.fontMetrics().lineSpacing())
-    height = int(max(content_h, 28) + 2)
-    browser.setFixedHeight(height)
-    browser.setMinimumHeight(height)
-    return height
 
 
 def _disable_tab_focus(root: QWidget) -> None:
@@ -592,7 +541,6 @@ class JobQueuePanelWidget(QWidget):
         self._refresh_table_timer: QTimer | None = None
         self._live_timer: QTimer | None = None
         self._resize_timer: QTimer | None = None
-        self._active_job_hovered_anchor: str | None = None
         self._queue_compact = False
         self._signal_connected = False
         self._live_refresh_paused = False
@@ -663,48 +611,7 @@ class JobQueuePanelWidget(QWidget):
             f"color: {t.sidebar_text_color_hex}; font-size: 12px; padding: 12px;"
         )
 
-        self._active_job_strip = QWidget()
-        active_job_layout = QHBoxLayout(self._active_job_strip)
-        active_job_layout.setContentsMargins(4, 4, 4, 0)
-        active_job_layout.setSpacing(0)
-        self._active_job_frame = QFrame()
-        self._active_job_frame.setObjectName("activeJobStripFrame")
-        self._active_job_frame.setStyleSheet(_active_job_strip_frame_stylesheet())
-        frame_layout = QVBoxLayout(self._active_job_frame)
-        frame_layout.setContentsMargins(0, 0, 0, 0)
-        frame_layout.setSpacing(0)
-        self._active_job_browser = QTextBrowser()
-        self._active_job_browser.setReadOnly(True)
-        self._active_job_browser.setOpenExternalLinks(False)
-        self._active_job_browser.setOpenLinks(False)
-        self._active_job_browser.setFrameShape(QTextBrowser.Shape.NoFrame)
-        self._active_job_browser.setVerticalScrollBarPolicy(
-            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
-        )
-        self._active_job_browser.setHorizontalScrollBarPolicy(
-            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
-        )
-        self._active_job_browser.setStyleSheet(_active_job_strip_browser_stylesheet())
-        self._active_job_browser.anchorClicked.connect(
-            lambda url: handle_task_info_reference_link_clicked(self.main_window, url)
-        )
-        self._active_job_browser.setSizePolicy(
-            QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed
-        )
-        self._active_job_viewport = self._active_job_browser.viewport()
-        self._active_job_viewport.setMouseTracking(True)
-        self._active_job_viewport.installEventFilter(self)
-        frame_layout.addWidget(
-            self._active_job_browser,
-            0,
-            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop,
-        )
-        active_job_layout.addWidget(
-            self._active_job_frame,
-            0,
-            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop,
-        )
-        self._active_job_strip.hide()
+        self._active_job_strip = ActiveJobStripWidget(self.main_window, self)
 
         self._scroll = QScrollArea()
         self._scroll.setWidgetResizable(True)
@@ -735,18 +642,11 @@ class JobQueuePanelWidget(QWidget):
         self._controller.queue_changed.connect(self._schedule_refresh_table)
         self._controller.queue_changed.connect(self._update_header_status)
         self._controller.jobs_pane_title_changed.connect(self._update_header_status)
-        self._controller.generation_started.connect(
-            lambda: self._refresh_active_job_strip(force=True)
-        )
-        self._controller.generation_finished.connect(self._refresh_active_job_strip)
+        self._controller.hold_job_queue_changed.connect(self._update_header_status)
+        self._signal_connected = True
         self._controller.task_status_info_changed.connect(
             lambda: self._refresh_active_row(force=True)
         )
-        self._controller.task_status_info_changed.connect(
-            lambda: self._refresh_active_job_strip(force=True)
-        )
-        self._controller.hold_job_queue_changed.connect(self._update_header_status)
-        self._signal_connected = True
         timer = QTimer(self)
         timer.setInterval(500)
         timer.timeout.connect(self._on_live_refresh_timer)
@@ -760,7 +660,7 @@ class JobQueuePanelWidget(QWidget):
         if not self._controller.task_status_display_needs_refresh():
             return
         self._refresh_active_row(force=True)
-        self._refresh_active_job_strip(force=True)
+        self._active_job_strip.refresh(force=True)
         self._controller.mark_task_status_display_refreshed()
 
     def pause_live_refresh(self) -> None:
@@ -803,14 +703,10 @@ class JobQueuePanelWidget(QWidget):
             apply_scroll_area_viewport_background(
                 self._scroll, t.sidebar_background_color_hex
             )
-        if hasattr(self, "_active_job_browser"):
-            self._active_job_browser.setStyleSheet(_active_job_strip_browser_stylesheet())
-        if hasattr(self, "_active_job_frame"):
-            self._active_job_frame.setStyleSheet(_active_job_strip_frame_stylesheet())
         card_ss = _job_card_stylesheet()
         for card in self._job_cards:
             card.setStyleSheet(card_ss)
-        self._refresh_active_job_strip(force=True)
+        self._active_job_strip.refresh_theme_styles()
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
@@ -830,21 +726,6 @@ class JobQueuePanelWidget(QWidget):
         super().hideEvent(event)
 
     def eventFilter(self, obj, event) -> bool:
-        if hasattr(self, "_active_job_viewport") and obj is self._active_job_viewport:
-            if event.type() == QEvent.Type.MouseMove:
-                pos = (
-                    event.position().toPoint()
-                    if hasattr(event, "position")
-                    else event.pos()
-                )
-                anchor = self._active_job_browser.anchorAt(pos)
-                if anchor != self._active_job_hovered_anchor:
-                    self._active_job_hovered_anchor = anchor or None
-                    self._refresh_active_job_strip(force=True)
-            elif event.type() == QEvent.Type.Leave:
-                if self._active_job_hovered_anchor is not None:
-                    self._active_job_hovered_anchor = None
-                    self._refresh_active_job_strip(force=True)
         if (
             hasattr(self, "_scroll")
             and obj is self._scroll.viewport()
@@ -876,64 +757,17 @@ class JobQueuePanelWidget(QWidget):
         w = self._scroll.viewport().width() if hasattr(self, "_scroll") else self.width()
         return max(80, w - 8)
 
-    def _strip_min_frame_width(self) -> int:
-        return 80
-
     def _info_content_width(self) -> int:
         return max(80, self._viewport_width() - _ACTION_COL_WIDTH - 20)
 
-    def _active_job_strip_layout_widths(self) -> tuple[int, int]:
-        w = self.width() if self.width() > 0 else self._scroll.viewport().width()
-        return active_job_strip_layout_widths(
-            max(0, w - _ACTIVE_JOB_STRIP_MARGIN),
-            min_frame_width_px=self._strip_min_frame_width(),
-        )
-
-    def _should_show_active_job_strip(self) -> bool:
-        return self._controller.is_running()
-
     def _refresh_active_job_strip(self, *, force: bool = False) -> None:
-        if not force and self._imagegen_dialog_building_active():
-            return
         if not hasattr(self, "_active_job_strip"):
             return
-        visible = self.isVisible() and self._should_show_active_job_strip()
-        if not visible:
+        if not self.isVisible() or not self._controller.is_running():
             if self._active_job_strip.isVisible():
                 self._active_job_strip.hide()
             return
-        if not force and not self._controller.task_status_display_needs_refresh():
-            if self._active_job_strip.isVisible():
-                return
-        frame_w, browser_w = self._active_job_strip_layout_widths()
-        hovered = self._active_job_hovered_anchor
-        cell_html = build_active_job_timing_cell_html(
-            self._controller,
-            content_width_px=browser_w,
-            cancel_hovered=hovered == "cancelgen://",
-            skip_hovered=hovered == "skipcooldown://",
-        )
-        if not cell_html:
-            self._active_job_strip.hide()
-            return
-        body_html = wrap_active_job_timing_table_html(
-            cell_html, content_width_px=browser_w
-        )
-        browser_h = _apply_active_job_strip_html(
-            self._active_job_browser,
-            body_html,
-            content_width=browser_w,
-        )
-        self._active_job_frame.setFixedWidth(frame_w)
-        self._active_job_frame.setFixedHeight(browser_h + _ACTIVE_JOB_STRIP_FRAME_CHROME_V)
-        layout = self._active_job_strip.layout()
-        margin_h = 0
-        if layout is not None:
-            margins = layout.contentsMargins()
-            margin_h = margins.top() + margins.bottom()
-        self._active_job_strip.setFixedHeight(self._active_job_frame.height() + margin_h)
-        self._active_job_strip.show()
-        _disable_tab_focus(self._active_job_strip)
+        self._active_job_strip.refresh(force=force)
         if self._queue_compact:
             cb = self._on_compact_geometry_changed
             if cb is not None:
@@ -1054,34 +888,7 @@ class JobQueuePanelWidget(QWidget):
 
     def compact_content_height(self) -> int:
         """Client height for minimized view: active progress strip only."""
-        if not self._should_show_active_job_strip():
-            return 0
-        if (
-            hasattr(self, "_active_job_strip")
-            and self._active_job_strip.isVisible()
-            and self._active_job_strip.height() > 0
-        ):
-            return self._active_job_strip.height()
-        frame_w, browser_w = self._active_job_strip_layout_widths()
-        cell_html = build_active_job_timing_cell_html(
-            self._controller,
-            content_width_px=browser_w,
-        )
-        if not cell_html:
-            return 0
-        body_html = wrap_active_job_timing_table_html(
-            cell_html, content_width_px=browser_w
-        )
-        browser_h = _apply_active_job_strip_html(
-            self._active_job_browser,
-            body_html,
-            content_width=browser_w,
-        )
-        layout = self._active_job_strip.layout()
-        if layout is None:
-            return browser_h + _ACTIVE_JOB_STRIP_FRAME_CHROME_V
-        margins = layout.contentsMargins()
-        return browser_h + _ACTIVE_JOB_STRIP_FRAME_CHROME_V + margins.top() + margins.bottom()
+        return self._active_job_strip.content_height()
 
     def preferred_content_height(self) -> int:
         """Height needed to show all job rows without vertical scrolling."""

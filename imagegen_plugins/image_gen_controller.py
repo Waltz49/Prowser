@@ -1769,6 +1769,15 @@ class ImageGenController(QObject):
         layout.setContentsMargins(22, 18, 22, 18)
         status_label = QLabel(self._deferred_quit_status_message())
         layout.addWidget(status_label)
+        from imagegen_plugins.active_job_strip_widget import ActiveJobStripWidget
+
+        progress_strip = ActiveJobStripWidget(
+            self.main_window,
+            dialog,
+            pause_when_imagegen_dialog_building=False,
+            layout_width_px=336,
+        )
+        layout.addWidget(progress_strip, 0, Qt.AlignmentFlag.AlignHCenter)
         button_row = QHBoxLayout()
         toggle_btn = QPushButton(self._deferred_quit_toggle_button_label())
         toggle_btn.clicked.connect(self._toggle_deferred_quit_mode)
@@ -1783,6 +1792,7 @@ class ImageGenController(QObject):
         self._deferred_quit_dialog = dialog
         self._deferred_quit_status_label = status_label
         self._deferred_quit_toggle_btn = toggle_btn
+        progress_strip.refresh(force=True)
         dialog.show()
         dialog.raise_()
         dialog.activateWindow()
@@ -1837,20 +1847,33 @@ class ImageGenController(QObject):
         self._refresh_deferred_quit_dialog()
         QTimer.singleShot(0, self._resume_deferred_quit_queue_advance)
 
-    def _set_deferred_quit_after_current_copy(self) -> None:
-        self._deferred_quit_wait_all_jobs = False
-        self._queue_advance_suppressed = True
-        self._persist_job_queue_for_exit()
-        self._refresh_deferred_quit_dialog()
+    def _try_complete_deferred_quit_after_current_copy(self) -> None:
+        """If quit-after-current was requested and the active unit is done, shut down."""
+        if not self._quit_after_current_worker:
+            return
+        if self._deferred_quit_wait_all_jobs:
+            return
         if (
             self._job_ai_stage_active
             or self._tasks.is_running()
             or self._foreground_tasks.is_running()
             or self._is_in_copy_cooldown()
         ):
+            if self._deferred_quit_dialog is None:
+                self._show_deferred_quit_dialog()
+            else:
+                self._refresh_deferred_quit_dialog()
             return
-        self._finish_copy_batch()
+        if self._copy_batch_active:
+            self._finish_copy_batch()
         self._maybe_quit_after_current_worker()
+
+    def _set_deferred_quit_after_current_copy(self) -> None:
+        self._deferred_quit_wait_all_jobs = False
+        self._queue_advance_suppressed = True
+        self._persist_job_queue_for_exit()
+        self._refresh_deferred_quit_dialog()
+        self._try_complete_deferred_quit_after_current_copy()
 
     def _toggle_deferred_quit_mode(self) -> None:
         if self._deferred_quit_wait_all_jobs:
@@ -1864,7 +1887,7 @@ class ImageGenController(QObject):
         self._deferred_quit_wait_all_jobs = False
         self._queue_advance_suppressed = True
         self._persist_job_queue_for_exit()
-        self._show_deferred_quit_dialog()
+        QTimer.singleShot(0, self._try_complete_deferred_quit_after_current_copy)
 
     def _deferred_quit_pipeline_idle(self) -> bool:
         if self._job_ai_stage_active:
@@ -1916,11 +1939,18 @@ class ImageGenController(QObject):
         if not self._quit_interrupts_active_worker():
             return True
         parent = parent or self.main_window
+        from imagegen_plugins.active_job_strip_widget import ActiveJobStripWidget
+
+        progress_strip = ActiveJobStripWidget(
+            self.main_window,
+            None,
+            pause_when_imagegen_dialog_building=False,
+        )
         msg_box = styled_message_box(
             parent,
             QMessageBox.Question,
             "AI task running",
-            "Image generation or an AI caption is in progress. Quit anyway?",
+            "Image generation or an AI caption is in progress.\nQuit anyway?",
             buttons=(
                 QMessageBox.StandardButton.No
                 | QMessageBox.StandardButton.Yes
@@ -1937,7 +1967,9 @@ class ImageGenController(QObject):
                     self.prepare_for_shutdown,
                 ),
             },
+            middle_widget=progress_strip,
         )
+        progress_strip.refresh(force=True)
         msg_box.exec()
         answer = msg_box.result_data["button"]
         if answer == QMessageBox.StandardButton.Apply:

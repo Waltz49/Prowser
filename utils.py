@@ -857,6 +857,7 @@ def styled_message_box(
     default_button=None,
     button_label_overrides=None,
     proceed_handlers: Optional[Dict[int, Tuple[str, Callable[[], None]]]] = None,
+    middle_widget=None,
 ):
     """
     Create a QMessageBox-like dialog using QDialog.
@@ -871,12 +872,21 @@ def styled_message_box(
         button_label_overrides: optional dict mapping QMessageBox.StandardButton to label text
         proceed_handlers: optional map of QMessageBox.StandardButton to (proceed_note, action)
             called after the user clicks that button, before the dialog closes
+        middle_widget: optional QWidget inserted between message text and buttons
 
     Returns:
         Dialog object (call .exec()/.exec_() on it, and check dialog.result_data['button'] for result)
         The result will be a QMessageBox.StandardButton enum value
     """
-    from PySide6.QtWidgets import QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QMessageBox, QStyle
+    from PySide6.QtWidgets import (
+        QHBoxLayout,
+        QLabel,
+        QMessageBox,
+        QPushButton,
+        QSizePolicy,
+        QStyle,
+        QVBoxLayout,
+    )
     from PySide6.QtCore import Qt
 
     # Map QMessageBox.StandardButton enum values to button text
@@ -916,10 +926,14 @@ def styled_message_box(
     )
     dialog.setWindowFlags(Qt.Window | Qt.WindowTitleHint | Qt.WindowSystemMenuHint | Qt.WindowCloseButtonHint | Qt.WindowStaysOnTopHint)
     dialog.setWindowModality(Qt.WindowModality.ApplicationModal)
-    dialog.setMinimumWidth(340)
+    _DIALOG_MARGIN_H = 44
+    _ICON_PIXMAP_W = 44
+    _MIDDLE_WIDGET_MIN_CONTENT_W = 336
+    _MIDDLE_WIDGET_MAX_TEXT_W = 520
+    dialog_content_width = 336
 
     main_layout = QVBoxLayout(dialog)
-    main_layout.setSpacing(18)
+    main_layout.setSpacing(18 if middle_widget is None else 14)
     main_layout.setContentsMargins(22, 18, 22, 18)
 
     # Optional icon support:
@@ -941,24 +955,58 @@ def styled_message_box(
     else:
         icon_label = None
 
-    # Message text
-    text_label = QLabel(text)
-    text_label.setWordWrap(True)
+    # Message text (parent to dialog so font metrics match rendered text)
+    text_label = QLabel(text, dialog)
     text_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
     text_label.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-    text_label.setMinimumWidth(240)
-    # Calculate proper height for wrapped text using QTextDocument for accurate measurement
     from PySide6.QtGui import QTextDocument
+
     font_metrics = text_label.fontMetrics()
-    # Calculate available width (dialog min width 340 - margins 44 - icon space if present)
-    available_width = 240 if icon_label else 296
+    icon_text_spacing = 12
+    text_width = 0
+    if middle_widget is not None:
+        icon_text_spacing = 16 if icon_label else 0
+        lines = text.split("\n")
+        line_widths = []
+        for line in lines:
+            probe = QLabel(line or " ")
+            probe.setFont(text_label.font())
+            probe.setWordWrap(False)
+            line_widths.append(probe.sizeHint().width())
+        max_line_w = max(line_widths, default=0)
+        if max_line_w <= _MIDDLE_WIDGET_MAX_TEXT_W:
+            text_label.setWordWrap(False)
+            text_width = text_label.sizeHint().width()
+        else:
+            text_label.setWordWrap(True)
+            text_width = _MIDDLE_WIDGET_MAX_TEXT_W
+            text_label.setFixedWidth(text_width)
+        if icon_label:
+            dialog_content_width = max(
+                _MIDDLE_WIDGET_MIN_CONTENT_W,
+                _ICON_PIXMAP_W + icon_text_spacing + text_width,
+            )
+        else:
+            dialog_content_width = max(
+                _MIDDLE_WIDGET_MIN_CONTENT_W, text_width
+            )
+        dialog.setMinimumWidth(dialog_content_width + _DIALOG_MARGIN_H)
+    else:
+        text_label.setWordWrap(True)
+        text_width = 240 if icon_label else 296
+        dialog.setMinimumWidth(340)
     # Use QTextDocument for more accurate multi-line wrapped text measurement
     doc = QTextDocument()
     doc.setDefaultFont(text_label.font())
-    doc.setTextWidth(available_width)
+    measure_width = text_width if middle_widget is not None else (
+        240 if icon_label else 296
+    )
+    doc.setTextWidth(measure_width)
     doc.setPlainText(text)
     # Get the ideal height from the document
     ideal_height = doc.size().height()
+    if middle_widget is not None and not text_label.wordWrap():
+        ideal_height = text_label.sizeHint().height()
     # Add generous padding: descent for characters below baseline + extra spacing
     descent = font_metrics.descent()
     leading = font_metrics.leading()
@@ -970,12 +1018,32 @@ def styled_message_box(
     calculated_height = max(calculated_height, min_line_height)
     # Set minimum height but don't constrain maximum - let it expand if needed
     text_label.setMinimumHeight(calculated_height)
+    if middle_widget is not None:
+        text_label.setSizePolicy(
+            QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Preferred
+        )
+    elif icon_label:
+        text_label.setMinimumWidth(240)
+    else:
+        text_label.setMinimumWidth(296)
     # Don't set maximum height - allow the label to size naturally if text is very long
     if icon_label:
-        icon_layout.addWidget(text_label)
+        icon_layout.setSpacing(icon_text_spacing)
+        icon_layout.addWidget(
+            text_label,
+            0,
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop,
+        )
+        icon_layout.addStretch(1)
         main_layout.addLayout(icon_layout)
     else:
         main_layout.addWidget(text_label)
+
+    if middle_widget is not None:
+        setter = getattr(middle_widget, "set_layout_width_px", None)
+        if callable(setter):
+            setter(dialog_content_width)
+        main_layout.addWidget(middle_widget, 0, Qt.AlignmentFlag.AlignHCenter)
 
     # Button bar: dismiss on the left, affirmative actions on the right
     _LEFT_DIALOG_BUTTONS = frozenset({
