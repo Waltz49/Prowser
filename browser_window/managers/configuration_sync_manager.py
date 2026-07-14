@@ -91,6 +91,12 @@ class ConfigurationSyncManager:
             message_type = configuration.get('type')
             if message_type == 'ping':
                 return
+            elif message_type == 'activate':
+                from utils import activate_application_window, activate_macos_application
+
+                activate_macos_application(force=True)
+                activate_application_window(mw, force=True)
+                return
             elif message_type == 'quit':
                 if getattr(mw, 'idle_detector', None):
                     mw.idle_detector.reset()

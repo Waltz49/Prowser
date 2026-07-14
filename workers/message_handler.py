@@ -36,6 +36,19 @@ debug_logger.addHandler(file_handler)
 # Ensure logger does NOT propagate messages to the root logger and thus the console
 debug_logger.propagate = False
 
+_shared_handler: Optional["MessageHandler"] = None
+_shared_handler_lock = threading.Lock()
+
+
+def get_shared_message_handler(pipe_path: str = None) -> "MessageHandler":
+    """Return the process-wide MessageHandler (one named-pipe listener)."""
+    global _shared_handler
+    with _shared_handler_lock:
+        if _shared_handler is None:
+            _shared_handler = MessageHandler(pipe_path)
+        return _shared_handler
+
+
 class MessageHandler(QObject):
     """Handles named pipe communication for the image browser.
     Uses queue-based pipeline: listener thread puts messages in queue, main thread
@@ -241,7 +254,7 @@ class MessageHandler(QObject):
         """Validate that a message has the required fields"""
         # Special message types don't need files or directory
         message_type = message.get('type')
-        if message_type in ['ping', 'quit']:
+        if message_type in ['ping', 'quit', 'activate']:
             return True
         
         # Message must have either 'files' or 'directory'

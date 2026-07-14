@@ -885,7 +885,7 @@ app = BUNDLE(
         'NSAppleEventsUsageDescription': 'Prowser needs to handle image files opened from Finder',
         'LSApplicationCategoryType': 'public.app-category.graphics-design',
         'NSRequiresAquaSystemAppearance': False,
-        'LSMultipleInstancesProhibited': False,
+        'LSMultipleInstancesProhibited': True,
         # Add permissions for file operations and undo functionality
         'NSAppleEventsUsageDescription': 'Prowser needs to handle image files opened from Finder and restore files from Trash',
         'NSSystemAdministrationUsageDescription': 'Prowser needs to restore files from Trash to their original locations',

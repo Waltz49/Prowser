@@ -217,6 +217,7 @@ logging.getLogger().addFilter(QtAccessibilityFilter())
 # Local imports
 from config import ImageBrowserConfig, get_config
 from image_browser_window import ImageBrowserWindow
+from instance_lock import acquire_primary_instance_lock, forward_message_to_running_instance
 from thumbnails.thumbnail_constants import (
     BLUE, CYAN, GREEN, LIGHT_GRAY, MAGENTA, RED, RESET, WHITE, YELLOW,
     get_image_extensions,
@@ -544,21 +545,6 @@ Examples:
 # Image and path validation functions moved to utils.py
 # Imported at top of file
 
-def is_started_from_command_line() -> bool:
-    """Check if application was started from command line (not macOS app bundle)"""
-    # Check if sys.argv[0] contains .app (indicates app bundle launch)
-    if '.app' in sys.argv[0] or '.app/' in sys.argv[0]:
-        return False
-    # Also check if we're running from a bundle by checking parent process
-    try:
-        parent = psutil.Process(os.getppid())
-        parent_cmd = ' '.join(parent.cmdline()) if hasattr(parent, 'cmdline') else ''
-        if '.app' in parent_cmd:
-            return False
-    except Exception:
-        pass
-    return True
-
 def build_configuration_message_from_args(args) -> Optional[Dict[str, Any]]:
     """Build a configuration message from command line arguments for pipe communication"""
     message = {}
@@ -594,58 +580,6 @@ def build_configuration_message_from_args(args) -> Optional[Dict[str, Any]]:
         message['filter'] = args.filter
     
     return message
-
-def try_send_to_existing_instance(message: Dict[str, Any], pipe_path: str, timeout: float = 4.0) -> bool:
-    """
-    Try to send configuration to existing instance via pipe.
-    Returns True if message was successfully sent (another instance accepted it).
-    Returns False if pipe doesn't exist, write times out, or write fails.
-    
-    Note: Opening a FIFO for writing blocks until a reader opens it.
-    If write completes within timeout, another instance is listening.
-    If write times out, no instance is listening (pipe is dead).
-    """
-    if not os.path.exists(pipe_path):
-        return False
-    
-    write_success = False
-    write_error = None
-    write_completed = threading.Event()
-    
-    def write_to_pipe():
-        nonlocal write_success, write_error
-        try:
-            # Open pipe for writing (will block until reader opens it)
-            # If no reader is present, this will block indefinitely
-            with open(pipe_path, 'w') as pipe:
-                json.dump(message, pipe)
-                pipe.write('\n')
-                pipe.flush()
-                write_success = True
-        except Exception as e:
-            write_error = e
-        finally:
-            write_completed.set()
-    
-    # Start write in a thread
-    write_thread = threading.Thread(target=write_to_pipe, daemon=True)
-    write_thread.start()
-    
-    # Wait up to timeout seconds for write to complete
-    write_completed.wait(timeout=timeout)
-    
-    if not write_completed.is_set():
-        # Write is still blocking - no reader available, pipe is likely dead
-        # The thread will continue blocking, but we proceed to start new instance
-        return False
-    
-    # Write completed - check if it succeeded
-    if write_success:
-        # Write succeeded - another instance read the message
-        return True
-    else:
-        # Write failed - pipe might be dead or error occurred
-        return False
 
 def handle_application_quit():
     """Enhanced application quit with robust cleanup"""
@@ -795,6 +729,18 @@ def main():
     # Initialize config early so splash and other startup paths share one profile.
     config = get_config(profile_dir=profile_dir)
 
+    lock_path = str(config.data_dir / "instance.lock")
+    pipe_path = str(config.named_pipe)
+    if not acquire_primary_instance_lock(lock_path):
+        message = build_configuration_message_from_args(args) or {"type": "activate"}
+        if forward_message_to_running_instance(message, pipe_path, deadline=2.0):
+            sys.exit(0)
+        print(
+            "Another Prowser instance is running but did not accept the request.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
     # Clean up log directory before anything else
     try:
         logs_dir = config.logs_dir
@@ -808,19 +754,6 @@ def main():
     except Exception as e:
         traceback.print_exc()
         pass
-
-    # Single instance check: if started from command line, try to send config to existing instance
-    if is_started_from_command_line():
-        pipe_path = str(config.named_pipe)
-        if os.path.exists(pipe_path):
-            # Build configuration message from args
-            message = build_configuration_message_from_args(args)
-            if message:
-                # Try to send to existing instance
-                if try_send_to_existing_instance(message, pipe_path, timeout=4.0):
-                    # Message was accepted by another instance, exit
-                    sys.exit(0)
-                # Otherwise, pipe is dead or no instance listening, proceed to start new instance
 
     # Safely get working directory with error handling
     try:
@@ -895,6 +828,10 @@ def main():
     app.setApplicationDisplayName("Prowser")
     app.setApplicationVersion("0.9.0")
     app.setOrganizationName("ImageBrowser")
+
+    from workers.message_handler import get_shared_message_handler
+
+    get_shared_message_handler(pipe_path).start_listening()
     activate_macos_application()
 
     connect_system_theme_listener()

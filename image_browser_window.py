@@ -105,7 +105,7 @@ from browser_window.managers.image_display_manager import ImageDisplayManager
 from keyboard_handler import KeyboardHandlerManager
 from browser_window.managers.lock_manager import LockManager
 from menu_manager import MenuManager
-from workers.message_handler import MessageHandler
+from workers.message_handler import get_shared_message_handler
 from browser_window.managers.navigation_manager import NavigationManager
 from path_exclusions import _get_excluded_paths, _is_excluded_path
 from browser_window.sidebar.preview_widget import PreviewWidget
@@ -592,7 +592,7 @@ class ImageBrowserWindow(QMainWindow):
         self.deleted_files = []
         
         # Initialize message handler for JSON configuration messages
-        self.message_handler = MessageHandler()
+        self.message_handler = get_shared_message_handler()
         self._processing_message = False  # Guard to prevent recursive message processing
         # Queue-based pipeline: main thread polls via timer (avoids GIL deadlock from signal emit)
         self._message_poll_timer = QTimer(self)
@@ -1290,7 +1290,8 @@ class ImageBrowserWindow(QMainWindow):
             self.idle_detector.start()
             self.background_cache_importer.start()
         
-        self.message_handler.start_listening()
+        if not self.message_handler.running:
+            self.message_handler.start_listening()
         self._message_poll_timer.start(50)  # Poll every 50ms for queued messages
 
         _import_appkit_modules()
