@@ -1162,7 +1162,13 @@ def main():
         QApplication.setDesktopSettingsAware(False)  # Prevent Qt from looking up system fonts
     
     # Set application icon if available
-    icon_path = os.path.join(os.path.dirname(__file__), "assets", "icon.png")
+    icon_path = os.path.join(os.path.dirname(__file__), "assets", "run_from_source_icon.png")
+
+    # Set application icon if available (same file as the .app bundle icon)
+    # icon_path = os.path.join(os.path.dirname(__file__), "Prowser.icns")
+    # if getattr(sys, "frozen", False) and getattr(sys, "_MEIPASS", None):
+    #     icon_path = os.path.join(sys._MEIPASS, "Prowser.icns")
+   
     if os.path.exists(icon_path):
         app.setWindowIcon(QIcon(icon_path))
     
