@@ -707,12 +707,42 @@ class ChatPaneWidget(QWidget):
         self._message_widgets.append(widget)
         _attach_chat_redo_key_filter(self)
         _attach_chat_tab_key_filter(self)
-        QTimer.singleShot(0, self._scroll_to_bottom)
+        self._schedule_scroll_to_bottom()
         return widget
 
     def _scroll_to_bottom(self) -> None:
+        if not isValid(self._scroll):
+            return
+        widgets = self._message_widgets
+        if widgets:
+            last = widgets[-1]
+            if isValid(last):
+                self._scroll.ensureWidgetVisible(last, 0, 12)
         bar = self._scroll.verticalScrollBar()
         bar.setValue(bar.maximum())
+
+    def _schedule_scroll_to_bottom(self) -> None:
+        """Scroll after layout settles (new message height, prompt shrink, etc.)."""
+        self._scroll_to_bottom()
+        bar = self._scroll.verticalScrollBar()
+        pending = getattr(self, "_scroll_pending_range_slot", None)
+        if pending is not None:
+            try:
+                bar.rangeChanged.disconnect(pending)
+            except (RuntimeError, TypeError):
+                pass
+
+        def _on_range_changed(_minimum: int, _maximum: int) -> None:
+            try:
+                bar.rangeChanged.disconnect(_on_range_changed)
+            except (RuntimeError, TypeError):
+                pass
+            setattr(self, "_scroll_pending_range_slot", None)
+            self._scroll_to_bottom()
+
+        setattr(self, "_scroll_pending_range_slot", _on_range_changed)
+        bar.rangeChanged.connect(_on_range_changed)
+        QTimer.singleShot(0, self._scroll_to_bottom)
 
     def _on_user_submit(self, text: str, image_paths: list[str]) -> None:
         if self._is_worker_active():
@@ -739,6 +769,7 @@ class ChatPaneWidget(QWidget):
         self._session.append(msg)
         self._append_message_widget(msg)
         self._maybe_persist_session()
+        self._schedule_scroll_to_bottom()
         self._request_assistant_response()
 
     def _request_assistant_response(self) -> None:
