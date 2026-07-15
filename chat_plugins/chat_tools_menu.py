@@ -20,6 +20,8 @@ def _populate_chat_menu(menu: QMenu, chat_pane) -> None:
     prompt_action.triggered.connect(chat_pane.edit_system_prompt)
     fav_action = menu.addAction("Favorite User Prompts…")
     fav_action.triggered.connect(chat_pane.open_favorite_user_prompts)
+    prefix_postfix_action = menu.addAction("Prefix and Postfix text…")
+    prefix_postfix_action.triggered.connect(chat_pane.open_prefix_postfix_text)
     preserve_action = menu.addAction("Preserve Chat Across Sessions")
     preserve_action.setCheckable(True)
     preserve_action.setChecked(is_preserve_chat_across_sessions())

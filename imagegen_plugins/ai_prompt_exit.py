@@ -38,7 +38,10 @@ def apply_text_ai_exit(text: str) -> str:
 
 def apply_image_ai_exit(text: str) -> str:
     """Run PROWSER_IMAGE_AI_EXIT on text before image model calls."""
-    return _invoke_exit_for_env(text, ENV_IMAGE_AI_EXIT)
+    from chat_plugins.chat_prefix_postfix import apply_prefix_postfix_rules
+
+    with_rules = apply_prefix_postfix_rules(text, for_images=True)
+    return _invoke_exit_for_env(with_rules, ENV_IMAGE_AI_EXIT)
 
 
 def apply_image_ai_exit_to_payload(payload: dict) -> None:

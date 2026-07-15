@@ -8,6 +8,7 @@ from typing import Generator, Iterable
 from chat_plugins.chat_prompt_config import load_system_prompt_config, save_system_prompt_config
 from config import CAPTION_DEFAULTS, CHAT_DEFAULTS, get_config
 from imagegen_plugins.ai_prompt_exit import apply_text_ai_exit
+from chat_plugins.chat_prefix_postfix import apply_prefix_postfix_rules
 from thumbnails.thumbnail_constants import CHAT_REJECTED_RESPONSE_PHRASES
 
 from chat_plugins.chat_debug_log import log_chat_llm_input
@@ -115,7 +116,8 @@ def _user_text_for_llm(raw_text: str) -> str:
     stripped = strip_image_gen_commands_from_user_message(
         strip_selection_image_trigger(raw_text)
     )
-    return apply_text_ai_exit(stripped)
+    with_rules = apply_prefix_postfix_rules(stripped, for_images=False)
+    return apply_text_ai_exit(with_rules)
 
 
 def _messages_as_sent_to_llm(messages: list[ChatMessage]) -> list[dict]:

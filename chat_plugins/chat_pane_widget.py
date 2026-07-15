@@ -68,6 +68,7 @@ from chat_plugins.chat_named_user_prompts import (
     run_chat_user_prompt_library,
     run_chat_user_prompt_save_dialog,
 )
+from chat_plugins.chat_prefix_postfix import run_chat_prefix_postfix_library
 from chat_plugins.chat_system_prompt_dialog import edit_chat_system_prompt
 from chat_plugins.chat_tools_menu import show_chat_context_menu, show_chat_tools_menu
 from chat_plugins.chat_worker import ChatLmStudioService
@@ -603,6 +604,9 @@ class ChatPaneWidget(QWidget):
         if entry is None:
             return
         self._prompt_input.set_content(entry.text, entry.image_paths)
+
+    def open_prefix_postfix_text(self) -> None:
+        run_chat_prefix_postfix_library(self.main_window)
 
     def _on_favorite_user_prompt(self, message_id: str) -> None:
         idx = self._session.index_of(message_id)

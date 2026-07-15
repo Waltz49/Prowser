@@ -16,6 +16,7 @@ from utils import validate_image_file
 
 _SYSTEM_FILE_NAME = "chat_system_prompts.json"
 _USER_FILE_NAME = "chat_user_prompts.json"
+_PREFIX_POSTFIX_FILE_NAME = "chat_prefix_postfix.json"
 _FAVORITE_IMAGES_DIR_NAME = "chat_favorite_images"
 _LEGACY_SETTINGS_KEYS = (
     "chat_system_prompt",
@@ -26,6 +27,7 @@ _LEGACY_SETTINGS_KEYS = (
 
 _system_prompt_lock = threading.Lock()
 _user_prompt_lock = threading.Lock()
+_prefix_postfix_lock = threading.Lock()
 
 
 def _system_prompts_path() -> Path:
@@ -34,6 +36,10 @@ def _system_prompts_path() -> Path:
 
 def _user_prompts_path() -> Path:
     return get_config().data_dir / _USER_FILE_NAME
+
+
+def _prefix_postfix_path() -> Path:
+    return get_config().data_dir / _PREFIX_POSTFIX_FILE_NAME
 
 
 def favorite_images_dir() -> Path:
@@ -119,6 +125,13 @@ def _default_user_prompt_config() -> dict[str, Any]:
     }
 
 
+def _default_prefix_postfix_config() -> dict[str, Any]:
+    return {
+        "enabled": True,
+        "entries": [],
+    }
+
+
 def _parse_json_file(path: Path) -> dict[str, Any] | None:
     try:
         if not path.is_file() or path.stat().st_size == 0:
@@ -156,6 +169,26 @@ def _normalize_named_prompts(raw: Any) -> list[dict[str, str]]:
             }
         )
     return prompts
+
+
+def _normalize_prefix_postfix_entries(raw: Any) -> list[dict[str, Any]]:
+    entries: list[dict[str, Any]] = []
+    if not isinstance(raw, list):
+        return entries
+    for item in raw:
+        if not isinstance(item, dict) or not item.get("id"):
+            continue
+        entries.append(
+            {
+                "id": str(item["id"]),
+                "text": str(item.get("text", "")),
+                "use_with_text": bool(item.get("use_with_text")),
+                "use_with_images": bool(item.get("use_with_images")),
+                "is_prefix": bool(item.get("is_prefix")),
+                "is_postfix": bool(item.get("is_postfix")),
+            }
+        )
+    return entries
 
 
 def _normalize_favorite_prompts(raw: Any) -> list[dict[str, Any]]:
@@ -227,6 +260,15 @@ def _normalize_user_prompt_config(raw: dict[str, Any]) -> dict[str, Any]:
     return config
 
 
+def _normalize_prefix_postfix_config(raw: dict[str, Any]) -> dict[str, Any]:
+    config = _default_prefix_postfix_config()
+    enabled = raw.get("enabled")
+    if isinstance(enabled, bool):
+        config["enabled"] = enabled
+    config["entries"] = _normalize_prefix_postfix_entries(raw.get("entries"))
+    return config
+
+
 def load_system_prompt_config() -> dict[str, Any]:
     """Load ~/.prowser/data/chat_system_prompts.json (migrate from settings once)."""
     path = _system_prompts_path()
@@ -268,4 +310,24 @@ def save_user_prompt_config(config: dict[str, Any]) -> None:
     normalized = _normalize_user_prompt_config(config)
     path = _user_prompts_path()
     with _user_prompt_lock:
+        _save_json_file(path, normalized)
+
+
+def load_prefix_postfix_config() -> dict[str, Any]:
+    """Load ~/.prowser/data/chat_prefix_postfix.json."""
+    path = _prefix_postfix_path()
+    with _prefix_postfix_lock:
+        parsed = _parse_json_file(path)
+        if parsed is not None:
+            return _normalize_prefix_postfix_config(parsed)
+        default = _default_prefix_postfix_config()
+        _save_json_file(path, default)
+        return default
+
+
+def save_prefix_postfix_config(config: dict[str, Any]) -> None:
+    """Save ~/.prowser/data/chat_prefix_postfix.json."""
+    normalized = _normalize_prefix_postfix_config(config)
+    path = _prefix_postfix_path()
+    with _prefix_postfix_lock:
         _save_json_file(path, normalized)

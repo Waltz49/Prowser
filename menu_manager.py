@@ -1463,6 +1463,7 @@ class MenuManager:
         debug_menu.addAction(random_images_action)
 
         view_log_action = QAction("View log", self.main_window)
+        view_log_action.setShortcut(QKeySequence("Meta+L"))
         view_log_action.triggered.connect(self._debug_view_print_log)
         debug_menu.addAction(view_log_action)
 
