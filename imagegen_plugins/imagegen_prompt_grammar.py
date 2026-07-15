@@ -18,9 +18,12 @@ from utils import get_main_window
 
 
 _GRAMMAR_SYSTEM_PROMPT = (
-    "You are a grammarian. correct the grammer and English sentance structure "
-    "and spelling for the user supplied input. Make no commentary or analysis.  "
-    "Correct the grammar and spelling only."
+    "You are a grammarian."
+    "Correct the grammer, English sentence structure, "
+    "spelling and capitalization for the user supplied input. "
+    "Make no commentary or analysis. "
+    "Correct the grammar, punctuation, spelling and capitalization only. "
+    "Do not reword the input for any purposes other than to correct the grammar, punctuation, spelling and capitalization."
 )
 _GRAMMAR_BUTTON_LABEL = "Grammar"
 _GRAMMAR_CANCEL_LABEL = "Cancel"
@@ -94,6 +97,7 @@ class ImageGenPromptGrammar:
         self._btn: Optional[QPushButton] = None
         self._connected = False
         self._streaming_started = False
+        self._foreground_started = False
         self._running = False
         self._user_cancelled = False
         self._prompt_before = ""
@@ -199,6 +203,7 @@ class ImageGenPromptGrammar:
             self._connected = True
 
         self._streaming_started = False
+        self._foreground_started = False
         system_prompt, user_prompt = _grammar_system_and_user_prompts(prompt)
         started = controller.start_flux_prompt_refine_foreground(
             system_prompt,
@@ -213,6 +218,8 @@ class ImageGenPromptGrammar:
                 window_title="Grammar",
                 cancel_label="Cancel",
             )
+            return
+        self._foreground_started = True
 
     def _prompt_edit_widget(self) -> QPlainTextEdit | None:
         return self._get_prompt_edit()
@@ -266,6 +273,7 @@ class ImageGenPromptGrammar:
         self._set_prompt_text(self._prompt_before)
         self._prompt_before = ""
         self._running = False
+        self._foreground_started = False
         self._user_cancelled = False
         self._set_button_idle()
         _show_ai_caption_error_dialog(
@@ -279,6 +287,8 @@ class ImageGenPromptGrammar:
         if not self._running and not self._user_cancelled:
             return
         was_cancelled = self._user_cancelled
+        foreground_started = self._foreground_started
+        self._foreground_started = False
         self._stop_dots()
         self._end_prompt_stream_scroll_session()
         self._set_button_idle()
@@ -286,11 +296,13 @@ class ImageGenPromptGrammar:
         if was_cancelled:
             self._set_prompt_text(self._prompt_before)
             self._user_cancelled = False
-        self._prompt_before = ""
-        if not was_cancelled:
+        elif not foreground_started and self._prompt_before:
+            self._set_prompt_text(self._prompt_before)
+        elif foreground_started:
             post_finish = getattr(self._dialog, "_chat_prompt_grammar_post_finish", None)
             if callable(post_finish):
                 post_finish()
+        self._prompt_before = ""
         if getattr(self._dialog, "_panel_mode", False) and hasattr(
             self._dialog, "state_changed"
         ):

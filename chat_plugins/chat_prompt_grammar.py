@@ -34,7 +34,12 @@ def apply_chat_prompt_save_format_to_widget(text_edit: QWidget) -> None:
     text_edit.setPlainText(format_chat_prompt_text_for_save(text_edit.toPlainText()))
 
 
-def _attach_prompt_grammar_api(dialog: QDialog, text_edit: QWidget) -> None:
+def _attach_prompt_grammar_api(
+    dialog: QDialog,
+    text_edit: QWidget,
+    *,
+    apply_grammar_punctuation: bool = True,
+) -> None:
     def get_prompt_text() -> str:
         return text_edit.toPlainText()
 
@@ -46,16 +51,18 @@ def _attach_prompt_grammar_api(dialog: QDialog, text_edit: QWidget) -> None:
             return text_edit
         return None
 
-    def _post_grammar_finish() -> None:
-        text = text_edit.toPlainText()
-        fixed = format_chat_prompt_text_after_grammar(text)
-        if fixed != text:
-            text_edit.setPlainText(fixed)
-
     dialog.get_prompt_text = get_prompt_text  # type: ignore[attr-defined]
     dialog.set_prompt_text = set_prompt_text  # type: ignore[attr-defined]
     dialog._prompt_edit_widget = _prompt_edit_widget  # type: ignore[attr-defined]
-    dialog._chat_prompt_grammar_post_finish = _post_grammar_finish  # type: ignore[attr-defined]
+
+    if apply_grammar_punctuation:
+        def _post_grammar_finish() -> None:
+            text = text_edit.toPlainText()
+            fixed = format_chat_prompt_text_after_grammar(text)
+            if fixed != text:
+                text_edit.setPlainText(fixed)
+
+        dialog._chat_prompt_grammar_post_finish = _post_grammar_finish  # type: ignore[attr-defined]
 
 
 def _hook_chat_prompt_grammar_cleanup(dialog: QDialog) -> None:
@@ -71,11 +78,20 @@ def add_chat_prompt_grammar_button(
     dialog: QDialog,
     text_edit: QWidget,
     layout: QHBoxLayout,
+    *,
+    apply_grammar_punctuation: bool = True,
 ) -> bool:
     """Add a Grammar button to layout when LM Studio services are available."""
     from imagegen_plugins.imagegen_prompt_grammar import prompt_grammar_button
+    from imagegen_plugins.lmstudio_caption import is_lmstudio_services_available
 
-    _attach_prompt_grammar_api(dialog, text_edit)
+    if not is_lmstudio_services_available():
+        return False
+    _attach_prompt_grammar_api(
+        dialog,
+        text_edit,
+        apply_grammar_punctuation=apply_grammar_punctuation,
+    )
     btn = prompt_grammar_button(dialog)
     if btn is None:
         return False
@@ -89,10 +105,17 @@ def add_chat_prompt_button_row(
     text_edit: QWidget,
     layout: QVBoxLayout,
     trailing: QWidget,
+    *,
+    apply_grammar_punctuation: bool = True,
 ) -> None:
     """One footer row: Grammar left (when available), trailing buttons right."""
     row = QHBoxLayout()
-    add_chat_prompt_grammar_button(dialog, text_edit, row)
+    add_chat_prompt_grammar_button(
+        dialog,
+        text_edit,
+        row,
+        apply_grammar_punctuation=apply_grammar_punctuation,
+    )
     row.addStretch(1)
     row.addWidget(trailing)
     layout.addLayout(row)
