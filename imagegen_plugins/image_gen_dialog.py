@@ -557,6 +557,15 @@ def repopulate_image_gen_prompt_import_row(
     if panel is None:
         return
     merged: List[QPushButton] = list(buttons) if buttons else []
+    ensure_flux = getattr(owner, "_ensure_flux_prompt_ai", None)
+    if callable(ensure_flux):
+        flux_ai = ensure_flux()
+        detach = getattr(flux_ai, "detach_import_row_buttons", None)
+        if callable(detach):
+            detach()
+        import_buttons = getattr(flux_ai, "import_row_buttons", None)
+        if callable(import_buttons):
+            merged = list(import_buttons(owner)) + merged
     grammar_btn = prompt_grammar_button(owner)
     if grammar_btn is not None:
         merged.append(grammar_btn)

@@ -180,16 +180,24 @@ def ensure_flux_prompt_system_pane(owner: Any) -> Optional[LmStudioInstructionsP
     if pane is not None:
         return pane
 
-    def _on_changed() -> None:
+    def _on_text_changed() -> None:
         _persist_flux_prompt_system_prompt(owner)
+        if getattr(owner, "_panel_mode", False) and hasattr(owner, "state_changed"):
+            owner.state_changed.emit()
+
+    def _on_visibility_changed() -> None:
+        _persist_flux_prompt_system_prompt(owner)
+        repopulate = getattr(owner, "_repopulate_side_buttons", None)
+        if callable(repopulate):
+            repopulate()
         if getattr(owner, "_panel_mode", False) and hasattr(owner, "state_changed"):
             owner.state_changed.emit()
 
     pane = LmStudioInstructionsPane(
         owner,
         image_gen_styled=True,
-        on_visibility_changed=_on_changed,
-        on_text_changed=_on_changed,
+        on_visibility_changed=_on_visibility_changed,
+        on_text_changed=_on_text_changed,
     )
     _load_flux_prompt_system_prompt_into_pane(pane)
     owner._flux_system_prompt_pane = pane
@@ -233,6 +241,9 @@ def mount_flux_prompt_ai_toolbar(owner: Any, flux_ai: ImageGenFluxPromptAi) -> N
     if toolbar is None:
         return
     pane.set_toolbar_widget(toolbar)
+    repopulate = getattr(owner, "_repopulate_side_buttons", None)
+    if callable(repopulate):
+        repopulate()
 
 
 def remount_flux_prompt_system_splitter(owner: Any) -> None:

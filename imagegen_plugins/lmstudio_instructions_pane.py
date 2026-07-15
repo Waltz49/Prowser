@@ -212,6 +212,7 @@ class LmStudioInstructionsPane:
 
         if self._image_gen_styled:
             from imagegen_plugins.image_gen_form_layout import (
+                IMAGE_GEN_BELOW_PROMPT_SPACING,
                 IMAGE_GEN_FIELD_BORDER_PAD,
                 IMAGE_GEN_FIELD_LABEL_SPACING,
                 build_image_gen_prompt_field_action_column,
@@ -288,6 +289,7 @@ class LmStudioInstructionsPane:
             section_layout.setContentsMargins(0, 0, 0, 0)
             section_layout.setSpacing(IMAGE_GEN_FIELD_LABEL_SPACING)
             section_layout.addWidget(self._toolbar_host, 0)
+            section_layout.addSpacing(IMAGE_GEN_BELOW_PROMPT_SPACING)
             section_layout.addWidget(label_row, 0)
             section_layout.addWidget(
                 wrap_image_gen_field_control_indent(field_row, section),

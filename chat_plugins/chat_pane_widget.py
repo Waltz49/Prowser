@@ -27,10 +27,6 @@ from browser_window.sidebar.sidebar_pane_chrome import (
     apply_scroll_area_viewport_background,
     apply_sidebar_pane_background,
 )
-from chat_plugins.chat_delete_confirm import (
-    confirm_chat_message_delete,
-    confirm_clear_chat,
-)
 from chat_plugins.chat_cleanup import purge_chat_disk_and_logs
 from chat_plugins.chat_assistant_image_paths import (
     normalize_assistant_message_image_paths,
@@ -581,9 +577,6 @@ class ChatPaneWidget(QWidget):
         self._maybe_persist_session()
 
     def clear_chat(self) -> None:
-        if self._session.has_started():
-            if not confirm_clear_chat(self.main_window):
-                return
         self.discard_all_data()
         if not self._lm_available_on_show:
             self._show_unavailable_only(True)
@@ -1069,8 +1062,6 @@ class ChatPaneWidget(QWidget):
     def _on_delete(self, message_id: str) -> None:
         idx = self._session.index_of(message_id)
         if idx < 0:
-            return
-        if not confirm_chat_message_delete(self.main_window):
             return
         removed = self._session.remove_at(idx)
         if removed is not None:

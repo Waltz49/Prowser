@@ -93,18 +93,27 @@ class CursorManager(QObject):
             w = w.parentWidget()
         return False
 
+    def _clear_override_cursors(self):
+        """Remove any application-wide override cursors (must not leak into sidebars)."""
+        app = QApplication.instance()
+        if app:
+            while app.overrideCursor():
+                app.restoreOverrideCursor()
+
     def _update_hide_zone_state(self):
         """Track enter/leave of the hide zone; show cursor and stop timer on leave."""
         over = self._is_over_hide_zone()
-        if over == self._over_hide_zone:
-            return
-        self._over_hide_zone = over
-        if over:
-            self.hide_timer.start(self.hide_delay_ms)
-        else:
-            self.hide_timer.stop()
-            if self.is_cursor_hidden:
-                self._show_cursor()
+        if over != self._over_hide_zone:
+            self._over_hide_zone = over
+            if over:
+                self.hide_timer.start(self.hide_delay_ms)
+            else:
+                self.hide_timer.stop()
+                if self.is_cursor_hidden:
+                    self._show_cursor()
+        elif not over and self.is_cursor_hidden:
+            # Safety: global override can stick after leaving the browse canvas
+            self._show_cursor()
 
     def eventFilter(self, obj, event):
         """
@@ -150,26 +159,14 @@ class CursorManager(QObject):
         if not self._is_over_hide_zone():
             return
         if not self.is_cursor_hidden:
-            # Set cursor on both widget and application level for better visibility
+            # Widget-level only: app-wide override hides the cursor in sidebars too
             self.widget.setCursor(Qt.BlankCursor)
-            app = QApplication.instance()
-            if app:
-                app.setOverrideCursor(Qt.BlankCursor)
             self.is_cursor_hidden = True
     
     def _show_cursor(self):
         """Show the cursor using the original cursor."""
         if self.is_cursor_hidden:
-            # For macOS, try a more aggressive approach
-            app = QApplication.instance()
-            if app:
-                # Clear any override cursors first
-                app.restoreOverrideCursor()
-                # Force a cursor change to trigger redraw
-                app.setOverrideCursor(self.original_cursor)
-                app.restoreOverrideCursor()
-            
-            # Set cursor on widget
+            self._clear_override_cursors()
             self.widget.setCursor(self.original_cursor)
             self.is_cursor_hidden = False
     
@@ -181,15 +178,16 @@ class CursorManager(QObject):
         Args:
             cursor: The cursor to set
         """
+        if self.is_cursor_hidden:
+            self._clear_override_cursors()
+            self.is_cursor_hidden = False
         self.widget.setCursor(cursor)
         # Update the original cursor reference so it can be restored later
         self.original_cursor = cursor
-        # If cursor was hidden, show it now
-        if self.is_cursor_hidden:
-            self.is_cursor_hidden = False
     
     def start(self):
         """Start cursor management (starts the hide timer when over the browse canvas)."""
+        self._clear_override_cursors()
         self._over_hide_zone = self._is_over_hide_zone()
         if self._over_hide_zone:
             self.hide_timer.start(self.hide_delay_ms)
@@ -197,8 +195,11 @@ class CursorManager(QObject):
     def stop(self):
         """Stop cursor management and ensure cursor is visible."""
         self.hide_timer.stop()
+        self._over_hide_zone = False
         if self.is_cursor_hidden:
             self._show_cursor()
+        else:
+            self._clear_override_cursors()
     
     def cleanup(self):
         """Clean up resources and restore original cursor."""
@@ -212,12 +213,14 @@ class CursorManager(QObject):
         self.stop()
         if self.is_cursor_hidden:
             self._show_cursor()
+        else:
+            self._clear_override_cursors()
         app = QApplication.instance()
         if app:
             app.removeEventFilter(self)
         # Reset state
         self.is_cursor_hidden = False
-        self._paused = True 
+        self._paused = True
 OVERLAY_HEIGHT = 8  # Height of the overlay band in pixels
 THUMBNAIL_SCROLL_AREA_OBJECT_NAME = "thumbnailScrollArea"
 LIST_SCROLL_AREA_OBJECT_NAME = "listScrollArea"
