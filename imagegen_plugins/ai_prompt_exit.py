@@ -7,6 +7,8 @@ import os
 import subprocess
 import sys
 
+from config import get_config
+
 ENV_TEXT_AI_EXIT = "PROWSER_TEXT_AI_EXIT"
 ENV_IMAGE_AI_EXIT = "PROWSER_IMAGE_AI_EXIT"
 
@@ -101,7 +103,13 @@ def _resolve_exit_script(env_var: str) -> str:
     return path
 
 
+def _prompt_filter_exits_enabled() -> bool:
+    return bool(get_config().load_settings().get("use_prompt_filter_exits", False))
+
+
 def _invoke_exit_for_env(text: str, env_var: str) -> str:
+    if not _prompt_filter_exits_enabled():
+        return text
     path = _resolve_exit_script(env_var)
     if not path:
         return text

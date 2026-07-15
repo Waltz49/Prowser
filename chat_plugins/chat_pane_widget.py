@@ -847,6 +847,8 @@ class ChatPaneWidget(QWidget):
                     and auto_image_gen_mode == "edit"
                     and bool(auto_image_gen_user_paths)
                 )
+                if auto_image_gen_mode == "edit" and not attach_assistant_sources:
+                    auto_image_gen_mode = "create"
                 break
 
         def on_finished_with_auto_generate(
@@ -865,8 +867,7 @@ class ChatPaneWidget(QWidget):
             if auto_image_gen_mode == "create":
                 self._auto_create_from_text_if_available(final)
             elif auto_image_gen_mode == "edit":
-                paths = list(auto_image_gen_user_paths)
-                self._auto_edit_from_text_if_available(final, paths)
+                self._auto_edit_from_text_if_available(final, edit_source_paths)
 
         started = self._lm_service.submit(
             history,

@@ -111,13 +111,18 @@ def _require_vision_if_needed(model, messages: Iterable[ChatMessage]) -> None:
     _require_vision_capable_model(model)
 
 
+def _user_text_for_llm(raw_text: str) -> str:
+    stripped = strip_image_gen_commands_from_user_message(
+        strip_selection_image_trigger(raw_text)
+    )
+    return apply_text_ai_exit(stripped)
+
+
 def _messages_as_sent_to_llm(messages: list[ChatMessage]) -> list[dict]:
     out: list[dict] = []
     for msg in messages:
         if msg.role == "user":
-            user_text = strip_image_gen_commands_from_user_message(
-                strip_selection_image_trigger(msg.text)
-            )
+            user_text = _user_text_for_llm(msg.text)
             entry: dict = {"role": "user", "text": user_text}
             vision_paths = paths_for_vision_model(msg)
             if vision_paths:
@@ -133,13 +138,17 @@ def _build_chat(
     messages: list[ChatMessage],
     *,
     system_prompt: str | None = None,
+    outbound_messages: list[dict] | None = None,
 ):
     import lmstudio as lms
 
     cfg = _chat_settings()
     prompt_text = system_prompt if system_prompt is not None else cfg["system_prompt"]
-    prompt_text = apply_text_ai_exit(prompt_text)
-    chat = lms.Chat(prompt_text)
+    filtered_system = apply_text_ai_exit(prompt_text)
+    chat = lms.Chat(filtered_system)
+    outbound_user_iter = (
+        m["text"] for m in (outbound_messages or []) if m["role"] == "user"
+    )
     for msg in messages:
         if msg.role == "user":
             handles = []
@@ -150,8 +159,10 @@ def _build_chat(
                     raise RuntimeError(
                         f"Could not prepare image for the model.\n\nDetail: {e}"
                     ) from e
-            user_text = strip_image_gen_commands_from_user_message(
-                strip_selection_image_trigger(msg.text)
+            user_text = (
+                next(outbound_user_iter)
+                if outbound_messages is not None
+                else _user_text_for_llm(msg.text)
             )
             if handles:
                 chat.add_user_message(user_text, images=handles)
@@ -159,7 +170,7 @@ def _build_chat(
                 chat.add_user_message(user_text)
         else:
             chat.add_assistant_response(msg.text)
-    return chat
+    return chat, filtered_system
 
 
 def stream_chat_response(
@@ -201,13 +212,17 @@ def stream_chat_response(
             ) from e
 
         _require_vision_if_needed(model, messages)
-        prompt_text = system_prompt if system_prompt is not None else cfg["system_prompt"]
-        prompt_text = apply_text_ai_exit(prompt_text)
-        chat = _build_chat(client, messages, system_prompt=system_prompt)
+        outbound_messages = _messages_as_sent_to_llm(messages)
+        chat, filtered_system = _build_chat(
+            client,
+            messages,
+            system_prompt=system_prompt,
+            outbound_messages=outbound_messages,
+        )
         temperature = cfg["temperature"]
         log_chat_llm_input(
-            _messages_as_sent_to_llm(messages),
-            system_prompt=prompt_text,
+            outbound_messages,
+            system_prompt=filtered_system,
             temperature=temperature,
         )
         try:
