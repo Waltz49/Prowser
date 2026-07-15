@@ -368,6 +368,7 @@ class ChatPaneWidget(QWidget):
 
         self._prompt_input = ChatPromptInput(self, main_window=self.main_window)
         self._prompt_input.submit_requested.connect(self._on_user_submit)
+        self._prompt_input.automatic_create_toggled.connect(self.set_automatic_create)
         self._prompt_input.set_automatic_create_active(self._automatic_create)
         apply_sidebar_pane_background(
             self._prompt_input, th.sidebar_background_color_hex

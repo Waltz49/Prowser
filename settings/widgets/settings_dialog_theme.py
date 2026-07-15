@@ -168,6 +168,38 @@ def settings_dialog_stylesheet(chrome: SettingsDialogChrome) -> str:
         background-color: {c.bg_hex};
         border: 1px solid {c.groupbox_border_hex};
     }}
+    #{_SETTINGS_DIALOG_OBJECT_NAME} QFrame#macPreferencePanel {{
+        background-color: {c.control_bg_hex};
+        border: 1px solid {c.groupbox_border_hex};
+        border-radius: 10px;
+    }}
+    #{_SETTINGS_DIALOG_OBJECT_NAME} QLabel#macPreferenceSectionTitle {{
+        color: {c.text_disabled_hex};
+        font-size: 11px;
+        font-weight: 600;
+        padding: 2px 4px 6px 4px;
+        background-color: transparent;
+    }}
+    #{_SETTINGS_DIALOG_OBJECT_NAME} QLabel#macPreferenceRowTitle {{
+        color: {c.text_hex};
+        font-size: 13px;
+        background-color: transparent;
+    }}
+    #{_SETTINGS_DIALOG_OBJECT_NAME} QLabel#macPreferenceRowSubtitle {{
+        color: {c.text_disabled_hex};
+        font-size: 11px;
+        background-color: transparent;
+    }}
+    #{_SETTINGS_DIALOG_OBJECT_NAME} QLabel#macPreferenceRowTitle:disabled,
+    #{_SETTINGS_DIALOG_OBJECT_NAME} QLabel#macPreferenceRowSubtitle:disabled {{
+        color: {c.text_disabled_hex};
+    }}
+    #{_SETTINGS_DIALOG_OBJECT_NAME} QFrame#macPreferenceDivider {{
+        background-color: {c.groupbox_border_hex};
+        border: none;
+        margin-left: 20px;
+        max-height: 1px;
+    }}
     #{_SETTINGS_DIALOG_OBJECT_NAME} QScrollArea {{
         background-color: {c.bg_hex};
         border: none;

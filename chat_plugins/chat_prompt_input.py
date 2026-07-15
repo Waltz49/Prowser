@@ -5,15 +5,16 @@ from __future__ import annotations
 
 from PySide6.QtCore import QEvent, Qt, Signal
 from PySide6.QtGui import QDragEnterEvent, QDragMoveEvent, QDropEvent, QTextBlock, QTextLayout, QTextOption
-from PySide6.QtWidgets import QLabel, QPlainTextEdit, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QPlainTextEdit, QVBoxLayout, QWidget
 
 from chat_plugins.chat_ui_common import (
     ChatImageThumbRow,
     _local_paths_from_mime,
     chat_prompt_edit_stylesheet,
-    chat_peek_zone_note_stylesheet,
 )
 from browser_window.managers.window_event_filters import CURSOR_PEEK_ZONE_HEIGHT
+from settings.widgets.macos_preferences import MacPreferenceCompactToggleRow
+from theme.theme_service import get_active_theme
 
 CHAT_PROMPT_MIN_LINES = 2
 CHAT_PROMPT_MAX_LINES = 12
@@ -170,6 +171,7 @@ class ChatPromptInput(QWidget):
 
     submit_requested = Signal(str, list)
     images_changed = Signal(list)
+    automatic_create_toggled = Signal(bool)
 
     def __init__(self, parent=None, *, main_window=None):
         super().__init__(parent)
@@ -187,15 +189,20 @@ class ChatPromptInput(QWidget):
         self._edit.images_dropped.connect(self._thumb_row.add_dropped_paths)
         self._thumb_row.images_changed.connect(self.images_changed.emit)
         layout.addWidget(self._edit)
-        self._create_indicator = QLabel(self)
-        self._create_indicator.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self._create_indicator.setFixedHeight(CURSOR_PEEK_ZONE_HEIGHT)
-        self._create_indicator.setAlignment(
-            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+        self._automatic_create_row = MacPreferenceCompactToggleRow(
+            "Submit Job Automatically",
+            tooltip=(
+                "When on, chat messages with images or /create automatically "
+                "submit an image-generation job."
+            ),
+            parent=self,
         )
-        layout.addWidget(self._create_indicator)
+        self._automatic_create_row.setFixedHeight(CURSOR_PEEK_ZONE_HEIGHT)
+        self._automatic_create_row.layout().setContentsMargins(6, 2, 6, 2)
+        self._automatic_create_row.toggle.toggled.connect(self._on_automatic_create_toggled)
+        layout.addWidget(self._automatic_create_row)
         self._automatic_create_active = False
-        self._style_create_indicator()
+        self._style_automatic_create_row()
 
     def set_main_window(self, main_window) -> None:
         self._thumb_row.set_main_window(main_window)
@@ -218,18 +225,33 @@ class ChatPromptInput(QWidget):
 
     def set_automatic_create_active(self, active: bool) -> None:
         self._automatic_create_active = bool(active)
-        state = "active" if self._automatic_create_active else "inactive"
-        self._create_indicator.setText(f"/create : {state}")
-        self._style_create_indicator()
+        toggle = self._automatic_create_row.toggle
+        if toggle.isChecked() != self._automatic_create_active:
+            toggle.blockSignals(True)
+            toggle.setChecked(self._automatic_create_active)
+            toggle.blockSignals(False)
 
     def refresh_theme_styles(self) -> None:
         self._edit.setStyleSheet(chat_prompt_edit_stylesheet())
-        self._style_create_indicator()
+        self._style_automatic_create_row()
 
-    def _style_create_indicator(self) -> None:
-        self._create_indicator.setStyleSheet(
-            chat_peek_zone_note_stylesheet(active=self._automatic_create_active)
+    def _style_automatic_create_row(self) -> None:
+        th = get_active_theme()
+        self._automatic_create_row.setStyleSheet(
+            f"""
+            QLabel#macPreferenceRowTitle {{
+                color: {th.sidebar_text_color_hex};
+                font-size: 12pt;
+                background: transparent;
+            }}
+            """
         )
+
+    def _on_automatic_create_toggled(self, checked: bool) -> None:
+        if checked == self._automatic_create_active:
+            return
+        self._automatic_create_active = checked
+        self.automatic_create_toggled.emit(checked)
 
     def _on_submit(self) -> None:
         text = self._edit.toPlainText().strip()

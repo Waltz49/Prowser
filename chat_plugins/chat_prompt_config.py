@@ -186,6 +186,7 @@ def _normalize_prefix_postfix_entries(raw: Any) -> list[dict[str, Any]]:
                 "use_with_images": bool(item.get("use_with_images")),
                 "is_prefix": bool(item.get("is_prefix")),
                 "is_postfix": bool(item.get("is_postfix")),
+                "active": bool(item.get("active", True)),
             }
         )
     return entries

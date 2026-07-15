@@ -7,10 +7,8 @@ import uuid
 from copy import deepcopy
 from dataclasses import dataclass, field
 
-from PySide6.QtCore import Qt, QSize
-from PySide6.QtGui import QColor, QPainter
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QAbstractButton,
     QCheckBox,
     QDialog,
     QDialogButtonBox,
@@ -35,12 +33,14 @@ from chat_plugins.chat_ui_common import (
     chat_library_trash_button_stylesheet,
     chat_prompt_edit_stylesheet,
 )
+from settings.widgets.macos_preferences import MacToggleSwitch
 from utils import get_button_style, get_dialog_shell_stylesheet
 
 ICON_BTN_SIZE = 22
 _COL_TEXT = 4
 _COL_EDIT = 5
 _COL_DELETE = 6
+_COL_ACTIVE = 7
 
 
 def _display_text(text: str) -> str:
@@ -55,6 +55,7 @@ class PrefixPostfixEntry:
     use_with_images: bool = False
     is_prefix: bool = False
     is_postfix: bool = False
+    active: bool = True
 
 
 @dataclass
@@ -77,6 +78,7 @@ class PrefixPostfixStore:
                     use_with_images=bool(item.get("use_with_images")),
                     is_prefix=bool(item.get("is_prefix")),
                     is_postfix=bool(item.get("is_postfix")),
+                    active=bool(item.get("active", True)),
                 )
             )
         enabled = config.get("enabled")
@@ -95,6 +97,7 @@ class PrefixPostfixStore:
                 "use_with_images": entry.use_with_images,
                 "is_prefix": entry.is_prefix,
                 "is_postfix": entry.is_postfix,
+                "active": entry.active,
             }
             for entry in self.entries
         ]
@@ -115,6 +118,8 @@ def apply_prefix_postfix_rules(text: str, *, for_images: bool) -> str:
     prefixes: list[str] = []
     postfixes: list[str] = []
     for entry in store.entries:
+        if not entry.active:
+            continue
         if for_images:
             if not entry.use_with_images:
                 continue
@@ -137,6 +142,7 @@ class _PrefixPostfixRowWidgets:
         "prefix_cb",
         "postfix_cb",
         "text_label",
+        "active_switch",
     )
 
     def __init__(
@@ -147,6 +153,7 @@ class _PrefixPostfixRowWidgets:
         prefix_cb: QCheckBox,
         postfix_cb: QCheckBox,
         text_label: QLabel,
+        active_switch: MacToggleSwitch,
     ) -> None:
         self.entry_id = entry_id
         self.use_text_cb = use_text_cb
@@ -154,6 +161,7 @@ class _PrefixPostfixRowWidgets:
         self.prefix_cb = prefix_cb
         self.postfix_cb = postfix_cb
         self.text_label = text_label
+        self.active_switch = active_switch
 
 
 def _center_widget(widget: QWidget) -> QWidget:
@@ -168,45 +176,6 @@ def _center_widget(widget: QWidget) -> QWidget:
 
 def _center_checkbox(checkbox: QCheckBox) -> QWidget:
     return _center_widget(checkbox)
-
-
-class MacToggleSwitch(QAbstractButton):
-    """macOS-style on/off slider switch."""
-
-    def __init__(self, parent: QWidget | None = None, *, checked: bool = True) -> None:
-        super().__init__(parent)
-        self.setCheckable(True)
-        self.setChecked(checked)
-        self.setFixedSize(42, 24)
-        self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.toggled.connect(self.update)
-
-    def sizeHint(self) -> QSize:  # noqa: N802 — Qt API
-        return QSize(42, 24)
-
-    def paintEvent(self, _event) -> None:
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-        width = self.width()
-        height = self.height()
-        pad = 2
-        track_h = height - pad * 2
-        track_r = track_h / 2.0
-        checked = self.isChecked()
-        track_color = QColor("#34c759" if checked else "#636366")
-        if not self.isEnabled():
-            track_color.setAlpha(140)
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(track_color)
-        painter.drawRoundedRect(pad, pad, width - pad * 2, track_h, track_r, track_r)
-        knob_d = track_h - 4
-        knob_y = pad + 2
-        knob_x = (width - pad - knob_d - 2) if checked else (pad + 2)
-        knob_color = QColor("#ffffff")
-        if not self.isEnabled():
-            knob_color.setAlpha(180)
-        painter.setBrush(knob_color)
-        painter.drawEllipse(knob_x, knob_y, knob_d, knob_d)
 
 
 class PrefixPostfixTextEditDialog(QDialog):
@@ -282,15 +251,16 @@ class ChatPrefixPostfixDialog(QDialog):
             QLabel("Prefix and postfix rules applied when sending chat or image prompts:")
         )
         instr_row.addStretch(1)
-        self._enable_switch = MacToggleSwitch(checked=self._store.enabled)
+        self._enable_switch = MacToggleSwitch()
+        self._enable_switch.setChecked(self._store.enabled)
         self._enable_switch.setToolTip("Enable prefix and postfix rules")
         self._enable_switch.toggled.connect(self._on_enabled_toggled)
         instr_row.addWidget(self._enable_switch)
         layout.addLayout(instr_row)
 
-        self._table = QTableWidget(0, 7, self)
+        self._table = QTableWidget(0, 8, self)
         self._table.setHorizontalHeaderLabels(
-            ["T", "I", "<", ">", "Text to add", "", ""]
+            ["T", "I", "<", ">", "Text to add", "", "", ""]
         )
         header = self._table.horizontalHeader()
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
@@ -300,12 +270,14 @@ class ChatPrefixPostfixDialog(QDialog):
         header.setSectionResizeMode(_COL_TEXT, QHeaderView.ResizeMode.Stretch)
         header.setSectionResizeMode(_COL_EDIT, QHeaderView.ResizeMode.Fixed)
         header.setSectionResizeMode(_COL_DELETE, QHeaderView.ResizeMode.Fixed)
+        header.setSectionResizeMode(_COL_ACTIVE, QHeaderView.ResizeMode.Fixed)
         self._table.setColumnWidth(0, 36)
         self._table.setColumnWidth(1, 36)
         self._table.setColumnWidth(2, 36)
         self._table.setColumnWidth(3, 36)
         self._table.setColumnWidth(_COL_EDIT, ICON_BTN_SIZE + 8)
         self._table.setColumnWidth(_COL_DELETE, ICON_BTN_SIZE + 8)
+        self._table.setColumnWidth(_COL_ACTIVE, 48)
         self._table.verticalHeader().setVisible(False)
         self._table.setShowGrid(False)
         self._table.setFrameShape(QFrame.Shape.NoFrame)
@@ -355,6 +327,17 @@ class ChatPrefixPostfixDialog(QDialog):
         dimmed = not self._store.enabled
         self._table_opacity.setOpacity(0.35 if dimmed else 1.0)
         self._table.setEnabled(not dimmed)
+
+    def _update_row_checkbox_states(self, row: _PrefixPostfixRowWidgets) -> None:
+        """Grey row checkboxes when the per-entry toggle is off."""
+        active = row.active_switch.isChecked()
+        for checkbox in (
+            row.use_text_cb,
+            row.use_images_cb,
+            row.prefix_cb,
+            row.postfix_cb,
+        ):
+            checkbox.setEnabled(active)
 
     def _rebuild_table(self) -> None:
         self._row_widgets.clear()
@@ -408,16 +391,28 @@ class ChatPrefixPostfixDialog(QDialog):
             )
             self._table.setCellWidget(row, _COL_DELETE, _center_widget(del_btn))
 
-            self._row_widgets.append(
-                _PrefixPostfixRowWidgets(
-                    entry.id,
-                    use_text_cb,
-                    use_images_cb,
-                    prefix_cb,
-                    postfix_cb,
-                    text_label,
-                )
+            active_switch = MacToggleSwitch()
+            active_switch.setChecked(entry.active)
+            active_switch.setToolTip(
+                "Use this text when on.\n"
+                "When off, T / I / < / > settings are ignored."
             )
+            self._table.setCellWidget(row, _COL_ACTIVE, _center_widget(active_switch))
+
+            row_widgets = _PrefixPostfixRowWidgets(
+                entry.id,
+                use_text_cb,
+                use_images_cb,
+                prefix_cb,
+                postfix_cb,
+                text_label,
+                active_switch,
+            )
+            active_switch.toggled.connect(
+                lambda _checked, rw=row_widgets: self._update_row_checkbox_states(rw)
+            )
+            self._update_row_checkbox_states(row_widgets)
+            self._row_widgets.append(row_widgets)
 
         self._update_table_dim_state()
 
@@ -429,6 +424,7 @@ class ChatPrefixPostfixDialog(QDialog):
         entry.use_with_images = row.use_images_cb.isChecked()
         entry.is_prefix = row.prefix_cb.isChecked()
         entry.is_postfix = row.postfix_cb.isChecked()
+        entry.active = row.active_switch.isChecked()
 
     def _sync_all_rows_to_store(self) -> None:
         for row in self._row_widgets:

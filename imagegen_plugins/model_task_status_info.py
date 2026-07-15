@@ -222,12 +222,17 @@ def format_series_line_value(base: str, values: Dict[str, Any]) -> str:
 
 
 def _task_menu_title_for_pipeline(pipeline_id: str) -> str:
-    titles = {
-        "mflux_fill_expand": "Expand Existing Image",
-        "mflux_fill_infill": "Infill image",
-        "mflux_flux2_klein_edit": "Edit an image with AI",
-    }
-    return titles.get(pipeline_id, "Generate an image from text")
+    try:
+        mode = get_pipeline(pipeline_id)
+    except KeyError:
+        return "Generate an image from text"
+    if mode.prompt_status_label == "Outfill:":
+        return "Expand Existing Image"
+    if mode.prompt_status_label == "Infill:":
+        return "Infill image"
+    if mode.requires_source_image and mode.prompt_label == "Edit prompt":
+        return "Edit an image with AI"
+    return "Generate an image from text"
 
 
 def _append_table_rows(html_text: str, rows: list[str]) -> str:

@@ -143,6 +143,12 @@ from settings.widgets.collapsible_theme_group import (
     THEME_COLLAPSE_GROUP_KEYS,
     merge_theme_settings_groups_expanded,
 )
+from settings.widgets.macos_preferences import (
+    MacPreferencePanel,
+    MacToggleSwitch,
+    build_column_major_toggle_grid,
+    mac_preference_section,
+)
 from settings.widgets.multi_row_tab_widget import (
     FlowLayout,
     MultiRowTabWidget,
@@ -2068,7 +2074,7 @@ class SettingsDialog(QDialog):
                 self._faces_rebuild_cards()
 
     def setup_app_settings_tab(self):
-        """Setup the application settings tab"""
+        """Setup the application settings tab (macOS Preferences pane style)."""
         layout = QVBoxLayout(self.app_settings_tab)
         layout.setContentsMargins(0, 0, 0, 0)
         scroll = QScrollArea()
@@ -2077,55 +2083,43 @@ class SettingsDialog(QDialog):
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         inner = QWidget()
         inner_layout = QVBoxLayout(inner)
-        inner_layout.setContentsMargins(12, 8, 12, 16)
-        inner_layout.setSpacing(14)
-        
-        # ===== Thumbnail Settings Group =====
-        thumbnail_group = QGroupBox("Thumbnail Settings")
-        thumbnail_group.setContentsMargins(12, 12, 12, 12)
-        thumbnail_layout = QFormLayout(thumbnail_group)
-        thumbnail_layout.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
-        thumbnail_layout.setVerticalSpacing(12)
-        thumbnail_layout.setHorizontalSpacing(16)
-        thumbnail_layout.setContentsMargins(8, 8, 8, 8)
-        
-        # Filter pattern setting
+        inner_layout.setContentsMargins(20, 12, 20, 20)
+        inner_layout.setSpacing(18)
+
+        # ----- Thumbnails -----
+        thumb_title, thumb_panel = mac_preference_section("Thumbnails", inner)
+
         filter_container = QWidget()
         filter_layout = QVBoxLayout(filter_container)
         filter_layout.setContentsMargins(0, 0, 0, 0)
         filter_layout.setSpacing(4)
-        
+
         self.filter_pattern_layout = QHBoxLayout()
         self.filter_pattern_layout.setContentsMargins(0, 0, 0, 0)
-        self.filter_pattern_layout.setSpacing(10)
+        self.filter_pattern_layout.setSpacing(8)
         self.filter_pattern_input = QLineEdit()
         self.filter_pattern_input.setToolTip(
             "Filter images by filename using glob pattern\n"
             "(e.g., '*.jpg', 'IMG_*', etc.)"
         )
-        self.filter_pattern_input.setPlaceholderText("e.g., *.jpg, IMG_*, etc.")
-        self.filter_pattern_input.setMinimumWidth(130)
-        self.filter_pattern_input.setMaximumWidth(130)
+        self.filter_pattern_input.setPlaceholderText("e.g., *.jpg, IMG_*")
+        self.filter_pattern_input.setMinimumWidth(140)
+        self.filter_pattern_input.setMaximumWidth(180)
         self.filter_pattern_input.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        self.filter_pattern_input.setStyleSheet("QLineEdit {padding: 4px; }")
+        self.filter_pattern_input.setStyleSheet("QLineEdit { padding: 4px; }")
         self.filter_pattern_input.textChanged.connect(self.validate_filter_pattern)
-        
+
         self.filter_validation_label = QLabel("")
-        self.filter_validation_label.setStyleSheet(f"color: {TEXT_DISABLED_HEX}; font-style: italic;")
-        
-        # Add apply button for immediate testing
+        self.filter_validation_label.setObjectName("macPreferenceRowSubtitle")
+
         self.apply_filter_button = QPushButton("Apply")
         self.apply_filter_button.setToolTip("Apply filter immediately")
         self.apply_filter_button.clicked.connect(self.apply_filter_now)
-        self.apply_filter_button.setMinimumWidth(70)
-        self.apply_filter_button.setMaximumWidth(80)
+        self.apply_filter_button.setFixedHeight(28)
         self.apply_filter_button.setStyleSheet(f"""
             QPushButton {{
-                padding: 4px 6px;
-                font-size: 11pt;
-                width:50px;
-                max-width:50px;
-                min-width: 50px;
+                padding: 4px 10px;
+                font-size: 12px;
                 border: 1px solid {BORDER_DEFAULT_HEX};
             }}
             QPushButton:focus {{
@@ -2137,114 +2131,86 @@ class SettingsDialog(QDialog):
                 border-color: {TAB_BUTTON_HOVER_BG_HEX};
             }}
         """)
-        
+
         self.filter_pattern_layout.addWidget(self.filter_pattern_input)
         self.filter_pattern_layout.addWidget(self.filter_validation_label)
         self.filter_pattern_layout.addWidget(self.apply_filter_button)
-        self.filter_pattern_layout.addStretch()
-        
-        # Add match count info label
+
         self.match_count_label = QLabel("")
-        self.match_count_label.setStyleSheet("font-size: 11px; margin-left: 10px;")
-        
+        self.match_count_label.setObjectName("macPreferenceRowSubtitle")
+
         filter_layout.addLayout(self.filter_pattern_layout)
         filter_layout.addWidget(self.match_count_label)
-        
-        filter_pattern_label = QLabel("Filter Pattern:")
-        filter_pattern_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-        filter_pattern_label.setMinimumWidth(130)
-        thumbnail_layout.addRow(filter_pattern_label, filter_container)
-        # Show extensions checkbox (filename/size overlays are toggled via Cmd+I)
-        self.show_extensions_checkbox = QCheckBox("Always show file extensions on file names")
-        self.show_extensions_checkbox.setToolTip(
-            "Always show file extensions on file names.\n"
-            "If unchecked, file extensions are only\n"
-            "shown when multiple files have the same base name."
-        )
-        self.show_extensions_checkbox.setStyleSheet(self.SMALL_CHECKBOX_STYLE)
-        extensions_field = QWidget()
-        extensions_field_layout = QVBoxLayout(extensions_field)
-        extensions_field_layout.setContentsMargins(0, 2, 0, 0)
-        extensions_field_layout.setSpacing(2)
-        extensions_field_layout.addWidget(self.show_extensions_checkbox)
-        extensions_hint = QLabel(f"Use {CMD_SYMBOL}-I to cycle display of names, etc.")
-        extensions_hint.setStyleSheet(f"color: {TEXT_DISABLED_HEX}; font-size: 13px; font-style: italic;margin-left:18px")
-        extensions_field_layout.addWidget(extensions_hint)
-        thumbnail_layout.addRow("", extensions_field)
-       
-        # Drag/Drop auto date change checkbox
-        self.drag_drop_auto_date_change_checkbox = QCheckBox("Drag/Drop changes dates when sorted by date")
-        self.drag_drop_auto_date_change_checkbox.setToolTip(
-            "When sorted by date, moving icons in thumbnail view\n"
-            "automatically adjusts file dates to preserve the new\n"
-            "sort order."
-        )
-        self.drag_drop_auto_date_change_checkbox.setStyleSheet(self.SMALL_CHECKBOX_STYLE)
-        thumbnail_layout.addRow("", self.drag_drop_auto_date_change_checkbox)
-        
-        # Allow thumbnail locking functions checkbox
-        self.allow_thumbnail_locking_checkbox = QCheckBox("Allow thumbnail locking functions (Experimental)")
-        self.allow_thumbnail_locking_checkbox.setToolTip(
-            "Allow marking thumbnails as locked to keep them in\n"
-            "place while organizing images in a directory."
-        )
-        self.allow_thumbnail_locking_checkbox.setStyleSheet(self.SMALL_CHECKBOX_STYLE)
-        thumbnail_layout.addRow("", self.allow_thumbnail_locking_checkbox)
-        
-        # Allow quick mass rename checkbox
-        self.allow_quick_mass_rename_checkbox = QCheckBox("Allow Quick Mass Rename")
-        self.allow_quick_mass_rename_checkbox.setToolTip(
-            "Allow Quick rename. Warning: This can rename large\n"
-            "numbers of files without confirmation"
-        )
-        self.allow_quick_mass_rename_checkbox.setStyleSheet(self.SMALL_CHECKBOX_STYLE)
-        thumbnail_layout.addRow("", self.allow_quick_mass_rename_checkbox)
-        
-        inner_layout.addWidget(thumbnail_group)
-        
-        # ===== Browse Settings Group =====
-        browse_group = QGroupBox("Global Browse Settings")
-        browse_group.setContentsMargins(12, 12, 12, 12)
-        browse_layout = QFormLayout(browse_group)
-        browse_layout.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
-        browse_layout.setVerticalSpacing(12)
-        browse_layout.setHorizontalSpacing(16)
-        browse_layout.setContentsMargins(8, 8, 8, 8)
 
-        # Space key mode setting
+        thumb_panel.add_form_row(
+            "Filter Pattern",
+            filter_container,
+            tooltip="Filter images by filename using glob patterns.",
+        )
+
+        self.show_extensions_checkbox = thumb_panel.add_toggle(
+            "Always show file extensions",
+            tooltip=(
+                "Always show file extensions on file names.\n"
+                "If unchecked, file extensions are only\n"
+                "shown when multiple files have the same base name."
+            ),
+            subtitle=f"Use {CMD_SYMBOL}-I to cycle display of names, etc.",
+        )
+
+        self.drag_drop_auto_date_change_checkbox = thumb_panel.add_toggle(
+            "Drag/drop changes dates when sorted by date",
+            tooltip=(
+                "When sorted by date, moving icons in thumbnail view\n"
+                "automatically adjusts file dates to preserve the new\n"
+                "sort order."
+            ),
+        )
+
+        self.allow_thumbnail_locking_checkbox = thumb_panel.add_toggle(
+            "Allow thumbnail locking",
+            tooltip=(
+                "Allow marking thumbnails as locked to keep them in\n"
+                "place while organizing images in a directory."
+            ),
+            subtitle="Experimental",
+        )
+
+        self.allow_quick_mass_rename_checkbox = thumb_panel.add_toggle(
+            "Allow Quick Mass Rename",
+            tooltip=(
+                "Allow Quick rename. Warning: This can rename large\n"
+                "numbers of files without confirmation."
+            ),
+        )
+
+        inner_layout.addWidget(thumb_title)
+        inner_layout.addWidget(thumb_panel)
+
+        # ----- Browse -----
+        browse_title, browse_panel = mac_preference_section("Browse", inner)
+
         self.space_mode_combo = QComboBox()
-        self.space_mode_combo.addItem('Exit to thumbnails', userData='exit')
-        self.space_mode_combo.addItem('Show next image', userData='advance')
+        self.space_mode_combo.addItem("Exit to thumbnails", userData="exit")
+        self.space_mode_combo.addItem("Show next image", userData="advance")
         self.space_mode_combo.setToolTip("Default behavior for space key in browse mode")
         self.space_mode_combo.setFixedHeight(28)
-        self.space_mode_combo.setFixedWidth(130)
-        self.space_mode_combo.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
-        self.space_mode_combo.setStyleSheet("QComboBox {font-size: 12px; padding: 4px; }")
-        # Use right-justified label
-        space_key_label = QLabel("Space Key:")
-        space_key_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-        space_key_label.setMinimumWidth(130)  # Ensure label column has enough width
-        space_combo_wrapper = QWidget()
-        space_combo_wrapper.setFixedWidth(130)
-        space_combo_wrapper.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
-        space_combo_wrapper_layout = QHBoxLayout(space_combo_wrapper)
-        space_combo_wrapper_layout.setContentsMargins(0, 0, 0, 0)
-        space_combo_wrapper_layout.addWidget(self.space_mode_combo)
-        browse_layout.addRow(space_key_label, space_combo_wrapper)
-
-        # Browse image history: delay before an image is recorded (F3 history)
-        save_history_label = QLabel("Remember image after:\n(for Image History - F3)")
-        save_history_label.setAlignment(Qt.AlignRight | Qt.AlignTop)
-        save_history_label.setMinimumWidth(130)
-        save_history_label.setToolTip(
-            "After this time, the current image is added to Image\n"
-            "History that you can see by pressing F3."
+        self.space_mode_combo.setMinimumWidth(160)
+        self.space_mode_combo.setStyleSheet("QComboBox { font-size: 12px; padding: 4px; }")
+        browse_panel.add_form_row(
+            "Space Key",
+            self.space_mode_combo,
+            tooltip="Default behavior for the space key in browse mode.",
         )
-        save_history_row = QWidget()
-        save_history_layout = QHBoxLayout(save_history_row)
+
+        save_history_control = QWidget()
+        save_history_layout = QVBoxLayout(save_history_control)
         save_history_layout.setContentsMargins(0, 0, 0, 0)
-        save_history_layout.setSpacing(10)
-        save_history_layout.setAlignment(Qt.AlignTop)
+        save_history_layout.setSpacing(4)
+        save_history_slider_row = QWidget()
+        save_history_slider_layout = QHBoxLayout(save_history_slider_row)
+        save_history_slider_layout.setContentsMargins(0, 0, 0, 0)
+        save_history_slider_layout.setSpacing(8)
         self.browse_image_history_save_after_slider = QSlider(Qt.Horizontal)
         self.browse_image_history_save_after_slider.setMinimum(0)
         self.browse_image_history_save_after_slider.setMaximum(10)
@@ -2252,6 +2218,7 @@ class SettingsDialog(QDialog):
         self.browse_image_history_save_after_slider.setPageStep(2)
         self.browse_image_history_save_after_slider.setTickInterval(2)
         self.browse_image_history_save_after_slider.setTickPosition(QSlider.TicksBelow)
+        self.browse_image_history_save_after_slider.setMinimumWidth(160)
         self.browse_image_history_save_after_slider.setToolTip(
             "Time in seconds before the currently browsed image\n"
             "is added to Image History.\n\n"
@@ -2260,83 +2227,76 @@ class SettingsDialog(QDialog):
             "images and then pressing F3 to show them in the same\n"
             "thumbnail view."
         )
-   
-
         self.browse_image_history_save_after_slider.valueChanged.connect(
             self._on_browse_image_history_save_after_slider_changed
         )
         self.browse_image_history_save_after_value_label = QLabel()
-        self.browse_image_history_save_after_value_label.setMinimumWidth(200)
-        self.browse_image_history_save_after_value_label.setAlignment(Qt.AlignLeft | Qt.AlignTop)
-        save_history_layout.addWidget(self.browse_image_history_save_after_slider, 1, Qt.AlignTop)
-        save_history_layout.addWidget(self.browse_image_history_save_after_value_label, 0, Qt.AlignTop)
-        browse_layout.addRow(save_history_label, save_history_row)
-        browse_layout.setAlignment(save_history_row, Qt.AlignTop)
-
-        inner_layout.addWidget(browse_group)
-        
-        # ===== General Settings Group =====
-        general_group = QGroupBox("General Settings")
-        general_group.setContentsMargins(12, 12, 12, 12)
-        general_layout = QVBoxLayout(general_group)
-        general_layout.setContentsMargins(8, 8, 8, 8)
-        general_layout.setSpacing(8)
-        
-        # Checkbox grid for general settings
-        checkbox_grid = QGridLayout()
-        checkbox_grid.setHorizontalSpacing(24)
-        checkbox_grid.setVerticalSpacing(10)
-        checkbox_grid.setContentsMargins(0, 0, 0, 0)
-        
-        # Row 0: Delete confirmation, Wrap around
-        self.confirm_delete_checkbox = QCheckBox("Delete confirmation")
-        self.confirm_delete_checkbox.setToolTip("Show confirmation dialog when deleting files")
-        self.confirm_delete_checkbox.setStyleSheet(self.SMALL_CHECKBOX_STYLE)
-        checkbox_grid.addWidget(self.confirm_delete_checkbox, 0, 0)
-        
-        self.wrap_around_checkbox = QCheckBox("Wrap around")
-        self.wrap_around_checkbox.setToolTip(
-            "Allow navigation to wrap from end to beginning and\n"
-            "vice versa"
+        self.browse_image_history_save_after_value_label.setMinimumWidth(72)
+        self.browse_image_history_save_after_value_label.setAlignment(
+            Qt.AlignLeft | Qt.AlignVCenter
         )
-        self.wrap_around_checkbox.setStyleSheet(self.SMALL_CHECKBOX_STYLE)
-        checkbox_grid.addWidget(self.wrap_around_checkbox, 0, 1)
-        
-        # Row 1: Use EXIF Rotation, Debug mode
-        self.ignore_exif_rotation_checkbox = QCheckBox("Use EXIF Rotation")
-        self.ignore_exif_rotation_checkbox.setToolTip(
-            "Apply automatic EXIF rotation correction.\n"
-            "When unchecked, images are displayed without rotation\n"
-            "correction.\n"
-            "Manual rotation (Shift+arrow keys) still works in\n"
-            "fullscreen."
+        save_history_slider_layout.addWidget(self.browse_image_history_save_after_slider, 1)
+        save_history_slider_layout.addWidget(self.browse_image_history_save_after_value_label, 0)
+        save_history_layout.addWidget(save_history_slider_row)
+        browse_panel.add_form_row(
+            "Remember image after",
+            save_history_control,
+            tooltip=(
+                "After this time, the current image is added to Image\n"
+                "History that you can see by pressing F3."
+            ),
+            subtitle="For Image History (F3)",
         )
-        self.ignore_exif_rotation_checkbox.setStyleSheet(self.SMALL_CHECKBOX_STYLE)
-        checkbox_grid.addWidget(self.ignore_exif_rotation_checkbox, 1, 0)
-        
-        self.debug_checkbox = QCheckBox("Debug mode")
-        self.debug_checkbox.setToolTip("Show key popup overlay for debugging keyboard events")
-        self.debug_checkbox.setStyleSheet(self.SMALL_CHECKBOX_STYLE)
-        checkbox_grid.addWidget(self.debug_checkbox, 1, 1)
 
-        self.use_prompt_filter_exits_checkbox = QCheckBox("Use prompt filter exits")
-        self.use_prompt_filter_exits_checkbox.setToolTip(
-            "When enabled, run external prompt filter scripts\n"
-            "configured via PROWSER_TEXT_AI_EXIT (LMStudio / caption\n"
-            "prompts) and PROWSER_IMAGE_AI_EXIT (image generation\n"
-            "prompts) before model calls."
+        inner_layout.addWidget(browse_title)
+        inner_layout.addWidget(browse_panel)
+
+        # ----- General -----
+        general_title, general_panel = mac_preference_section("General", inner)
+
+        self.confirm_delete_checkbox = general_panel.add_toggle(
+            "Delete confirmation",
+            tooltip="Show confirmation dialog when deleting files.",
         )
-        self.use_prompt_filter_exits_checkbox.setStyleSheet(self.SMALL_CHECKBOX_STYLE)
-        checkbox_grid.addWidget(self.use_prompt_filter_exits_checkbox, 2, 0)
-        
-        # Add checkbox grid to general group
-        checkbox_container = QWidget()
-        checkbox_container.setLayout(checkbox_grid)
-        general_layout.addWidget(checkbox_container, alignment=Qt.AlignCenter)
-        
-        inner_layout.addWidget(general_group)
 
-        # ===== General Generation Settings Group =====
+        self.wrap_around_checkbox = general_panel.add_toggle(
+            "Wrap around",
+            tooltip=(
+                "Allow navigation to wrap from end to beginning and\n"
+                "vice versa."
+            ),
+        )
+
+        self.ignore_exif_rotation_checkbox = general_panel.add_toggle(
+            "Use EXIF rotation",
+            tooltip=(
+                "Apply automatic EXIF rotation correction.\n"
+                "When unchecked, images are displayed without rotation\n"
+                "correction.\n"
+                "Manual rotation (Shift+arrow keys) still works in\n"
+                "fullscreen."
+            ),
+        )
+
+        self.debug_checkbox = general_panel.add_toggle(
+            "Debug mode",
+            tooltip="Show key popup overlay for debugging keyboard events.",
+        )
+
+        self.use_prompt_filter_exits_checkbox = general_panel.add_toggle(
+            "Use prompt filter exits",
+            tooltip=(
+                "When enabled, run external prompt filter scripts\n"
+                "configured via PROWSER_TEXT_AI_EXIT (LMStudio / caption\n"
+                "prompts) and PROWSER_IMAGE_AI_EXIT (image generation\n"
+                "prompts) before model calls."
+            ),
+        )
+
+        inner_layout.addWidget(general_title)
+        inner_layout.addWidget(general_panel)
+
+        # ----- Image generation -----
         from imagegen_plugins.image_gen_dim_limits import (
             APP_MAX_GENERATION_DIMENSION_CEILING,
             APP_MAX_GENERATION_DIMENSION_DEFAULT,
@@ -2348,29 +2308,23 @@ class SettingsDialog(QDialog):
             app_series_cooldown_seconds,
         )
 
-        imagegen_group = QGroupBox("General Generation Settings")
-        imagegen_group.setContentsMargins(12, 12, 12, 12)
-        imagegen_layout = QFormLayout(imagegen_group)
-        imagegen_layout.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
-        imagegen_layout.setVerticalSpacing(12)
-        imagegen_layout.setHorizontalSpacing(16)
-        imagegen_layout.setContentsMargins(8, 8, 8, 8)
+        imagegen_title, imagegen_panel = mac_preference_section("Image Generation", inner)
 
-        max_dim_label = QLabel("Max Generation Dimension:")
-        max_dim_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-        max_dim_row = QWidget()
-        max_dim_row_layout = QHBoxLayout(max_dim_row)
-        max_dim_row_layout.setContentsMargins(0, 0, 0, 0)
-        max_dim_row_layout.setSpacing(10)
         _dim_step = APP_MAX_GENERATION_DIMENSION_STEP
         _dim_slider_max = (
             APP_MAX_GENERATION_DIMENSION_CEILING - APP_MAX_GENERATION_DIMENSION_MIN
         ) // _dim_step
+
+        max_dim_control = QWidget()
+        max_dim_row_layout = QHBoxLayout(max_dim_control)
+        max_dim_row_layout.setContentsMargins(0, 0, 0, 0)
+        max_dim_row_layout.setSpacing(8)
         self.imagegen_max_generation_dimension_slider = QSlider(Qt.Horizontal)
         self.imagegen_max_generation_dimension_slider.setMinimum(0)
         self.imagegen_max_generation_dimension_slider.setMaximum(_dim_slider_max)
         self.imagegen_max_generation_dimension_slider.setSingleStep(1)
         self.imagegen_max_generation_dimension_slider.setPageStep(4)
+        self.imagegen_max_generation_dimension_slider.setMinimumWidth(160)
         self.imagegen_max_generation_dimension_slider.setToolTip(
             "Maximum edge length (width or height) for image\n"
             "generation.\n"
@@ -2384,34 +2338,29 @@ class SettingsDialog(QDialog):
         self.imagegen_max_generation_dimension_value_label.setAlignment(
             Qt.AlignLeft | Qt.AlignVCenter
         )
-        max_dim_row_layout.addWidget(
-            self.imagegen_max_generation_dimension_slider, 1
+        max_dim_row_layout.addWidget(self.imagegen_max_generation_dimension_slider, 1)
+        max_dim_row_layout.addWidget(self.imagegen_max_generation_dimension_value_label, 0)
+        imagegen_panel.add_form_row(
+            "Max generation dimension",
+            max_dim_control,
+            tooltip="Maximum edge length for image generation.",
+            subtitle="Models may impose lower limits.",
         )
-        max_dim_row_layout.addWidget(
-            self.imagegen_max_generation_dimension_value_label, 0
-        )
-        imagegen_layout.addRow(max_dim_label, max_dim_row)
 
-        models_hint = QLabel("Models may impose lower limits.")
-        models_hint.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-        models_hint.setStyleSheet(self.NOTE_TEXT_STYLE + "margin-top:0px;")
-        imagegen_layout.addRow("", models_hint)
-
-        cooldown_label = QLabel("Cooldown time:")
-        cooldown_label.setAlignment(Qt.AlignRight | Qt.AlignTop)
-        cooldown_field = QWidget()
-        cooldown_field_layout = QVBoxLayout(cooldown_field)
-        cooldown_field_layout.setContentsMargins(0, 0, 0, 0)
-        cooldown_field_layout.setSpacing(4)
+        cooldown_control = QWidget()
+        cooldown_control_layout = QVBoxLayout(cooldown_control)
+        cooldown_control_layout.setContentsMargins(0, 0, 0, 0)
+        cooldown_control_layout.setSpacing(4)
         cooldown_row = QWidget()
         cooldown_row_layout = QHBoxLayout(cooldown_row)
         cooldown_row_layout.setContentsMargins(0, 0, 0, 0)
-        cooldown_row_layout.setSpacing(10)
+        cooldown_row_layout.setSpacing(8)
         self.imagegen_series_cooldown_slider = QSlider(Qt.Horizontal)
         self.imagegen_series_cooldown_slider.setMinimum(0)
         self.imagegen_series_cooldown_slider.setMaximum(APP_SERIES_COOLDOWN_SECONDS_MAX)
         self.imagegen_series_cooldown_slider.setSingleStep(1)
         self.imagegen_series_cooldown_slider.setPageStep(10)
+        self.imagegen_series_cooldown_slider.setMinimumWidth(160)
         self.imagegen_series_cooldown_slider.setToolTip(
             "Number of seconds between each generation in a series."
         )
@@ -2425,14 +2374,13 @@ class SettingsDialog(QDialog):
         )
         cooldown_row_layout.addWidget(self.imagegen_series_cooldown_slider, 1)
         cooldown_row_layout.addWidget(self.imagegen_series_cooldown_value_label, 0)
-        cooldown_field_layout.addWidget(cooldown_row)
-
-        cooldown_hint = QLabel("Seconds between generations in a series.")
-        cooldown_hint.setStyleSheet(self.NOTE_TEXT_STYLE + "margin-top:0px;")
-        cooldown_hint.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-        cooldown_hint.setWordWrap(True)
-        cooldown_field_layout.addWidget(cooldown_hint)
-        imagegen_layout.addRow(cooldown_label, cooldown_field)
+        cooldown_control_layout.addWidget(cooldown_row)
+        imagegen_panel.add_form_row(
+            "Cooldown time",
+            cooldown_control,
+            tooltip="Number of seconds between each generation in a series.",
+            subtitle="Seconds between generations in a series.",
+        )
 
         default_dim_index = (
             align_generation_dimension(APP_MAX_GENERATION_DIMENSION_DEFAULT)
@@ -2448,8 +2396,16 @@ class SettingsDialog(QDialog):
         )
         self._update_imagegen_series_cooldown_label()
 
-        inner_layout.addWidget(imagegen_group)
-        self._imagegen_general_settings_group = imagegen_group
+        imagegen_section = QWidget()
+        imagegen_section_layout = QVBoxLayout(imagegen_section)
+        imagegen_section_layout.setContentsMargins(0, 0, 0, 0)
+        imagegen_section_layout.setSpacing(6)
+        imagegen_section_layout.addWidget(imagegen_title)
+        imagegen_section_layout.addWidget(imagegen_panel)
+        inner_layout.addWidget(imagegen_section)
+        self._imagegen_general_settings_group = imagegen_section
+
+        inner_layout.addStretch()
         scroll.setWidget(inner)
         layout.addWidget(scroll)
     
@@ -3752,12 +3708,10 @@ class SettingsDialog(QDialog):
         slideshow_layout.addWidget(QLabel("Default Direction:"), 2, 0, Qt.AlignRight | Qt.AlignVCenter)
         slideshow_layout.addWidget(self.direction_combo, 2, 1, Qt.AlignLeft | Qt.AlignVCenter)
 
-        self.slideshow_back_and_forth_checkbox = QCheckBox("Back and forth")
-        self.slideshow_back_and_forth_checkbox.setToolTip(
-            "Play through images forward and backward repeatedly."
-        )
-        slideshow_layout.addWidget(
-            self.slideshow_back_and_forth_checkbox, 2, 2, 1, 2, Qt.AlignLeft | Qt.AlignVCenter
+        playback_panel = MacPreferencePanel()
+        self.slideshow_back_and_forth_checkbox = playback_panel.add_toggle(
+            "Back and forth",
+            tooltip="Play through images forward and backward repeatedly.",
         )
         
         # Add performance warning note at the bottom
@@ -3778,6 +3732,7 @@ class SettingsDialog(QDialog):
         warning_label.setStyleSheet(self.NOTE_TEXT_STYLE)
 
         layout.addWidget(slideshow_group)
+        layout.addWidget(playback_panel)
         layout.addWidget(warning_label)
         layout.addStretch()
 
@@ -3850,6 +3805,19 @@ class SettingsDialog(QDialog):
             and not getattr(self, "_settings_dialog_initializing", False)
         ):
             QTimer.singleShot(50, self._adjust_size_and_persist_geometry)
+
+    def _update_background_clip_subordinates_enabled(self) -> None:
+        """Enable subordinate background-processing toggles only when parent is on."""
+        if not hasattr(self, "background_clip_enabled_checkbox"):
+            return
+        enabled = self.background_clip_enabled_checkbox.isChecked()
+        for attr in (
+            "background_clip_gather_thumbnails_container",
+            "background_clip_extract_faces_container",
+        ):
+            container = getattr(self, attr, None)
+            if container is not None:
+                container.setEnabled(enabled)
 
     def setup_cache_management_tab(self):
         """Setup the cache management tab"""
@@ -4058,68 +4026,49 @@ class SettingsDialog(QDialog):
         
         layout.addWidget(cache_group)
 
-        # Background CLIP Extraction group
-        background_group = QGroupBox("Background Processing")
-        background_layout = QFormLayout(background_group)
-        background_layout.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
-        background_layout.setVerticalSpacing(12)
+        bg_title, bg_panel = mac_preference_section("Background Processing")
 
-        self.background_clip_enabled_checkbox = QCheckBox("Enable idle search-data collection (use sparingly)")
-        self.background_clip_enabled_checkbox.setToolTip(
-            "Analyzes images to populate cache with data needed for\n"
-            "similarity and text searches for files in the Favorites\n"
-            "and recently used directories.\n"
-            "This runs while the application is idle and does not\n"
-            "interfere with normal operations, but may cause battery\n"
-            "drain."
+        self.background_clip_enabled_checkbox = bg_panel.add_toggle(
+            "Enable idle search-data collection",
+            tooltip=(
+                "Analyzes images to populate cache with data needed for\n"
+                "similarity and text searches for files in the Favorites\n"
+                "and recently used directories.\n"
+                "This runs while the application is idle and does not\n"
+                "interfere with normal operations, but may cause battery\n"
+                "drain."
+            ),
+            subtitle="Use sparingly",
         )
-        self.background_clip_enabled_checkbox.setStyleSheet(self.SMALL_CHECKBOX_STYLE)
-        background_layout.addRow("", self.background_clip_enabled_checkbox)
 
-        # Indented "Also gather thumbnails" checkbox - enabled only when background CLIP is enabled
-        self.background_clip_gather_thumbnails_container = QWidget()
-        self.background_clip_gather_thumbnails_container.setContentsMargins(20, 2, 0, 0)
-        gather_thumb_layout = QHBoxLayout(self.background_clip_gather_thumbnails_container)
-        gather_thumb_layout.setContentsMargins(0, 0, 0, 0)
-        self.background_clip_gather_thumbnails_checkbox = QCheckBox("Also gather thumbnails")
-        self.background_clip_gather_thumbnails_checkbox.setToolTip(
-            "When processing images for CLIP extraction, also\n"
-            "generate and cache thumbnails for images that don't\n"
-            "have them yet."
+        gather_row = bg_panel.add_subordinate_toggle(
+            "Also gather thumbnails",
+            tooltip=(
+                "When processing images for CLIP extraction, also\n"
+                "generate and cache thumbnails for images that don't\n"
+                "have them yet."
+            ),
         )
-        gather_thumb_style = self.SMALL_CHECKBOX_STYLE + f"""
-            QCheckBox:disabled {{
-                color: {TEXT_DISABLED_HEX};
-            }}
-        """
-        self.background_clip_gather_thumbnails_checkbox.setStyleSheet(gather_thumb_style)
-        gather_thumb_layout.addWidget(self.background_clip_gather_thumbnails_checkbox)
-        gather_thumb_layout.addStretch()
-        background_layout.addRow("", self.background_clip_gather_thumbnails_container)
+        self.background_clip_gather_thumbnails_checkbox = gather_row.toggle
+        self.background_clip_gather_thumbnails_container = gather_row
 
-        # Indented "Extract faces" checkbox - enabled only when background CLIP is enabled
-        self.background_clip_extract_faces_container = QWidget()
-        self.background_clip_extract_faces_container.setContentsMargins(20, 2, 0, 0)
-        extract_faces_layout = QHBoxLayout(self.background_clip_extract_faces_container)
-        extract_faces_layout.setContentsMargins(0, 0, 0, 0)
-        self.background_clip_extract_faces_checkbox = QCheckBox("Extract faces")
-        self.background_clip_extract_faces_checkbox.setToolTip(
-            "When processing images for CLIP/CNN extraction, also\n"
-            "extract and cache face encodings for face search."
+        extract_row = bg_panel.add_subordinate_toggle(
+            "Extract faces",
+            tooltip=(
+                "When processing images for CLIP/CNN extraction, also\n"
+                "extract and cache face encodings for face search."
+            ),
         )
-        self.background_clip_extract_faces_checkbox.setStyleSheet(gather_thumb_style)
-        extract_faces_layout.addWidget(self.background_clip_extract_faces_checkbox)
-        extract_faces_layout.addStretch()
-        background_layout.addRow("", self.background_clip_extract_faces_container)
+        self.background_clip_extract_faces_checkbox = extract_row.toggle
+        self.background_clip_extract_faces_container = extract_row
 
-        # Enable gather thumbnails and extract faces checkboxes only when background CLIP is enabled
-        def _update_background_options_enabled():
-            enabled = self.background_clip_enabled_checkbox.isChecked()
-            self.background_clip_gather_thumbnails_checkbox.setEnabled(enabled)
-            self.background_clip_extract_faces_checkbox.setEnabled(enabled)
-        self.background_clip_enabled_checkbox.toggled.connect(_update_background_options_enabled)
+        self.background_clip_enabled_checkbox.toggled.connect(
+            lambda _checked: self._update_background_clip_subordinates_enabled()
+        )
+        self._update_background_clip_subordinates_enabled()
 
-        layout.addWidget(background_group)
+        layout.addWidget(bg_title)
+        layout.addWidget(bg_panel)
         layout.addStretch()
         
         # Load initial cache statistics (with error handling) - only if stats are enabled
@@ -4815,13 +4764,12 @@ class SettingsDialog(QDialog):
         layout.addStretch()
 
     def setup_root_directories_tab(self):
-        """Setup the root directories tab for configuring root directories"""
+        """Setup the root directories tab (macOS Preferences pane style)."""
 
         import os
 
-        # List of directories (by name, not path) to exclude from UI
         _excluded_directories = {
-            '.nofollow', '.resolve', '.vol', '.Trashes', '.fseventsd', 'cores', 
+            '.nofollow', '.resolve', '.vol', '.Trashes', '.fseventsd', 'cores',
             '.Spotlight-V100', '.DocumentRevisions-V100', '.MobileBackups',
             '.PKInstallSandboxManager-SystemSoftware', '.file', '.vol'
         }
@@ -4834,24 +4782,9 @@ class SettingsDialog(QDialog):
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         inner = QWidget()
         layout = QVBoxLayout(inner)
-        layout.setContentsMargins(12, 8, 12, 16)
+        layout.setContentsMargins(20, 12, 20, 20)
+        layout.setSpacing(18)
 
-        # Title
-        title = QLabel("Root Directories")
-        title.setAlignment(Qt.AlignCenter)
-        title_font = QFont()
-        title_font.setPointSize(14)
-        title_font.setBold(True)
-        title.setFont(title_font)
-        layout.addWidget(title)
-
-        # Description
-        description = QLabel("Select which root-level directories should be shown in the file tree view.")
-        description.setWordWrap(True)
-        description.setStyleSheet(self.NOTE_TEXT_STYLE)
-        layout.addWidget(description)
-
-        # List all actual directories present in root ("/"), sort alphabetically, and exclude unwanted ones
         try:
             root_dir = "/"
             all_entries = os.listdir(root_dir)
@@ -4864,94 +4797,85 @@ class SettingsDialog(QDialog):
             print(f"Failed to list root directories: {e}")
             all_directories = []
 
-        # Create checkboxes for each directory
-        self.directory_checkboxes = {}
-        checkbox_grid = QGridLayout()
-        checkbox_grid.setHorizontalSpacing(24)
-        checkbox_grid.setVerticalSpacing(10)
-        checkbox_grid.setContentsMargins(40, 0, 0, 0)
-
-
-        num_dirs = len(all_directories)
-        num_cols = 2
-        num_rows = (num_dirs + num_cols - 1) // num_cols
-
-        # Place the checkboxes in column-major order (fill first column,
-        # then second column, etc.) for 2 columns.
-        for col in range(num_cols):
-            for row in range(num_rows):
-                idx = col * num_rows + row
-                if idx >= num_dirs:
-                    continue
-                directory = all_directories[idx]
-                # Display with leading slash (e.g., /blah instead of blah)
-                checkbox = QCheckBox(f"/{directory}")
-                checkbox.setToolTip(f"Show {directory} in the file tree view")
-                checkbox.setStyleSheet(self.SMALL_CHECKBOX_STYLE)
-                # Set minimum height to ensure full text is visible (prevents vertical clipping)
-                checkbox.setMinimumHeight(20)
-                self.directory_checkboxes[directory] = checkbox
-                checkbox_grid.addWidget(checkbox, row, col)
-
-        # Add the checkbox grid to a container
-        checkbox_container = QWidget()
-        checkbox_container.setLayout(checkbox_grid)
-        layout.addWidget(checkbox_container)
-
-        # Add spacing before hidden directories checkbox
-        layout.addSpacing(15)
-
-        # Add hidden directories checkbox
-        self.show_hidden_directories_checkbox = QCheckBox("Process hidden directories")
-        self.show_hidden_directories_checkbox.setToolTip(
-            "Process directories starting with a period (e.g., .git,\n"
-            ".vscode) in searches and file operations, not just the\n"
-            "file tree"
+        root_title, root_panel = mac_preference_section("Root Directories", inner)
+        root_desc = QLabel(
+            "Select which root-level directories should be shown in the file tree view."
         )
-        pad_factor = "; margin-left: 16px;"
-        self.show_hidden_directories_checkbox.setStyleSheet(self.SMALL_CHECKBOX_STYLE + pad_factor)
-        layout.addWidget(self.show_hidden_directories_checkbox)
-        layout.addSpacing(8)
+        root_desc.setObjectName("macPreferenceRowSubtitle")
+        root_desc.setWordWrap(True)
 
-        # Add "Always show 'work'" checkbox
-        self.always_show_work_checkbox = QCheckBox("Always show directorise that start with 'work'")
-        self.always_show_work_checkbox.setToolTip(
-            "Always show directories that start with 'work...' in\n"
-            "the file tree, regardless of filter settings.\n"
-            "This is intended to provide empty directories when tree\n"
-            "filtering requires images."
+        grid_items = [
+            (
+                directory,
+                f"/{directory}",
+                f"Show {directory} in the file tree view",
+            )
+            for directory in all_directories
+        ]
+        dir_grid, self.directory_checkboxes = build_column_major_toggle_grid(
+            grid_items,
+            num_cols=3,
+            parent=root_panel,
         )
-        self.always_show_work_checkbox.setStyleSheet(self.SMALL_CHECKBOX_STYLE + pad_factor)
-        layout.addWidget(self.always_show_work_checkbox)
-        layout.addSpacing(8)
+        root_panel.add_custom_row(dir_grid)
 
-        # Add "Follow symlinks" checkbox
-        self.follow_symlinks_checkbox = QCheckBox("Follow symlinks (including system volumes)")
-        self.follow_symlinks_checkbox.setToolTip(
-            "Follow symbolic and hard links when scanning\n"
-            "directories in the tree view.\n"
-            "Disable this to not show the system volumes in the tree\n"
-            "view."
+        layout.addWidget(root_title)
+        layout.addWidget(root_desc)
+        layout.addWidget(root_panel)
+
+        options_title, options_panel = mac_preference_section("Scanning Options", inner)
+
+        self.show_hidden_directories_checkbox = options_panel.add_toggle(
+            "Process hidden directories",
+            tooltip=(
+                "Process directories starting with a period (e.g., .git,\n"
+                ".vscode) in searches and file operations, not just the\n"
+                "file tree."
+            ),
         )
-        self.follow_symlinks_checkbox.setStyleSheet(self.SMALL_CHECKBOX_STYLE + pad_factor)
-        layout.addWidget(self.follow_symlinks_checkbox)
 
-        # {CMD_SYMBOL}{SHIFT_SYMBOL}{ENTER_SYMBOL} depth and Search depth on one line
-        depth_container = QWidget()
-        depth_horizontal_layout = QHBoxLayout(depth_container)
-        depth_horizontal_layout.setContentsMargins(16, 3, 0, 0)
-        depth_horizontal_layout.setSpacing(10)
-        depth_label = QLabel(f"{CMD_SYMBOL}{SHIFT_SYMBOL}{ENTER_SYMBOL} depth:")
+        self.always_show_work_checkbox = options_panel.add_toggle(
+            "Always show directories that start with 'work'",
+            tooltip=(
+                "Always show directories that start with 'work...' in\n"
+                "the file tree, regardless of filter settings.\n"
+                "This is intended to provide empty directories when tree\n"
+                "filtering requires images."
+            ),
+        )
+
+        self.follow_symlinks_checkbox = options_panel.add_toggle(
+            "Follow symlinks",
+            tooltip=(
+                "Follow symbolic and hard links when scanning\n"
+                "directories in the tree view.\n"
+                "Disable this to not show the system volumes in the tree\n"
+                "view."
+            ),
+            subtitle="Including system volumes",
+        )
+
+        layout.addWidget(options_title)
+        layout.addWidget(options_panel)
+
+        depth_title, depth_panel = mac_preference_section("Depth", inner)
+
         self.shift_cmd_depth_spinbox = QSpinBox()
         self.shift_cmd_depth_spinbox.setRange(1, 10)
-        self.shift_cmd_depth_spinbox.setValue(4)  # Default value
+        self.shift_cmd_depth_spinbox.setValue(4)
         self.shift_cmd_depth_spinbox.setToolTip(
             "How many levels to expand the file tree when you press\n"
             "Shift+Cmd+Return (1-10).\n"
             "Applies when tree filtering is set to show all entries."
         )
-        self.shift_cmd_depth_spinbox.setFixedWidth(120)
-        search_depth_label = QLabel("Search depth:")
+        self.shift_cmd_depth_spinbox.setFixedWidth(72)
+        self.shift_cmd_depth_spinbox.setFixedHeight(28)
+        depth_panel.add_form_row(
+            f"{CMD_SYMBOL}{SHIFT_SYMBOL}{ENTER_SYMBOL} depth",
+            self.shift_cmd_depth_spinbox,
+            tooltip="Tree expansion depth for Shift+Cmd+Return.",
+        )
+
         self.search_depth_spinbox = QSpinBox()
         self.search_depth_spinbox.setRange(1, 10)
         self.search_depth_spinbox.setValue(4)
@@ -4963,114 +4887,61 @@ class SettingsDialog(QDialog):
             "• Recursive image search and tree \"has images\" checks\n"
             "• Similarity / background indexing over folders"
         )
-        self.search_depth_spinbox.setFixedWidth(120)
-        depth_horizontal_layout.addWidget(depth_label)
-        depth_horizontal_layout.addWidget(self.shift_cmd_depth_spinbox)
-        depth_horizontal_layout.addSpacing(16)
-        depth_horizontal_layout.addWidget(search_depth_label)
-        depth_horizontal_layout.addWidget(self.search_depth_spinbox)
-        depth_horizontal_layout.addStretch()
-        layout.addWidget(depth_container)
+        self.search_depth_spinbox.setFixedWidth(72)
+        self.search_depth_spinbox.setFixedHeight(28)
+        depth_panel.add_form_row(
+            "Search depth",
+            self.search_depth_spinbox,
+            tooltip="Maximum depth for recursive directory scans.",
+        )
 
-        # Add performance warning note at the bottom (commented out)
-        # warning_label = QLabel(
-        #     "Note:\tAdding unnecessary directories may affect performance.\n"
-        #     "\tOnly enable directories you need to access."
-        # )
-        # warning_label.setWordWrap(True)
-        # warning_label.setStyleSheet(self.NOTE_TEXT_STYLE)
-        # layout.addWidget(warning_label)
+        layout.addWidget(depth_title)
+        layout.addWidget(depth_panel)
 
-        # Image creation directory (generated imagegen-NNNN files) and work temp files
-        image_creation_groupbox = QGroupBox("Image Creation & Temporary Files")
-        image_creation_groupbox.setStyleSheet(f"""
-            QGroupBox {{
-                font-weight: bold;
-                border: 1px solid {BORDER_DEFAULT_HEX};
-                border-radius: 4px;
-                margin-top: 10px;
-                padding-top: 10px;
-            }}
-            QGroupBox::title {{
-                subcontrol-origin: margin;
-                left: 10px;
-                padding: 0 5px;
-            }}
-        """)
-        image_creation_layout = QVBoxLayout(image_creation_groupbox)
-        image_creation_layout.setSpacing(8)
-
-        image_creation_note = QLabel(
+        files_title, files_panel = mac_preference_section("Image Creation & Temporary Files", inner)
+        files_note = QLabel(
             "When enabled, newly generated images are saved in the folder below. "
             "When disabled, images are saved to ~/Downloads."
         )
-        image_creation_note.setWordWrap(True)
-        image_creation_note.setStyleSheet(self.NOTE_TEXT_STYLE)
-        image_creation_layout.addWidget(image_creation_note)
+        files_note.setObjectName("macPreferenceRowSubtitle")
+        files_note.setWordWrap(True)
 
-        image_creation_row = QWidget()
-        image_creation_row.setMinimumHeight(28)
-        image_creation_row.setMaximumHeight(28)
-        image_creation_row_layout = QHBoxLayout(image_creation_row)
-        image_creation_row_layout.setContentsMargins(0, 0, 0, 0)
-        image_creation_row_layout.setSpacing(8)
-
-        image_creation_checkbox_container = QWidget()
-        image_creation_checkbox_container.setFixedSize(20, 28)
-        image_creation_checkbox_layout = QHBoxLayout(image_creation_checkbox_container)
-        image_creation_checkbox_layout.setContentsMargins(0, 0, 0, 0)
-        image_creation_checkbox_layout.setSpacing(0)
-        self.image_creation_directory_checkbox = QCheckBox()
-        self.image_creation_directory_checkbox.setToolTip(
-            "Use the directory below for generated images"
-        )
-        image_creation_checkbox_layout.addWidget(self.image_creation_directory_checkbox)
-        image_creation_row_layout.addWidget(image_creation_checkbox_container)
-
+        image_path_control = QWidget()
+        image_path_layout = QHBoxLayout(image_path_control)
+        image_path_layout.setContentsMargins(0, 0, 0, 0)
+        image_path_layout.setSpacing(8)
         self.image_creation_directory_input_field = QLineEdit()
         self.image_creation_directory_input_field.setPlaceholderText(
             "Enter directory for generated images"
         )
         self.image_creation_directory_input_field.setToolTip(
-            "Folder for newly generated images when the checkbox\n"
+            "Folder for newly generated images when the toggle\n"
             "above is enabled.\n"
             "When disabled, images are saved to ~/Downloads."
         )
         self.image_creation_directory_input_field.setMinimumHeight(28)
-        image_creation_row_layout.addWidget(self.image_creation_directory_input_field)
-
+        image_path_layout.addWidget(self.image_creation_directory_input_field, 1)
         image_creation_browse_button = QPushButton("...")
         image_creation_browse_button.setToolTip("Browse for directory")
         image_creation_browse_button.setFixedWidth(30)
         image_creation_browse_button.setFixedHeight(28)
         image_creation_browse_button.setStyleSheet(self._small_ellipsis_button_style())
         image_creation_browse_button.clicked.connect(self.browse_image_creation_directory)
-        image_creation_row_layout.addWidget(image_creation_browse_button)
+        image_path_layout.addWidget(image_creation_browse_button)
 
-        image_creation_layout.addWidget(image_creation_row)
+        self.image_creation_directory_checkbox = files_panel.add_toggle(
+            "Use custom folder for generated images",
+            tooltip="Use the directory below for generated images.",
+        )
+        files_panel.add_form_row("Generated images folder", image_path_control)
 
         from prowser_temp_files import default_temporary_files_directory
 
         _default_temp_dir = default_temporary_files_directory() + os.sep
-        temp_files_note = QLabel(
-            "Work files for infill, masking, image generation, wallpaper, and similar "
-            "operations (resize uses the destination folder). Leave blank for the default."
-        )
-        temp_files_note.setWordWrap(True)
-        temp_files_note.setStyleSheet(self.NOTE_TEXT_STYLE)
-        image_creation_layout.addWidget(temp_files_note)
-
-        temp_files_row = QWidget()
-        temp_files_row.setMinimumHeight(28)
-        temp_files_row.setMaximumHeight(28)
-        temp_files_row_layout = QHBoxLayout(temp_files_row)
-        temp_files_row_layout.setContentsMargins(0, 0, 0, 0)
-        temp_files_row_layout.setSpacing(8)
-
-        temp_files_label = QLabel("Temporary files:")
-        temp_files_label.setMinimumWidth(110)
-        temp_files_row_layout.addWidget(temp_files_label)
-
+        temp_files_control = QWidget()
+        temp_files_layout = QHBoxLayout(temp_files_control)
+        temp_files_layout.setContentsMargins(0, 0, 0, 0)
+        temp_files_layout.setSpacing(8)
         self.temporary_files_directory_input_field = QLineEdit()
         self.temporary_files_directory_input_field.setPlaceholderText(
             f"Default: {_default_temp_dir}"
@@ -5081,162 +4952,126 @@ class SettingsDialog(QDialog):
             f"Leave blank to use the default:\n{_default_temp_dir}"
         )
         self.temporary_files_directory_input_field.setMinimumHeight(28)
-        temp_files_row_layout.addWidget(self.temporary_files_directory_input_field)
-
+        temp_files_layout.addWidget(self.temporary_files_directory_input_field, 1)
         temp_files_browse_button = QPushButton("...")
         temp_files_browse_button.setToolTip("Browse for temporary files directory")
         temp_files_browse_button.setFixedWidth(30)
         temp_files_browse_button.setFixedHeight(28)
         temp_files_browse_button.setStyleSheet(self._small_ellipsis_button_style())
         temp_files_browse_button.clicked.connect(self.browse_temporary_files_directory)
-        temp_files_row_layout.addWidget(temp_files_browse_button)
+        temp_files_layout.addWidget(temp_files_browse_button)
+        files_panel.add_form_row(
+            "Temporary files",
+            temp_files_control,
+            subtitle=(
+                "Work files for infill, masking, image generation, wallpaper, and similar "
+                "operations. Leave blank for the default."
+            ),
+        )
 
-        image_creation_layout.addWidget(temp_files_row)
-        layout.addWidget(image_creation_groupbox)
-        layout.addSpacing(12)
+        layout.addWidget(files_title)
+        layout.addWidget(files_note)
+        layout.addWidget(files_panel)
 
-        # Add "Ignore directories" groupbox with 3 input fields and browse buttons
-        ignore_groupbox = QGroupBox("Ignore directories")
-        ignore_groupbox.setStyleSheet(f"""
-            QGroupBox {{
-                font-weight: bold;
-                border: 1px solid {BORDER_DEFAULT_HEX};
-                border-radius: 4px;
-                margin-top: 10px;
-                padding-top: 10px;
-            }}
-            QGroupBox::title {{
-                subcontrol-origin: margin;
-                left: 10px;
-                padding: 0 5px;
-            }}
-        """)
-        ignore_layout = QVBoxLayout(ignore_groupbox)
-        ignore_layout.setSpacing(8)
+        ignore_title, ignore_panel = mac_preference_section("Ignore Directories", inner)
 
-        # Create 3 input fields with checkboxes and browse buttons
         self.ignore_directory_input_fields = []
         self.ignore_directory_checkboxes = []
         self.ignore_directory_browse_buttons = []
 
         for i in range(3):
-            # Create container for checkbox, input and browse button
-            container = QWidget()
-            container.setMinimumHeight(28)
-            container.setMaximumHeight(28)
-            container_layout = QHBoxLayout(container)
-            container_layout.setContentsMargins(0, 0, 0, 0)
-            container_layout.setSpacing(8)
+            ignore_control = QWidget()
+            ignore_control_layout = QHBoxLayout(ignore_control)
+            ignore_control_layout.setContentsMargins(0, 0, 0, 0)
+            ignore_control_layout.setSpacing(8)
 
-            # Checkbox in its own clipping container to prevent row layout issues
-            checkbox_container = QWidget()
-            checkbox_container.setFixedSize(20, 28)  # Fixed size that clips overflow
-            checkbox_layout = QHBoxLayout(checkbox_container)
-            checkbox_layout.setContentsMargins(0, 0, 0, 0)
-            checkbox_layout.setSpacing(0)
-            
-            checkbox = QCheckBox()
-            checkbox.setToolTip(f"Enable ignoring for this directory")
+            checkbox = MacToggleSwitch()
+            checkbox.setToolTip("Enable ignoring for this directory")
             self.ignore_directory_checkboxes.append(checkbox)
-            checkbox_layout.addWidget(checkbox)
-            
-            container_layout.addWidget(checkbox_container)
+            ignore_control_layout.addWidget(checkbox)
 
-            # Input field
             input_field = QLineEdit()
-            input_field.setPlaceholderText(f"Enter directory to ignore")
+            input_field.setPlaceholderText("Enter directory to ignore")
             input_field.setToolTip(
                 "Directory to skip during scans and file operations when\n"
-                "the checkbox is enabled."
+                "the toggle is enabled."
             )
             input_field.setMinimumHeight(28)
             self.ignore_directory_input_fields.append(input_field)
-            container_layout.addWidget(input_field)
+            ignore_control_layout.addWidget(input_field, 1)
 
-            # Browse button with "..." label
             browse_button = QPushButton("...")
-            browse_button.setToolTip(f"Browse for directory")
+            browse_button.setToolTip("Browse for directory")
             browse_button.setFixedWidth(30)
             browse_button.setFixedHeight(28)
             browse_button.setStyleSheet(self._small_ellipsis_button_style())
             browse_button.clicked.connect(lambda checked, idx=i: self.browse_ignore_directory(idx))
             self.ignore_directory_browse_buttons.append(browse_button)
-            container_layout.addWidget(browse_button)
+            ignore_control_layout.addWidget(browse_button)
 
-            ignore_layout.addWidget(container)
+            ignore_panel.add_form_row(f"Ignore path {i + 1}", ignore_control)
 
-        layout.addWidget(ignore_groupbox)
+        layout.addWidget(ignore_title)
+        layout.addWidget(ignore_panel)
 
         layout.addStretch()
         scroll.setWidget(inner)
         tab_layout.addWidget(scroll)
 
     def setup_extensions_tab(self):
-        """Setup the extensions tab for configuring image file extensions"""
+        """Setup the extensions tab (macOS Preferences pane style)."""
         from thumbnails.thumbnail_constants import IMAGE_EXTENSIONS
 
-        layout = QVBoxLayout(self.extensions_tab)
+        tab_layout = QVBoxLayout(self.extensions_tab)
+        tab_layout.setContentsMargins(0, 0, 0, 0)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        inner = QWidget()
+        layout = QVBoxLayout(inner)
+        layout.setContentsMargins(20, 12, 20, 20)
+        layout.setSpacing(18)
 
-        # Title
-        title = QLabel("Image File Extensions")
-        title.setAlignment(Qt.AlignCenter)
-        title_font = QFont()
-        title_font.setPointSize(14)
-        title_font.setBold(True)
-        title.setFont(title_font)
-        layout.addWidget(title)
+        all_extensions = sorted(IMAGE_EXTENSIONS)
 
-        # Description
-        description = QLabel("Select which file extensions should be recognized as image files.")
-        description.setWordWrap(True)
-        description.setStyleSheet(self.NOTE_TEXT_STYLE)
-        layout.addWidget(description)
-
-        # Get all available extensions from IMAGE_EXTENSIONS constant and sort them alphabetically
-        all_extensions = sorted(list(IMAGE_EXTENSIONS))
-
-        # Create checkboxes for each extension
-        self.extension_checkboxes = {}
-
-        checkbox_grid = QGridLayout()
-        checkbox_grid.setHorizontalSpacing(24)
-        checkbox_grid.setVerticalSpacing(10)
-        checkbox_grid.setContentsMargins(40, 0, 0, 0)
-
-        # --- Place extensions by filling the first column before the second (column order) ---
-        num_extensions = len(all_extensions)
-        num_cols = 2
-        # Distribute rows evenly; the first column can have 1 more if odd
-        num_rows = (num_extensions + num_cols - 1) // num_cols
-
-        # Build the columns in a column-major order
-        # For 2 columns: fill the first column fully before the second
-        for idx, extension in enumerate(all_extensions):
-            col = idx // num_rows
-            row = idx % num_rows
-            checkbox = QCheckBox(extension)
-            checkbox.setToolTip(f"Recognize {extension} files as images")
-            checkbox.setStyleSheet(self.SMALL_CHECKBOX_STYLE)
-            # Set minimum height to ensure full text is visible (prevents vertical clipping)
-            checkbox.setMinimumHeight(20)
-            self.extension_checkboxes[extension] = checkbox
-            checkbox_grid.addWidget(checkbox, row, col)
-
-        # Add the checkbox grid to a container
-        checkbox_container = QWidget()
-        checkbox_container.setLayout(checkbox_grid)
-        layout.addWidget(checkbox_container)
-
-        # Add performance warning note at the bottom
-        warning_label = QLabel(
-            "Note:\tAdding many extensions may affect performance.\n"
-            "\tOnly enable extensions you need to access."
+        ext_title, ext_panel = mac_preference_section("Image File Extensions", inner)
+        ext_desc = QLabel(
+            "Select which file extensions should be recognized as image files."
         )
-        warning_label.setWordWrap(True)
-        warning_label.setStyleSheet(self.NOTE_TEXT_STYLE)
-        layout.addWidget(warning_label)
+        ext_desc.setObjectName("macPreferenceRowSubtitle")
+        ext_desc.setWordWrap(True)
 
+        grid_items = [
+            (
+                extension,
+                extension,
+                f"Recognize {extension} files as images",
+            )
+            for extension in all_extensions
+        ]
+        ext_grid, self.extension_checkboxes = build_column_major_toggle_grid(
+            grid_items,
+            num_cols=3,
+            parent=ext_panel,
+        )
+        ext_panel.add_custom_row(ext_grid)
+
+        warning_label = QLabel(
+            "Adding many extensions may affect performance. "
+            "Only enable extensions you need to access."
+        )
+        warning_label.setObjectName("macPreferenceRowSubtitle")
+        warning_label.setWordWrap(True)
+
+        layout.addWidget(ext_title)
+        layout.addWidget(ext_desc)
+        layout.addWidget(ext_panel)
+        layout.addWidget(warning_label)
         layout.addStretch()
+
+        scroll.setWidget(inner)
+        tab_layout.addWidget(scroll)
 
     def setup_map_settings_tab(self):
         """Setup the map settings tab for configuring map application preference"""
@@ -6086,8 +5921,7 @@ class SettingsDialog(QDialog):
         row_count = 0
         for entry in catalog_entries_for_model(cfg_settings, model_key):
             installed = is_lora_installed(entry.lora_id)
-            cb = QCheckBox()
-            cb.setStyleSheet(self.SMALL_CHECKBOX_STYLE)
+            cb = MacToggleSwitch()
             cb.setToolTip(entry.repo_id or entry.local_path or entry.lora_id)
             cb.stateChanged.connect(self._on_lora_checkbox_state_changed)
             self._lora_checkboxes[entry.lora_id] = cb
@@ -6176,9 +6010,6 @@ class SettingsDialog(QDialog):
             row_layout = QHBoxLayout(row_w)
             row_layout.setContentsMargins(0, 0, 0, 0)
             row_layout.setSpacing(10)
-            row_layout.addWidget(
-                cb, 0, Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft
-            )
             row_layout.addWidget(desc_w, 1)
             if install_btn is not None:
                 row_layout.addWidget(
@@ -6190,16 +6021,18 @@ class SettingsDialog(QDialog):
             row_layout.addWidget(
                 del_btn, 0, Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignRight
             )
+            row_layout.addWidget(
+                cb, 0, Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignRight
+            )
             row_w.setSizePolicy(
                 QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum
             )
             self._lora_rows_layout.addWidget(row_w)
 
-            row_widgets = [cb, desc_w]
+            row_widgets = [desc_w]
             if install_btn is not None:
                 row_widgets.append(install_btn)
-            row_widgets.append(edit_btn)
-            row_widgets.append(del_btn)
+            row_widgets.extend([edit_btn, del_btn, cb])
             self._lora_row_widgets[entry.lora_id] = tuple(row_widgets)
             row_count += 1
         if row_count == 0:
@@ -6659,14 +6492,13 @@ class SettingsDialog(QDialog):
                 background_clip_gather_thumbnails = settings.get('background_clip_gather_thumbnails', True)
                 if hasattr(self, 'background_clip_gather_thumbnails_checkbox'):
                     self.background_clip_gather_thumbnails_checkbox.setChecked(background_clip_gather_thumbnails)
-                    self.background_clip_gather_thumbnails_checkbox.setEnabled(background_clip_enabled)
                 self.original_settings['background_clip_gather_thumbnails'] = background_clip_gather_thumbnails
                 # Load "Extract faces" setting (enabled only when background CLIP is enabled)
                 background_clip_extract_faces = settings.get('background_clip_extract_faces', False)
                 if hasattr(self, 'background_clip_extract_faces_checkbox'):
                     self.background_clip_extract_faces_checkbox.setChecked(background_clip_extract_faces)
-                    self.background_clip_extract_faces_checkbox.setEnabled(background_clip_enabled)
                 self.original_settings['background_clip_extract_faces'] = background_clip_extract_faces
+                self._update_background_clip_subordinates_enabled()
                 
                 # Set CLIP model name from config
                 clip_model_name = settings.get('clip_model_name', 'openai/clip-vit-base-patch32')
