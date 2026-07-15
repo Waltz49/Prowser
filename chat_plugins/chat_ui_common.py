@@ -16,6 +16,7 @@ from PySide6.QtGui import (
     QFontMetrics,
     QIcon,
     QImage,
+    QKeyEvent,
     QPainter,
     QPalette,
     QPen,
@@ -24,6 +25,7 @@ from PySide6.QtGui import (
     qGray,
 )
 from PySide6.QtWidgets import (
+    QDialog,
     QFrame,
     QGridLayout,
     QGroupBox,
@@ -44,6 +46,43 @@ from utils import validate_image_file
 _ICON_BTN_SIZE = 22
 _ICON_DISPLAY_PX = 14
 CHAT_THUMB_PX = 64
+
+
+def cmd_enter_pressed(event: QKeyEvent) -> bool:
+    if event.key() not in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+        return False
+    mods = event.modifiers() & ~Qt.KeyboardModifier.KeypadModifier
+    cmd = mods & (Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.MetaModifier)
+    if not cmd:
+        return False
+    other = mods & ~(
+        Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.MetaModifier
+    )
+    return other in (Qt.KeyboardModifier.NoModifier, 0)
+
+
+class CmdEnterAcceptFilter(QObject):
+    """Accept a dialog when the user presses Cmd/Ctrl+Return in a text field."""
+
+    def __init__(self, dialog: QDialog) -> None:
+        super().__init__(dialog)
+        self._dialog = dialog
+
+    def eventFilter(self, watched: QObject, event: QEvent) -> bool:
+        if (
+            event.type() == QEvent.Type.KeyPress
+            and isinstance(event, QKeyEvent)
+            and cmd_enter_pressed(event)
+        ):
+            self._dialog.accept()
+            return True
+        return super().eventFilter(watched, event)
+
+
+def install_cmd_enter_accept(dialog: QDialog, *widgets: QWidget) -> None:
+    filt = CmdEnterAcceptFilter(dialog)
+    for widget in widgets:
+        widget.installEventFilter(filt)
 
 
 def _local_paths_from_mime(mime) -> list[str]:
@@ -621,8 +660,8 @@ def _chat_library_icon_button_stylesheet(
     sz = _CHAT_LIBRARY_ICON_BTN_SIZE
     return f"""
         QPushButton {{
-            background-color: #f4f4f4;
-            border: 1px solid #c8c8c8;
+            background-color: transparent;
+            border: none;
             border-radius: 3px;
             padding: 0px;
             min-width: {sz}px;
@@ -632,12 +671,12 @@ def _chat_library_icon_button_stylesheet(
             image: {icon_url};
         }}
         QPushButton:hover {{
-            background-color: #e8e8e8;
-            border: 1px solid #b0b0b0;
+            background-color: transparent;
+            border: none;
             image: {hover_url};
         }}
         QPushButton:pressed {{
-            background-color: #d0d0d0;
+            background-color: transparent;
         }}
     """
 

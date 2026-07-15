@@ -278,14 +278,19 @@ class ImageGenPromptGrammar:
     def _on_finished(self) -> None:
         if not self._running and not self._user_cancelled:
             return
+        was_cancelled = self._user_cancelled
         self._stop_dots()
         self._end_prompt_stream_scroll_session()
         self._set_button_idle()
         self._running = False
-        if self._user_cancelled:
+        if was_cancelled:
             self._set_prompt_text(self._prompt_before)
             self._user_cancelled = False
         self._prompt_before = ""
+        if not was_cancelled:
+            post_finish = getattr(self._dialog, "_chat_prompt_grammar_post_finish", None)
+            if callable(post_finish):
+                post_finish()
         if getattr(self._dialog, "_panel_mode", False) and hasattr(
             self._dialog, "state_changed"
         ):

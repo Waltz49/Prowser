@@ -28,11 +28,16 @@ from chat_plugins.chat_prompt_config import (
     load_system_prompt_config,
     save_system_prompt_config,
 )
+from chat_plugins.chat_prompt_grammar import (
+    add_chat_prompt_button_row,
+    apply_chat_prompt_save_format_to_widget,
+)
 from chat_plugins.chat_ui_common import (
     ChatPromptLibraryPreview,
     chat_library_edit_button_stylesheet,
     chat_library_trash_button_stylesheet,
     chat_prompt_edit_stylesheet,
+    install_cmd_enter_accept,
 )
 from config import CHAT_DEFAULTS
 from utils import get_button_style, get_dialog_shell_stylesheet
@@ -152,8 +157,13 @@ class ChatPromptEditDialog(QDialog):
         )
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
-        layout.addWidget(buttons)
+        add_chat_prompt_button_row(self, self.text_edit, layout, buttons)
         self.setStyleSheet(get_dialog_shell_stylesheet() + get_button_style())
+        install_cmd_enter_accept(self, self.name_edit, self.text_edit)
+
+    def accept(self) -> None:
+        apply_chat_prompt_save_format_to_widget(self.text_edit)
+        super().accept()
 
     def values(self) -> tuple[str, str]:
         return self.name_edit.text().strip(), self.text_edit.toPlainText()

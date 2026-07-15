@@ -9,7 +9,7 @@ from copy import deepcopy
 from dataclasses import dataclass, field
 
 from PySide6.QtCore import QEvent, QObject, Qt
-from PySide6.QtGui import QDragEnterEvent, QDragMoveEvent, QDropEvent
+from PySide6.QtGui import QDragEnterEvent, QDragMoveEvent, QDropEvent, QKeyEvent
 from PySide6.QtWidgets import (
     QButtonGroup,
     QDialog,
@@ -32,6 +32,10 @@ from chat_plugins.chat_prompt_config import (
     remove_favorite_image_files,
     save_user_prompt_config,
 )
+from chat_plugins.chat_prompt_grammar import (
+    add_chat_prompt_button_row,
+    apply_chat_prompt_save_format_to_widget,
+)
 from chat_plugins.chat_ui_common import (
     ChatImageThumbRow,
     ChatPromptLibraryPreview,
@@ -39,6 +43,8 @@ from chat_plugins.chat_ui_common import (
     chat_library_edit_button_stylesheet,
     chat_library_trash_button_stylesheet,
     chat_prompt_edit_stylesheet,
+    cmd_enter_pressed,
+    install_cmd_enter_accept,
 )
 from utils import get_button_style, get_dialog_shell_stylesheet
 
@@ -68,11 +74,21 @@ def _commit_favorite_images(
 
 
 class _FavoritePromptImageDropFilter(QObject):
-    def __init__(self, thumb_row: ChatImageThumbRow) -> None:
+    def __init__(
+        self,
+        thumb_row: ChatImageThumbRow,
+        *,
+        accept_dialog: QDialog | None = None,
+    ) -> None:
         super().__init__(thumb_row)
         self._thumb_row = thumb_row
+        self._accept_dialog = accept_dialog
 
     def eventFilter(self, watched: QObject, event: QEvent) -> bool:
+        if event.type() == QEvent.Type.KeyPress and isinstance(event, QKeyEvent):
+            if self._accept_dialog is not None and cmd_enter_pressed(event):
+                self._accept_dialog.accept()
+                return True
         if event.type() in (QEvent.Type.DragEnter, QEvent.Type.DragMove):
             drag_event = event
             if isinstance(drag_event, (QDragEnterEvent, QDragMoveEvent)):
@@ -197,7 +213,7 @@ class ChatUserPromptEditDialog(QDialog):
         existing = _existing_image_paths(image_paths)
         if existing:
             self._thumb_row.set_image_paths(existing, allow_remove=True)
-        drop_filter = _FavoritePromptImageDropFilter(self._thumb_row)
+        drop_filter = _FavoritePromptImageDropFilter(self._thumb_row, accept_dialog=self)
         self.text_edit.setAcceptDrops(True)
         self.text_edit.installEventFilter(drop_filter)
         self._thumb_row.installEventFilter(drop_filter)
@@ -208,8 +224,13 @@ class ChatUserPromptEditDialog(QDialog):
         )
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
-        layout.addWidget(buttons)
+        add_chat_prompt_button_row(self, self.text_edit, layout, buttons)
         self.setStyleSheet(get_dialog_shell_stylesheet() + get_button_style())
+        install_cmd_enter_accept(self, self.name_edit)
+
+    def accept(self) -> None:
+        apply_chat_prompt_save_format_to_widget(self.text_edit)
+        super().accept()
 
     def values(self) -> tuple[str, str, list[str]]:
         return (

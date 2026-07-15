@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 from PySide6.QtCore import QEvent, QObject, QSize, Qt
-from PySide6.QtGui import QEnterEvent, QIcon, QKeyEvent
+from PySide6.QtGui import QEnterEvent, QIcon
 from PySide6.QtWidgets import (
     QDialog,
     QHBoxLayout,
@@ -17,42 +17,20 @@ from PySide6.QtWidgets import (
 )
 
 from chat_plugins.chat_named_system_prompts import run_chat_system_prompt_library
-from chat_plugins.chat_ui_common import chat_prompt_edit_stylesheet
+from chat_plugins.chat_prompt_grammar import (
+    add_chat_prompt_grammar_button,
+    apply_chat_prompt_save_format_to_widget,
+)
+from chat_plugins.chat_ui_common import (
+    chat_prompt_edit_stylesheet,
+    install_cmd_enter_accept,
+)
 from theme.theme_base import asset_path
 from theme.theme_service import get_active_theme
 from utils import get_button_style, get_dialog_shell_stylesheet
 
 CHAT_GEAR_BTN_SIZE = 26
 _CHAT_GEAR_ICON_PX = 18
-
-
-def _cmd_enter_pressed(event: QKeyEvent) -> bool:
-    if event.key() not in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
-        return False
-    mods = event.modifiers() & ~Qt.KeyboardModifier.KeypadModifier
-    cmd = mods & (Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.MetaModifier)
-    if not cmd:
-        return False
-    other = mods & ~(
-        Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.MetaModifier
-    )
-    return other in (Qt.KeyboardModifier.NoModifier, 0)
-
-
-class _CmdEnterAcceptFilter(QObject):
-    def __init__(self, dialog: QDialog) -> None:
-        super().__init__(dialog)
-        self._dialog = dialog
-
-    def eventFilter(self, watched: QObject, event: QEvent) -> bool:
-        if (
-            event.type() == QEvent.Type.KeyPress
-            and isinstance(event, QKeyEvent)
-            and _cmd_enter_pressed(event)
-        ):
-            self._dialog.accept()
-            return True
-        return super().eventFilter(watched, event)
 
 
 def _chat_gear_button_stylesheet() -> str:
@@ -132,9 +110,9 @@ def edit_chat_system_prompt(parent: QWidget | None, current: str) -> str | None:
     edit.setLineWrapMode(QPlainTextEdit.LineWrapMode.WidgetWidth)
     edit.setStyleSheet(chat_prompt_edit_stylesheet())
     layout.addWidget(edit, 1)
-    edit.installEventFilter(_CmdEnterAcceptFilter(dialog))
+    install_cmd_enter_accept(dialog, edit)
 
-    button_row = QHBoxLayout()
+    gear_row = QHBoxLayout()
     gear_button = _ChatSystemPromptGearButton(dialog)
 
     def _open_prompt_library() -> None:
@@ -146,7 +124,12 @@ def edit_chat_system_prompt(parent: QWidget | None, current: str) -> str | None:
             edit.setPlainText(selected_text)
 
     gear_button.clicked.connect(_open_prompt_library)
-    button_row.addWidget(gear_button)
+    gear_row.addWidget(gear_button)
+    gear_row.addStretch(1)
+    layout.addLayout(gear_row)
+
+    button_row = QHBoxLayout()
+    add_chat_prompt_grammar_button(dialog, edit, button_row)
     button_row.addStretch(1)
     cancel_button = QPushButton("Cancel")
     ok_button = QPushButton("OK")
@@ -163,6 +146,11 @@ def edit_chat_system_prompt(parent: QWidget | None, current: str) -> str | None:
     QWidget.setTabOrder(gear_button, cancel_button)
     QWidget.setTabOrder(cancel_button, ok_button)
 
+    def accept_dialog() -> None:
+        apply_chat_prompt_save_format_to_widget(edit)
+        QDialog.accept(dialog)
+
+    dialog.accept = accept_dialog  # type: ignore[method-assign]
     ok_button.clicked.connect(dialog.accept)
     cancel_button.clicked.connect(dialog.reject)
     dialog.setStyleSheet(
