@@ -43,6 +43,7 @@ class StepSpinBox(QWidget):
         self._maximum = 99
         self._single_step = 1
         self._value = self._minimum
+        self._suffix = ""
 
         self._edit = QLineEdit(self)
         self._edit.setObjectName(_EDIT_OBJECT_NAME)
@@ -126,6 +127,21 @@ class StepSpinBox(QWidget):
     def setSingleStep(self, step: int) -> None:
         self._single_step = max(1, int(step))
 
+    def suffix(self) -> str:
+        return self._suffix
+
+    def setSuffix(self, suffix: str) -> None:
+        self._suffix = suffix or ""
+        self._sync_edit_from_value()
+
+    def char_width_for_text(self, sample_text: str, *, extra_chars: int = 1) -> int:
+        """Widget width that fits ``sample_text`` plus step buttons and padding."""
+        fm = self._edit.fontMetrics()
+        text_w = fm.horizontalAdvance(sample_text)
+        if extra_chars > 0:
+            text_w += fm.horizontalAdvance("0" * extra_chars)
+        return text_w + _BTN_STRIP_WIDTH + 16
+
     def setValue(self, value: int) -> None:
         clamped = max(self._minimum, min(self._maximum, int(value)))
         if clamped == self._value:
@@ -146,10 +162,10 @@ class StepSpinBox(QWidget):
         self._update_button_states()
 
     def char_width(self, chars: int = _DEFAULT_CHAR_COUNT) -> int:
-        """Widget width that fits ``chars`` digits plus step buttons and padding."""
+        """Widget width that fits ``chars`` digits plus suffix, step buttons, and padding."""
         count = max(1, int(chars))
         fm = self._edit.fontMetrics()
-        text_w = fm.horizontalAdvance("8" * count)
+        text_w = fm.horizontalAdvance("8" * count + self._suffix)
         # Edit padding + outer border slack so five-digit values do not clip.
         chrome_w = _BTN_STRIP_WIDTH + 16
         return text_w + chrome_w
@@ -203,6 +219,8 @@ class StepSpinBox(QWidget):
 
     def _commit_edit_text(self) -> None:
         text = self._edit.text().strip()
+        if self._suffix and text.endswith(self._suffix):
+            text = text[: -len(self._suffix)].strip()
         try:
             self.setValue(int(text))
         except ValueError:
@@ -210,7 +228,7 @@ class StepSpinBox(QWidget):
 
     def _sync_edit_from_value(self) -> None:
         blocked = self._edit.blockSignals(True)
-        self._edit.setText(str(self._value))
+        self._edit.setText(f"{self._value}{self._suffix}")
         self._edit.blockSignals(blocked)
 
     def _update_button_states(self) -> None:

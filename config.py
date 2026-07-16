@@ -375,6 +375,7 @@ class ImageBrowserConfig:
             'show_splash': True,  # Startup splash; False when user checks "Do not show again"
             'imagegen_max_generation_dimension': 1024,
             'imagegen_series_cooldown_seconds': 60,
+            'imagegen_add_chat_prefix_postfix': True,
             'browse_view_actual_size': False,
             # ms on same browse image before recording to Image History (0 = immediate; max 5000; 500 ms steps in UI)
             'browse_image_history_save_after_ms': 3000,

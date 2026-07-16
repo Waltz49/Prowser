@@ -93,7 +93,7 @@ class CursorManager(QObject):
         return False
 
     def _exclusion_roots(self) -> tuple[QWidget, ...]:
-        """Sidebars, status bar, and chat — never auto-hide the cursor here."""
+        """Sidebars and status bar — never auto-hide the cursor here."""
         mw = self.parent()
         if mw is None:
             return ()
@@ -102,9 +102,6 @@ class CursorManager(QObject):
             w = getattr(mw, name, None)
             if w is not None:
                 roots.append(w)
-        chat = getattr(mw, "sidebar_chat_widget", None)
-        if chat is not None:
-            roots.append(chat)
         return tuple(roots)
 
     def _is_over_excluded_zone(self) -> bool:
@@ -137,12 +134,14 @@ class CursorManager(QObject):
         self.hide_timer.stop()
         self._clear_override_cursors()
         if self.is_cursor_hidden:
-            self._show_cursor()
+            self.widget.setCursor(self.original_cursor)
+            self.is_cursor_hidden = False
 
     def _update_hide_zone_state(self):
         """Track enter/leave of the hide zone; show cursor and stop timer on leave."""
         if self._is_over_excluded_zone():
-            self._leave_hide_zone()
+            if self._over_hide_zone or self.is_cursor_hidden:
+                self._leave_hide_zone()
             return
         over = self._is_over_hide_zone()
         if over != self._over_hide_zone:
@@ -151,10 +150,8 @@ class CursorManager(QObject):
                 self.hide_timer.start(self.hide_delay_ms)
             else:
                 self._leave_hide_zone()
-        elif not over:
-            self._clear_override_cursors()
-            if self.is_cursor_hidden:
-                self._show_cursor()
+        elif not over and self.is_cursor_hidden:
+            self._show_cursor()
 
     def eventFilter(self, obj, event):
         """
@@ -209,7 +206,7 @@ class CursorManager(QObject):
     
     def _hide_cursor(self):
         """Hide the cursor only while it remains over the browse canvas."""
-        if self._is_over_excluded_zone() or not self._is_over_hide_zone():
+        if not self._is_over_hide_zone():
             return
         if not self.is_cursor_hidden:
             # Widget-level only: app-wide override hides the cursor in sidebars too
@@ -264,14 +261,9 @@ class CursorManager(QObject):
     def disable(self):
         """Completely disable cursor management and restore cursor."""
         self.stop()
-        if self.is_cursor_hidden:
-            self._show_cursor()
-        else:
-            self._clear_override_cursors()
         app = QApplication.instance()
         if app:
             app.removeEventFilter(self)
-        # Reset state
         self.is_cursor_hidden = False
         self._paused = True
 OVERLAY_HEIGHT = 8  # Height of the overlay band in pixels

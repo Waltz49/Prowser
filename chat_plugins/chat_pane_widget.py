@@ -400,9 +400,6 @@ class ChatPaneWidget(QWidget):
 
     def on_pane_activated(self) -> None:
         """Called when the user shows the chat pane; check LM Studio once."""
-        cm = getattr(self.main_window, "cursor_manager", None)
-        if cm is not None:
-            cm.refresh_for_pointer_location()
         available = is_lmstudio_chat_available()
         self._lm_available_on_show = available
         if not available and not self._chat_started:

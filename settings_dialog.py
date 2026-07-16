@@ -42,7 +42,7 @@ from thumbnails.thumbnail_constants import (
     MAX_THEME_BORDER_WIDTH_PX,
     MIN_VIEW_CHROME_BORDER_WIDTH_PX,
     MAX_VIEW_CHROME_BORDER_WIDTH_PX,
-    CMD_SYMBOL, OPTION_SYMBOL, SHIFT_SYMBOL, ENTER_SYMBOL,
+    CMD_SYMBOL, OPTION_SYMBOL, SHIFT_SYMBOL, ENTER_SYMBOL, CTRL_SYMBOL,
 )
 
 # macOS-specific imports for application selection
@@ -86,11 +86,14 @@ from theme.theme_service import (
     merge_dark_theme_colors,
     merge_light_theme_colors,
     merge_user_theme_colors,
+    normalize_theme_id,
+    resolve_theme_id_for_apply,
     USER_THEME_COLOR_KEYS,
     THEME_BORDER_WIDTH_KEYS,
     VIEW_CHROME_THEME_KEYS,
     theme_apply_scope_for_keys,
 )
+from theme.spin_box import StepSpinBox
 
 
 _THEME_SYNC_CONSTANTS = (
@@ -746,6 +749,7 @@ class SettingsDialog(QDialog):
         self._user_theme_color_live_timer.timeout.connect(self._debounced_apply_user_theme_preview_live)
         self._user_theme_color_picker_active_key = None
         self._theme_live_preview_changed_keys: set[str] = set()
+        self._main_window_theme_touched = False
 
         self._browse_transparency_live_timer = QTimer(self)
         self._browse_transparency_live_timer.setSingleShot(True)
@@ -786,6 +790,40 @@ class SettingsDialog(QDialog):
 
     def _settings_chrome(self):
         return settings_chrome_for_preset(self._settings_chrome_preset_id())
+
+    def _combo_theme_preset_id(self) -> str:
+        if not hasattr(self, "theme_preset_combo"):
+            return "dark"
+        tid = self.theme_preset_combo.currentData()
+        return tid if tid in ("dark", "light", "user") else "dark"
+
+    def _ui_theme_user_explicitly_changed(self, combo_tid: Optional[str] = None) -> bool:
+        """True when the theme combo no longer matches the stored system appearance."""
+        combo_tid = normalize_theme_id(combo_tid or self._combo_theme_preset_id())
+        stored = normalize_theme_id(self.original_settings.get("ui_theme") or "dark")
+        if stored != "system":
+            return stored != combo_tid
+        return resolve_theme_id_for_apply("system") != combo_tid
+
+    def _get_ui_theme_for_save(self) -> str:
+        """Persisted ui_theme: keep 'system' when the combo still reflects OS appearance."""
+        combo_tid = self._combo_theme_preset_id()
+        stored = normalize_theme_id(self.original_settings.get("ui_theme") or "dark")
+        if stored == "system" and not self._ui_theme_user_explicitly_changed(combo_tid):
+            return "system"
+        return combo_tid
+
+    def _ui_theme_values_equal(self, stored_ui_theme, combo_tid: str) -> bool:
+        stored = normalize_theme_id(stored_ui_theme or "dark")
+        combo = normalize_theme_id(combo_tid if combo_tid in ("dark", "light", "user") else "dark")
+        if stored == combo:
+            return True
+        if stored == "system" and combo == resolve_theme_id_for_apply("system"):
+            return True
+        return False
+
+    def _mark_main_window_theme_touched(self) -> None:
+        self._main_window_theme_touched = True
 
     def _sync_theme_context(self):
         """Sync local theme constants and instance styles from active theme."""
@@ -1195,7 +1233,7 @@ class SettingsDialog(QDialog):
                 ltc = merge_light_theme_colors(self.current_settings.get("light_theme_colors"))
             bts = merge_browse_transparency_settings(self.current_settings.get("browse_transparency_settings"))
             return {
-                'ui_theme': tid,
+                'ui_theme': self._get_ui_theme_for_save(),
                 'user_theme_colors': utc,
                 'dark_theme_colors': dtc,
                 'light_theme_colors': ltc,
@@ -1228,6 +1266,11 @@ class SettingsDialog(QDialog):
                     int(self.imagegen_series_cooldown_slider.value())
                     if hasattr(self, 'imagegen_series_cooldown_slider')
                     else 60
+                ),
+                'imagegen_add_chat_prefix_postfix': (
+                    self.imagegen_add_chat_prefix_postfix_checkbox.isChecked()
+                    if hasattr(self, 'imagegen_add_chat_prefix_postfix_checkbox')
+                    else True
                 ),
             }
         elif tab_widget == self.slideshow_settings_tab:
@@ -1358,6 +1401,8 @@ class SettingsDialog(QDialog):
             o = merge_light_theme_colors(original_value if isinstance(original_value, dict) else None)
             n = merge_light_theme_colors(new_value if isinstance(new_value, dict) else None)
             return tuple(sorted(o.items())) == tuple(sorted(n.items()))
+        if key == 'ui_theme':
+            return self._ui_theme_values_equal(original_value, new_value)
         return original_value == new_value
 
     def _tab_has_unsaved_changes(self, tab_widget) -> bool:
@@ -1748,6 +1793,8 @@ class SettingsDialog(QDialog):
                 self.imagegen_series_cooldown_slider.setValue(sec)
                 self.imagegen_series_cooldown_slider.blockSignals(False)
                 self._update_imagegen_series_cooldown_label()
+            if hasattr(self, 'imagegen_add_chat_prefix_postfix_checkbox'):
+                self.imagegen_add_chat_prefix_postfix_checkbox.setChecked(True)
         elif tab_widget == self.slideshow_settings_tab:
             self.slideshow_rate_spinbox.setValue(self.DEFAULT_SLIDESHOW_RATE)
             self.transition_speed_spinbox.setValue(self.DEFAULT_TRANSITION_SPEED)
@@ -1945,6 +1992,8 @@ class SettingsDialog(QDialog):
                 self.imagegen_series_cooldown_slider.setValue(sec)
                 self.imagegen_series_cooldown_slider.blockSignals(False)
                 self._update_imagegen_series_cooldown_label()
+            if hasattr(self, 'imagegen_add_chat_prefix_postfix_checkbox'):
+                self.imagegen_add_chat_prefix_postfix_checkbox.setChecked(True)
         elif tab_widget == self.slideshow_settings_tab:
             self.slideshow_rate_spinbox.setValue(self.DEFAULT_SLIDESHOW_RATE)
             self.transition_speed_spinbox.setValue(self.DEFAULT_TRANSITION_SPEED)
@@ -2149,7 +2198,7 @@ class SettingsDialog(QDialog):
         )
 
         self.show_extensions_checkbox = thumb_panel.add_toggle(
-            "Always show file extensions",
+            f"Always show file extensions (cycle with {CMD_SYMBOL}-I)",
             tooltip=(
                 "Always show file extensions on file names.\n"
                 "If unchecked, file extensions are only\n"
@@ -2165,23 +2214,25 @@ class SettingsDialog(QDialog):
                 "automatically adjusts file dates to preserve the new\n"
                 "sort order."
             ),
+            subtitle="Changes file date when dragging to maintain sort order by date.",
         )
 
         self.allow_thumbnail_locking_checkbox = thumb_panel.add_toggle(
-            "Allow thumbnail locking",
+            f"Allow thumbnail locking ({SHIFT_SYMBOL}-{CMD_SYMBOL}-L)",
             tooltip=(
                 "Allow marking thumbnails as locked to keep them in\n"
                 "place while organizing images in a directory."
             ),
-            subtitle="Experimental",
+            subtitle="Experimental. Locks thumbnail positions in order.",
         )
 
         self.allow_quick_mass_rename_checkbox = thumb_panel.add_toggle(
-            "Allow Quick Mass Rename",
+            f"Allow Quick Mass Rename ({SHIFT_SYMBOL}-{CMD_SYMBOL}-M)",
             tooltip=(
                 "Allow Quick rename. Warning: This can rename large\n"
                 "numbers of files without confirmation."
             ),
+            subtitle="Warning: This can rename large numbers of files without confirmation.",
         )
 
         inner_layout.addWidget(thumb_title)
@@ -2201,6 +2252,7 @@ class SettingsDialog(QDialog):
             "Space Key",
             self.space_mode_combo,
             tooltip="Default behavior for the space key in browse mode.",
+            subtitle=f"Use {SHIFT_SYMBOL}-Space in browse to toggle show next image/exit browse.",
         )
 
         save_history_control = QWidget()
@@ -2255,8 +2307,9 @@ class SettingsDialog(QDialog):
         general_title, general_panel = mac_preference_section("General", inner)
 
         self.confirm_delete_checkbox = general_panel.add_toggle(
-            "Delete confirmation",
+            f"Delete confirmation on {CMD_SYMBOL}-Delete",
             tooltip="Show confirmation dialog when deleting files.",
+            subtitle=f"Show confirmation dialog when deleting files with {CMD_SYMBOL}-Delete.",
         )
 
         self.wrap_around_checkbox = general_panel.add_toggle(
@@ -2265,6 +2318,7 @@ class SettingsDialog(QDialog):
                 "Allow navigation to wrap from end to beginning and\n"
                 "vice versa."
             ),
+            subtitle="Allow cursor navigation to wrap from end to beginning.",
         )
 
         self.ignore_exif_rotation_checkbox = general_panel.add_toggle(
@@ -2276,11 +2330,13 @@ class SettingsDialog(QDialog):
                 "Manual rotation (Shift+arrow keys) still works in\n"
                 "fullscreen."
             ),
+            subtitle="Rotate images based on EXIF data if available.",
         )
 
         self.debug_checkbox = general_panel.add_toggle(
-            "Debug mode",
+            f"Debug mode ({SHIFT_SYMBOL}-{CMD_SYMBOL}-D)",
             tooltip="Show key popup overlay for debugging keyboard events.",
+            subtitle=f"Enter debug mode. Meaning varies. Use {CTRL_SYMBOL}-L to view log.",
         )
 
         self.use_prompt_filter_exits_checkbox = general_panel.add_toggle(
@@ -2291,6 +2347,7 @@ class SettingsDialog(QDialog):
                 "prompts) and PROWSER_IMAGE_AI_EXIT (image generation\n"
                 "prompts) before model calls."
             ),
+            subtitle="Use Exit code to modify prompt data before model calls.",
         )
 
         inner_layout.addWidget(general_title)
@@ -2380,6 +2437,18 @@ class SettingsDialog(QDialog):
             cooldown_control,
             tooltip="Number of seconds between each generation in a series.",
             subtitle="Seconds between generations in a series.",
+        )
+
+        self.imagegen_add_chat_prefix_postfix_checkbox = imagegen_panel.add_gear_toggle(
+            "Add prefix/postfix from chat",
+            on_gear_clicked=self._open_chat_prefix_postfix_library,
+            tooltip=(
+                "When enabled, prefix and postfix rules marked for images\n"
+                "in the chat prefix/postfix library are applied to image\n"
+                "generation prompts."
+            ),
+            subtitle="Apply chat prefix/postfix rules to image prompts.",
+            gear_tooltip="Edit prefix and postfix rules",
         )
 
         default_dim_index = (
@@ -2976,6 +3045,7 @@ class SettingsDialog(QDialog):
         else:
             kwargs["light_theme_colors"] = colors
             apply_theme("light", **kwargs)
+        self._mark_main_window_theme_touched()
         self._sync_theme_context()
         if not skip_dialog_theme:
             self.apply_theme()
@@ -3097,6 +3167,7 @@ class SettingsDialog(QDialog):
             apply_theme("dark", **kwargs, dark_theme_colors=colors)
         elif tid == "light":
             apply_theme("light", **kwargs, light_theme_colors=colors)
+        self._mark_main_window_theme_touched()
         self._sync_theme_context()
         self.apply_theme()
         mw = self.parent()
@@ -3109,6 +3180,7 @@ class SettingsDialog(QDialog):
                 mw.update_image_display()
 
     def _capture_theme_snapshot_at_open(self):
+        self._main_window_theme_touched = False
         cfg = get_config()
         s = cfg.load_settings()
         self._theme_snapshot_at_open = {
@@ -3169,7 +3241,8 @@ class SettingsDialog(QDialog):
         snap = self._theme_snapshot_at_open
         cfg = get_config()
         settings = cfg.load_settings()
-        if self._theme_snapshot_disk_restore_needed(snap, settings):
+        disk_restore = self._theme_snapshot_disk_restore_needed(snap, settings)
+        if disk_restore:
             cfg.update_settings({
                 "ui_theme": snap["ui_theme"],
                 "user_theme_colors": copy.deepcopy(snap["user_theme_colors"]),
@@ -3179,6 +3252,8 @@ class SettingsDialog(QDialog):
                     merge_browse_transparency_settings(snap.get("browse_transparency_settings"))
                 ),
             })
+        if not disk_restore and not getattr(self, "_main_window_theme_touched", False):
+            return
         tid = snap["ui_theme"]
         apply_theme(
             tid,
@@ -3237,6 +3312,9 @@ class SettingsDialog(QDialog):
             self.imagegen_series_cooldown_slider.setValue(sec)
             self.imagegen_series_cooldown_slider.blockSignals(False)
             self._update_imagegen_series_cooldown_label()
+        if hasattr(self, 'imagegen_add_chat_prefix_postfix_checkbox'):
+            enabled = settings.get('imagegen_add_chat_prefix_postfix', True)
+            self.imagegen_add_chat_prefix_postfix_checkbox.setChecked(enabled)
 
     def _imagegen_max_generation_dimension_px(self) -> int:
         from imagegen_plugins.image_gen_dim_limits import (
@@ -3267,6 +3345,11 @@ class SettingsDialog(QDialog):
 
     def _on_imagegen_series_cooldown_slider_changed(self, _value: int) -> None:
         self._update_imagegen_series_cooldown_label()
+
+    def _open_chat_prefix_postfix_library(self) -> None:
+        from chat_plugins.chat_prefix_postfix import run_chat_prefix_postfix_library
+
+        run_chat_prefix_postfix_library(self)
 
     @staticmethod
     def _browse_rgb3_tuple(val, default):
@@ -3633,7 +3716,7 @@ class SettingsDialog(QDialog):
         slideshow_layout = QGridLayout(slideshow_group)
         
         # Slideshow rate setting (time between slides)
-        self.slideshow_rate_spinbox = QSpinBox()
+        self.slideshow_rate_spinbox = StepSpinBox()
         self.slideshow_rate_spinbox.setRange(1000, 60000)  # 1 second to 1 minute
         self.slideshow_rate_spinbox.setSingleStep(1000)  # 1000ms increments
         self.slideshow_rate_spinbox.setSuffix(" ms")
@@ -3643,7 +3726,7 @@ class SettingsDialog(QDialog):
         )
 
         # Transition speed setting
-        self.transition_speed_spinbox = QSpinBox()
+        self.transition_speed_spinbox = StepSpinBox()
         self.transition_speed_spinbox.setRange(0, 10000)  # 0 to 10 seconds
         self.transition_speed_spinbox.setSingleStep(100)  # 100ms increments
         self.transition_speed_spinbox.setSuffix(" ms")
@@ -3653,7 +3736,7 @@ class SettingsDialog(QDialog):
         )
 
         # Rotation angle setting
-        self.rotation_angle_spinbox = QSpinBox()
+        self.rotation_angle_spinbox = StepSpinBox()
         self.rotation_angle_spinbox.setRange(0, 360)
         self.rotation_angle_spinbox.setSingleStep(15)
         self.rotation_angle_spinbox.setSuffix("°")
@@ -3663,7 +3746,7 @@ class SettingsDialog(QDialog):
         )
 
         # Overlap percentage setting
-        self.overlap_percent_spinbox = QSpinBox()
+        self.overlap_percent_spinbox = StepSpinBox()
         self.overlap_percent_spinbox.setRange(0, 200)  # 0% to 200% overlap
         self.overlap_percent_spinbox.setSingleStep(10)  # 10% increments
         self.overlap_percent_spinbox.setSuffix("%")
@@ -3684,15 +3767,16 @@ class SettingsDialog(QDialog):
         
         # -- Remove unused "direction_container" which causes the black block artifact --
         # Use the combo box directly in the grid layout. No need for a seperate container.
-        # Set size constraints
-        self.slideshow_rate_spinbox.setMinimumWidth(70)
-        self.slideshow_rate_spinbox.setMaximumWidth(90)
-        self.transition_speed_spinbox.setMinimumWidth(70)
-        self.transition_speed_spinbox.setMaximumWidth(90)
-        self.rotation_angle_spinbox.setMinimumWidth(70)
-        self.rotation_angle_spinbox.setMaximumWidth(90)
-        self.overlap_percent_spinbox.setMinimumWidth(70)
-        self.overlap_percent_spinbox.setMaximumWidth(90)
+        # Size StepSpinBox controls for widest displayed values (suffix included).
+        _slideshow_spinbox_samples = (
+            (self.slideshow_rate_spinbox, "60000 ms"),
+            (self.transition_speed_spinbox, "10000 ms"),
+            (self.rotation_angle_spinbox, "360°"),
+            (self.overlap_percent_spinbox, "200%"),
+        )
+        for spinbox, sample_text in _slideshow_spinbox_samples:
+            spinbox.setFixedWidth(spinbox.char_width_for_text(sample_text))
+            spinbox.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
 
         # 2x3 grid layout
         slideshow_layout.addWidget(QLabel("Slideshow Rate:"), 0, 0, Qt.AlignRight | Qt.AlignVCenter)
@@ -3707,6 +3791,10 @@ class SettingsDialog(QDialog):
 
         slideshow_layout.addWidget(QLabel("Default Direction:"), 2, 0, Qt.AlignRight | Qt.AlignVCenter)
         slideshow_layout.addWidget(self.direction_combo, 2, 1, Qt.AlignLeft | Qt.AlignVCenter)
+        slideshow_layout.setColumnStretch(0, 0)
+        slideshow_layout.setColumnStretch(1, 0)
+        slideshow_layout.setColumnStretch(2, 0)
+        slideshow_layout.setColumnStretch(3, 0)
 
         playback_panel = MacPreferencePanel()
         self.slideshow_back_and_forth_checkbox = playback_panel.add_toggle(
@@ -4171,8 +4259,8 @@ class SettingsDialog(QDialog):
 
         # Instructions immediately below input boxes
         description = QLabel(
-            f"{CMD_SYMBOL}+number moves or copies per Destination menu action below.\n"
-            f"{OPTION_SYMBOL}{CMD_SYMBOL}+number always copies to the same destination (not undoable)."
+            f"Press {CMD_SYMBOL}+number to move or copy to these destinations.\n"
+            f"Press {OPTION_SYMBOL}+{CMD_SYMBOL}+number to quickly copy to a numbered destination (not undoable)."
         )
         description.setWordWrap(True)
         description.setStyleSheet(self.NOTE_TEXT_STYLE + "margin-top:0px;margin-left:40px;")
@@ -4753,9 +4841,7 @@ class SettingsDialog(QDialog):
         
         # Instructions immediately below input boxes
         description = QLabel(
-            "Used to exclude directories from the thumbnail view when pressing Cmd-X.\n\n"
-            "This can be useful when you are searching for images that are not within specific "
-            "directories."
+            "Used to exclude files in specific directories from the thumbnail view when pressing Cmd-X."
         )
         description.setWordWrap(True)
         description.setStyleSheet(self.NOTE_TEXT_STYLE + "margin-top:8px;")
@@ -4832,6 +4918,7 @@ class SettingsDialog(QDialog):
                 ".vscode) in searches and file operations, not just the\n"
                 "file tree."
             ),
+            subtitle="Process hidden directories in searches and other operations.",
         )
 
         self.always_show_work_checkbox = options_panel.add_toggle(
@@ -4842,6 +4929,7 @@ class SettingsDialog(QDialog):
                 "This is intended to provide empty directories when tree\n"
                 "filtering requires images."
             ),
+            subtitle="Show an empty directories in tree starting with 'work'.",
         )
 
         self.follow_symlinks_checkbox = options_panel.add_toggle(
@@ -4873,7 +4961,8 @@ class SettingsDialog(QDialog):
         depth_panel.add_form_row(
             f"{CMD_SYMBOL}{SHIFT_SYMBOL}{ENTER_SYMBOL} depth",
             self.shift_cmd_depth_spinbox,
-            tooltip="Tree expansion depth for Shift+Cmd+Return.",
+            tooltip="The depth of directories to be opened in the\nfile tree when you press Shift+Cmd+Return.",
+            subtitle="Tree expansion depth for Shift+Cmd+Return.",
         )
 
         self.search_depth_spinbox = QSpinBox()
@@ -4887,6 +4976,7 @@ class SettingsDialog(QDialog):
             "• Recursive image search and tree \"has images\" checks\n"
             "• Similarity / background indexing over folders"
         )
+
         self.search_depth_spinbox.setFixedWidth(72)
         self.search_depth_spinbox.setFixedHeight(28)
         depth_panel.add_form_row(
@@ -4899,9 +4989,10 @@ class SettingsDialog(QDialog):
         layout.addWidget(depth_panel)
 
         files_title, files_panel = mac_preference_section("Image Creation & Temporary Files", inner)
+        _default_image_dir = self._path_to_display(os.path.expanduser("~/Downloads"))
         files_note = QLabel(
             "When enabled, newly generated images are saved in the folder below. "
-            "When disabled, images are saved to ~/Downloads."
+            f"When disabled, images are saved to {_default_image_dir}."
         )
         files_note.setObjectName("macPreferenceRowSubtitle")
         files_note.setWordWrap(True)
@@ -4910,14 +5001,19 @@ class SettingsDialog(QDialog):
         image_path_layout = QHBoxLayout(image_path_control)
         image_path_layout.setContentsMargins(0, 0, 0, 0)
         image_path_layout.setSpacing(8)
+        self.image_creation_directory_checkbox = MacToggleSwitch()
+        self.image_creation_directory_checkbox.setToolTip(
+            "Use a custom folder for generated images."
+        )
+        image_path_layout.addWidget(self.image_creation_directory_checkbox)
         self.image_creation_directory_input_field = QLineEdit()
         self.image_creation_directory_input_field.setPlaceholderText(
             "Enter directory for generated images"
         )
         self.image_creation_directory_input_field.setToolTip(
             "Folder for newly generated images when the toggle\n"
-            "above is enabled.\n"
-            "When disabled, images are saved to ~/Downloads."
+            "is enabled.\n"
+            f"When disabled, images are saved to {_default_image_dir}."
         )
         self.image_creation_directory_input_field.setMinimumHeight(28)
         image_path_layout.addWidget(self.image_creation_directory_input_field, 1)
@@ -4929,15 +5025,15 @@ class SettingsDialog(QDialog):
         image_creation_browse_button.clicked.connect(self.browse_image_creation_directory)
         image_path_layout.addWidget(image_creation_browse_button)
 
-        self.image_creation_directory_checkbox = files_panel.add_toggle(
-            "Use custom folder for generated images",
-            tooltip="Use the directory below for generated images.",
+        files_panel.add_form_row(
+            "Generated images folder",
+            image_path_control,
+            subtitle=f"Default: {_default_image_dir}",
         )
-        files_panel.add_form_row("Generated images folder", image_path_control)
 
         from prowser_temp_files import default_temporary_files_directory
 
-        _default_temp_dir = default_temporary_files_directory() + os.sep
+        _default_temp_dir = self._path_to_display(default_temporary_files_directory())
         temp_files_control = QWidget()
         temp_files_layout = QHBoxLayout(temp_files_control)
         temp_files_layout.setContentsMargins(0, 0, 0, 0)
@@ -4965,7 +5061,7 @@ class SettingsDialog(QDialog):
             temp_files_control,
             subtitle=(
                 "Work files for infill, masking, image generation, wallpaper, and similar "
-                "operations. Leave blank for the default."
+                f"operations. Leave blank for {_default_temp_dir}"
             ),
         )
 
@@ -5009,7 +5105,8 @@ class SettingsDialog(QDialog):
             self.ignore_directory_browse_buttons.append(browse_button)
             ignore_control_layout.addWidget(browse_button)
 
-            ignore_panel.add_form_row(f"Ignore path {i + 1}", ignore_control)
+            ignore_panel.add_form_row(f"Ignore path {i + 1}", ignore_control, 
+                subtitle=f"Skipped during scans and file operations")
 
         layout.addWidget(ignore_title)
         layout.addWidget(ignore_panel)
@@ -6801,6 +6898,9 @@ class SettingsDialog(QDialog):
             )
             self.original_settings["theme_settings_groups_expanded"] = copy.deepcopy(theme_groups_expanded)
             if hasattr(self, "current_settings"):
+                self.current_settings['user_theme_colors'] = copy.deepcopy(
+                    merge_user_theme_colors(_ts.get('user_theme_colors'))
+                )
                 self.current_settings['dark_theme_colors'] = copy.deepcopy(
                     merge_dark_theme_colors(_ts.get('dark_theme_colors'))
                 )
@@ -7534,6 +7634,9 @@ class SettingsDialog(QDialog):
                     n = merge_light_theme_colors(new_value if isinstance(new_value, dict) else None)
                     original_value = tuple(sorted(o.items()))
                     new_value = tuple(sorted(n.items()))
+                elif key == 'ui_theme':
+                    if self._ui_theme_values_equal(original_value, new_value):
+                        continue
                 if original_value != new_value:
                     has_changes = True
                     changed_keys.add(key)
@@ -7662,6 +7765,11 @@ class SettingsDialog(QDialog):
                 if hasattr(self, 'imagegen_series_cooldown_slider')
                 else 60
             ),
+            'imagegen_add_chat_prefix_postfix': (
+                self.imagegen_add_chat_prefix_postfix_checkbox.isChecked()
+                if hasattr(self, 'imagegen_add_chat_prefix_postfix_checkbox')
+                else True
+            ),
             'filtered_tree': self.original_settings.get('filtered_tree', 'images'),  # UI removed, value set from Tree Filtering menu and persisted
             'filter_pattern': ImageBrowserConfig.normalize_filter_pattern(self.filter_pattern_input.text().strip()),
             'shift_cmd_depth': self.shift_cmd_depth_spinbox.value(),
@@ -7762,7 +7870,7 @@ class SettingsDialog(QDialog):
             tid = self.theme_preset_combo.currentData()
             if tid in ("dark", "light", "user") and hasattr(self, "use_diamonds_checkbox"):
                 self._flush_browse_transparency_entry(tid)
-            settings['ui_theme'] = tid
+            settings['ui_theme'] = self._get_ui_theme_for_save()
             if tid == "user":
                 settings['user_theme_colors'] = self._get_user_theme_colors_from_widgets()
             else:

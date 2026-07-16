@@ -114,6 +114,51 @@ def global_scrollbar_stylesheet(t) -> str:
     )
 
 
+def dialog_radio_button_stylesheet(
+    t,
+    *,
+    selector: str = "QRadioButton",
+    text_hex: str | None = None,
+    indicator_bg_hex: str | None = None,
+) -> str:
+    """Standard QRadioButton rules (Convert dialog, settings, etc.)."""
+    au = asset_url
+    color = text_hex if text_hex is not None else t.dialog_text_color_hex
+    if indicator_bg_hex is not None:
+        indicator_bg = indicator_bg_hex
+    elif t.theme_id == "light":
+        indicator_bg = "#ffffff"
+    else:
+        indicator_bg = t.dialog_background_hex
+    return f"""
+    {selector} {{
+        color: {color};
+        spacing: 8px;
+        background-color: transparent;
+    }}
+    {selector}::indicator {{
+        width: 12px;
+        height: 12px;
+        border: 2px solid {t.radiobutton_indicator_border_hex};
+        border-radius: 8px;
+        background-color: {indicator_bg};
+    }}
+    {selector}::indicator:checked {{
+        image: {au("radio_dot.svg")};
+    }}
+    {selector}::indicator:disabled {{
+        border-color: {t.radiobutton_indicator_disabled_hex};
+        background-color: {t.radiobutton_indicator_disabled_hex};
+    }}
+    {selector}::indicator:hover {{
+        border-color: {t.checkbox_indicator_hover_border_hex};
+    }}
+    {selector}::indicator:focus {{
+        border-color: {t.checkbox_indicator_focus_border_hex};
+    }}
+    """
+
+
 def dialog_input_stylesheet(t) -> str:
     """Editable controls inside QDialog (not settings or unified image-gen shell)."""
     inp = t.dialog_input_background_hex

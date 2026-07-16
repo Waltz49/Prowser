@@ -6,7 +6,7 @@ from __future__ import annotations
 from typing import Any, Optional
 
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtWidgets import QPushButton, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QHBoxLayout, QPushButton, QWidget
 from imagegen_plugins.image_gen_persistence import (
     load_flux_prompt_system_prompt_settings,
     save_flux_prompt_system_prompt_settings,
@@ -19,61 +19,55 @@ from imagegen_plugins.lmstudio_caption import (
 )
 
 
-def _image_prompt_action_column(
+def _image_prompt_label_row(
     owner: Any,
-) -> Optional[tuple[QVBoxLayout, QWidget, QPushButton, Optional[QPushButton]]]:
-    """VBox to the right of the image prompt field (copy / mic button column)."""
+) -> Optional[tuple[QHBoxLayout, QWidget, QPushButton]]:
+    """Heading row above the image prompt field (label / clear / AI toggle)."""
     from imagegen_plugins.image_gen_form_layout import ImageGenFieldsPanel
 
     panel: Optional[ImageGenFieldsPanel] = getattr(owner, "_fields_panel", None)
     if panel is None or panel._prompt_group is None:
         return None
-    copy_btn = panel._prompt_group.findChild(QPushButton, "imageGenPromptCopyBtn")
-    if copy_btn is None:
+    label_row = panel.prompt_field_label_row_widget()
+    if label_row is None:
         return None
-    action_col = copy_btn.parentWidget()
-    if action_col is None:
+    layout = label_row.layout()
+    if not isinstance(layout, QHBoxLayout):
         return None
-    layout = action_col.layout()
-    if not isinstance(layout, QVBoxLayout):
+    clear_btn = panel._prompt_group.findChild(QPushButton, "imageGenPromptClearBtn")
+    if clear_btn is None:
         return None
-    mic_btn = panel._prompt_group.findChild(
-        QPushButton, "imageGenPromptVoiceMicBtn"
-    )
-    return layout, action_col, copy_btn, mic_btn
+    return layout, label_row, clear_btn
 
 
-def _insert_flux_toggle_below_mic(
-    action_layout: QVBoxLayout,
-    action_col: QWidget,
+def _insert_flux_toggle_after_clear(
+    label_layout: QHBoxLayout,
+    label_row: QWidget,
     btn: QPushButton,
     *,
-    copy_btn: Optional[QPushButton],
-    mic_btn: Optional[QPushButton],
+    clear_btn: QPushButton,
 ) -> None:
-    """Stack AI toggle under copy and optional mic in a prompt action column."""
-    btn.setParent(action_col)
-    for i in range(action_layout.count()):
-        item = action_layout.itemAt(i)
+    """Place AI toggle to the right of the prompt clear button in the heading row."""
+    btn.setParent(label_row)
+    for i in range(label_layout.count()):
+        item = label_layout.itemAt(i)
         if item is not None and item.widget() is btn:
             return
-    insert_at = action_layout.count()
-    anchor = mic_btn if mic_btn is not None else copy_btn
-    if anchor is not None:
-        for i in range(action_layout.count()):
-            item = action_layout.itemAt(i)
-            if item is not None and item.widget() is anchor:
-                insert_at = i + 1
-                break
-    action_layout.insertWidget(
+    insert_at = label_layout.count()
+    for i in range(label_layout.count()):
+        item = label_layout.itemAt(i)
+        if item is not None and item.widget() is clear_btn:
+            insert_at = i + 1
+            break
+    label_layout.insertWidget(
         insert_at,
         btn,
         0,
-        Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignHCenter,
+        Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
     )
 
 
-def _remove_button_from_layout(layout: QVBoxLayout, btn: QPushButton) -> None:
+def _remove_button_from_layout(layout, btn: QPushButton) -> None:
     for i in range(layout.count()):
         item = layout.itemAt(i)
         if item is not None and item.widget() is btn:
@@ -82,7 +76,7 @@ def _remove_button_from_layout(layout: QVBoxLayout, btn: QPushButton) -> None:
 
 
 def sync_flux_prompt_system_toggle_location(owner: Any) -> None:
-    """Keep the AI toggle in the image-prompt action column (copy / mic / AI)."""
+    """Keep the AI toggle in the image-prompt heading row (label / clear / AI)."""
     pane = getattr(owner, "_flux_system_prompt_pane", None)
     btn = getattr(owner, "_flux_system_prompt_toggle_btn", None)
     if pane is None or btn is None:
@@ -98,23 +92,22 @@ def sync_flux_prompt_system_toggle_location(owner: Any) -> None:
     parent = btn.parentWidget()
     if parent is not None:
         layout = parent.layout()
-        if isinstance(layout, QVBoxLayout):
+        if layout is not None:
             _remove_button_from_layout(layout, btn)
 
     if not _flux_lmstudio_ui_entry_allowed(pane):
         btn.hide()
         return
 
-    found = _image_prompt_action_column(owner)
+    found = _image_prompt_label_row(owner)
     if found is None:
         return
-    action_layout, action_col, copy_btn, mic_btn = found
-    _insert_flux_toggle_below_mic(
-        action_layout,
-        action_col,
+    label_layout, label_row, clear_btn = found
+    _insert_flux_toggle_after_clear(
+        label_layout,
+        label_row,
         btn,
-        copy_btn=copy_btn,
-        mic_btn=mic_btn,
+        clear_btn=clear_btn,
     )
     btn.show()
 
@@ -205,7 +198,7 @@ def ensure_flux_prompt_system_pane(owner: Any) -> Optional[LmStudioInstructionsP
 
 
 def mount_flux_prompt_system_toggle(owner: Any) -> None:
-    """Place the AI toggle beside the image prompt field."""
+    """Place the AI toggle in the image prompt heading row beside the clear button."""
     pane = ensure_flux_prompt_system_pane(owner)
     if pane is None:
         return

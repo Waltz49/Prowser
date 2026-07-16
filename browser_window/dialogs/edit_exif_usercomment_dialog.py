@@ -244,6 +244,10 @@ def _edit_exif_usercomment_stylesheet() -> str:
                 color: {BUTTON_TEXT_HOVER_HEX};
                 border: 1px solid {BUTTON_BORDER_HOVER_HEX};
             }}
+            QPushButton#ear_btn[speaking="true"] {{
+                color: {BUTTON_TEXT_HOVER_HEX};
+                border: 1px solid {BUTTON_BORDER_HOVER_HEX};
+            }}
             QPushButton#copy_btn {{
                 background-color: {BUTTON_BG_DEFAULT_HEX};
                 color: {TEXT_DISABLED_HEX};
@@ -379,6 +383,9 @@ class EditExifUserCommentDialog(QDialog):
         self.ear_btn.clicked.connect(self._on_read_aloud)
         if not _audio_output_ui_enabled():
             self.ear_btn.hide()
+        from speech_utils import register_speech_state_listener
+
+        register_speech_state_listener(self._on_speech_state_changed)
         btn_stack.addWidget(self.ear_btn, 0, Qt.AlignmentFlag.AlignRight)
         self.copy_btn = QPushButton()
         self.copy_btn.setObjectName("copy_btn")
@@ -566,6 +573,25 @@ class EditExifUserCommentDialog(QDialog):
             btn.move(right - btn.width(), bottom - btn.height())
             btn.raise_()
 
+    def _on_speech_state_changed(self, _speaking: bool) -> None:
+        QTimer.singleShot(0, self._sync_ear_btn_speaking_highlight)
+
+    def _sync_ear_btn_speaking_highlight(self) -> None:
+        if not hasattr(self, "ear_btn"):
+            return
+        from speech_utils import is_speaking
+
+        speaking = is_speaking()
+        self.ear_btn.setProperty("speaking", "true" if speaking else "false")
+        style = self.ear_btn.style()
+        style.unpolish(self.ear_btn)
+        style.polish(self.ear_btn)
+
+    def _unregister_speech_state_listener(self) -> None:
+        from speech_utils import unregister_speech_state_listener
+
+        unregister_speech_state_listener(self._on_speech_state_changed)
+
     def eventFilter(self, obj, event):
         """Swap icon buttons to hover/normal icons on enter/leave; thumbnail border on hover."""
         if (
@@ -653,17 +679,20 @@ class EditExifUserCommentDialog(QDialog):
     def reject(self):
         _stop_whisper_dictation()
         self._cancel_active_ai_caption()
+        self._unregister_speech_state_listener()
         super().reject()
 
     def accept(self):
         _stop_whisper_dictation()
         self._cancel_active_ai_caption()
+        self._unregister_speech_state_listener()
         super().accept()
 
     def closeEvent(self, event):
         """Save geometry when closed via X button (accept/reject use finished signal)."""
         _stop_whisper_dictation()
         self._cancel_active_ai_caption()
+        self._unregister_speech_state_listener()
         self._save_geometry()
         super().closeEvent(event)
 
@@ -709,6 +738,7 @@ class EditExifUserCommentDialog(QDialog):
         text = self.text_edit.toPlainText().strip()
         text = truncate_usercomment_before_prompt(text)
         _speak_or_stop(text)
+        QTimer.singleShot(0, self._sync_ear_btn_speaking_highlight)
 
     def _on_copy_to_clipboard(self):
         mods = QApplication.keyboardModifiers()

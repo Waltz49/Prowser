@@ -155,6 +155,7 @@ from utils import (
     is_root_or_system_volume,
     normalize_path_for_display,
     present_auxiliary_dialog,
+    should_preserve_chat_focus,
     should_preserve_window_focus,
     show_styled_critical,
     show_styled_information,
@@ -2700,6 +2701,8 @@ class ImageBrowserWindow(QMainWindow):
     
     def focus_canvas(self):
         """Give focus to the canvas area"""
+        if should_preserve_chat_focus(self):
+            return
         if hasattr(self, 'main_content_widget'):
             self.main_content_widget.setFocus()
     

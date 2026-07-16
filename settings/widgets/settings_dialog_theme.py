@@ -4,9 +4,18 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Optional
 
-from theme.theme import push_button_stylesheet, macos_scrollbar_stylesheet
+from PySide6.QtCore import QEvent, QSize, Qt
+from PySide6.QtGui import QEnterEvent, QIcon
+from PySide6.QtWidgets import QPushButton, QSizePolicy, QWidget
+
+from thumbnails.thumbnail_constants import asset_path
+from theme.theme import (
+    dialog_radio_button_stylesheet,
+    macos_scrollbar_stylesheet,
+    push_button_stylesheet,
+)
 from theme.theme_service import get_active_theme
 
 _SETTINGS_DIALOG_OBJECT_NAME = "settingsDialog"
@@ -83,6 +92,83 @@ def resolve_settings_chrome_from_widget(widget: Any) -> SettingsDialogChrome:
     return _DARK_USER_CHROME
 
 
+_SETTINGS_GEAR_BTN_SIZE = 22
+_SETTINGS_GEAR_ICON_PX = 18
+
+
+def settings_gear_button_stylesheet(chrome: SettingsDialogChrome) -> str:
+    """Small gear icon button for settings preference row titles."""
+    sz = _SETTINGS_GEAR_BTN_SIZE
+    return f"""
+        QPushButton#settingsPreferenceGearBtn {{
+            background-color: {chrome.control_bg_hex};
+            border: 1px solid {chrome.control_border_hex};
+            border-radius: 3px;
+            padding: 0px;
+            min-width: {sz}px;
+            max-width: {sz}px;
+            min-height: {sz}px;
+            max-height: {sz}px;
+        }}
+        QPushButton#settingsPreferenceGearBtn:focus {{
+            border: 1px solid {chrome.focus_border_hex};
+            outline: none;
+        }}
+        QPushButton#settingsPreferenceGearBtn:hover {{
+            background-color: {chrome.control_hover_bg_hex};
+            border: 1px solid {chrome.control_hover_border_hex};
+        }}
+        QPushButton#settingsPreferenceGearBtn:pressed {{
+            background-color: {chrome.tab_checked_bg_hex};
+        }}
+    """
+
+
+class SettingsGearButton(QPushButton):
+    """Gear icon button for opening a related settings or library dialog."""
+
+    def __init__(
+        self,
+        parent: Optional[QWidget] = None,
+        *,
+        tooltip: str = "",
+    ) -> None:
+        super().__init__("", parent)
+        self.setObjectName("settingsPreferenceGearBtn")
+        if tooltip:
+            self.setToolTip(tooltip)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._normal_icon = QIcon(asset_path("gear.svg"))
+        self._hover_icon = QIcon(asset_path("gear_hover.svg"))
+        self._hovered = False
+        self._apply_icon()
+        self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        self.setFixedSize(_SETTINGS_GEAR_BTN_SIZE, _SETTINGS_GEAR_BTN_SIZE)
+        self._refresh_stylesheet()
+
+    def _chrome(self) -> SettingsDialogChrome:
+        return resolve_settings_chrome_from_widget(self)
+
+    def _refresh_stylesheet(self) -> None:
+        self.setStyleSheet(settings_gear_button_stylesheet(self._chrome()))
+
+    def _apply_icon(self) -> None:
+        icon = self._hover_icon if self._hovered else self._normal_icon
+        px = _SETTINGS_GEAR_ICON_PX
+        self.setIcon(icon)
+        self.setIconSize(QSize(px, px))
+
+    def enterEvent(self, event: QEnterEvent) -> None:
+        self._hovered = True
+        self._apply_icon()
+        super().enterEvent(event)
+
+    def leaveEvent(self, event: QEvent) -> None:
+        self._hovered = False
+        self._apply_icon()
+        super().leaveEvent(event)
+
+
 def settings_dialog_stylesheet(chrome: SettingsDialogChrome) -> str:
     """Full settings shell stylesheet; overrides global QDialog QWidget dialog fill."""
     c = chrome
@@ -148,13 +234,52 @@ def settings_dialog_stylesheet(chrome: SettingsDialogChrome) -> str:
     #{_SETTINGS_DIALOG_OBJECT_NAME} QDoubleSpinBox {{
         padding: 4px 16px 4px 8px;
     }}
-    #{_SETTINGS_DIALOG_OBJECT_NAME} QCheckBox,
-    #{_SETTINGS_DIALOG_OBJECT_NAME} QRadioButton {{
+    #{_SETTINGS_DIALOG_OBJECT_NAME} StepSpinBox {{
+        background-color: {c.control_bg_hex};
+        color: {c.control_text_hex};
+        border: 1px solid {c.control_border_hex};
+        border-radius: 4px;
+        margin-left: 0px;
+        font-size: 13px;
+    }}
+    #{_SETTINGS_DIALOG_OBJECT_NAME} StepSpinBox[hasFocus="true"] {{
+        border: 1px solid {c.focus_border_hex};
+    }}
+    #{_SETTINGS_DIALOG_OBJECT_NAME} StepSpinBox QLineEdit#StepSpinEdit {{
+        border: none;
+        background: transparent;
+        color: {c.control_text_hex};
+        padding: 4px 4px 4px 6px;
+        margin: 0px;
+        selection-background-color: {c.focus_border_hex};
+    }}
+    #{_SETTINGS_DIALOG_OBJECT_NAME} StepSpinBox QWidget#StepSpinButtons {{
+        background: transparent;
+        min-width: 12px;
+        max-width: 12px;
+    }}
+    #{_SETTINGS_DIALOG_OBJECT_NAME} StepSpinBox QToolButton#StepSpinUpButton,
+    #{_SETTINGS_DIALOG_OBJECT_NAME} StepSpinBox QToolButton#StepSpinDownButton {{
+        border: none;
+        border-left: 1px solid {c.control_border_hex};
+        background: transparent;
+        padding: 0px;
+        margin: 0px;
+        min-width: 12px;
+        max-width: 12px;
+    }}
+    #{_SETTINGS_DIALOG_OBJECT_NAME} StepSpinBox QToolButton#StepSpinUpButton {{
+        border-bottom: 1px solid {c.control_border_hex};
+    }}
+    #{_SETTINGS_DIALOG_OBJECT_NAME} StepSpinBox QToolButton#StepSpinUpButton:hover:enabled,
+    #{_SETTINGS_DIALOG_OBJECT_NAME} StepSpinBox QToolButton#StepSpinDownButton:hover:enabled {{
+        background-color: {c.control_hover_bg_hex};
+    }}
+    #{_SETTINGS_DIALOG_OBJECT_NAME} QCheckBox {{
         color: {c.text_hex};
         spacing: 6px;
     }}
-    #{_SETTINGS_DIALOG_OBJECT_NAME} QCheckBox::indicator,
-    #{_SETTINGS_DIALOG_OBJECT_NAME} QRadioButton::indicator {{
+    #{_SETTINGS_DIALOG_OBJECT_NAME} QCheckBox::indicator {{
         background-color: {c.control_bg_hex};
         border: 1px solid {c.control_border_hex};
         width: 11px;
@@ -168,6 +293,11 @@ def settings_dialog_stylesheet(chrome: SettingsDialogChrome) -> str:
         background-color: {c.bg_hex};
         border: 1px solid {c.groupbox_border_hex};
     }}
+    {dialog_radio_button_stylesheet(
+        t,
+        selector=f"#{_SETTINGS_DIALOG_OBJECT_NAME} QRadioButton",
+        text_hex=c.text_hex,
+    )}
     #{_SETTINGS_DIALOG_OBJECT_NAME} QFrame#macPreferencePanel {{
         background-color: {c.control_bg_hex};
         border: 1px solid {c.groupbox_border_hex};

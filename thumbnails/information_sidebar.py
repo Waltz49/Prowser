@@ -24,7 +24,7 @@ from utils import (
     normalize_path_for_display,
     show_styled_question,
 )
-from speech_utils import speak_or_stop
+from speech_utils import is_speaking, register_speech_state_listener, speak_or_stop, unregister_speech_state_listener
 from tooltip_popup_utils import ensure_tooltip_label, position_tooltip_near_cursor
 from search.reference_graph import (
     collect_reference_chain_paths,
@@ -127,6 +127,7 @@ class InformationSidebar(QWidget):
         vp.setMouseTracking(True)
         vp.installEventFilter(self)
         self._information_viewport = vp
+        register_speech_state_listener(self._on_speech_state_changed)
         self.info_text_edit.setViewportMargins(
             _INFO_VIEWPORT_MARGIN_LEFT,
             _INFO_VIEWPORT_MARGIN_TOP,
@@ -487,6 +488,18 @@ class InformationSidebar(QWidget):
             )
         return cells
 
+    def _action_icon_highlighted(self, href: str, hovered_anchor: str | None) -> bool:
+        if href == "speak://" and is_speaking():
+            return True
+        return href == hovered_anchor
+
+    def _on_speech_state_changed(self, _speaking: bool) -> None:
+        QTimer.singleShot(0, self._refresh_speak_action_highlight)
+
+    def _refresh_speak_action_highlight(self) -> None:
+        if getattr(self, "_last_overlay_data", None):
+            self._refresh_overlay_for_hover(getattr(self, "_hovered_anchor", None))
+
     def eventFilter(self, obj, event):
         """Show tooltip and red highlight when hovering over information action links."""
         if obj is self._information_viewport:
@@ -583,6 +596,7 @@ class InformationSidebar(QWidget):
         if url.toString() == "speak://":
             text = truncate_usercomment_before_prompt(self._speakable_description or "")
             speak_or_stop(text)
+            QTimer.singleShot(0, self._refresh_speak_action_highlight)
         elif url.toString() == "copy://":
             from PySide6.QtWidgets import QApplication
             from exif.exif_utils import usercomment_text_for_clipboard
@@ -1228,7 +1242,7 @@ class InformationSidebar(QWidget):
                     f'style="display:block;line-height:0;text-decoration:none;cursor:pointer;" '
                     f'title="{title}">{icon}</a>'
                 )
-            color = ACTION_ICON_HOVER_COLOR if href == hovered_anchor else ACTION_ICON_COLOR
+            color = ACTION_ICON_HOVER_COLOR if self._action_icon_highlighted(href, hovered_anchor) else ACTION_ICON_COLOR
             return (
                 f'<a href="{href}" '
                 f'style="display:block; color:{color}; text-decoration:none; cursor:pointer; '
@@ -1237,7 +1251,7 @@ class InformationSidebar(QWidget):
             )
 
         def icon_box(href, icon, title, *, image=False):
-            is_hovered = href == hovered_anchor
+            is_hovered = self._action_icon_highlighted(href, hovered_anchor)
             border_color = ACTION_ICON_HOVER_COLOR if is_hovered else _th.information_icon_cell_border_muted_hex
             if image:
                 px = _INFO_ACTION_ICON_PX

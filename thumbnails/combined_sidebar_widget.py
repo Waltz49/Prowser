@@ -1216,6 +1216,7 @@ class CombinedSidebarWidget(QWidget):
                 self._apply_display_sections()
             self.chat_header.hide_button.setText("−" if visible else "+")
             if visible and self.chat_widget and hasattr(self.chat_widget, "on_pane_activated"):
+                self._refresh_browse_cursor_for_pointer()
                 self.chat_widget.on_pane_activated()
             self._update_splitter_sizes()
             self.main_window.config.update_setting('chat_visible', visible)
@@ -1232,6 +1233,7 @@ class CombinedSidebarWidget(QWidget):
             if self.isVisible():
                 self.chat_widget.show()
             if hasattr(self.chat_widget, "on_pane_activated"):
+                self._refresh_browse_cursor_for_pointer()
                 self.chat_widget.on_pane_activated()
             if hasattr(self.chat_widget, "ensure_input_focus_policy"):
                 self.chat_widget.ensure_input_focus_policy()
@@ -1244,6 +1246,11 @@ class CombinedSidebarWidget(QWidget):
         if action is not None:
             action.setChecked(self.chat_visible)
             action.setText("Hide Chat" if self.chat_visible else "Show Chat")
+
+    def _refresh_browse_cursor_for_pointer(self) -> None:
+        cm = getattr(self.main_window, "cursor_manager", None)
+        if cm is not None:
+            cm.refresh_for_pointer_location()
 
     def is_chat_visible(self):
         """Check if chat is visible"""

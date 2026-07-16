@@ -40,7 +40,9 @@ def apply_image_ai_exit(text: str) -> str:
     """Run PROWSER_IMAGE_AI_EXIT on text before image model calls."""
     from chat_plugins.chat_prefix_postfix import apply_prefix_postfix_rules
 
-    with_rules = apply_prefix_postfix_rules(text, for_images=True)
+    with_rules = text
+    if _imagegen_add_chat_prefix_postfix_enabled():
+        with_rules = apply_prefix_postfix_rules(text, for_images=True)
     return _invoke_exit_for_env(with_rules, ENV_IMAGE_AI_EXIT)
 
 
@@ -108,6 +110,10 @@ def _resolve_exit_script(env_var: str) -> str:
 
 def _prompt_filter_exits_enabled() -> bool:
     return bool(get_config().load_settings().get("use_prompt_filter_exits", False))
+
+
+def _imagegen_add_chat_prefix_postfix_enabled() -> bool:
+    return bool(get_config().load_settings().get("imagegen_add_chat_prefix_postfix", True))
 
 
 def _invoke_exit_for_env(text: str, env_var: str) -> str:

@@ -731,6 +731,34 @@ def present_auxiliary_dialog(dialog: QDialog) -> None:
     raise_dialog_without_space_hop(dialog)
 
 
+def chat_pane_has_focus(
+    main_window: Optional[QWidget],
+    focus_widget: Optional[QWidget] = None,
+) -> bool:
+    """True when keyboard focus is inside the visible chat pane."""
+    if main_window is None:
+        return False
+    if focus_widget is None:
+        app = QApplication.instance()
+        focus_widget = app.focusWidget() if app is not None else None
+    if focus_widget is None:
+        return False
+    combined_sidebar = getattr(main_window, "combined_sidebar", None)
+    if combined_sidebar is not None and hasattr(combined_sidebar, "_chat_pane_has_focus"):
+        return bool(combined_sidebar._chat_pane_has_focus(focus_widget))
+    chat = getattr(main_window, "chat_container", None)
+    if chat is None or not chat.isVisible():
+        return False
+    return focus_widget is chat or chat.isAncestorOf(focus_widget)
+
+
+def should_preserve_chat_focus(main_window: Optional[QWidget] = None) -> bool:
+    """True when the app is foreground and chat has keyboard focus."""
+    if QGuiApplication.applicationState() != Qt.ApplicationState.ApplicationActive:
+        return False
+    return chat_pane_has_focus(main_window)
+
+
 def should_preserve_window_focus(main_window: Optional[QWidget] = None) -> bool:
     """True when raising/activating the main window would interrupt the user."""
     app = QApplication.instance()
@@ -746,6 +774,8 @@ def should_preserve_window_focus(main_window: Optional[QWidget] = None) -> bool:
         if isinstance(w, QDialog) and w.isVisible():
             return True
         w = w.parentWidget()
+    if chat_pane_has_focus(main_window, focus):
+        return True
     return False
 
 

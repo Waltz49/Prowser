@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Optional
 
 from PySide6.QtCore import Qt, QSize, QEvent
@@ -19,6 +20,7 @@ from PySide6.QtWidgets import (
 
 from settings.widgets.settings_dialog_theme import (
     SettingsDialogChrome,
+    SettingsGearButton,
     resolve_settings_chrome_from_widget,
 )
 
@@ -128,6 +130,59 @@ class MacPreferenceToggleRow(QWidget):
             title_label.setToolTip(tooltip)
             self.toggle.setToolTip(tooltip)
         text_col.addWidget(title_label)
+
+        if subtitle:
+            sub = QLabel(subtitle)
+            sub.setObjectName("macPreferenceRowSubtitle")
+            sub.setWordWrap(True)
+            text_col.addWidget(sub)
+
+        layout.addLayout(text_col, 1)
+        layout.addWidget(self.toggle, 0, Qt.AlignRight | Qt.AlignVCenter)
+
+
+class MacPreferenceGearToggleRow(QWidget):
+    """Preference row: title + gear on the left, toggle on the right."""
+
+    def __init__(
+        self,
+        title: str,
+        *,
+        on_gear_clicked: Callable[[], None],
+        tooltip: str = "",
+        subtitle: str = "",
+        gear_tooltip: str = "",
+        parent: Optional[QWidget] = None,
+    ) -> None:
+        super().__init__(parent)
+        self.toggle = MacToggleSwitch(self)
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(20, 10, 20, 10)
+        layout.setSpacing(12)
+
+        text_col = QVBoxLayout()
+        text_col.setContentsMargins(0, 0, 0, 0)
+        text_col.setSpacing(2)
+
+        title_row = QHBoxLayout()
+        title_row.setContentsMargins(0, 0, 0, 0)
+        title_row.setSpacing(6)
+
+        title_label = QLabel(title)
+        title_label.setObjectName("macPreferenceRowTitle")
+        title_label.setWordWrap(True)
+        title_label.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Preferred)
+        if tooltip:
+            title_label.setToolTip(tooltip)
+            self.toggle.setToolTip(tooltip)
+        title_row.addWidget(title_label, 0, Qt.AlignVCenter)
+
+        gear_button = SettingsGearButton(self, tooltip=gear_tooltip or tooltip)
+        gear_button.clicked.connect(on_gear_clicked)
+        title_row.addWidget(gear_button, 0, Qt.AlignVCenter)
+        title_row.addStretch(1)
+        text_col.addLayout(title_row)
 
         if subtitle:
             sub = QLabel(subtitle)
@@ -292,6 +347,29 @@ class MacPreferencePanel(QFrame):
         if self._row_count:
             self._add_divider()
         row = MacPreferenceToggleRow(title, tooltip=tooltip, subtitle=subtitle, parent=self)
+        self._rows_layout.addWidget(row)
+        self._row_count += 1
+        return row.toggle
+
+    def add_gear_toggle(
+        self,
+        title: str,
+        *,
+        on_gear_clicked: Callable[[], None],
+        tooltip: str = "",
+        subtitle: str = "",
+        gear_tooltip: str = "",
+    ) -> MacToggleSwitch:
+        if self._row_count:
+            self._add_divider()
+        row = MacPreferenceGearToggleRow(
+            title,
+            on_gear_clicked=on_gear_clicked,
+            tooltip=tooltip,
+            subtitle=subtitle,
+            gear_tooltip=gear_tooltip,
+            parent=self,
+        )
         self._rows_layout.addWidget(row)
         self._row_count += 1
         return row.toggle

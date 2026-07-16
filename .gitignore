@@ -98,3 +98,4 @@ imagegen_plugins/debug_download_script_dialog.py
 imagegen_plugins/debug_download_scripts.py
 profile.sh
 assets/run_from_source_icon1.png
+prowser_say_exit.py
