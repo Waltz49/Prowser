@@ -959,28 +959,52 @@ def global_stylesheet_dark(t) -> str:
 class ThemeStylesMixin:
     """Stylesheet methods shared by LightTheme and DarkTheme (palette via `self`)."""
 
-    def context_menu_stylesheet(self, *, rounded: bool = False) -> str:
+    def context_menu_stylesheet(
+        self, *, rounded: bool = False, anchored_top: bool = False
+    ) -> str:
         """QMenu rules using status bar background, text, selection, and disabled colors."""
+        from thumbnails import thumbnail_constants as tc
+
         t = self
         selected_bg = t.status_bar_menu_item_selected_bg_hex()
-        shell_extra = ""
-        if rounded:
-            shell_extra = """
+        item_h = tc.QMENU_ITEM_MIN_HEIGHT
+        pad_v = tc.QMENU_ITEM_PADDING_V
+        pad_h = tc.QMENU_ITEM_PADDING_H
+        text_left = (
+            tc.QMENU_INDICATOR_LEFT + tc.QMENU_INDICATOR_SIZE + tc.QMENU_ITEM_TEXT_LEFT
+        )
+        ind_size = tc.QMENU_INDICATOR_SIZE
+        ind_left = tc.QMENU_INDICATOR_LEFT
+        font_pt = tc.QMENU_FONT_SIZE_PT
+        sep_margin_h = max(8, pad_h // 2)
+
+        if anchored_top:
+            shell_border = f"""
+        border-top: 1px solid {t.chrome_border_hex};
+        border-left: 1px solid {t.chrome_border_hex};
+        border-right: 1px solid {t.chrome_border_hex};
+        border-bottom: 0px solid {t.chrome_border_hex};
+        padding: 2px;"""
+        else:
+            shell_border = f"border: 1px solid {t.border_default_hex};"
+            if rounded:
+                shell_border += """
         border-radius: 7px;
         padding-top: 7px;
         padding-bottom: 7px;"""
+
         return f"""
     QMenu {{
         background-color: {t.main_status_bar_bg_hex};
-        color: {t.status_bar_label_text_hex};
-        border: 1px solid {t.border_default_hex};{shell_extra}
+        color: {t.status_bar_label_text_hex};{shell_border}
     }}
     QMenu::item {{
-        min-height: 20px;
-        font-size: 13pt;
+        min-height: {item_h}px;
+        font-size: {font_pt}pt;
         font-weight: 500;
         color: {t.status_bar_label_text_hex};
-        padding: 0px 8px;
+        background-color: transparent;
+        padding: {pad_v}px {pad_h}px {pad_v}px {text_left}px;
     }}
     QMenu::item:selected {{
         background-color: {selected_bg};
@@ -990,10 +1014,15 @@ class ThemeStylesMixin:
         color: {t.status_bar_label_disabled_hex};
         font-weight: 100;
     }}
+    QMenu::indicator {{
+        width: {ind_size}px;
+        height: {ind_size}px;
+        left: {ind_left}px;
+    }}
     QMenu::separator {{
         height: 1px;
         background: {t.status_bar_label_disabled_hex};
-        margin: 5px 8px;
+        margin: 5px {sep_margin_h}px;
     }}
     """
 
@@ -1136,40 +1165,7 @@ class ThemeStylesMixin:
         return q.lighter(130).name()
 
     def status_bar_context_menu_stylesheet(self) -> str:
-        t = self
-        selected_bg = t.status_bar_menu_item_selected_bg_hex()
-        return f"""
-            QMenu {{
-                background-color: {t.main_status_bar_bg_hex};
-                color: {t.status_bar_label_text_hex};
-                border-top: 1px solid {t.chrome_border_hex};
-                border-left: 1px solid {t.chrome_border_hex};
-                border-right: 1px solid {t.chrome_border_hex};
-                border-bottom: 0px solid {t.chrome_border_hex};
-                padding: 2px;
-            }}
-            QMenu::item {{
-                background-color: transparent;
-                padding: 4px 20px 4px 20px;
-                font-size: 13px;
-                color: {t.status_bar_label_text_hex};
-            }}
-            QMenu::item:selected {{
-                background-color: {selected_bg};
-                color: {t.status_bar_label_text_hex};
-            }}
-            QMenu::item:disabled {{
-                color: {t.status_bar_label_disabled_hex};
-            }}
-            QMenu::separator {{
-                height: 1px;
-                background-color: {t.status_bar_label_disabled_hex};
-                margin-left: 10px;
-                margin-right: 10px;
-                margin-top: 4px;
-                margin-bottom: 4px;
-            }}
-        """
+        return self.context_menu_stylesheet(anchored_top=True)
 
     def file_tree_panel_stylesheet(self) -> str:
         """Embedded file tree (left sidebar) — distinct from generic QTreeView in global sheet."""

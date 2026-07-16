@@ -150,6 +150,15 @@ CHAT_REJECTED_RESPONSE_PHRASES: List[str] = [
     "standards",
 ]
 
+# Context menu item metrics (toolbar, status bar, thumbnail, file tree — shared QMenu QSS)
+QMENU_ITEM_MIN_HEIGHT = 20
+QMENU_ITEM_PADDING_V = 0
+QMENU_ITEM_PADDING_H = 16
+QMENU_ITEM_TEXT_LEFT = 6       # gap between checkmark column and label text
+QMENU_INDICATOR_SIZE = 14
+QMENU_INDICATOR_LEFT = 8
+QMENU_FONT_SIZE_PT = 13
+
 # File tree constants
 EXPANSION_LEVELS = 5          # Number of levels to expand the file tree
 TREE_UPDATE_DEBOUNCE_TIMER = 130  # ms - debounce when holding scroll key to coalesce rapid updates
