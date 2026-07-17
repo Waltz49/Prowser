@@ -92,7 +92,7 @@ def _terminate_process_tree(proc: subprocess.Popen) -> None:
 
 def stop_speech() -> None:
     """Stop the currently running speech. Safe to call from any thread."""
-    global _say_process
+    global _say_process, _speech_active, _stop_requested
     with _say_lock:
         was_active = _speech_active
         _stop_requested = True
@@ -117,7 +117,7 @@ def _speak_argv(text: str) -> list[str] | None:
 
 
 def _run_speech_process(argv: list[str], text: str) -> None:
-    global _say_process
+    global _say_process, _speech_active, _stop_requested
     proc = None
     notified_start = False
     try:
@@ -166,7 +166,7 @@ def speak_text(text: str) -> bool:
     Runs in a background thread to avoid blocking UI.
     Returns True if speak was started successfully, False otherwise.
     """
-    global _speech_active
+    global _speech_active, _stop_requested
     if not text or not text.strip():
         return False
     text = text.strip()

@@ -95,6 +95,8 @@ class SettingsDialogTooltipFilter(QObject):
         self._label = ensure_tooltip_label(dialog, "_settings_dialog_tooltip_label")
         self._source_widget: QWidget | None = None
         self._active = True
+        dialog.installEventFilter(self)
+        dialog.finished.connect(self._hide_tooltip)
         app = QApplication.instance()
         if app is not None:
             app.installEventFilter(self)
@@ -113,6 +115,8 @@ class SettingsDialogTooltipFilter(QObject):
             return
         self._active = False
         self._hide_tooltip()
+        if isValid(self._dialog):
+            self._dialog.removeEventFilter(self)
         app = QApplication.instance()
         if app is not None:
             app.removeEventFilter(self)
@@ -126,7 +130,14 @@ class SettingsDialogTooltipFilter(QObject):
         if not self._active or not isValid(self._dialog):
             self._on_dialog_destroyed()
             return False
+        if obj is self._dialog and event.type() in (
+            QEvent.Type.Hide,
+            QEvent.Type.Close,
+        ):
+            self._hide_tooltip()
+            return False
         if not self._dialog.isVisible():
+            self._hide_tooltip()
             return False
         if not isinstance(obj, QWidget) or not self._is_descendant(obj):
             return False
