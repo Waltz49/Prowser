@@ -1652,6 +1652,7 @@ class ImageBrowserWindow(QMainWindow):
 
         self._chrome_saved_layout = None
         self._chrome_suppressed = False
+        self._chrome_partial_side = None
         
         # Set initial focus to canvas area
         QTimer.singleShot(200, self._set_initial_focus)
@@ -2220,7 +2221,6 @@ class ImageBrowserWindow(QMainWindow):
 
     def toggle_file_tree(self):
         """Toggle the visibility of the file tree and resize canvas accordingly"""
-        self._chrome_suppressed = False
         return self.sidebar_manager.toggle_file_tree()
     
     def toggle_rename_status(self):
@@ -2301,31 +2301,28 @@ class ImageBrowserWindow(QMainWindow):
 
     def toggle_jobs(self):
         """Toggle the jobs pane in the right combined sidebar."""
-        self._chrome_suppressed = False
         if hasattr(self, "sidebar_manager"):
             return self.sidebar_manager.toggle_jobs()
         if hasattr(self, "right_sidebar"):
-            self.right_sidebar.set_jobs_visible(
-                not self.right_sidebar.is_jobs_visible()
+            rs = self.right_sidebar
+            return self._toggle_pane_with_chrome_restore(
+                rs.is_jobs_visible, rs.set_jobs_visible, 'right_jobs_visible', 'right'
             )
-            return self.right_sidebar.is_jobs_visible()
         return False
 
     def toggle_chat(self):
         """Toggle the chat pane in the left combined sidebar (F9)."""
-        self._chrome_suppressed = False
         if hasattr(self, "sidebar_manager"):
             return self.sidebar_manager.toggle_chat()
         if hasattr(self, "combined_sidebar"):
-            self.combined_sidebar.set_chat_visible(
-                not self.combined_sidebar.is_chat_visible()
+            cs = self.combined_sidebar
+            return self._toggle_pane_with_chrome_restore(
+                cs.is_chat_visible, cs.set_chat_visible, 'left_chat_visible', 'left'
             )
-            return self.combined_sidebar.is_chat_visible()
         return False
 
     def toggle_preview(self):
         """Toggle the visibility of the preview widget and resize canvas accordingly"""
-        self._chrome_suppressed = False
         if hasattr(self, 'sidebar_manager'):
             return self.sidebar_manager.toggle_preview()
         if hasattr(self, 'combined_sidebar'):
@@ -2414,6 +2411,21 @@ class ImageBrowserWindow(QMainWindow):
         if getattr(self, 'preview_widget', None) and self.preview_widget.is_visible():
             self.preview_widget.update_preview()
     
+    def _apply_chrome_partial_side_masks(
+        self, partial: str | None, left_width: int, right_width: int, total_width: int
+    ) -> tuple[int, int, int]:
+        """Keep only the partial-chrome sidebar visible when F4 revealed one side via a pane key."""
+        if partial == 'left':
+            right_width = 0
+            if hasattr(self, 'right_sidebar'):
+                self.right_sidebar.hide()
+                self.right_sidebar.hide_info()
+        elif partial == 'right':
+            left_width = 0
+            if hasattr(self, 'combined_sidebar'):
+                self.combined_sidebar.hide()
+        return left_width, right_width, total_width - left_width - right_width
+
     def manage_sidebar_visibility_for_view_mode(self, view_mode):
         """Manage sidebar visibility based on current view mode"""
         if getattr(self, '_chrome_suppressed', False):
@@ -2426,6 +2438,7 @@ class ImageBrowserWindow(QMainWindow):
                 self.right_sidebar.hide()
             self._sync_right_sidebar_chrome()
             return
+        partial = getattr(self, '_chrome_partial_side', None)
         if view_mode == 'list':
             # Show sidebars in list view (same as thumbnail view)
             # Use the same sidebar visibility logic as thumbnail view
@@ -2464,6 +2477,9 @@ class ImageBrowserWindow(QMainWindow):
             
             # Set splitter sizes
             if total_width > 0:
+                left_width, right_width, main_width = self._apply_chrome_partial_side_masks(
+                    partial, left_width, right_width, total_width
+                )
                 self._set_splitter_sizes_safe([left_width, main_width, right_width])
             self._sync_right_sidebar_chrome()
             return
@@ -2517,6 +2533,9 @@ class ImageBrowserWindow(QMainWindow):
                     self.right_sidebar.hide_info()
             
             # Only update splitter sizes if they need to change
+            left_width, right_width, main_width = self._apply_chrome_partial_side_masks(
+                partial, left_width, right_width, total_width
+            )
             if current_left_width != left_width or current_sizes[2] != right_width:
                 # Ensure at least one column of thumbnails is visible
                 min_thumb_width = 200
@@ -2578,7 +2597,9 @@ class ImageBrowserWindow(QMainWindow):
                     self.right_sidebar.hide_info()
 
             # Set splitter sizes: [left_sidebar, main_content, right_sidebar]
-            main_width = total_width - left_width - right_width
+            left_width, right_width, main_width = self._apply_chrome_partial_side_masks(
+                partial, left_width, right_width, total_width
+            )
             self._set_splitter_sizes_safe([left_width, main_width, right_width])
         
         self._sync_right_sidebar_chrome()
@@ -10135,6 +10156,142 @@ class ImageBrowserWindow(QMainWindow):
             return True
         return False
 
+    def _should_reveal_sidebar_only(self, side: str) -> bool:
+        """True when a pane shortcut should reveal one sidebar, not toggle or full-restore chrome."""
+        if getattr(self, '_chrome_suppressed', False):
+            return True
+        partial = getattr(self, '_chrome_partial_side', None)
+        return partial is not None and partial != side
+
+    def _apply_left_pane_layout(self, layout: dict) -> None:
+        cs = self.combined_sidebar
+        self.sidebar_width = layout.get('sidebar_width', self.sidebar_width)
+        left_sizes = layout.get('left_splitter_sizes')
+        if left_sizes and len(left_sizes) >= 2:
+            cs.saved_splitter_sizes = list(left_sizes)
+        cs.set_tree_visible(layout.get('left_tree_visible', False))
+        cs.set_preview_visible(layout.get('left_preview_visible', False))
+        chat_vis = layout.get('left_chat_visible', False)
+        covers = layout.get('left_chat_covers_panes', chat_vis)
+        if hasattr(cs, 'set_chat_visible'):
+            if chat_vis:
+                cs.set_chat_visible(True, enter_cover=covers)
+            else:
+                cs.set_chat_visible(False)
+        elif hasattr(cs, 'set_chat_covers_panes') and covers:
+            cs.set_chat_covers_panes(True)
+        self.file_tree_visible = cs.is_tree_visible()
+        self.preview_visible = cs.is_preview_visible()
+        self.chat_visible = cs.is_chat_visible() if hasattr(cs, 'is_chat_visible') else False
+
+    def _apply_right_pane_layout(self, layout: dict) -> None:
+        rs = self.right_sidebar
+        self.right_sidebar_width = layout.get('right_sidebar_width', self.right_sidebar_width)
+        right_sizes = layout.get('right_splitter_sizes')
+        if right_sizes and len(right_sizes) >= 3:
+            rs.saved_splitter_sizes = list(right_sizes)
+        rs.set_information_visible(layout.get('right_information_visible', False))
+        rs.set_shortcuts_visible(layout.get('right_shortcuts_visible', False))
+        rs.set_jobs_visible(layout.get('right_jobs_visible', False))
+        self.jobs_visible = rs.is_jobs_visible()
+        self.right_sidebar_visible = (
+            rs.is_information_visible()
+            or rs.is_shortcuts_visible()
+            or rs.is_jobs_visible()
+        )
+
+    def _show_sidebar_pane_only(
+        self,
+        side: str,
+        layout_key: str | None,
+        is_visible_fn,
+        set_visible_fn,
+    ):
+        """Reveal only the sidebar containing the requested pane (after F4 hide)."""
+        layout = dict(self._chrome_saved_layout or self._capture_chrome_layout())
+        if layout_key and not layout.get(layout_key, is_visible_fn()):
+            layout[layout_key] = True
+            self._chrome_saved_layout = layout
+
+        self._chrome_partial_side = side
+        self._chrome_suppressed = False
+        cs = getattr(self, 'combined_sidebar', None)
+        rs = getattr(self, 'right_sidebar', None)
+        total_width = self.main_splitter.width()
+
+        if side == 'left':
+            if cs is None:
+                return is_visible_fn()
+            self._apply_left_pane_layout(layout)
+            if rs is not None:
+                rs.hide()
+                rs.hide_info()
+            if self._any_left_sidebar_pane_visible():
+                cs.show()
+                if self.file_tree_visible or cs.is_tree_visible():
+                    self.ensure_tree_initialized()
+                left_width = self.sidebar_width
+            else:
+                cs.hide()
+                left_width = 0
+            right_width = 0
+        else:
+            if rs is None:
+                return is_visible_fn()
+            if cs is not None:
+                cs.hide()
+            self._apply_right_pane_layout(layout)
+            if self.right_sidebar_visible:
+                rs.show()
+                if rs.is_information_visible():
+                    rs.show_info()
+                    if self.current_image_path:
+                        rs.show_image_info_overlay()
+                else:
+                    rs.hide_info()
+                right_width = self.right_sidebar_width
+            else:
+                rs.hide()
+                rs.hide_info()
+                right_width = 0
+            left_width = 0
+
+        if total_width > 0:
+            min_thumb_width = 200
+            available_width = total_width - left_width - right_width
+            if available_width < min_thumb_width and right_width > 0:
+                right_width = max(0, total_width - left_width - min_thumb_width)
+                self.right_sidebar_width = right_width
+            main_width = total_width - left_width - right_width
+            self._set_splitter_sizes_safe([left_width, main_width, right_width])
+
+        self._status_bar_peek_active = False
+        if getattr(self, 'status_bar', None):
+            self.status_bar.setMaximumHeight(0)
+            self.status_bar.hide()
+        self._sync_right_sidebar_chrome()
+        self._update_chrome_menu_actions()
+        self._peek_layout_update()
+        self._sync_left_sidebar_tab_order()
+        if self.current_view_mode == 'browse' and self.current_pixmap:
+            QTimer.singleShot(50, self._browse_after_chrome_layout_change)
+        elif self.current_view_mode == 'thumbnail':
+            QTimer.singleShot(50, self.update_max_thumbnail_size)
+        return is_visible_fn()
+
+    def _toggle_pane_with_chrome_restore(
+        self,
+        is_visible_fn,
+        set_visible_fn,
+        layout_key: str | None = None,
+        side: str = 'left',
+    ):
+        """Toggle a pane, or reveal only its sidebar when chrome was hidden via F4."""
+        if self._should_reveal_sidebar_only(side):
+            return self._show_sidebar_pane_only(side, layout_key, is_visible_fn, set_visible_fn)
+        set_visible_fn(not is_visible_fn())
+        return is_visible_fn()
+
     def _capture_chrome_layout(self) -> dict:
         cs = self.combined_sidebar
         rs = self.right_sidebar
@@ -10190,6 +10347,7 @@ class ImageBrowserWindow(QMainWindow):
 
     def _restore_chrome_layout(self, layout: dict):
         self._chrome_suppressed = False
+        self._chrome_partial_side = None
         cs = self.combined_sidebar
         rs = self.right_sidebar
         self.sidebar_width = layout.get('sidebar_width', self.sidebar_width)
@@ -10200,24 +10358,8 @@ class ImageBrowserWindow(QMainWindow):
         right_sizes = layout.get('right_splitter_sizes')
         if right_sizes and len(right_sizes) >= 3:
             rs.saved_splitter_sizes = list(right_sizes)
-        cs.set_tree_visible(layout.get('left_tree_visible', False))
-        cs.set_preview_visible(layout.get('left_preview_visible', False))
-        chat_vis = layout.get('left_chat_visible', False)
-        covers = layout.get('left_chat_covers_panes', chat_vis)
-        if hasattr(cs, 'set_chat_visible'):
-            if chat_vis:
-                cs.set_chat_visible(True, enter_cover=covers)
-            else:
-                cs.set_chat_visible(False)
-        elif hasattr(cs, 'set_chat_covers_panes') and covers:
-            cs.set_chat_covers_panes(True)
-        rs.set_information_visible(layout.get('right_information_visible', False))
-        rs.set_shortcuts_visible(layout.get('right_shortcuts_visible', False))
-        rs.set_jobs_visible(layout.get('right_jobs_visible', False))
-        self.file_tree_visible = cs.is_tree_visible()
-        self.preview_visible = cs.is_preview_visible()
-        self.chat_visible = cs.is_chat_visible() if hasattr(cs, 'is_chat_visible') else False
-        self.jobs_visible = rs.is_jobs_visible()
+        self._apply_left_pane_layout(layout)
+        self._apply_right_pane_layout(layout)
         self.manage_sidebar_visibility_for_view_mode(self.current_view_mode)
         saved_main = layout.get('main_splitter_sizes')
         if saved_main and len(saved_main) == 3 and sum(saved_main) > 0:
@@ -10240,6 +10382,7 @@ class ImageBrowserWindow(QMainWindow):
 
     def _show_default_chrome(self):
         self._chrome_suppressed = False
+        self._chrome_partial_side = None
         cs = self.combined_sidebar
         rs = self.right_sidebar
         cs.set_tree_visible(True)
@@ -10381,6 +10524,8 @@ class ImageBrowserWindow(QMainWindow):
 
     def _apply_right_sidebar_visibility(self):
         """Apply right sidebar visibility based on Organize, Information, or Jobs panes."""
+        if getattr(self, '_chrome_partial_side', None) == 'left':
+            return
         self.jobs_visible = self.right_sidebar.is_jobs_visible()
         self.right_sidebar_visible = (
             self.right_sidebar.is_information_visible()
@@ -10391,7 +10536,9 @@ class ImageBrowserWindow(QMainWindow):
 
         sizes = self.main_splitter.sizes()
         total_width = sum(sizes)
-        left_width = sizes[0]
+        left_width = 0 if getattr(self, '_chrome_partial_side', None) == 'right' else sizes[0]
+        if getattr(self, '_chrome_partial_side', None) == 'right' and hasattr(self, 'combined_sidebar'):
+            self.combined_sidebar.hide()
 
         if self.right_sidebar_visible:
             right_width = self.right_sidebar_width
@@ -10447,15 +10594,25 @@ class ImageBrowserWindow(QMainWindow):
 
     def toggle_information_display(self):
         """Toggle Information sidebar only (I key). visibility_changed triggers _apply_right_sidebar_visibility."""
-        self._chrome_suppressed = False
         if hasattr(self.right_sidebar, 'set_information_visible'):
-            self.right_sidebar.set_information_visible(not self.right_sidebar.is_information_visible())
+            rs = self.right_sidebar
+            self._toggle_pane_with_chrome_restore(
+                rs.is_information_visible,
+                rs.set_information_visible,
+                'right_information_visible',
+                'right',
+            )
 
     def toggle_shortcuts_display(self):
         """Toggle Shortcuts sidebar only (O key). visibility_changed triggers _apply_right_sidebar_visibility."""
-        self._chrome_suppressed = False
         if hasattr(self.right_sidebar, 'set_shortcuts_visible'):
-            self.right_sidebar.set_shortcuts_visible(not self.right_sidebar.is_shortcuts_visible())
+            rs = self.right_sidebar
+            self._toggle_pane_with_chrome_restore(
+                rs.is_shortcuts_visible,
+                rs.set_shortcuts_visible,
+                'right_shortcuts_visible',
+                'right',
+            )
 
     def update_filename_for_new_image(self):
         """Update detailed image info overlay for new image when toggled on."""

@@ -75,6 +75,10 @@ class SidebarManager:
         """Toggle the visibility of the file tree and resize canvas accordingly"""
         if hasattr(self.main_window, 'combined_sidebar'):
             cs = self.main_window.combined_sidebar
+            if self.main_window._should_reveal_sidebar_only('left'):
+                return self.main_window._toggle_pane_with_chrome_restore(
+                    cs.is_tree_visible, cs.set_tree_visible, 'left_tree_visible', 'left'
+                )
             self._leave_browse_then_toggle_pane(cs.is_tree_visible, cs.set_tree_visible)
             return cs.is_tree_visible()
         def do_toggle():
@@ -86,6 +90,10 @@ class SidebarManager:
         """Toggle the visibility of the preview widget and resize canvas accordingly"""
         if hasattr(self.main_window, 'combined_sidebar'):
             cs = self.main_window.combined_sidebar
+            if self.main_window._should_reveal_sidebar_only('left'):
+                return self.main_window._toggle_pane_with_chrome_restore(
+                    cs.is_preview_visible, cs.set_preview_visible, 'left_preview_visible', 'left'
+                )
             self._leave_browse_then_toggle_pane(cs.is_preview_visible, cs.set_preview_visible)
             return cs.is_preview_visible()
         else:
@@ -129,16 +137,23 @@ class SidebarManager:
     def toggle_jobs(self):
         """Toggle the visibility of the jobs pane in the right combined sidebar."""
         if hasattr(self.main_window, "right_sidebar"):
-            self.main_window.right_sidebar.set_jobs_visible(
-                not self.main_window.right_sidebar.is_jobs_visible()
-            )
-            return self.main_window.right_sidebar.is_jobs_visible()
+            rs = self.main_window.right_sidebar
+            if self.main_window._should_reveal_sidebar_only('right'):
+                return self.main_window._toggle_pane_with_chrome_restore(
+                    rs.is_jobs_visible, rs.set_jobs_visible, 'right_jobs_visible', 'right'
+                )
+            rs.set_jobs_visible(not rs.is_jobs_visible())
+            return rs.is_jobs_visible()
         return False
 
     def toggle_chat(self):
         """Toggle the visibility of the chat pane in the left combined sidebar."""
         if hasattr(self.main_window, "combined_sidebar"):
             cs = self.main_window.combined_sidebar
+            if self.main_window._should_reveal_sidebar_only('left'):
+                return self.main_window._toggle_pane_with_chrome_restore(
+                    cs.is_chat_visible, cs.set_chat_visible, 'left_chat_visible', 'left'
+                )
             cs.set_chat_visible(not cs.is_chat_visible())
             return cs.is_chat_visible()
         return False
