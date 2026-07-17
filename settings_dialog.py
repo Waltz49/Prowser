@@ -1255,6 +1255,9 @@ class SettingsDialog(QDialog):
                 'debug_mode': self.debug_checkbox.isChecked(),
                 'confirm_delete': self.confirm_delete_checkbox.isChecked(),
                 'wrap_around': self.wrap_around_checkbox.isChecked(),
+                'raise_status_bar_on_cursor_near_bottom': (
+                    self.raise_status_bar_on_cursor_near_bottom_checkbox.isChecked()
+                ),
                 'use_prompt_filter_exits': self.use_prompt_filter_exits_checkbox.isChecked(),
                 'ignore_exif_rotation': not self.ignore_exif_rotation_checkbox.isChecked(),
                 'imagegen_max_generation_dimension': (
@@ -1498,6 +1501,10 @@ class SettingsDialog(QDialog):
                 self.confirm_delete_checkbox.setChecked(settings['confirm_delete'])
             if 'wrap_around' in settings:
                 self.wrap_around_checkbox.setChecked(settings['wrap_around'])
+            if 'raise_status_bar_on_cursor_near_bottom' in settings:
+                self.raise_status_bar_on_cursor_near_bottom_checkbox.setChecked(
+                    settings['raise_status_bar_on_cursor_near_bottom']
+                )
             if 'use_prompt_filter_exits' in settings:
                 self.use_prompt_filter_exits_checkbox.setChecked(settings['use_prompt_filter_exits'])
             if 'ignore_exif_rotation' in settings:
@@ -1764,6 +1771,7 @@ class SettingsDialog(QDialog):
             self.debug_checkbox.setChecked(False)
             self.confirm_delete_checkbox.setChecked(True)
             self.wrap_around_checkbox.setChecked(True)
+            self.raise_status_bar_on_cursor_near_bottom_checkbox.setChecked(True)
             self.use_prompt_filter_exits_checkbox.setChecked(False)
             self.ignore_exif_rotation_checkbox.setChecked(True)
             if hasattr(self, 'imagegen_max_generation_dimension_slider'):
@@ -1963,6 +1971,7 @@ class SettingsDialog(QDialog):
             self.debug_checkbox.setChecked(False)
             self.confirm_delete_checkbox.setChecked(True)
             self.wrap_around_checkbox.setChecked(True)
+            self.raise_status_bar_on_cursor_near_bottom_checkbox.setChecked(True)
             self.use_prompt_filter_exits_checkbox.setChecked(False)
             self.ignore_exif_rotation_checkbox.setChecked(True)
             if hasattr(self, 'imagegen_max_generation_dimension_slider'):
@@ -2319,6 +2328,17 @@ class SettingsDialog(QDialog):
                 "vice versa."
             ),
             subtitle="Allow cursor navigation to wrap from end to beginning.",
+        )
+
+        self.raise_status_bar_on_cursor_near_bottom_checkbox = general_panel.add_toggle(
+            "Raise status bar when cursor nears bottom",
+            tooltip=(
+                "When the status bar is hidden, move the cursor near the\n"
+                "bottom edge of the window to temporarily show it."
+            ),
+            subtitle=(
+                "When off, a hidden status bar stays hidden near the bottom edge."
+            ),
         )
 
         self.ignore_exif_rotation_checkbox = general_panel.add_toggle(
@@ -6472,6 +6492,16 @@ class SettingsDialog(QDialog):
                 self.wrap_around_checkbox.setChecked(parent_window.wrap_around)
                 self.original_settings['wrap_around'] = parent_window.wrap_around
 
+                raise_status_bar_on_cursor_near_bottom = getattr(
+                    parent_window, 'raise_status_bar_on_cursor_near_bottom', True
+                )
+                self.raise_status_bar_on_cursor_near_bottom_checkbox.setChecked(
+                    raise_status_bar_on_cursor_near_bottom
+                )
+                self.original_settings['raise_status_bar_on_cursor_near_bottom'] = (
+                    raise_status_bar_on_cursor_near_bottom
+                )
+
                 use_prompt_filter_exits = getattr(
                     parent_window, 'use_prompt_filter_exits', False
                 )
@@ -7747,6 +7777,9 @@ class SettingsDialog(QDialog):
             'slideshow_overlap_delay': self._calculate_overlap_delay(),
             'slideshow_back_and_forth': self.slideshow_back_and_forth_checkbox.isChecked(),
             'wrap_around': self.wrap_around_checkbox.isChecked(),
+            'raise_status_bar_on_cursor_near_bottom': (
+                self.raise_status_bar_on_cursor_near_bottom_checkbox.isChecked()
+            ),
             'use_prompt_filter_exits': self.use_prompt_filter_exits_checkbox.isChecked(),
             'ignore_exif_rotation': not self.ignore_exif_rotation_checkbox.isChecked(),  # Reversed: checked = use EXIF (ignore_exif=False)
             'drag_drop_auto_date_change': self.drag_drop_auto_date_change_checkbox.isChecked(),
@@ -9373,6 +9406,7 @@ if __name__ == "__main__":
             self.confirm_delete = False
             self.is_actual_size = True
             self.wrap_around = True
+            self.raise_status_bar_on_cursor_near_bottom = True
             self.space_key_mode = 'exit'
             self.filter_pattern = 'image*'
             self.current_directory = '/mock/images'

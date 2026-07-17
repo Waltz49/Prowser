@@ -18,6 +18,8 @@ class StatusBarPeekFilter(QObject):
     def eventFilter(self, obj, event):
         if getattr(self.main_window, '_chrome_suppressed', False):
             return False
+        if not getattr(self.main_window, 'raise_status_bar_on_cursor_near_bottom', True):
+            return False
         if event.type() == QEvent.MouseMove and hasattr(obj, 'window') and obj.window() == self.main_window:
             if hasattr(self.main_window, 'status_bar'):
                 cursor_y = self.main_window.mapFromGlobal(QCursor.pos()).y()

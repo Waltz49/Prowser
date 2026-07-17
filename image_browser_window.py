@@ -385,6 +385,9 @@ class ImageBrowserWindow(QMainWindow):
         self.confirm_delete = settings.get('confirm_delete', True)
         self.is_actual_size = settings.get('browse_view_actual_size', False)
         self.wrap_around = settings.get('wrap_around', True)
+        self.raise_status_bar_on_cursor_near_bottom = settings.get(
+            'raise_status_bar_on_cursor_near_bottom', True
+        )
         self.use_prompt_filter_exits = settings.get('use_prompt_filter_exits', False)
         self.ignore_exif_rotation = settings.get('ignore_exif_rotation', False)
         self.drag_drop_auto_date_change = settings.get('drag_drop_auto_date_change', False)
@@ -639,6 +642,10 @@ class ImageBrowserWindow(QMainWindow):
         self.config.update_setting('confirm_delete', self.confirm_delete)
         self.config.update_setting('browse_view_actual_size', self.is_actual_size)
         self.config.update_setting('wrap_around', self.wrap_around)
+        self.config.update_setting(
+            'raise_status_bar_on_cursor_near_bottom',
+            self.raise_status_bar_on_cursor_near_bottom,
+        )
         self.config.update_setting('space_key_mode', self.space_key_mode)
         self.config.update_setting('browse_image_history_save_after_ms', self.browse_image_history_save_after_ms)
         
@@ -5703,6 +5710,17 @@ class ImageBrowserWindow(QMainWindow):
         
         if 'wrap_around' in new_settings:
             self.wrap_around = new_settings['wrap_around']
+
+        if 'raise_status_bar_on_cursor_near_bottom' in new_settings:
+            self.raise_status_bar_on_cursor_near_bottom = new_settings[
+                'raise_status_bar_on_cursor_near_bottom'
+            ]
+            if (
+                not self.raise_status_bar_on_cursor_near_bottom
+                and self._status_bar_peek_active
+            ):
+                self._status_bar_peek_active = False
+                self._animate_status_bar_hide(self._peek_layout_update)
 
         if 'use_prompt_filter_exits' in new_settings:
             self.use_prompt_filter_exits = new_settings['use_prompt_filter_exits']
