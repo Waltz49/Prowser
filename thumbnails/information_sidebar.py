@@ -77,6 +77,12 @@ _INFO_H4_SECTION_KEY_BY_TITLE = {
     'negative prompt': 'negative_prompt',
 }
 _INFO_H4_TAG_RE = re.compile(r'<h4>([^<]+)</h4>', re.IGNORECASE)
+_INFO_IMAGE_MODEL_H4 = '<h4>Image model</h4>'
+_INFO_ELAPSED_IN_MODEL_RE = re.compile(
+    r'(?i)Elapsed:\s*(\d+:\d{2}:\d{2})(?:\s*\((\d+:\d{2}:\d{2})/iter\))?'
+)
+# Table rows derived from file/dimensions only (not camera EXIF); user comment is separate below.
+_BASIC_INFO_TABLE_FIELDS = frozenset({'Directory', 'Image Size', 'File Size', 'File Date', 'Scale'})
 
 
 class InformationSidebar(QWidget):
@@ -970,6 +976,28 @@ class InformationSidebar(QWidget):
             return False
         return bool(re.search(r"(?im)^image model:", text))
 
+    @staticmethod
+    def _highlight_image_model_elapsed_html(disp: str) -> str:
+        """Bold elapsed duration values in the Image model section (like section headings)."""
+        pos = disp.find(_INFO_IMAGE_MODEL_H4)
+        if pos < 0:
+            return disp
+        body_start = pos + len(_INFO_IMAGE_MODEL_H4)
+        next_h4 = disp.find('<h4>', body_start)
+        end = len(disp) if next_h4 < 0 else next_h4
+        middle = disp[body_start:end]
+
+        def repl(match: re.Match[str]) -> str:
+            main = match.group(1)
+            per_iter = match.group(2)
+            out = f'Elapsed: <b>{main}</b>'
+            if per_iter:
+                out += f' ({per_iter}/iter)'
+            return out
+
+        middle = _INFO_ELAPSED_IN_MODEL_RE.sub(repl, middle)
+        return disp[:body_start] + middle + disp[end:]
+
     def _update_overlay_image_model_flag(
         self, image_path: str, speakable_plain_text: Optional[str]
     ) -> None:
@@ -1190,13 +1218,41 @@ class InformationSidebar(QWidget):
 
         # Build 2-column table (Field | Value)
         if filename_expanded and field_value_pairs:
-            html_parts.append(f'<table style="border: 1px solid {bdr}; border-collapse: collapse; width: 100%;">')
+            has_exif_fields = any(
+                field not in _BASIC_INFO_TABLE_FIELDS for field, _ in field_value_pairs
+            )
+            if has_exif_fields:
+                table_style = f'border: 1px solid {bdr}; border-collapse: collapse; width: 100%;'
+                label_cell_style = (
+                    f'border: 1px solid {bdr}; padding: 4px 4px 4px 2px; text-align: right; '
+                    f'color: {text_hex}; white-space: nowrap; width: 1%;'
+                )
+                value_cell_style = (
+                    f'border: 1px solid {bdr}; padding: 4px 8px; color: {text_hex};'
+                )
+            else:
+                table_style = (
+                    'border: none; border-collapse: collapse; width: 100%; '
+                    'line-height: 1.0;'
+                )
+                label_cell_style = (
+                    f'border: none; text-align: left; '
+                    f'color: {text_hex}; white-space: nowrap; width: 1%; vertical-align: top;'
+                    'padding: 0px;'
+                )
+                value_cell_style = (
+                    f'border: none;  color: {text_hex}; '
+                    f'vertical-align: top;'
+                    'padding: 0px 0px 0px 4px;'
+                )
+
+            html_parts.append(f'<table style="{table_style}">')
 
             # One row per field-value pair
             for field, value in field_value_pairs:
                 html_parts.append('<tr>')
-                html_parts.append(f'<td style="border: 1px solid {bdr}; padding: 4px 4px 4px 2px; text-align: right; color: {text_hex}; white-space: nowrap; width: 1%;">{field}:</td>')
-                html_parts.append(f'<td style="border: 1px solid {bdr}; padding: 4px 8px; color: {text_hex};">{value}</td>')
+                html_parts.append(f'<td style="{label_cell_style}">{field}:</td>')
+                html_parts.append(f'<td style="{value_cell_style}">{value}</td>')
                 html_parts.append('</tr>')
 
             html_parts.append('</table>')
@@ -1510,6 +1566,7 @@ class InformationSidebar(QWidget):
                                 disp,
                                 count=1,
                             )
+                            disp = self._highlight_image_model_elapsed_html(disp)
 
                             description, _ = self._apply_references_markup(
                                 disp, os.path.dirname(current_image_path), current_image_path
