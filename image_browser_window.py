@@ -35,7 +35,7 @@ from PySide6.QtCore import (
     QPropertyAnimation, QSize, Qt, QThread, QTimer, Signal, Slot
 )
 from PySide6.QtGui import (
-    QColor, QCursor, QDrag, QFont, QGuiApplication, QImage, QKeyEvent, QKeySequence, QPainter,
+    QColor, QCursor, QDrag, QFont, QFontMetrics, QGuiApplication, QImage, QKeyEvent, QKeySequence, QPainter,
     QPixmap, QResizeEvent, QTransform
 )
 from PySide6.QtWidgets import (
@@ -9381,6 +9381,26 @@ class ImageBrowserWindow(QMainWindow):
         # Update number overlay position/content if visible
         self.update_number_overlay()
 
+    def _hide_number_overlay_labels(self):
+        """Hide browse-mode name/sequence overlay labels (and size line if present)."""
+        if hasattr(self, 'number_overlay_shadow_label'):
+            self.number_overlay_shadow_label.hide()
+        if hasattr(self, 'number_overlay_label'):
+            self.number_overlay_label.hide()
+        if hasattr(self, 'number_overlay_size_shadow_label'):
+            self.number_overlay_size_shadow_label.hide()
+        if hasattr(self, 'number_overlay_size_label'):
+            self.number_overlay_size_label.hide()
+
+    def _get_browse_overlay_image_dimensions(self) -> tuple[int, int]:
+        """Return pixel width/height for the current browse image."""
+        if getattr(self, 'current_pixmap', None) and not self.current_pixmap.isNull():
+            return self.current_pixmap.width(), self.current_pixmap.height()
+        if self.current_image_path:
+            _, width, height = self.get_image_info(self.current_image_path)
+            return width, height
+        return 0, 0
+
     def update_number_overlay(self):
         """Update the number overlay visibility, content, and position."""
         # Ensure attributes exist
@@ -9389,8 +9409,7 @@ class ImageBrowserWindow(QMainWindow):
 
         # Only in browse with a current image
         if self.current_view_mode != 'browse' or not self.current_image_path:
-            self.number_overlay_shadow_label.hide()
-            self.number_overlay_label.hide()
+            self._hide_number_overlay_labels()
             return
 
         # Determine overlay text and font size based on filename pattern
@@ -9399,8 +9418,7 @@ class ImageBrowserWindow(QMainWindow):
         use_digits = match is not None
 
         if not show_overlay:
-            self.number_overlay_shadow_label.hide()
-            self.number_overlay_label.hide()
+            self._hide_number_overlay_labels()
             return
 
         if use_digits:
@@ -9424,6 +9442,30 @@ class ImageBrowserWindow(QMainWindow):
         self.number_overlay_shadow_label.adjustSize()
         self.number_overlay_label.adjustSize()
 
+        # Image size line (smaller, right-aligned below name/sequence)
+        size_text = ""
+        has_size_labels = (
+            hasattr(self, 'number_overlay_size_label')
+            and hasattr(self, 'number_overlay_size_shadow_label')
+        )
+        if has_size_labels:
+            width, height = self._get_browse_overlay_image_dimensions()
+            if width > 0 and height > 0:
+                size_text = f"{width} x {height}"
+                size_font_size = max(12, int(font_size * 0.25))
+                size_font = QFont("Impact")
+                size_font.setPointSize(size_font_size)
+                size_font.setBold(True)
+                self.number_overlay_size_shadow_label.setFont(size_font)
+                self.number_overlay_size_label.setFont(size_font)
+                self.number_overlay_size_shadow_label.setText(size_text)
+                self.number_overlay_size_label.setText(size_text)
+                self.number_overlay_size_shadow_label.adjustSize()
+                self.number_overlay_size_label.adjustSize()
+            else:
+                self.number_overlay_size_shadow_label.hide()
+                self.number_overlay_size_label.hide()
+
         # Recalculate margin/shadow offset (keep them the same regardless of overlay)
         margin = 20
         shadow_offset_x = 6
@@ -9435,6 +9477,7 @@ class ImageBrowserWindow(QMainWindow):
         else:
             display_size = self.get_effective_display_size()
         label_size = self.number_overlay_label.size()
+        main_text_height = QFontMetrics(font).boundingRect(overlay_text).height()
         x = max(0, display_size.width() - label_size.width() - margin)
         y = margin
 
@@ -9444,6 +9487,17 @@ class ImageBrowserWindow(QMainWindow):
         self.number_overlay_label.raise_()
         self.number_overlay_shadow_label.show()
         self.number_overlay_label.show()
+
+        if has_size_labels and size_text:
+            size_label_size = self.number_overlay_size_label.size()
+            size_x = max(0, display_size.width() - size_label_size.width() - margin)
+            size_y = y + main_text_height - 20 # 20 is the margin between the main text and the size text
+            self.number_overlay_size_shadow_label.move(size_x - shadow_offset_x, size_y + shadow_offset_y)
+            self.number_overlay_size_label.move(size_x, size_y)
+            self.number_overlay_size_shadow_label.raise_()
+            self.number_overlay_size_label.raise_()
+            self.number_overlay_size_shadow_label.show()
+            self.number_overlay_size_label.show()
 
     def _extract_imagegen_digits(self, image_path: Optional[str]) -> Optional[str]:
         """Extract 4-digit code from filenames like imagegen-0123.ext. Returns digits or None."""

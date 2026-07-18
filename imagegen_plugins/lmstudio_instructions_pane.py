@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from typing import Callable, Optional
 
-from PySide6.QtCore import QEvent, QObject, QSize, Qt
+from PySide6.QtCore import QEvent, QObject, QSize, Qt, Signal
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (
     QLabel,
@@ -17,6 +17,10 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+
+_COLLAPSED_ARROW = "\u25b6"  # ▶
+_EXPANDED_ARROW = "\u25bc"  # ▼
+_COLLAPSE_ARROW_FONT_PX = 13
 
 from theme.ai_info_icon import AI_INFO_ICON_DISPLAY_PX, create_ai_info_icons
 from theme.theme_service import apply_view_chrome_splitter_theme, get_active_theme
@@ -113,6 +117,21 @@ def create_lmstudio_instructions_icon() -> QIcon:
     return create_ai_info_icons()[0]
 
 
+class _ClickableCollapseLabel(QLabel):
+    clicked = Signal()
+
+    def __init__(self, parent: Optional[QWidget] = None, text: str = ""):
+        super().__init__(text, parent)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+
+    def mousePressEvent(self, event) -> None:
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.clicked.emit()
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
+
 class _InstructionsButtonHoverFilter(QObject):
     def __init__(
         self,
@@ -166,11 +185,14 @@ class LmStudioInstructionsPane:
         image_gen_styled: bool = False,
         on_visibility_changed: Optional[Callable[[], None]] = None,
         on_text_changed: Optional[Callable[[], None]] = None,
+        on_editor_expanded_changed: Optional[Callable[[], None]] = None,
     ):
         self._parent = parent
         self._on_visibility_changed = on_visibility_changed
         self._on_text_changed = on_text_changed
+        self._on_editor_expanded_changed = on_editor_expanded_changed
         self._visible = False
+        self._editor_expanded = True
         self._toggle_btn: Optional[QPushButton] = None
         self._hover_filter: Optional[_InstructionsButtonHoverFilter] = None
         self._splitter: Optional[QSplitter] = None
@@ -187,6 +209,9 @@ class LmStudioInstructionsPane:
         self._action_layout: Optional[QVBoxLayout] = None
         self._copy_btn: Optional[QPushButton] = None
         self._mic_btn: Optional[QPushButton] = None
+        self._collapse_arrow: Optional[_ClickableCollapseLabel] = None
+        self._collapse_title: Optional[_ClickableCollapseLabel] = None
+        self._body_widget: Optional[QWidget] = None
         self._build_instructions_widget()
 
     def _widget_is_alive(self) -> bool:
@@ -214,10 +239,11 @@ class LmStudioInstructionsPane:
             from imagegen_plugins.image_gen_form_layout import (
                 IMAGE_GEN_BELOW_PROMPT_SPACING,
                 IMAGE_GEN_FIELD_BORDER_PAD,
+                IMAGE_GEN_FIELD_LABEL_OBJECT_NAME,
                 IMAGE_GEN_FIELD_LABEL_SPACING,
                 build_image_gen_prompt_field_action_column,
+                create_image_gen_prompt_clear_button,
                 create_image_gen_prompt_edit,
-                make_image_gen_prompt_label_row,
                 wrap_image_gen_bordered_field,
                 wrap_image_gen_field_control_indent,
                 wrap_image_gen_prompt_subsection,
@@ -236,13 +262,54 @@ class LmStudioInstructionsPane:
                 edit.setPlainText(saved_text)
             if self._on_text_changed is not None:
                 edit.textChanged.connect(self._on_text_changed)
-            label_row = make_image_gen_prompt_label_row(
-                self._label_text,
-                edit,
-                group_parent,
-                label_row_object_name="imageGenSystemPromptLabelRow",
-                clear_object_name="imageGenSystemPromptClearBtn",
+            label_row = QWidget(group_parent)
+            label_row.setObjectName("imageGenSystemPromptLabelRow")
+            label_row.setSizePolicy(
+                QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
             )
+            label_row_layout = QHBoxLayout(label_row)
+            label_row_layout.setContentsMargins(0, 8, 0, 0)
+            label_row_layout.setSpacing(4)
+            collapse_arrow = _ClickableCollapseLabel(label_row)
+            arrow_font = collapse_arrow.font()
+            arrow_font.setPixelSize(_COLLAPSE_ARROW_FONT_PX)
+            collapse_arrow.setFont(arrow_font)
+            collapse_arrow.setSizePolicy(
+                QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed
+            )
+            collapse_title = _ClickableCollapseLabel(label_row)
+            collapse_title.setObjectName(IMAGE_GEN_FIELD_LABEL_OBJECT_NAME)
+            collapse_title.setText(self._label_text)
+            collapse_title.setSizePolicy(
+                QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed
+            )
+            tooltip = "Click to expand or collapse system prompt"
+            collapse_arrow.setToolTip(tooltip)
+            collapse_title.setToolTip(tooltip)
+            collapse_arrow.clicked.connect(self._toggle_editor_expanded)
+            collapse_title.clicked.connect(self._toggle_editor_expanded)
+            self._collapse_arrow = collapse_arrow
+            self._collapse_title = collapse_title
+            label_row_layout.addWidget(
+                collapse_arrow,
+                0,
+                Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+            )
+            label_row_layout.addWidget(
+                collapse_title,
+                0,
+                Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+            )
+            label_row_layout.addWidget(
+                create_image_gen_prompt_clear_button(
+                    edit,
+                    label_row,
+                    object_name="imageGenSystemPromptClearBtn",
+                ),
+                0,
+                Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+            )
+            label_row_layout.addStretch(1)
             self._toolbar_host = QWidget(group_parent)
             self._toolbar_host.setSizePolicy(
                 QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum
@@ -291,10 +358,9 @@ class LmStudioInstructionsPane:
             section_layout.addWidget(self._toolbar_host, 0)
             section_layout.addSpacing(IMAGE_GEN_BELOW_PROMPT_SPACING)
             section_layout.addWidget(label_row, 0)
-            section_layout.addWidget(
-                wrap_image_gen_field_control_indent(field_row, section),
-                0,
-            )
+            body_widget = wrap_image_gen_field_control_indent(field_row, section)
+            self._body_widget = body_widget
+            section_layout.addWidget(body_widget, 0)
             section.setSizePolicy(
                 QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum
             )
@@ -326,6 +392,7 @@ class LmStudioInstructionsPane:
             self._instructions_edit = edit
         if self._image_gen_styled:
             widget.setVisible(True)
+            self._apply_editor_expanded_state()
             self._apply_content_visibility()
         else:
             widget.setVisible(self._visible)
@@ -354,20 +421,39 @@ class LmStudioInstructionsPane:
                 child.deleteLater()
         layout.addWidget(toolbar, 0)
 
+    def _apply_editor_expanded_state(self) -> None:
+        if not self._image_gen_styled:
+            return
+        if self._collapse_arrow is not None:
+            self._collapse_arrow.setText(
+                _EXPANDED_ARROW if self._editor_expanded else _COLLAPSED_ARROW
+            )
+        if self._body_widget is not None:
+            self._body_widget.setVisible(self._editor_expanded)
+
+    def _toggle_editor_expanded(self) -> None:
+        self.set_editor_expanded(not self._editor_expanded)
+
+    def is_editor_expanded(self) -> bool:
+        return self._editor_expanded
+
+    def set_editor_expanded(self, expanded: bool) -> None:
+        if self._editor_expanded == expanded:
+            return
+        self._editor_expanded = bool(expanded)
+        self._apply_editor_expanded_state()
+        if self._on_editor_expanded_changed is not None:
+            self._on_editor_expanded_changed()
+
     def _apply_content_visibility(self) -> None:
         vis = self._visible
         if self._widget is not None:
             self._widget.setVisible(vis)
         if not vis:
             return
-        if self._editor_block is not None:
-            self._editor_block.setVisible(True)
         if self._toolbar_host is not None:
             self._toolbar_host.setVisible(True)
-        if self._copy_btn is not None:
-            self._copy_btn.setVisible(True)
-        if self._mic_btn is not None:
-            self._mic_btn.setVisible(True)
+        self._apply_editor_expanded_state()
 
     def _sync_toggle_location(self) -> None:
         if not self._image_gen_styled or self._toggle_btn is None:

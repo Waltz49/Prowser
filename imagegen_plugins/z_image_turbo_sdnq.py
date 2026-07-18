@@ -70,7 +70,7 @@ Z_IMAGE_TURBO_SDNQ_PLUGIN = ImageGenModelPlugin(
         "prompt": "",
         "width": 512,
         "height": 512,
-        "steps": 4,
+        "steps": 9,
         "seed": 0,
         "random_seed": True,
         "copies": 1,

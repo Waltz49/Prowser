@@ -123,6 +123,7 @@ def _persist_flux_prompt_system_prompt(owner: Any) -> None:
         pane.plain_text(),
         pane.is_visible(),
         pane.splitter_sizes(),
+        editor_expanded=pane.is_editor_expanded(),
     )
 
 
@@ -149,8 +150,9 @@ def _hide_flux_system_prompt_toggle(owner: Any) -> None:
 
 def _load_flux_prompt_system_prompt_into_pane(pane: LmStudioInstructionsPane) -> None:
     already_open = pane.is_visible()
-    text, saved_visible, sizes = load_flux_prompt_system_prompt_settings()
+    text, saved_visible, sizes, saved_expanded = load_flux_prompt_system_prompt_settings()
     pane.set_plain_text(text)
+    pane.set_editor_expanded(saved_expanded)
     if is_lmstudio_services_available():
         pane.set_visible(saved_visible or already_open)
     else:
@@ -186,11 +188,15 @@ def ensure_flux_prompt_system_pane(owner: Any) -> Optional[LmStudioInstructionsP
         if getattr(owner, "_panel_mode", False) and hasattr(owner, "state_changed"):
             owner.state_changed.emit()
 
+    def _on_editor_expanded_changed() -> None:
+        _persist_flux_prompt_system_prompt(owner)
+
     pane = LmStudioInstructionsPane(
         owner,
         image_gen_styled=True,
         on_visibility_changed=_on_visibility_changed,
         on_text_changed=_on_text_changed,
+        on_editor_expanded_changed=_on_editor_expanded_changed,
     )
     _load_flux_prompt_system_prompt_into_pane(pane)
     owner._flux_system_prompt_pane = pane

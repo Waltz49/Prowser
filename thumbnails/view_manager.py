@@ -1495,6 +1495,17 @@ class ViewManager:
         self.main_window.number_overlay_label.setStyleSheet("background-color: transparent; color: white;")
         self.main_window.number_overlay_label.hide()
 
+        # Image size line below name/sequence overlay (shadow + foreground)
+        self.main_window.number_overlay_size_shadow_label = QLabel(browse_view_widget)
+        self.main_window.number_overlay_size_shadow_label.setAttribute(Qt.WA_TransparentForMouseEvents)
+        self.main_window.number_overlay_size_shadow_label.setStyleSheet("background-color: transparent; color: black;")
+        self.main_window.number_overlay_size_shadow_label.hide()
+
+        self.main_window.number_overlay_size_label = QLabel(browse_view_widget)
+        self.main_window.number_overlay_size_label.setAttribute(Qt.WA_TransparentForMouseEvents)
+        self.main_window.number_overlay_size_label.setStyleSheet("background-color: transparent; color: white;")
+        self.main_window.number_overlay_size_label.hide()
+
         self.main_window.stacked_widget.addWidget(browse_view_widget)
 
     def refresh_browse_theme_styles(self):

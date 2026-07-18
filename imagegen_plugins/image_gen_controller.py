@@ -27,6 +27,11 @@ from imagegen_plugins.image_gen_naming import (
     resolve_generation_elapsed_seconds,
     write_exif_user_comment,
 )
+from imagegen_plugins.generation_timing_stats import (
+    build_generation_timing_key,
+    lookup_average,
+    record_run,
+)
 from imagegen_plugins.mflux_lora_presets import lora_name_for_exif_from_values
 from imagegen_plugins.image_gen_persistence import (
     load_hold_job_queue,
@@ -159,6 +164,8 @@ class ImageGenController(QObject):
         self._live_estimate_seconds: Optional[float] = None
         # Seconds per step, frozen when a diffusion step completes (for live ETA).
         self._step_seconds_per_step: Optional[float] = None
+        self._generation_timing_key = None
+        self._historical_avg_total_seconds: Optional[float] = None
         self._job_ai_stage_active = False
         self._active_job_with_ai = False
         self._job_ai_chars_received = 0
@@ -921,8 +928,6 @@ class ImageGenController(QObject):
         self, *, in_cooldown: bool = False
     ) -> tuple[Optional[float], Optional[float]]:
         """Elapsed and estimate from one clock read (kept in sync for display)."""
-        if self._live_step_total <= 0:
-            return None, None
         if in_cooldown:
             elapsed = self._frozen_elapsed_seconds
             return (elapsed, None) if elapsed is not None else (None, None)
@@ -930,13 +935,18 @@ class ImageGenController(QObject):
         if elapsed is None:
             return None, None
         estimate = None
-        if self._live_step > 0:
+        if self._live_step > 0 and self._live_step_total > 0:
             estimate = self._estimate_remaining_seconds(
                 elapsed=elapsed,
                 completed_steps=self._live_step,
                 total_steps=self._live_step_total,
                 seconds_per_step=self._step_seconds_per_step,
             )
+        elif (
+            self._historical_avg_total_seconds is not None
+            and self._historical_avg_total_seconds > 0
+        ):
+            estimate = max(0.0, self._historical_avg_total_seconds - elapsed)
         self._live_elapsed_seconds = elapsed
         self._live_estimate_seconds = estimate
         return elapsed, estimate
@@ -1371,6 +1381,8 @@ class ImageGenController(QObject):
         self._live_elapsed_seconds = None
         self._live_estimate_seconds = None
         self._step_seconds_per_step = None
+        self._generation_timing_key = None
+        self._historical_avg_total_seconds = None
 
     def _reset_active_job_progress_tracking(self) -> None:
         """Clear step/elapsed/timing used by progress bars (not copy-batch counters)."""
@@ -2066,6 +2078,14 @@ class ImageGenController(QObject):
                     )
             self._reset_active_job_progress_tracking()
             self._step_progress_start_time = time.perf_counter()
+            plugin = self._active_plugin
+            if plugin is not None:
+                self._generation_timing_key = build_generation_timing_key(
+                    plugin, self._pending_values
+                )
+                self._historical_avg_total_seconds = lookup_average(
+                    self._generation_timing_key
+                )
             try:
                 self._live_step_total = int(self._pending_values.get("steps") or 0)
             except (TypeError, ValueError):
@@ -2152,10 +2172,20 @@ class ImageGenController(QObject):
         if success and plugin and output_path:
             try:
                 include_quantization = self._pipeline_supports_quantization(plugin)
+                local_elapsed = self._live_elapsed_seconds
+                if local_elapsed is None and self._step_progress_start_time is not None:
+                    local_elapsed = (
+                        time.perf_counter() - self._step_progress_start_time
+                    )
                 elapsed_seconds = resolve_generation_elapsed_seconds(
                     worker_result,
                     output_path,
+                    local_elapsed=local_elapsed,
                 )
+                if elapsed_seconds and elapsed_seconds > 0:
+                    timing_key = build_generation_timing_key(plugin, values)
+                    if timing_key is not None:
+                        record_run(timing_key, elapsed_seconds)
                 used_seed = extract_used_seed_from_worker_result(
                     plugin.pipeline_id, worker_result
                 )

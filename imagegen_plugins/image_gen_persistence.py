@@ -80,6 +80,9 @@ _FLUX_PROMPT_SYSTEM_PROMPT_VISIBLE_KEY = "flux_prompt_system_prompt_visible"
 _FLUX_PROMPT_SYSTEM_PROMPT_SPLITTER_SIZES_KEY = (
     "flux_prompt_system_prompt_splitter_sizes"
 )
+_FLUX_PROMPT_SYSTEM_PROMPT_EDITOR_EXPANDED_KEY = (
+    "flux_prompt_system_prompt_editor_expanded"
+)
 
 
 def _sanitize_dialog_values(values: Dict[str, Any]) -> Dict[str, Any]:
@@ -595,28 +598,34 @@ def save_flux_prompt_job_with_generate(enabled: bool) -> None:
     _mutate_imagegen_settings(mutate)
 
 
-def load_flux_prompt_system_prompt_settings() -> tuple[str, bool, list[int]]:
+def load_flux_prompt_system_prompt_settings() -> tuple[str, bool, list[int], bool]:
     """Global flux Prompt AI system prompt pane state."""
     settings = get_config().load_settings()
     imagegen = settings.get("imagegen") or {}
     text = imagegen.get(_FLUX_PROMPT_SYSTEM_PROMPT_TEXT_KEY, "")
     visible = bool(imagegen.get(_FLUX_PROMPT_SYSTEM_PROMPT_VISIBLE_KEY, False))
     sizes = imagegen.get(_FLUX_PROMPT_SYSTEM_PROMPT_SPLITTER_SIZES_KEY, [])
+    expanded = bool(imagegen.get(_FLUX_PROMPT_SYSTEM_PROMPT_EDITOR_EXPANDED_KEY, True))
     if not isinstance(text, str):
         text = ""
     if not isinstance(sizes, list):
         sizes = []
-    return text, visible, sizes
+    return text, visible, sizes, expanded
 
 
 def save_flux_prompt_system_prompt_settings(
     text: str,
     visible: bool,
     splitter_sizes: list[int],
+    *,
+    editor_expanded: bool = True,
 ) -> None:
     def mutate(imagegen: dict) -> None:
         imagegen[_FLUX_PROMPT_SYSTEM_PROMPT_TEXT_KEY] = text
         imagegen[_FLUX_PROMPT_SYSTEM_PROMPT_VISIBLE_KEY] = bool(visible)
+        imagegen[_FLUX_PROMPT_SYSTEM_PROMPT_EDITOR_EXPANDED_KEY] = bool(
+            editor_expanded
+        )
         if (
             isinstance(splitter_sizes, list)
             and len(splitter_sizes) == 2

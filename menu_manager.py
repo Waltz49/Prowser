@@ -1496,6 +1496,10 @@ class MenuManager:
             reset_gen_settings_action.triggered.connect(self._debug_reset_all_gen_settings)
             debug_menu.addAction(reset_gen_settings_action)
 
+            see_timings_action = QAction("See timings", self.main_window)
+            see_timings_action.triggered.connect(self._debug_see_generation_timings)
+            debug_menu.addAction(see_timings_action)
+
         self.main_window.debug_save_canvas_action = QAction("Save Canvas", self.main_window)
         self.main_window.debug_save_canvas_action.triggered.connect(self._debug_save_canvas)
         debug_menu.addAction(self.main_window.debug_save_canvas_action)
@@ -1519,6 +1523,12 @@ class MenuManager:
         from list_models import run_list_models_window
 
         run_list_models_window(self.main_window)
+
+    def _debug_see_generation_timings(self):
+        """Tools > Debug > See timings — saved generation timing averages."""
+        from imagegen_plugins.generation_timing_dialog import show_generation_timing_dialog
+
+        show_generation_timing_dialog(self.main_window)
 
     def _debug_view_print_log(self):
         """Open the in-app live print() log viewer."""
