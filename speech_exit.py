@@ -13,6 +13,17 @@ ENV_SAY_VOICE = "PROWSER_SAY_VOICE"
 
 _PYTHON_INTERPRETERS = frozenset({"python", "python3", "pypy3"})
 
+
+def _is_python_interpreter(argv0: str) -> bool:
+    base = os.path.basename(argv0).lower()
+    if base in _PYTHON_INTERPRETERS:
+        return True
+    return base.startswith("python") or base.startswith("pypy")
+
+
+def _normalize_command_path(path: str) -> str:
+    return os.path.abspath(os.path.expanduser(path))
+
 _ANSI_RESET = "\033[0m"
 _ANSI_ORANGE = "\033[38;5;208m"
 
@@ -67,15 +78,26 @@ def _command_target(argv: list[str]) -> tuple[str, str]:
     """Return (kind, path_or_name) where kind is ``script`` or ``command``."""
     if not argv:
         return ("", "")
-    first = os.path.basename(argv[0]).lower()
-    if first in _PYTHON_INTERPRETERS:
+    if _is_python_interpreter(argv[0]):
         if len(argv) < 2:
             return ("", "")
-        return ("script", os.path.expanduser(argv[1]))
-    expanded = os.path.expanduser(argv[0])
+        return ("script", _normalize_command_path(argv[1]))
+    expanded = _normalize_command_path(argv[0])
     if os.path.isfile(expanded):
         return ("script", expanded)
     return ("command", argv[0])
+
+
+def _normalized_exit_argv(argv: list[str]) -> list[str]:
+    if not argv:
+        return []
+    normalized = list(argv)
+    if _is_python_interpreter(normalized[0]):
+        if len(normalized) >= 2:
+            normalized[1] = _normalize_command_path(normalized[1])
+    else:
+        normalized[0] = _normalize_command_path(normalized[0])
+    return normalized
 
 
 def resolve_say_exit_command() -> list[str]:
@@ -86,7 +108,7 @@ def resolve_say_exit_command() -> list[str]:
     kind, target = _command_target(argv)
     if kind == "script":
         if _script_path_usable(target):
-            return argv
+            return _normalized_exit_argv(argv)
         return []
     if kind == "command" and shutil.which(target):
         return argv
@@ -127,17 +149,17 @@ def describe_say_exit_env() -> str:
         return f"{ENV_SAY_EXIT}: {display} {_status_suffix('Invalid')}"
 
     first = os.path.basename(argv[0]).lower()
-    if first in _PYTHON_INTERPRETERS:
+    if _is_python_interpreter(argv[0]):
         if len(argv) < 2:
             return f"{ENV_SAY_EXIT}: {display} {_status_suffix('Missing script')}"
-        script = os.path.expanduser(argv[1])
+        script = _normalize_command_path(argv[1])
         if not os.path.isfile(script):
             return f"{ENV_SAY_EXIT}: {display} {_status_suffix('Script not found')}"
         issues = _script_path_issues(script)
         if issues:
             return f"{ENV_SAY_EXIT}: {display} {_status_suffix('Exists; ' + '; '.join(issues))}"
     else:
-        script = os.path.expanduser(argv[0])
+        script = _normalize_command_path(argv[0])
         if os.path.isfile(script):
             issues = _script_path_issues(script)
             if issues:

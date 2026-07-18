@@ -111,6 +111,13 @@ def _speak_argv(text: str) -> list[str] | None:
     if resolve_say_exit_command():
         argv = say_exit_argv(text)
         return argv or None
+    raw = os.environ.get("PROWSER_SAY_EXIT", "").strip()
+    if raw:
+        print(
+            f"DEBUG speech_utils: PROWSER_SAY_EXIT not usable ({raw!r}); "
+            "falling back to macOS say",
+            file=sys.stderr,
+        )
     if sys.platform != "darwin":
         return None
     return ["say", "-f", "-"]

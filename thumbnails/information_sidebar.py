@@ -533,6 +533,12 @@ class InformationSidebar(QWidget):
         else:
             lbl.hide()
 
+    def _speakable_text_for_speech(self) -> str:
+        if self._speakable_description:
+            return self._speakable_description
+        data = getattr(self, "_last_overlay_data", None) or {}
+        return str(data.get("speakable_plain_text") or "")
+
     def _on_anchor_clicked(self, url):
         """Handle click on speak/copy/delete links in the information description area."""
         from exif.exif_utils import truncate_usercomment_before_prompt
@@ -594,7 +600,7 @@ class InformationSidebar(QWidget):
                 mw.save_sorting_settings()
             return
         if url.toString() == "speak://":
-            text = truncate_usercomment_before_prompt(self._speakable_description or "")
+            text = truncate_usercomment_before_prompt(self._speakable_text_for_speech())
             speak_or_stop(text)
             QTimer.singleShot(0, self._refresh_speak_action_highlight)
         elif url.toString() == "copy://":
@@ -1523,7 +1529,7 @@ class InformationSidebar(QWidget):
             )
 
             # Build HTML using shared method
-            self._speakable_description = speakable_plain_text if (speakable_plain_text and len(speakable_plain_text) > 30) else None
+            self._speakable_description = speakable_plain_text
             self._last_overlay_data = {
                 'filename': filename,
                 'field_value_pairs': field_value_pairs,
