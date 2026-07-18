@@ -1163,14 +1163,17 @@ def main():
         # Also set a default font family to avoid Sans-serif lookup
         QApplication.setDesktopSettingsAware(False)  # Prevent Qt from looking up system fonts
     
-    # Set application icon if available
-    icon_path = os.path.join(os.path.dirname(__file__), "assets", "run_from_source_icon.png")
+    # Source runs use a distinct icon; bundled app uses Prowser.icns (same as .app bundle).
+    if getattr(sys, "frozen", False):
+        icon_path = os.path.join(os.path.dirname(__file__), "Prowser.icns")
+        meipass = getattr(sys, "_MEIPASS", None)
+        if meipass:
+            bundled_icon = os.path.join(meipass, "Prowser.icns")
+            if os.path.exists(bundled_icon):
+                icon_path = bundled_icon
+    else:
+        icon_path = os.path.join(os.path.dirname(__file__), "assets", "run_from_source_icon.png")
 
-    # Set application icon if available (same file as the .app bundle icon)
-    # icon_path = os.path.join(os.path.dirname(__file__), "Prowser.icns")
-    # if getattr(sys, "frozen", False) and getattr(sys, "_MEIPASS", None):
-    #     icon_path = os.path.join(sys._MEIPASS, "Prowser.icns")
-   
     if os.path.exists(icon_path):
         app.setWindowIcon(QIcon(icon_path))
     
