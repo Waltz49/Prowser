@@ -78,6 +78,7 @@ from imagegen_plugins.image_gen_source_nav import (
 )
 from imagegen_plugins.image_gen_model_selector import (
     apply_mflux_lora_collection_guard,
+    collect_lora_field_values,
     build_model_selector_row,
     mount_image_gen_lora_field,
     refresh_dialog_mflux_lora_combo,
@@ -1488,8 +1489,7 @@ class ImageGenEditDialog(ImageGenDimensionAspectMixin, QDialog):
         else:
             out = self._param_panel.collect_values(self._values)
         lora_field = getattr(self, "_lora_field", None)
-        if lora_field is not None and lora_field.is_stack_mode():
-            out["mflux_lora_stack"] = lora_field.selected_ids()
+        collect_lora_field_values(out, lora_field)
         self._stash_aspect_lock_in_values(out)
         out["source_image_path"] = self.source_path
         out["source_image_paths"] = list(self._source_paths)

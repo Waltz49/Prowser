@@ -97,11 +97,13 @@ def steps_slider_block(
         from imagegen_plugins.mflux_lora_presets import (
             effective_steps_for_lora,
             effective_steps_for_lora_stack,
+            effective_lora_ids_from_values,
             lora_stack_min_steps,
-            normalize_lora_stack_from_values,
         )
 
-        lora_stack = normalize_lora_stack_from_values(values, pop=False)
+        lora_stack = effective_lora_ids_from_values(
+            values, pipeline_id=pipeline_id, pop=False
+        )
         if lora_stack:
             lora_min = lora_stack_min_steps(lora_stack)
             if lora_min is not None:

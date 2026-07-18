@@ -171,7 +171,7 @@ def build_generation_timing_key(
     """Hashable key for model + steps + size + quant + LoRA list, or None if size unknown."""
     from imagegen_plugins.image_gen_dim_limits import effective_max_for_plugin
     from imagegen_plugins.image_gen_pipeline_modes import generation_status_display_size
-    from imagegen_plugins.mflux_lora_presets import normalize_lora_stack_from_values
+    from imagegen_plugins.mflux_lora_presets import effective_lora_ids_from_values
     from imagegen_plugins.model_task_status_info import _generation_model_id_for_status
 
     effective = dict(values)
@@ -207,7 +207,11 @@ def build_generation_timing_key(
         return None
 
     quant = plugin.quantize_status_value(effective) or ""
-    lora_stack = tuple(normalize_lora_stack_from_values(effective, pop=False))
+    lora_stack = tuple(
+        effective_lora_ids_from_values(
+            effective, pipeline_id=plugin.pipeline_id, pop=False
+        )
+    )
 
     return (model_id, steps, int(size[0]), int(size[1]), quant, lora_stack)
 

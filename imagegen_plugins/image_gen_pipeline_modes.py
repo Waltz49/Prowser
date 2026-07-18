@@ -10,8 +10,10 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
 from imagegen_plugins.hf_model_ids import FLUX1_SCHNELL
+from imagegen_plugins.lora_host_registry import HOST_SD15, lora_host_for_pipeline
 from imagegen_plugins.mflux_lora_presets import (
     coerce_lora_preset_id,
+    effective_lora_ids_from_values,
     effective_steps_for_lora,
     effective_steps_for_lora_stack,
     lora_preset_min_steps,
@@ -449,7 +451,9 @@ def resolve_steps_for_run(pipeline_id: str, values: Dict[str, Any]) -> int:
     steps = int(values.get("steps", mode.steps_default))
     steps = max(mode.steps_min, min(mode.steps_max, steps))
     if pipeline_id == "flux_schnell_mflux_play":
-        stack = normalize_lora_stack_from_values(values, pop=False)
+        stack = effective_lora_ids_from_values(
+            values, pipeline_id=pipeline_id, pop=False
+        )
         if stack:
             steps = effective_steps_for_lora_stack(steps, stack, for_fill=False)
         else:
@@ -499,15 +503,37 @@ def merge_defaults(
     base.update(model_defaults or {})
     if saved:
         base.update(saved)
-    if "mflux_lora" in base:
-        base["mflux_lora"] = coerce_lora_preset_id(base["mflux_lora"])
-    if "mflux_lora_stack" in base:
-        base["mflux_lora_stack"] = normalize_lora_stack_from_values(
-            {"mflux_lora_stack": base.get("mflux_lora_stack"), "mflux_lora": base.get("mflux_lora")},
-            pop=False,
-        )
-    elif base.get("mflux_lora"):
-        base["mflux_lora_stack"] = normalize_lora_stack_from_values(base, pop=False)
+    if lora_host_for_pipeline(pipeline_id) == HOST_SD15:
+        raw_stack = base.get("mflux_lora_stack")
+        pid = coerce_lora_preset_id(base.get("mflux_lora", "none"))
+        if pid == "none" and isinstance(raw_stack, list) and raw_stack:
+            migrated = normalize_lora_stack_from_values(
+                {"mflux_lora_stack": raw_stack},
+                pop=False,
+            )
+            if migrated:
+                base["mflux_lora"] = migrated[0]
+        base.pop("mflux_lora_stack", None)
+        if "mflux_lora" in base:
+            base["mflux_lora"] = coerce_lora_preset_id(base["mflux_lora"])
+    else:
+        if "mflux_lora" in base:
+            base["mflux_lora"] = coerce_lora_preset_id(base["mflux_lora"])
+        raw_stack = base.get("mflux_lora_stack")
+        if isinstance(raw_stack, list):
+            if raw_stack:
+                base["mflux_lora_stack"] = normalize_lora_stack_from_values(
+                    {"mflux_lora_stack": raw_stack},
+                    pop=False,
+                )
+            else:
+                base["mflux_lora_stack"] = []
+        elif base.get("mflux_lora"):
+            pid = coerce_lora_preset_id(base.get("mflux_lora", "none"))
+            base["mflux_lora_stack"] = [] if pid == "none" else [pid]
+        else:
+            base["mflux_lora_stack"] = []
+        base.pop("mflux_lora", None)
     return base
 
 

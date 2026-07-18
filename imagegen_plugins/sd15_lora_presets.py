@@ -12,6 +12,7 @@ from imagegen_plugins.mflux_lora_presets import _normalize_preset_id, resolve_lo
 
 def apply_lora_to_sd15_payload(merged: Dict[str, object]) -> None:
     """Set sd15_lora_paths/scales when a catalog LoRA is selected."""
+    merged.pop("mflux_lora_stack", None)
     preset_id = _normalize_preset_id(merged.pop("mflux_lora", "none") or "none")
     if preset_id == "none":
         merged.pop("sd15_lora_paths", None)

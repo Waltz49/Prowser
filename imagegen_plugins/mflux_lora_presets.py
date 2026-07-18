@@ -24,8 +24,7 @@ from imagegen_plugins.lora_catalog import (
     lora_entry_min_steps,
     manual_download_help,
 )
-from imagegen_plugins.lora_entry import PAPER_CUTOUT_LORA_PATH
-from imagegen_plugins.lora_host_registry import HOST_SD15
+from imagegen_plugins.lora_host_registry import HOST_SD15, lora_host_for_pipeline
 
 FLUX_LORA_CATALOG = LORA_CATALOG
 
@@ -239,6 +238,51 @@ def lora_stack_min_steps(stack: List[str]) -> Optional[int]:
     return max(mins) if mins else None
 
 
+def _uses_sd15_single_lora(
+    values: Dict[str, Any],
+    *,
+    pipeline_id: Optional[str] = None,
+) -> bool:
+    pid = (pipeline_id or values.get("pipeline_id") or "").strip()
+    if pid:
+        return lora_host_for_pipeline(pid) == HOST_SD15
+    from imagegen_plugins.hf_model_ids import SD15_LORA_MODEL_KEYS
+
+    hf = str(values.get("hf_model_id") or "").strip()
+    return hf in SD15_LORA_MODEL_KEYS
+
+
+def _strip_sd15_lora_stack_keys(values: Dict[str, Any], *, pop: bool) -> None:
+    if pop:
+        values.pop("mflux_lora_stack", None)
+        values.pop("mflux_lora_paths", None)
+        values.pop("mflux_lora_scales", None)
+
+
+def effective_lora_ids_from_values(
+    values: Dict[str, Any],
+    *,
+    pipeline_id: Optional[str] = None,
+    pop: bool = False,
+) -> List[str]:
+    """
+    Active LoRA preset ids for generation, EXIF, and trigger-word guards.
+
+    SD 1.5 uses the single ``mflux_lora`` field only; ``mflux_lora_stack`` is ignored
+    so stale stack data from FLUX/Klein models does not leak into SD15 runs.
+    """
+    pid = (pipeline_id or values.get("pipeline_id") or "").strip()
+    if _uses_sd15_single_lora(values, pipeline_id=pid or None):
+        _strip_sd15_lora_stack_keys(values, pop=pop)
+        if pop:
+            legacy = values.pop("mflux_lora", None)
+        else:
+            legacy = values.get("mflux_lora")
+        preset_id = _normalize_preset_id(legacy or "none")
+        return [] if preset_id == "none" else [preset_id]
+    return normalize_lora_stack_from_values(values, pop=pop)
+
+
 def normalize_lora_stack_from_values(
     values: Dict[str, Any],
     *,
@@ -254,9 +298,11 @@ def normalize_lora_stack_from_values(
         legacy = values.pop("mflux_lora", None)
         values.pop("mflux_lora_paths", None)
         values.pop("mflux_lora_scales", None)
+        explicit_stack = stack_raw is not None
     else:
         stack_raw = values.get("mflux_lora_stack")
         legacy = values.get("mflux_lora")
+        explicit_stack = "mflux_lora_stack" in values
 
     ids: List[str] = []
     if isinstance(stack_raw, list):
@@ -268,6 +314,9 @@ def normalize_lora_stack_from_values(
         pid = _normalize_preset_id(stack_raw)
         if pid != "none" and pid not in ids:
             ids.append(pid)
+
+    if explicit_stack:
+        return ids
 
     if not ids and legacy is not None:
         pid = _normalize_preset_id(legacy)
@@ -287,9 +336,15 @@ def lora_display_names_for_stack(stack: List[str]) -> List[str]:
     return names
 
 
-def lora_name_for_exif_from_values(values: Dict[str, Any]) -> Optional[str]:
+def lora_name_for_exif_from_values(
+    values: Dict[str, Any],
+    *,
+    pipeline_id: Optional[str] = None,
+) -> Optional[str]:
     """LoRA label for EXIF from stack or legacy single preset."""
-    stack = normalize_lora_stack_from_values(values, pop=False)
+    stack = effective_lora_ids_from_values(
+        values, pipeline_id=pipeline_id, pop=False
+    )
     if not stack:
         return None
     names = lora_display_names_for_stack(stack)
@@ -305,7 +360,11 @@ def apply_lora_to_mflux_payload(
     for_klein: bool = False,
 ) -> None:
     """Set mflux_lora_paths/scales when one or more presets are selected."""
-    stack = normalize_lora_stack_from_values(merged, pop=True)
+    stack = effective_lora_ids_from_values(
+        merged,
+        pipeline_id=str(merged.get("pipeline_id") or "").strip() or None,
+        pop=True,
+    )
     if not stack:
         merged.pop("mflux_lora_paths", None)
         merged.pop("mflux_lora_scales", None)
@@ -382,6 +441,7 @@ __all__ = [
     "apply_lora_to_mflux_payload",
     "coerce_lora_preset_id",
     "effective_steps_for_lora",
+    "effective_lora_ids_from_values",
     "effective_steps_for_lora_stack",
     "lora_choice_ids",
     "lora_choices_for_plugin",

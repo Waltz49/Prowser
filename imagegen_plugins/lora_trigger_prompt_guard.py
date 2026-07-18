@@ -7,10 +7,7 @@ import re
 from typing import Any, Dict, List
 
 from imagegen_plugins.lora_catalog import get_lora_entry
-from imagegen_plugins.mflux_lora_presets import (
-    coerce_lora_preset_id,
-    normalize_lora_stack_from_values,
-)
+from imagegen_plugins.mflux_lora_presets import effective_lora_ids_from_values
 
 
 def prompt_contains_lora_trigger(prompt: str, trigger: str) -> bool:
@@ -39,11 +36,7 @@ def prompt_with_lora_trigger_added(prompt: str, trigger: str) -> str:
 
 
 def _missing_lora_trigger_words(values: Dict[str, Any]) -> List[str]:
-    stack = normalize_lora_stack_from_values(values, pop=False)
-    if not stack:
-        lora_id = coerce_lora_preset_id(values.get("mflux_lora", "none"))
-        if lora_id != "none":
-            stack = [lora_id]
+    stack = effective_lora_ids_from_values(values, pop=False)
     prompt = (values.get("prompt") or "").strip()
     missing: List[str] = []
     for lora_id in stack:

@@ -2205,7 +2205,9 @@ class ImageGenController(QObject):
                         if include_quantization
                         else None
                     ),
-                    lora=lora_name_for_exif_from_values(values),
+                    lora=lora_name_for_exif_from_values(
+                        values, pipeline_id=plugin.pipeline_id
+                    ),
                     guidance=values.get("guidance_scale"),
                 )
                 ref_entries, allow_cross_dir = self._exif_reference_entries_for_output(

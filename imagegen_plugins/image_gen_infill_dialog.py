@@ -8,7 +8,7 @@ from typing import Any, Dict, List, Optional
 
 from imagegen_plugins.image_gen_dialog import ImageGenDialog, validate_copies_require_random_seed
 from imagegen_plugins.image_gen_pipeline_modes import finalize_run_values
-from imagegen_plugins.image_gen_persistence import save_dialog_settings
+from imagegen_plugins.image_gen_persistence import save_plugin_dialog_settings
 from imagegen_plugins.image_gen_registry import ImageGenModelPlugin
 from imagegen_plugins.pixelmator_export import (
     export_pixelmator_base_and_mask,
@@ -81,8 +81,8 @@ class ImageGenInfillDialog(ImageGenDialog):
         values = self._prepare_pixelmator_values()
         if values is None:
             return False
-        save_dialog_settings(
-            self._function, values, active_plugin_id=self.plugin.plugin_id
+        save_plugin_dialog_settings(
+            self._function, self.plugin.plugin_id, values
         )
         from imagegen_plugins.image_gen_menu import start_imagegen_without_closing
 
@@ -97,8 +97,8 @@ class ImageGenInfillDialog(ImageGenDialog):
         values = self._prepare_pixelmator_values()
         if values is None:
             return
-        save_dialog_settings(
-            self._function, values, active_plugin_id=self.plugin.plugin_id
+        save_plugin_dialog_settings(
+            self._function, self.plugin.plugin_id, values
         )
         from imagegen_plugins.image_gen_menu import start_imagegen_without_closing
 

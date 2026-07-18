@@ -130,7 +130,7 @@ def _plugin_uses_lora_stack(plugin_id: str) -> bool:
 
     plugin_id = _normalize_plugin_id(plugin_id)
     try:
-        from imagegen_plugins.image_gen_registry import discover_plugins
+        from imagegen_plugins import discover_plugins
 
         for plugin in discover_plugins():
             if plugin.plugin_id == plugin_id:
@@ -146,8 +146,6 @@ def load_lora_stack_for_plugin(function: str, plugin_id: str) -> List[str]:
     from imagegen_plugins.mflux_lora_presets import coerce_lora_preset_id
 
     plugin_id = _normalize_plugin_id(plugin_id)
-    if not _plugin_uses_lora_stack(plugin_id):
-        return []
     settings = get_config().load_settings()
     imagegen = settings.get("imagegen") or {}
     dialogs = imagegen.get(_DIALOGS_KEY) or {}
@@ -159,11 +157,20 @@ def load_lora_stack_for_plugin(function: str, plugin_id: str) -> List[str]:
         if stack:
             return stack
 
-    legacy = load_model_settings(plugin_id).get("mflux_lora")
+    per_plugin = load_model_settings(plugin_id)
+    if _plugin_uses_lora_stack(plugin_id):
+        legacy = per_plugin.get("mflux_lora")
+        pid = coerce_lora_preset_id(legacy)
+        if pid != "none":
+            return [pid]
+        return []
+
+    legacy = per_plugin.get("mflux_lora")
     pid = coerce_lora_preset_id(legacy)
     if pid != "none":
         return [pid]
-    return []
+    raw_stack = per_plugin.get("mflux_lora_stack")
+    return _coerce_lora_stack_list(raw_stack)
 
 
 def save_lora_stack_for_plugin(
@@ -282,8 +289,14 @@ def load_plugin_dialog_settings(function: str, plugin_id: str) -> Dict[str, Any]
     stack = load_lora_stack_for_plugin(function, plugin_id)
     if _plugin_uses_lora_stack(plugin_id):
         out["mflux_lora_stack"] = stack
-        if stack:
-            out.pop("mflux_lora", None)
+        out.pop("mflux_lora", None)
+    else:
+        from imagegen_plugins.mflux_lora_presets import coerce_lora_preset_id
+
+        pid = coerce_lora_preset_id(out.get("mflux_lora", "none"))
+        if pid == "none" and stack:
+            out["mflux_lora"] = stack[0]
+        out.pop("mflux_lora_stack", None)
     return _sanitize_dialog_values(out)
 
 
@@ -298,6 +311,13 @@ def save_plugin_dialog_settings(
     plugin_id = _normalize_plugin_id(plugin_id)
     sanitized, stack = _split_lora_stack_from_values(dict(values))
     persist_stack = _plugin_uses_lora_stack(plugin_id)
+    if not persist_stack:
+        from imagegen_plugins.mflux_lora_presets import coerce_lora_preset_id
+
+        sanitized.pop("mflux_lora_stack", None)
+        pid = coerce_lora_preset_id(sanitized.get("mflux_lora", "none"))
+        if pid == "none" and stack:
+            sanitized["mflux_lora"] = stack[0]
 
     def mutate(imagegen: dict) -> None:
         from imagegen_plugins.image_gen_active_model import (
@@ -316,6 +336,8 @@ def save_plugin_dialog_settings(
             stacks = {}
         if persist_stack:
             stacks[plugin_id] = stack
+        else:
+            stacks.pop(plugin_id, None)
         fn_entry[_LORA_STACKS_KEY] = stacks
         dialogs[function] = fn_entry
 
@@ -324,7 +346,7 @@ def save_plugin_dialog_settings(
             models = {}
             imagegen[_LEGACY_MODELS_KEY] = models
         per_plugin = _per_plugin_dialog_values(sanitized)
-        if persist_stack and stack:
+        if persist_stack:
             per_plugin.pop("mflux_lora", None)
         models[plugin_id] = per_plugin
 
@@ -358,6 +380,21 @@ def save_dialog_settings(
     *,
     active_plugin_id: Optional[str] = None,
 ) -> None:
+    """Persist function-level dialog values (legacy flat store).
+
+    When ``active_plugin_id`` is set, delegates to
+    :func:`save_plugin_dialog_settings` so per-plugin fields (including LoRA)
+    are stored under ``imagegen.models`` and ``lora_stacks``.
+    """
+    if active_plugin_id is not None:
+        save_plugin_dialog_settings(
+            function,
+            active_plugin_id,
+            values,
+            active_plugin_id=active_plugin_id,
+        )
+        return
+
     values = _sanitize_dialog_values(values)
 
     def mutate(imagegen: dict) -> None:
@@ -366,12 +403,6 @@ def save_dialog_settings(
             dialogs = {}
             imagegen[_DIALOGS_KEY] = dialogs
         dialogs[function] = values
-        if active_plugin_id is not None:
-            from imagegen_plugins.image_gen_active_model import (
-                apply_active_plugin_to_imagegen,
-            )
-
-            apply_active_plugin_to_imagegen(imagegen, function, active_plugin_id)
 
     _mutate_imagegen_settings(mutate)
 
@@ -386,6 +417,15 @@ def save_dialog_sessions_batch(
     prepared: Dict[str, Tuple[Dict[str, Any], Optional[str], List[str]]] = {}
     for function, (values, plugin_id) in sessions.items():
         sanitized, stack = _split_lora_stack_from_values(dict(values))
+        if plugin_id is not None and not _plugin_uses_lora_stack(
+            _normalize_plugin_id(plugin_id)
+        ):
+            from imagegen_plugins.mflux_lora_presets import coerce_lora_preset_id
+
+            sanitized.pop("mflux_lora_stack", None)
+            pid = coerce_lora_preset_id(sanitized.get("mflux_lora", "none"))
+            if pid == "none" and stack:
+                sanitized["mflux_lora"] = stack[0]
         prepared[function] = (sanitized, plugin_id, stack)
 
     def mutate(imagegen: dict) -> None:
@@ -416,11 +456,13 @@ def save_dialog_sessions_batch(
                     stacks = {}
                 if persist_stack:
                     stacks[_normalize_plugin_id(plugin_id)] = stack
+                else:
+                    stacks.pop(_normalize_plugin_id(plugin_id), None)
                 fn_entry[_LORA_STACKS_KEY] = stacks
             dialogs[function] = fn_entry
             if plugin_id is not None:
                 per_plugin = _per_plugin_dialog_values(vals)
-                if persist_stack and stack:
+                if persist_stack:
                     per_plugin.pop("mflux_lora", None)
                 models[_normalize_plugin_id(plugin_id)] = per_plugin
                 apply_active_plugin_to_imagegen(imagegen, function, plugin_id)

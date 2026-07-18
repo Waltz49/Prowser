@@ -34,8 +34,8 @@ from imagegen_plugins.image_gen_function_switcher import (
 from imagegen_plugins.image_gen_model_availability import confirm_model_download_if_needed
 from imagegen_plugins.image_gen_persistence import (
     load_imagegen_dialog_geometry_hex,
-    save_dialog_settings,
     save_imagegen_dialog_geometry_hex,
+    save_plugin_dialog_settings,
 )
 from imagegen_plugins.image_gen_pipeline_modes import finalize_run_values
 from imagegen_plugins.image_gen_dim_limits import (
@@ -171,8 +171,8 @@ class InfillPaintSettingsDialog(ImageGenDialog):
         )
         if not validate_copies_require_random_seed(self, values):
             return
-        save_dialog_settings(
-            FUNCTION_INFILL, values, active_plugin_id=self.plugin.plugin_id
+        save_plugin_dialog_settings(
+            FUNCTION_INFILL, self.plugin.plugin_id, values
         )
         self._result_values = values
         self.accept()
@@ -399,7 +399,9 @@ class ImageGenInfillPaintDialog(QDialog):
             return False
 
         values.update(export_meta)
-        save_dialog_settings(FUNCTION_INFILL, values)
+        save_plugin_dialog_settings(
+            FUNCTION_INFILL, self._settings.plugin.plugin_id, values
+        )
 
         if self._settings is None:
             return False
@@ -506,10 +508,10 @@ class ImageGenInfillPaintDialog(QDialog):
     def closeEvent(self, event):
         if not self._panel_mode and self._settings is not None:
             try:
-                save_dialog_settings(
+                save_plugin_dialog_settings(
                     FUNCTION_INFILL,
+                    self._settings.plugin.plugin_id,
                     self._settings.collect_values(),
-                    active_plugin_id=self._settings.plugin.plugin_id,
                 )
             except Exception:
                 pass

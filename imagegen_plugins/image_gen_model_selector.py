@@ -462,10 +462,17 @@ def sync_image_gen_lora_field(dialog: Any) -> None:
         lora_spec = next((s for s in fresh_specs if s.key == "mflux_lora"), None)
 
     stack = normalize_lora_stack_from_values(values, pop=False)
-    if use_stack and lora_field.is_stack_mode():
-        live_stack = lora_field.selected_ids()
-        if live_stack:
-            stack = live_stack
+    if use_stack:
+        raw_stack = values.get("mflux_lora_stack")
+        if isinstance(raw_stack, list):
+            stack = normalize_lora_stack_from_values(
+                {"mflux_lora_stack": raw_stack},
+                pop=False,
+            )
+        if lora_field.is_stack_mode():
+            live_stack = lora_field.selected_ids()
+            if live_stack:
+                stack = live_stack
     legacy = coerce_lora_preset_id(values.get("mflux_lora", "none"))
     if lora_spec is None:
         lora_spec = FieldSpec(
@@ -513,6 +520,21 @@ def sync_image_gen_lora_field(dialog: Any) -> None:
     dialog._lora_combo = lora_field.summary_combo
 
 
+def collect_lora_field_values(out: Dict[str, Any], lora_field: Any) -> None:
+    """Write the live LoRA control into dialog values (stack or single-select)."""
+    from imagegen_plugins.mflux_lora_presets import coerce_lora_preset_id
+
+    if lora_field is None:
+        return
+    if lora_field.is_stack_mode():
+        out["mflux_lora_stack"] = lora_field.selected_ids()
+        out.pop("mflux_lora", None)
+        return
+    ids = lora_field.selected_ids()
+    out["mflux_lora"] = ids[0] if ids else "none"
+    out.pop("mflux_lora_stack", None)
+
+
 def apply_mflux_lora_collection_guard(
     out: Dict[str, Any],
     widgets: Dict[str, Any],
@@ -525,6 +547,7 @@ def apply_mflux_lora_collection_guard(
             out["mflux_lora_stack"] = []
         elif hasattr(widget, "selected_ids"):
             out["mflux_lora_stack"] = widget.selected_ids()
+        out.pop("mflux_lora", None)
         return
 
     entry = widgets.get("mflux_lora")
@@ -532,6 +555,7 @@ def apply_mflux_lora_collection_guard(
         out["mflux_lora"] = "none"
         out.pop("mflux_lora_stack", None)
         return
+    out.pop("mflux_lora_stack", None)
     widget, _, spec = entry
     if spec.kind == "choice" and not widget.isEnabled():
         out["mflux_lora"] = "none"

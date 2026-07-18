@@ -931,7 +931,9 @@ def _collect_generation_status_fields(
     if getattr(plugin, "lora_host_id", None):
         from imagegen_plugins.mflux_lora_presets import lora_name_for_exif_from_values
 
-        lora_label = lora_name_for_exif_from_values(effective)
+        lora_label = lora_name_for_exif_from_values(
+            effective, pipeline_id=plugin.pipeline_id
+        )
         if lora_label:
             fields["lora"] = lora_label
 
