@@ -14,28 +14,7 @@ from PySide6.QtWidgets import (
     QTextEdit,
     QVBoxLayout,
 )
-from thumbnails.thumbnail_constants import (
-    BUTTON_BG_DEFAULT_HEX,
-    BUTTON_BG_HOVER_HEX,
-    BUTTON_BG_PRESSED_HEX,
-    BUTTON_BORDER_DEFAULT_HEX,
-    BUTTON_BORDER_HOVER_HEX,
-    BUTTON_FOCUS_TEXT_HEX,
-    BUTTON_TEXT_DEFAULT_HEX,
-    BUTTON_TEXT_HOVER_HEX,
-    CURRENT_IMAGE_BORDER_COLOR_HEX,
-    DEFAULT_BORDER_COLOR,
-    DIALOG_BACKGROUND_HEX,
-    DIALOG_TEXT_COLOR_HEX,
-    TEXT_DISABLED_HEX,
-    WIDGET_BG_DISABLED_HEX,
-)
-from utils import file_string
-
-
-def qtcolor_to_hex(color):
-    """Convert QColor to hex string."""
-    return f"#{color.red():02x}{color.green():02x}{color.blue():02x}"
+from utils import apply_standard_dialog_layout, file_string, get_standard_dialog_stylesheet
 
 
 class NormalizeExifStepsDialog(QDialog):
@@ -53,70 +32,13 @@ class NormalizeExifStepsDialog(QDialog):
         super().__init__(parent)
         self.files_to_update = files_to_update
 
-        bg_color = DIALOG_BACKGROUND_HEX
-        text_color = DIALOG_TEXT_COLOR_HEX
-        border_color = qtcolor_to_hex(DEFAULT_BORDER_COLOR)
-
         self.setWindowTitle("Normalize EXIF Steps")
         self.setMinimumWidth(600)
         self.setMinimumHeight(400)
-
-        self.setStyleSheet(f"""
-            QDialog {{
-                background-color: {bg_color};
-            }}
-            QLabel {{
-                font-size: 13px;
-            }}
-            QPushButton {{
-                background-color: {BUTTON_BG_DEFAULT_HEX};
-                color: {BUTTON_TEXT_DEFAULT_HEX};
-                border: 1px solid {BUTTON_BORDER_DEFAULT_HEX};
-                border-radius: 5px;
-                padding: 6px 18px;
-                min-width: 100px;
-                font-size: 13px;
-                font-family: 'Arial Narrow', Arial;
-                letter-spacing: 0.5px;
-            }}
-            QPushButton:focus {{
-                background-color: {DIALOG_BACKGROUND_HEX};
-                color: {BUTTON_FOCUS_TEXT_HEX};
-                border: 1px solid {CURRENT_IMAGE_BORDER_COLOR_HEX};
-                outline: none;
-            }}
-            QPushButton:hover {{
-                background-color: {BUTTON_BG_HOVER_HEX};
-                color: {BUTTON_TEXT_HOVER_HEX};
-                border: 1px solid {BUTTON_BORDER_HOVER_HEX};
-            }}
-            QPushButton:pressed {{
-                background-color: {BUTTON_BG_PRESSED_HEX};
-                color: {BUTTON_FOCUS_TEXT_HEX};
-            }}
-            QPushButton:disabled {{
-                color: {TEXT_DISABLED_HEX};
-                background-color: {WIDGET_BG_DISABLED_HEX};
-                border-color: {DIALOG_BACKGROUND_HEX};
-            }}
-            QDialogButtonBox QPushButton {{
-                min-width: 80px;
-                padding: 6px 14px;
-            }}
-            QTextEdit {{
-                background-color: {BUTTON_BG_DEFAULT_HEX};
-                color: {text_color};
-                border: 1px solid {border_color};
-                border-radius: 5px;
-                padding: 8px;
-                font-family: 'Monaco', 'Menlo', 'Courier New';
-                font-size: 12px;
-            }}
-        """)
+        self.setStyleSheet(get_standard_dialog_stylesheet(monospace_text_edit=True))
 
         main_layout = QVBoxLayout(self)
-        main_layout.setSpacing(12)
-        main_layout.setContentsMargins(16, 16, 16, 16)
+        apply_standard_dialog_layout(main_layout)
 
         count = len(files_to_update)
         info_label = QLabel(

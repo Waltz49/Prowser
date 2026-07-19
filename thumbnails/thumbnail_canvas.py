@@ -3112,10 +3112,12 @@ class ThumbnailCanvas(QWidget):
         
         try:
             # Check if any locked files exist - if so, paint canvas with non-black background
+            locked_by_directory = {}
             has_locked_files = False
             if hasattr(self.main_window, 'lock_manager') and self.main_window.lock_manager:
                 if hasattr(self.main_window, 'current_directory') and self.main_window.current_directory:
                     locked_files = self.main_window.lock_manager.get_locked_files(self.main_window.current_directory)
+                    locked_by_directory[self.main_window.current_directory] = locked_files
                     has_locked_files = len(locked_files) > 0
             
             # Paint canvas background
@@ -3162,7 +3164,7 @@ class ThumbnailCanvas(QWidget):
                 painted_count = 0
                 for thumbnail in self.thumbnails:
                     if thumbnail.rect and self._visible_rect.intersects(thumbnail.rect):
-                        self._paint_thumbnail(painter, thumbnail)
+                        self._paint_thumbnail(painter, thumbnail, locked_by_directory)
                         painted_count += 1
 
                 if self._is_reference_graph_mode():
@@ -3307,13 +3309,20 @@ class ThumbnailCanvas(QWidget):
         self.filter_button_rects = []
         self._hovered_button_index = -1
     
-    def _is_file_locked(self, file_path: str) -> bool:
+    def _is_file_locked(self, file_path: str, locked_by_directory: Optional[dict] = None) -> bool:
         """Check if a file is locked"""
         if not hasattr(self.main_window, 'lock_manager') or not self.main_window.lock_manager:
             return False
+        if locked_by_directory is not None:
+            directory = os.path.dirname(file_path)
+            if directory not in locked_by_directory:
+                locked_by_directory[directory] = (
+                    self.main_window.lock_manager.get_locked_files(directory)
+                )
+            return os.path.basename(file_path) in locked_by_directory[directory]
         return self.main_window.lock_manager.is_file_locked(file_path)
     
-    def _paint_thumbnail(self, painter: QPainter, thumbnail: ThumbnailItem):
+    def _paint_thumbnail(self, painter: QPainter, thumbnail: ThumbnailItem, locked_by_directory: Optional[dict] = None):
         """Paint a single thumbnail"""
         if not thumbnail.rect:
             return
@@ -3332,7 +3341,7 @@ class ThumbnailCanvas(QWidget):
         is_selected = thumbnail.index in self.selected_indices
         
         # Check if file is locked
-        is_locked = self._is_file_locked(thumbnail.image_path)
+        is_locked = self._is_file_locked(thumbnail.image_path, locked_by_directory)
 
         # Draw background using rounded rectangle to honor border radius
         if is_highlighted or is_selected:

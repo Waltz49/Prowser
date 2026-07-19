@@ -19,8 +19,10 @@ LOCAL_PACKAGES = (
     "faces",
     "workers",
     "files",
+    "file_ops",
     "thumbnails",
     "settings",
+    "widgets",
     "imagegen_plugins",
     "chat_plugins",
 )

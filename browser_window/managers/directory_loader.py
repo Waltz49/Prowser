@@ -18,6 +18,7 @@ from utils import (
 )
 from sort_mode import SortMode
 from event_bus import DIRECTORY_REQUESTED, DIRECTORY_LOADED
+from file_data_model import normalize_file_path
 
 
 def normalize_restore_image_path(path: Optional[str]) -> Optional[str]:
@@ -126,7 +127,7 @@ class DirectoryLoader:
                 for entry in entries:
                     if entry.is_file():
                         if get_file_extension(entry.name) in get_image_extensions():
-                            image_files.append(entry.path)
+                            image_files.append(normalize_file_path(entry.path))
         except PermissionError:
             raise
         except OSError as e:
@@ -357,7 +358,9 @@ class DirectoryLoader:
         
         self.main_window._batch_directory_load = True
         try:
-            self.main_window.displayed_images = current_files_list
+            self.main_window.file_data_model.set_displayed_images(
+                current_files_list, notify=True, validate_exists=False
+            )
 
             # Clear thumbnails if we have no images to ensure empty state is shown
             if not self.main_window.displayed_images:

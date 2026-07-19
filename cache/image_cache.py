@@ -6,6 +6,7 @@ Provides multiple layers of caching for thumbnails, metadata, and full images
 
 # Standard library imports
 import hashlib
+import heapq
 import json
 import os
 from dataclasses import dataclass
@@ -111,7 +112,7 @@ class ThumbnailWorkerThread(QThread):
             # Get next request from queue
             with QMutexLocker(self.queue_mutex):
                 if self.load_queue and not self.should_stop_flag[0]:
-                    request = self.load_queue.pop(0)
+                    _, _, request = heapq.heappop(self.load_queue)
             
             if not request:
                 # No requests available - use time.sleep() instead of msleep() or QWaitCondition.wait()
@@ -360,7 +361,7 @@ class BackgroundImageLoader(QObject):
     def __init__(self, cache_manager):
         super().__init__()
         self.cache_manager = cache_manager
-        self.load_queue = []
+        self.load_queue: List[Tuple[int, int, tuple]] = []
         self.queue_mutex = QMutex()
         self.queue_wait_condition = QWaitCondition()  # Wake workers when work arrives
         self.should_stop = [False]  # Use list to allow sharing between threads
@@ -371,32 +372,31 @@ class BackgroundImageLoader(QObject):
     def add_thumbnail_request(self, image_path: str, size: int, priority: int = 0):
         """Add thumbnail loading request"""
         with QMutexLocker(self.queue_mutex):
-            # Remove any existing requests for same path/size to avoid duplicates (modify list in place)
-            # Use list comprehension but assign back to maintain reference
-            self.load_queue[:] = [req for req in self.load_queue
-                                 if not (len(req) >= 5 and req[0] == 'thumbnail' and req[1] == image_path and req[2] == size)]
+            self.load_queue[:] = [
+                item for item in self.load_queue
+                if not (
+                    len(item) >= 3
+                    and len(item[2]) >= 5
+                    and item[2][0] == 'thumbnail'
+                    and item[2][1] == image_path
+                    and item[2][2] == size
+                )
+            ]
+            heapq.heapify(self.load_queue)
 
-            # Limit queue size to prevent memory issues with large image sets
-            # If queue is getting too large, remove lowest priority items first
-            # if len(self.load_queue) >= 10000:
-            #     # Remove lowest priority items to make room (sort by priority desc, sequence asc)
-            #     self.load_queue.sort(key=lambda x: (-x[3], x[4]))
-            #     self.load_queue[:] = self.load_queue[:8000]  # Keep top 8000 items
-
-            # Add new request - 5-element tuple: (type, path, size, priority, sequence)
             self.request_sequence += 1
-            self.load_queue.append(('thumbnail', image_path, size, priority, self.request_sequence))
-            # Sort by priority (higher priority first), then by sequence (lower sequence first)
-            self.load_queue.sort(key=lambda x: (-x[3], x[4]))
-            # Wake one waiting worker thread
+            request = ('thumbnail', image_path, size, priority, self.request_sequence)
+            heapq.heappush(self.load_queue, (-priority, self.request_sequence, request))
             self.queue_wait_condition.wakeOne()
     
     def remove_requests_for_file(self, image_path: str):
         """Remove all requests for a specific file from the queue"""
         with QMutexLocker(self.queue_mutex):
-            # Modify list in place to maintain reference for worker threads
-            self.load_queue[:] = [req for req in self.load_queue
-                                 if not (len(req) >= 2 and req[1] == image_path)]
+            self.load_queue[:] = [
+                item for item in self.load_queue
+                if not (len(item) >= 3 and len(item[2]) >= 2 and item[2][1] == image_path)
+            ]
+            heapq.heapify(self.load_queue)
     
     def start(self):
         """Start all worker threads"""
@@ -721,112 +721,25 @@ class ImageCacheManager(QObject):
     
     def get_thumbnail_async(self, image_path: str, size: int, priority: int = 0) -> Optional[QPixmap]:
         """
-        Get thumbnail asynchronously. Returns cached version immediately if available,
+        Get thumbnail asynchronously. Returns in-memory cache hits immediately;
         otherwise queues for background loading and emits thumbnail_ready when done.
-        
-        This method is smart about using cached thumbnails:
-        1. First checks for exact size match
-        2. If no exact match, looks for larger cached thumbnails that can be scaled down
-        3. Only queues new request if no suitable cached thumbnail is available
         """
         cache_key_base = self.get_cache_key(image_path)
         exact_cache_key = f"{cache_key_base}_{size}"
         
-        # Check for exact size match first
+        # Check for exact size match first (only synchronous fast path — memory hit)
         with QMutexLocker(self.cache_mutex):
             if exact_cache_key in self.thumbnail_cache:
                 cached = self.thumbnail_cache[exact_cache_key]
                 if cached.size == size:
                     self.stats.thumbnail_hits += 1
-                    # Update access time using efficient counter (LRU) - much faster than timestamps
                     self._lru_counter += 1
                     self.thumbnail_cache[exact_cache_key] = cached._replace(created_time=self._lru_counter)
-                    # Emit signal for immediate cache hits
                     self.thumbnail_ready.emit(image_path, cached.pixmap, size)
                     return cached.pixmap
         
-        # Check for larger cached thumbnails that can be scaled down
-        # Optimize: only check a limited number of cache entries to avoid expensive scans
-        # when cache is large (e.g., after cmd-K recursive with thousands of images)
-        best_cached = None
-        best_size_diff = float('inf')
-        
-        # Use index - only check keys for this path (typically 3-5), not whole cache
-        with QMutexLocker(self.cache_mutex):
-            base = cache_key_base.split('_')[0] if '_' in cache_key_base else cache_key_base
-            for key in self._thumbnail_key_index.get(base, set()):
-                cached = self.thumbnail_cache.get(key)
-                if cached and cached.size >= size:
-                    size_diff = cached.size - size
-                    if size_diff < best_size_diff:
-                        best_cached = cached
-                        best_size_diff = size_diff
-        
-        if best_cached:
-            # Scale down the larger thumbnail to the requested size
-            scaled_pixmap = best_cached.pixmap.scaled(
-                size, size,
-                Qt.KeepAspectRatio,
-                Qt.SmoothTransformation
-            )
-            # Cache the scaled version for future use (outside of mutex to avoid deadlock)
-            self._cache_thumbnail_memory(exact_cache_key, scaled_pixmap, size)
-            self.stats.thumbnail_hits += 1
-            # Emit signal for scaled cache hits
-            self.thumbnail_ready.emit(image_path, scaled_pixmap, size)
-            return scaled_pixmap
-        
-        # Check disk cache for exact size match
-        disk_path = os.path.join(self.thumbnail_cache_dir, f"{exact_cache_key}.jpg")
-        if os.path.exists(disk_path):
-            try:
-                pixmap = QPixmap(disk_path)
-                if not pixmap.isNull():
-                    # Cache in memory (outside of mutex to avoid deadlock)
-                    self._cache_thumbnail_memory(exact_cache_key, pixmap, size)
-                    self.stats.thumbnail_hits += 1
-                    # Emit signal for disk cache hits
-                    self.thumbnail_ready.emit(image_path, pixmap, size)
-                    return pixmap
-            except Exception:
-                pass
-        
-        # Check disk cache for larger thumbnails that can be scaled down
-        try:
-            thumbnail_files = self.get_thumbnail_dir_listing()
-            prefix = (cache_key_base.split('_')[0] if '_' in cache_key_base else cache_key_base) + "_"
-            scanned = 0
-            max_disk_scan = 200
-            for filename in thumbnail_files:
-                scanned += 1
-                if scanned > max_disk_scan:
-                    break
-                if filename.startswith(prefix) and filename.endswith('.jpg'):
-                    # Extract size from filename
-                    try:
-                        cached_size = int(filename.split('_')[-1].replace('.jpg', ''))
-                        if cached_size >= size:
-                            disk_path = os.path.join(self.thumbnail_cache_dir, filename)
-                            pixmap = QPixmap(disk_path)
-                            if not pixmap.isNull():
-                                # Scale down the larger thumbnail
-                                scaled_pixmap = pixmap.scaled(
-                                    size, size,
-                                    Qt.KeepAspectRatio,
-                                    Qt.SmoothTransformation
-                                )
-                                # Cache the scaled version for future use (outside of mutex to avoid deadlock)
-                                self._cache_thumbnail_memory(exact_cache_key, scaled_pixmap, size)
-                                self.stats.thumbnail_hits += 1
-                                # Emit signal for scaled disk cache hits
-                                self.thumbnail_ready.emit(image_path, scaled_pixmap, size)
-                                return scaled_pixmap
-                    except (ValueError, IndexError):
-                        continue
-        except Exception:
-            pass
-        
-        # Not in cache, queue for background loading
+        # Disk load, scale-down, and generation run on BackgroundImageLoader workers
+        # (avoid QPixmap I/O and SmoothTransformation on the UI thread during scroll).
         self.stats.thumbnail_misses += 1
         self.background_loader.add_thumbnail_request(image_path, size, priority)
         return None

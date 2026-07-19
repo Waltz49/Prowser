@@ -9,24 +9,10 @@ from datetime import datetime
 from typing import List, Tuple, Optional
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QLabel, QTextEdit,
-    QDialogButtonBox, QTextEdit
+    QDialogButtonBox,
 )
-from thumbnails.thumbnail_constants import (
-    DIALOG_TEXT_COLOR_HEX,
-    DEFAULT_BORDER_COLOR,
-    CURRENT_IMAGE_BORDER_COLOR,
-    BUTTON_BG_DEFAULT_HEX, BUTTON_TEXT_DEFAULT_HEX, BUTTON_BORDER_DEFAULT_HEX,
-    BUTTON_BG_HOVER_HEX, BUTTON_TEXT_HOVER_HEX, BUTTON_BORDER_HOVER_HEX,
-    BUTTON_BG_PRESSED_HEX, BUTTON_FOCUS_TEXT_HEX, TEXT_DISABLED_HEX,
-    WIDGET_BG_DISABLED_HEX, DIALOG_BACKGROUND_HEX, CURRENT_IMAGE_BORDER_COLOR_HEX,
-    ERROR_COLOR_HEX,
-)
-from utils import file_string
-
-
-def qtcolor_to_hex(color):
-    """Convert QColor to hex string"""
-    return f"#{color.red():02x}{color.green():02x}{color.blue():02x}"
+from theme.theme_service import get_active_theme
+from utils import apply_standard_dialog_layout, file_string, get_standard_dialog_stylesheet
 
 
 class DeleteExifDialog(QDialog):
@@ -42,79 +28,18 @@ class DeleteExifDialog(QDialog):
         """
         super().__init__(parent)
         self.files_to_delete = files_to_delete
-        
-        # Convert QColor constants to hex strings
-        bg_color = DIALOG_BACKGROUND_HEX
-        text_color = DIALOG_TEXT_COLOR_HEX
-        border_color = qtcolor_to_hex(DEFAULT_BORDER_COLOR)
-        accent_border = qtcolor_to_hex(CURRENT_IMAGE_BORDER_COLOR)
+        th = get_active_theme()
+        error_color = th.error_color_hex
+        text_disabled = th.text_disabled_hex
         
         self.setWindowTitle("Delete EXIF Date")
         self.setMinimumWidth(600)
         self.setMinimumHeight(400)
-        
-        # Dark theme styling
-        self.setStyleSheet(f"""
-            QDialog {{
-                background-color: {bg_color};
-            }}
-            QLabel {{
-                font-size: 13px;
-            }}
-            QPushButton {{
-                background-color: {BUTTON_BG_DEFAULT_HEX};
-                color: {BUTTON_TEXT_DEFAULT_HEX};
-                border: 1px solid {BUTTON_BORDER_DEFAULT_HEX};
-                border-radius: 5px;
-                padding: 6px 18px;
-                min-width: 100px;
-                font-size: 13px;
-                font-family: 'Arial Narrow', Arial;
-                letter-spacing: 0.5px;
-            }}
-            QPushButton:focus {{
-                background-color: {DIALOG_BACKGROUND_HEX};
-                color: {BUTTON_FOCUS_TEXT_HEX};
-                border: 1px solid {CURRENT_IMAGE_BORDER_COLOR_HEX};
-                outline: none;
-            }}
-            QPushButton:hover {{
-                background-color: {BUTTON_BG_HOVER_HEX};
-                color: {BUTTON_TEXT_HOVER_HEX};
-                border: 1px solid {BUTTON_BORDER_HOVER_HEX};
-            }}
-            QPushButton:pressed {{
-                background-color: {BUTTON_BG_PRESSED_HEX};
-                color: {BUTTON_FOCUS_TEXT_HEX};
-            }}
-            QPushButton:disabled {{
-                color: {TEXT_DISABLED_HEX};
-                background-color: {WIDGET_BG_DISABLED_HEX};
-                border-color: {DIALOG_BACKGROUND_HEX};
-            }}
-            QDialogButtonBox QPushButton {{
-                min-width: 80px;
-                padding: 6px 14px;
-            }}
-            QTextEdit {{
-                background-color: {BUTTON_BG_DEFAULT_HEX};
-                color: {text_color};
-                border: 1px solid {border_color};
-                border-radius: 5px;
-                padding: 8px;
-                font-family: 'Monaco', 'Menlo', 'Courier New';
-                font-size: 12px;
-            }}
-            QScrollArea {{
-                background-color: {bg_color};
-                border: none;
-            }}
-        """)
+        self.setStyleSheet(get_standard_dialog_stylesheet(monospace_text_edit=True))
         
         # Main layout
         main_layout = QVBoxLayout(self)
-        main_layout.setSpacing(12)
-        main_layout.setContentsMargins(16, 16, 16, 16)
+        apply_standard_dialog_layout(main_layout)
         
         # Warning label - make it scarier
         warning_text = f"⚠️ WARNING: EXIF date/time data will be PERMANENTLY DELETED from {len(files_to_delete)} {file_string(len(files_to_delete))}."
@@ -122,7 +47,7 @@ class DeleteExifDialog(QDialog):
         
         warning_label = QLabel(warning_text)
         warning_label.setWordWrap(True)
-        warning_label.setStyleSheet(f"color: {ERROR_COLOR_HEX}; font-weight: bold; font-size: 14px;")
+        warning_label.setStyleSheet(f"color: {error_color}; font-weight: bold; font-size: 14px;")
         main_layout.addWidget(warning_label)
         
         # Info label
@@ -156,9 +81,9 @@ class DeleteExifDialog(QDialog):
             if exif_timestamp is not None:
                 exif_date = datetime.fromtimestamp(exif_timestamp).strftime("%Y-%m-%d %H:%M:%S")
                 exif_date_escaped = exif_date.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-                html_lines.append(f'<div>  <span style="color: {ERROR_COLOR_HEX}; font-weight: bold;">EXIF Date to DELETE: {exif_date_escaped}</span></div>')
+                html_lines.append(f'<div>  <span style="color: {error_color}; font-weight: bold;">EXIF Date to DELETE: {exif_date_escaped}</span></div>')
             else:
-                html_lines.append(f'<div>  <span style="color: {TEXT_DISABLED_HEX};">No EXIF date found (will be skipped)</span></div>')
+                html_lines.append(f'<div>  <span style="color: {text_disabled};">No EXIF date found (will be skipped)</span></div>')
             
             html_lines.append("<div><br></div>")
         

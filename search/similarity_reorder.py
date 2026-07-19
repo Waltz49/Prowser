@@ -340,23 +340,6 @@ def reorder_images_by_similarity(mw):
     if getattr(mw, 'cache_manager', None) and mw.cache_manager.background_loader:
         mw.cache_manager.background_loader.stop()
     
-    # Cancel thumbnail loading worker (non-blocking)
-    if getattr(mw, 'thumbnail_worker', None):
-        try:
-            if mw.thumbnail_worker.isRunning():
-                mw.thumbnail_worker.cancel()
-                # Use non-blocking cleanup
-                mw.cleanup_worker_thread('thumbnail_worker', delete_after=False)
-            else:
-                if hasattr(mw, 'thumbnail_worker'):
-                    delattr(mw, 'thumbnail_worker')
-        except Exception:
-            try:
-                mw.cleanup_worker_thread('thumbnail_worker', delete_after=False)
-            except Exception:
-                if hasattr(mw, 'thumbnail_worker'):
-                    delattr(mw, 'thumbnail_worker')
-    
     # Lazy initialize CNN sorter on first use
     mw._ensure_cnn_sorter_initialized()
     
@@ -952,23 +935,6 @@ def reorder_images_by_clip_search(mw):
     # Stop background loader
     if getattr(mw, 'cache_manager', None) and mw.cache_manager.background_loader:
         mw.cache_manager.background_loader.stop()
-    
-    # Cancel thumbnail loading worker (non-blocking)
-    if getattr(mw, 'thumbnail_worker', None):
-        try:
-            if mw.thumbnail_worker.isRunning():
-                mw.thumbnail_worker.cancel()
-                # Use non-blocking cleanup
-                mw.cleanup_worker_thread('thumbnail_worker', delete_after=False)
-            else:
-                if hasattr(mw, 'thumbnail_worker'):
-                    delattr(mw, 'thumbnail_worker')
-        except Exception:
-            try:
-                mw.cleanup_worker_thread('thumbnail_worker', delete_after=False)
-            except Exception:
-                if hasattr(mw, 'thumbnail_worker'):
-                    delattr(mw, 'thumbnail_worker')
     
     # NOW lazy initialize CNN sorter (user has confirmed they want to search)
     mw._ensure_cnn_sorter_initialized()

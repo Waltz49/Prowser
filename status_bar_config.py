@@ -38,6 +38,7 @@ from thumbnails.thumbnail_constants import (
     DEFAULT_BORDER_COLOR_HEX,
 )
 from theme.theme_service import get_active_theme
+from utils import apply_standard_dialog_layout, get_standard_dialog_stylesheet
 
 
 def qtcolor_to_hex(color):
@@ -241,75 +242,19 @@ class FilterDialog(QDialog):
         # Store current filter for pre-filling new entries
         self.current_filter = current_filter
         
-        # Convert QColor constants to hex strings
-        def qtcolor_to_hex(color):
-            """Convert QColor to hex string"""
-            return f"#{color.red():02x}{color.green():02x}{color.blue():02x}"
-        
-        bg_color = DIALOG_BACKGROUND_HEX
-        border_color = qtcolor_to_hex(DEFAULT_BORDER_COLOR)
-        accent_border = qtcolor_to_hex(CURRENT_IMAGE_BORDER_COLOR)
-        
         self.setWindowTitle("Edit Filters")
         self.setMinimumWidth(200)
         self.setMinimumHeight(300)
         
-        # Dark theme styling using constants
-        self.setStyleSheet(f"""
-            QDialog {{
-                background-color: {bg_color};
-            }}
-            QLabel {{
-                font-size: 13px;
-            }}
-            QPushButton {{
-                background-color: {BUTTON_BG_DEFAULT_HEX};
-                color: {BUTTON_TEXT_DEFAULT_HEX};
-                border: 1px solid {BUTTON_BORDER_DEFAULT_HEX};
-                border-radius: 5px;
-                padding: 6px 18px;
-                min-width: 100px;
-                font-size: 13px;
-                font-family: 'Arial Narrow', Arial;
-                letter-spacing: 0.5px;
-            }}
-            QPushButton:focus {{
-                background-color: {DIALOG_BACKGROUND_HEX};
-                color: {BUTTON_FOCUS_TEXT_HEX};
-                border: 1px solid {CURRENT_IMAGE_BORDER_COLOR_HEX};
-                outline: none;
-            }}
-            QPushButton:hover {{
-                background-color: {BUTTON_BG_HOVER_HEX};
-                color: {BUTTON_TEXT_HOVER_HEX};
-                border: 1px solid {BUTTON_BORDER_HOVER_HEX};
-            }}
-            QPushButton:pressed {{
-                background-color: {BUTTON_BG_PRESSED_HEX};
-                color: {BUTTON_FOCUS_TEXT_HEX};
-            }}
-            QPushButton:disabled {{
-                color: {TEXT_DISABLED_HEX};
-                background-color: {WIDGET_BG_DISABLED_HEX};
-                border-color: {DIALOG_BACKGROUND_HEX};
-            }}
-            QDialogButtonBox QPushButton {{
-                min-width: 80px;
-                padding: 6px 14px;
-            }}
-            QScrollArea {{
-                background-color: {bg_color};
-                border: none;
-            }}
-            QScrollArea > QWidget > QWidget {{
-                background-color: {bg_color};
-            }}
-        """)
+        th = get_active_theme()
+        self.setStyleSheet(
+            get_standard_dialog_stylesheet()
+            + f"\nQScrollArea > QWidget > QWidget {{ background-color: {th.dialog_background_hex}; }}"
+        )
         
         # Main layout
         main_layout = QVBoxLayout(self)
-        main_layout.setSpacing(12)
-        main_layout.setContentsMargins(16, 16, 16, 16)
+        apply_standard_dialog_layout(main_layout)
         
         # Scroll area for filter entries
         scroll_area = QScrollArea()

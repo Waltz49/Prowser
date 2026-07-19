@@ -6,9 +6,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Optional
 
-from PySide6.QtCore import QEvent, QSize, Qt
-from PySide6.QtGui import QEnterEvent, QIcon
-from PySide6.QtWidgets import QPushButton, QSizePolicy, QWidget
+from PySide6.QtCore import QSize, Qt
+from PySide6.QtWidgets import QSizePolicy, QWidget
 
 from thumbnails.thumbnail_constants import asset_path
 from theme.theme import (
@@ -17,6 +16,7 @@ from theme.theme import (
     push_button_stylesheet,
 )
 from theme.theme_service import get_active_theme
+from widgets.gear_icon_button import GearIconButton
 
 _SETTINGS_DIALOG_OBJECT_NAME = "settingsDialog"
 
@@ -124,7 +124,7 @@ def settings_gear_button_stylesheet(chrome: SettingsDialogChrome) -> str:
     """
 
 
-class SettingsGearButton(QPushButton):
+class SettingsGearButton(GearIconButton):
     """Gear icon button for opening a related settings or library dialog."""
 
     def __init__(
@@ -133,17 +133,13 @@ class SettingsGearButton(QPushButton):
         *,
         tooltip: str = "",
     ) -> None:
-        super().__init__("", parent)
-        self.setObjectName("settingsPreferenceGearBtn")
-        if tooltip:
-            self.setToolTip(tooltip)
-        self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._normal_icon = QIcon(asset_path("gear.svg"))
-        self._hover_icon = QIcon(asset_path("gear_hover.svg"))
-        self._hovered = False
-        self._apply_icon()
-        self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
-        self.setFixedSize(_SETTINGS_GEAR_BTN_SIZE, _SETTINGS_GEAR_BTN_SIZE)
+        super().__init__(
+            parent,
+            size_px=_SETTINGS_GEAR_BTN_SIZE,
+            icon_px=_SETTINGS_GEAR_ICON_PX,
+            tooltip=tooltip,
+            object_name="settingsPreferenceGearBtn",
+        )
         self._refresh_stylesheet()
 
     def _chrome(self) -> SettingsDialogChrome:
@@ -151,22 +147,6 @@ class SettingsGearButton(QPushButton):
 
     def _refresh_stylesheet(self) -> None:
         self.setStyleSheet(settings_gear_button_stylesheet(self._chrome()))
-
-    def _apply_icon(self) -> None:
-        icon = self._hover_icon if self._hovered else self._normal_icon
-        px = _SETTINGS_GEAR_ICON_PX
-        self.setIcon(icon)
-        self.setIconSize(QSize(px, px))
-
-    def enterEvent(self, event: QEnterEvent) -> None:
-        self._hovered = True
-        self._apply_icon()
-        super().enterEvent(event)
-
-    def leaveEvent(self, event: QEvent) -> None:
-        self._hovered = False
-        self._apply_icon()
-        super().leaveEvent(event)
 
 
 def settings_dialog_stylesheet(chrome: SettingsDialogChrome) -> str:

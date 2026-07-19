@@ -28,7 +28,7 @@ class ThumbnailDisplayManager:
         if getattr(self.main_window, '_batch_directory_load', False):
             return
         self.generate_thumbnails(force_refresh=False)
-    
+
     def generate_thumbnails(self, force_refresh=False):
         """Create responsive thumbnail grid with canvas-based display"""
         # Check if we have images to process
@@ -44,7 +44,7 @@ class ThumbnailDisplayManager:
             self.main_window.thumbnail_container.set_thumbnails([], self.main_window.current_thumbnail_size)
             return
         
-        # Use displayed_images directly
+        # Use displayed_images directly (lock order is enforced on load, sort, and refresh)
         images_to_process = self.main_window.displayed_images
         
         # Calculate grid based on the actual number of images being processed
@@ -185,65 +185,8 @@ class ThumbnailDisplayManager:
         self.main_window.start_background_thumbnail_loading_if_needed()
     
     def _start_throttled_thumbnail_loading(self, images_to_process):
-        """Start loading thumbnails using background worker to avoid blocking UI"""
-        if not images_to_process:
-            return
-        
-        # Import here to avoid circular import (image_browser_window imports this module)
-        from workers.window_background_workers import ThumbnailLoadingWorker
-        
-        # Cancel any existing worker FIRST, before creating a new one
-        # Store reference to old worker to avoid race conditions with delayed cleanup
-        old_worker = None
-        if hasattr(self.main_window, 'thumbnail_worker') and self.main_window.thumbnail_worker:
-            try:
-                if self.main_window.thumbnail_worker.isRunning():
-                    self.main_window.thumbnail_worker.cancel()
-                    # Store reference for delayed cleanup
-                    old_worker = self.main_window.thumbnail_worker
-                    # Clear reference immediately so new worker can be created
-                    self.main_window.thumbnail_worker = None
-                else:
-                    # Worker not running, just clear reference
-                    old_worker = self.main_window.thumbnail_worker
-                    self.main_window.thumbnail_worker = None
-            except Exception:
-                # If anything goes wrong, clear reference and continue
-                try:
-                    old_worker = self.main_window.thumbnail_worker
-                except:
-                    pass
-                self.main_window.thumbnail_worker = None
-        
-        # Schedule cleanup of old worker (if any) after a delay
-        # This prevents blocking but doesn't interfere with new worker creation
-        if old_worker:
-            def cleanup_old_worker():
-                try:
-                    # Wait for old worker to finish (with timeout to avoid blocking)
-                    if old_worker and old_worker.isRunning():
-                        old_worker.wait(100)  # Wait up to 100ms for graceful shutdown
-                except Exception:
-                    pass
-            QTimer.singleShot(100, cleanup_old_worker)
-        
-        # Create and start the background worker IMMEDIATELY
-        # Don't wait for cleanup - start loading thumbnails right away
-        self.main_window.thumbnail_worker = ThumbnailLoadingWorker(
-            self.main_window.cache_manager, 
-            images_to_process, 
-            self.main_window.current_thumbnail_size, 
-            self.main_window
-        )
-        
-        # Connect signals
-        self.main_window.thumbnail_worker.thumbnail_loaded.connect(self.main_window._on_thumbnail_loaded_from_worker)
-        self.main_window.thumbnail_worker.finished.connect(self.main_window._on_thumbnail_worker_finished)
-        self.main_window.thumbnail_worker.error.connect(self.main_window._on_thumbnail_worker_error)
-        self.main_window.thumbnail_worker.progress_updated.connect(self.main_window._on_thumbnail_progress_updated)
-        
-        # Start immediately - don't wait for cleanup
-        self.main_window.thumbnail_worker.start()
+        """Delegate to main window BackgroundImageLoader queue."""
+        self.main_window._start_throttled_thumbnail_loading(images_to_process)
     
     def populate_indices_arrays(self):
         """Populate the image indices arrays for navigation"""
@@ -498,36 +441,3 @@ class ThumbnailDisplayManager:
         
         # Regenerate thumbnails
         self.generate_thumbnails(force_refresh=True)
-
-    def on_thumbnail_loaded_from_worker(self, path, pixmap):
-        """Handle thumbnail loaded signal from background worker"""
-        mw = self.main_window
-        thumbnail_index = mw.find_thumbnail_index_by_path(path)
-        if thumbnail_index is not None:
-            # set_thumbnail_loaded applies session transforms; do not pre-transform here
-            mw.thumbnail_container.set_thumbnail_loaded(thumbnail_index, pixmap)
-
-    def on_thumbnail_worker_finished(self):
-        """Handle thumbnail loading finished signal from background worker"""
-        mw = self.main_window
-        mw.progress_bar.setVisible(False)
-        QTimer.singleShot(0, lambda: mw.cache_manager.save_metadata_cache())
-        if mw.status_bar:
-            mw.status_bar_manager.clear_message()
-
-    def on_thumbnail_worker_error(self):
-        """Handle thumbnail loading error signal from background worker"""
-        pass
-
-    def on_thumbnail_progress_updated(self, completed, total, _):
-        """Handle thumbnail loading progress updates"""
-        mw = self.main_window
-        if total > 0:
-            if not mw.progress_bar.isVisible():
-                mw.progress_bar.setVisible(True)
-                mw.progress_bar.raise_()
-            mw.progress_bar.setMaximum(total)
-            mw.progress_bar.setValue(completed)
-            mw.progress_bar.setFormat(f"Loading thumbnails: {completed}/{total}")
-        else:
-            mw.progress_bar.setVisible(False)

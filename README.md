@@ -97,6 +97,7 @@ By default, the app will use threads when bundled into an app, and processes whe
 - [API.md](API.md) — pipe API for controlling a running instance
 - [IMAGE_CREATE_PLUGINS.md](IMAGE_CREATE_PLUGINS.md) — **Image** menu and local generation
 - [ARCHITECTURE.md](ARCHITECTURE.md) — code structure and module map (for contributors)
+- [tools/README.md](tools/README.md) — standalone dev scripts (not part of the app bundle)
 
 ## License
 

@@ -5976,20 +5976,18 @@ class SettingsDialog(QDialog):
         model_label = lora_model_display_name(model_key) if model_key else "this model"
 
         if is_user_lora_id(lora_id):
-            reply = QMessageBox.question(
+            reply = show_styled_question(
                 self,
                 "Remove LoRA",
                 f"Remove imported LoRA «{label}» from {model_label}?",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                QMessageBox.StandardButton.No,
+                default_no=True,
             )
         else:
-            reply = QMessageBox.question(
+            reply = show_styled_question(
                 self,
                 "Hide LoRA",
                 f"Hide {label} for {model_label}?",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                QMessageBox.StandardButton.No,
+                default_no=True,
             )
         if reply != QMessageBox.StandardButton.Yes:
             return

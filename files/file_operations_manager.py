@@ -2453,23 +2453,8 @@ class FileOperationsManager:
             return ("", 0, 0, "date", "none", "top", False)
 
     def _compute_file_md5(self, file_path: str) -> Optional[str]:
-
-        """
-        Compute MD5 hash of a file.
-        Args:
-            file_path: Path to file
-        Returns:
-            MD5 hash as hexadecimal string, or None on error
-        """
-        try:
-            md5_hash = hashlib.md5()
-            with open(file_path, 'rb') as f:
-                for chunk in iter(lambda: f.read(8192), b''):
-                    md5_hash.update(chunk)
-            return md5_hash.hexdigest()
-        except (IOError, OSError) as e:
-            print(f"Error computing MD5 for {file_path}: {e}")
-            return None
+        from file_ops.duplicate_hash import compute_file_md5
+        return compute_file_md5(file_path)
 
     def _get_cnn_feature_if_cached(self, path: str, skip_mtime_check: bool = False) -> Optional['torch.Tensor']:
         """
@@ -2995,49 +2980,6 @@ class FileOperationsManager:
             background_loader_was_running = mw.cache_manager.background_loader.isRunning()
             if background_loader_was_running:
                 mw.cache_manager.background_loader.stop()
-
-        # Cancel thumbnail loading worker
-        if hasattr(mw, 'thumbnail_worker') and mw.thumbnail_worker:
-            try:
-                if mw.thumbnail_worker.isRunning():
-                    mw.thumbnail_worker.cancel()
-                    # Use non-blocking cleanup
-                    if hasattr(mw, 'cleanup_worker_thread'):
-                        mw.cleanup_worker_thread('thumbnail_worker', delete_after=False)
-                    else:
-                        # Fallback: use QTimer for non-blocking cleanup
-                        def cleanup():
-                            try:
-                                if hasattr(mw, 'thumbnail_worker') and mw.thumbnail_worker:
-                                    if mw.thumbnail_worker.isRunning():
-                                        mw.thumbnail_worker.terminate()
-                                    if hasattr(mw, 'thumbnail_worker'):
-                                        delattr(mw, 'thumbnail_worker')
-                            except Exception:
-                                pass
-                        QTimer.singleShot(100, cleanup)
-                else:
-                    if hasattr(mw, 'thumbnail_worker'):
-                        delattr(mw, 'thumbnail_worker')
-            except Exception:
-                try:
-                    if hasattr(mw, 'cleanup_worker_thread'):
-                        mw.cleanup_worker_thread('thumbnail_worker', delete_after=False)
-                    else:
-                        # Fallback: use QTimer for non-blocking cleanup
-                        def cleanup():
-                            try:
-                                if hasattr(mw, 'thumbnail_worker') and mw.thumbnail_worker:
-                                    if mw.thumbnail_worker.isRunning():
-                                        mw.thumbnail_worker.terminate()
-                                    if hasattr(mw, 'thumbnail_worker'):
-                                        delattr(mw, 'thumbnail_worker')
-                            except Exception:
-                                pass
-                        QTimer.singleShot(100, cleanup)
-                except Exception:
-                    if hasattr(mw, 'thumbnail_worker'):
-                        delattr(mw, 'thumbnail_worker')
 
         # Helper function to restart background loading
         def restart_background_loading():
@@ -5081,71 +5023,11 @@ class FileOperationsManager:
         if hasattr(mw, 'highlight_index') and 0 <= mw.highlight_index < len(displayed):
             current_image_path = displayed[mw.highlight_index]
 
-        progress_dialog = create_titled_progress_dialog(
-            mw, "Find Duplicate Image Files", len(displayed)
+        from file_ops.duplicate_hash import run_duplicate_hash_ui
+
+        hash_to_files, file_to_hash, cancelled = run_duplicate_hash_ui(
+            mw, displayed, window_title="Find Duplicate Image Files"
         )
-
-        # Compute MD5 hash for each file
-        hash_to_files = {}
-        file_to_hash = {}  # Store hash for each file for later use
-
-        cancelled = False
-        for idx, file_path in enumerate(displayed):
-            # Check for cancellation
-            if progress_dialog.wasCanceled():
-                cancelled = True
-                break
-
-            # Update progress
-            progress_dialog.setValue(idx)
-            progress_dialog.setLabelText(
-                f"Hashing {elide_progress_filename(os.path.basename(file_path))}... "
-                f"({idx + 1}/{len(displayed)})"
-            )
-            QApplication.processEvents()  # Keep UI responsive
-
-            if not os.path.exists(file_path) or not os.path.isfile(file_path):
-                continue
-
-            try:
-                # Compute MD5 hash
-                md5_hash = hashlib.md5()
-                chunk_count = 0
-                with open(file_path, 'rb') as f:
-                    # Read file in chunks to handle large files efficiently
-                    for chunk in iter(lambda: f.read(4096), b''):
-                        # Check for cancellation during file reading (every 100 chunks for performance)
-                        chunk_count += 1
-                        if chunk_count % 100 == 0:
-                            QApplication.processEvents()
-                            if progress_dialog.wasCanceled():
-                                cancelled = True
-                                break
-                        md5_hash.update(chunk)
-
-                if cancelled:
-                    break
-
-                file_hash = md5_hash.hexdigest()
-
-                # Store hash for this file
-                file_to_hash[file_path] = file_hash
-
-                # Group files by hash
-                if file_hash not in hash_to_files:
-                    hash_to_files[file_hash] = []
-                hash_to_files[file_hash].append(file_path)
-            except (IOError, OSError, PermissionError):
-                # Skip files that can't be read - they can't be duplicates
-                continue
-
-        # Set final progress value if not cancelled
-        if not cancelled:
-            progress_dialog.setValue(len(displayed))
-            QApplication.processEvents()
-
-        # Close progress dialog
-        progress_dialog.close()
 
         # If cancelled, return early
         if cancelled:
@@ -5302,71 +5184,11 @@ class FileOperationsManager:
             if 0 <= mw.highlight_index < len(mw.displayed_images):
                 current_image_path = mw.displayed_images[mw.highlight_index]
 
-        progress_dialog = create_titled_progress_dialog(
-            mw, "Find Duplicate Image Files", len(all_image_files)
+        from file_ops.duplicate_hash import run_duplicate_hash_ui
+
+        hash_to_files, file_to_hash, cancelled = run_duplicate_hash_ui(
+            mw, all_image_files, window_title="Find Duplicate Image Files"
         )
-
-        # Compute MD5 hash for each file
-        hash_to_files = {}
-        file_to_hash = {}
-
-        cancelled = False
-        for idx, file_path in enumerate(all_image_files):
-            # Check for cancellation
-            if progress_dialog.wasCanceled():
-                cancelled = True
-                break
-
-            # Update progress
-            progress_dialog.setValue(idx)
-            progress_dialog.setLabelText(
-                f"Hashing {elide_progress_filename(os.path.basename(file_path))}... "
-                f"({idx + 1}/{len(all_image_files)})"
-            )
-            QApplication.processEvents()
-
-            if not os.path.exists(file_path) or not os.path.isfile(file_path):
-                continue
-
-            try:
-                # Compute MD5 hash
-                md5_hash = hashlib.md5()
-                chunk_count = 0
-                with open(file_path, 'rb') as f:
-                    # Read file in chunks to handle large files efficiently
-                    for chunk in iter(lambda: f.read(4096), b''):
-                        # Check for cancellation during file reading (every 100 chunks for performance)
-                        chunk_count += 1
-                        if chunk_count % 100 == 0:
-                            QApplication.processEvents()
-                            if progress_dialog.wasCanceled():
-                                cancelled = True
-                                break
-                        md5_hash.update(chunk)
-
-                if cancelled:
-                    break
-
-                file_hash = md5_hash.hexdigest()
-
-                # Store hash for this file
-                file_to_hash[file_path] = file_hash
-
-                # Group files by hash
-                if file_hash not in hash_to_files:
-                    hash_to_files[file_hash] = []
-                hash_to_files[file_hash].append(file_path)
-            except (IOError, OSError, PermissionError) as e:
-                # Skip files that can't be read - they can't be duplicates
-                continue
-
-        # Set final progress value if not cancelled
-        if not cancelled:
-            progress_dialog.setValue(len(all_image_files))
-            QApplication.processEvents()
-
-        # Close progress dialog
-        progress_dialog.close()
 
         # If cancelled, return early
         if cancelled:

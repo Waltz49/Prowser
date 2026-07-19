@@ -221,6 +221,36 @@ class SortingManager:
         
         # Visually highlight the current image (this updates the canvas highlight)
         self.main_window.highlight_image()
+
+    def enforce_locked_first_in_thumbnail_view(self) -> bool:
+        """Whether locked files should be pinned to the top of the thumbnail grid."""
+        mw = self.main_window
+        if mw.current_view_mode != 'thumbnail':
+            return False
+        if getattr(mw, 'specific_files_active', False):
+            return False
+        if not getattr(mw, 'allow_thumbnail_locking', False):
+            return False
+        # CUSTOM after in-place lock: positions stay until the user changes sort mode.
+        if self.current_sort_mode == SortMode.CUSTOM:
+            return False
+        return True
+
+    def needs_locked_files_first(self, images: List[str]) -> bool:
+        """True when locked files exist but are not already at the top."""
+        if not images or not self.enforce_locked_first_in_thumbnail_view():
+            return False
+        locked_paths, _ = self._separate_locked_unlocked(images)
+        return bool(locked_paths) and images[: len(locked_paths)] != locked_paths
+
+    def reorder_locked_files_first(self, images: List[str]) -> List[str]:
+        """Move locked files to the top in .prsort order; preserve unlocked order."""
+        if not images:
+            return images
+        locked_paths, unlocked_paths = self._separate_locked_unlocked(images)
+        if not locked_paths:
+            return images
+        return locked_paths + unlocked_paths
     
     def _separate_locked_unlocked(self, images: List[str]) -> Tuple[List[str], List[str]]:
         """Separate images into locked and unlocked lists.

@@ -3,15 +3,13 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import QEvent, QSize, Qt
-from PySide6.QtGui import QEnterEvent, QIcon
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QDialog,
     QHBoxLayout,
     QLabel,
     QPlainTextEdit,
     QPushButton,
-    QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
@@ -25,9 +23,9 @@ from chat_plugins.chat_ui_common import (
     chat_prompt_edit_stylesheet,
     install_cmd_enter_accept,
 )
-from theme.theme_base import asset_path
 from theme.theme_service import get_active_theme
 from utils import get_button_style, get_dialog_shell_stylesheet
+from widgets.gear_icon_button import GearIconButton
 
 CHAT_GEAR_BTN_SIZE = 26
 _CHAT_GEAR_ICON_PX = 18
@@ -61,35 +59,6 @@ def _chat_gear_button_stylesheet() -> str:
     """
 
 
-class _ChatSystemPromptGearButton(QPushButton):
-    def __init__(self, parent: QWidget | None = None) -> None:
-        super().__init__("", parent)
-        self.setObjectName("chatSystemPromptGearBtn")
-        self.setToolTip("Manage saved system prompts")
-        self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._normal_icon = QIcon(asset_path("gear.svg"))
-        self._hover_icon = QIcon(asset_path("gear_hover.svg"))
-        self._hovered = False
-        self._apply_icon()
-        self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
-        self.setFixedSize(CHAT_GEAR_BTN_SIZE, CHAT_GEAR_BTN_SIZE)
-
-    def _apply_icon(self) -> None:
-        icon = self._hover_icon if self._hovered else self._normal_icon
-        self.setIcon(icon)
-        self.setIconSize(QSize(_CHAT_GEAR_ICON_PX, _CHAT_GEAR_ICON_PX))
-
-    def enterEvent(self, event: QEnterEvent) -> None:
-        self._hovered = True
-        self._apply_icon()
-        super().enterEvent(event)
-
-    def leaveEvent(self, event: QEvent) -> None:
-        self._hovered = False
-        self._apply_icon()
-        super().leaveEvent(event)
-
-
 def edit_chat_system_prompt(parent: QWidget | None, current: str) -> str | None:
     """Show System Prompt for Chat dialog. Returns new text on OK, else None."""
     dialog = QDialog(parent)
@@ -113,7 +82,14 @@ def edit_chat_system_prompt(parent: QWidget | None, current: str) -> str | None:
     install_cmd_enter_accept(dialog, edit)
 
     gear_row = QHBoxLayout()
-    gear_button = _ChatSystemPromptGearButton(dialog)
+    gear_button = GearIconButton(
+        dialog,
+        size_px=CHAT_GEAR_BTN_SIZE,
+        icon_px=_CHAT_GEAR_ICON_PX,
+        tooltip="Manage saved system prompts",
+        object_name="chatSystemPromptGearBtn",
+        stylesheet=_chat_gear_button_stylesheet(),
+    )
 
     def _open_prompt_library() -> None:
         _, selected_text = run_chat_system_prompt_library(

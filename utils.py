@@ -359,6 +359,43 @@ def get_dialog_button_box_style() -> str:
     )
 
 
+DIALOG_MARGIN = 20
+DIALOG_SPACING = 16
+
+
+def get_standard_dialog_stylesheet(*, monospace_text_edit: bool = False) -> str:
+    """Shell, buttons, inputs, and scroll areas for confirmation/file-list dialogs."""
+    from theme.theme import dialog_context_stylesheet
+    from theme.theme_service import get_active_theme
+
+    th = get_active_theme()
+    parts = [
+        get_dialog_shell_stylesheet(),
+        get_button_style(),
+        get_dialog_button_box_style(),
+        dialog_context_stylesheet(th),
+        "QLabel { font-size: 13px; }",
+        (
+            "QDialog QRadioButton { font-size: 13px; spacing: 8px; }\n"
+            f"QDialog QRadioButton:disabled {{ color: {th.text_disabled_hex}; }}"
+        ),
+    ]
+    if monospace_text_edit:
+        parts.append(
+            "QDialog QTextEdit { "
+            "font-family: 'Monaco', 'Menlo', 'Courier New'; "
+            "font-size: 12px; padding: 8px; "
+            "}"
+        )
+    return "\n".join(parts)
+
+
+def apply_standard_dialog_layout(layout) -> None:
+    """Apply shared margin and spacing for standard confirmation dialogs."""
+    layout.setContentsMargins(DIALOG_MARGIN, DIALOG_MARGIN, DIALOG_MARGIN, DIALOG_MARGIN)
+    layout.setSpacing(DIALOG_SPACING)
+
+
 def format_file_size(size_bytes: int) -> str:
     """Format file size in bytes to human-readable format (KB, MB, GB)"""
     if size_bytes < 1024 * 1024:  # Less than 1 MB

@@ -18,7 +18,16 @@ Navigation contract (read before changing current image / index):
 
 import os
 from typing import List, Optional, Callable
+
 from PySide6.QtCore import QObject, Signal, QMutexLocker, QRecursiveMutex
+
+# Skip per-path os.path.exists when the caller already validated paths (large directory loads).
+_VALIDATE_EXISTS_MAX = 500
+
+
+def normalize_file_path(path: str) -> str:
+    """Canonical absolute path for file lists (display order, lock matching)."""
+    return os.path.abspath(os.path.expanduser(path))
 
 
 class FileDataModel(QObject):
@@ -59,22 +68,29 @@ class FileDataModel(QObject):
         with QMutexLocker(self._mutex):
             return self._displayed_images.copy()
     
-    def set_displayed_images(self, images: List[str], notify: bool = True):
+    def set_displayed_images(self, images: List[str], notify: bool = True, *, validate_exists: Optional[bool] = None):
         """
         Set displayed images list.
         
         Args:
             images: List of image file paths
             notify: If True, emit signals and notify listeners
+            validate_exists: When False, skip os.path.exists per path (faster for
+                large lists from directory scans). Default: True for lists up to
+                _VALIDATE_EXISTS_MAX entries.
         """
         with QMutexLocker(self._mutex):
-            # Normalize paths and filter out non-existent files
+            check_exists = (
+                validate_exists
+                if validate_exists is not None
+                else len(images) <= _VALIDATE_EXISTS_MAX
+            )
             normalized_images = []
             for img in images:
                 if img and isinstance(img, str):
                     try:
-                        abs_path = os.path.abspath(os.path.expanduser(img))
-                        if os.path.exists(abs_path):
+                        abs_path = normalize_file_path(img)
+                        if not check_exists or os.path.exists(abs_path):
                             normalized_images.append(abs_path)
                     except Exception:
                         continue

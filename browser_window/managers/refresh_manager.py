@@ -70,15 +70,18 @@ class RefreshManager:
         
         # Quick check: if sets are identical, nothing changed - skip refresh
         if displayed_set == current_files:
+            displayed_list = self.main_window.get_displayed_images() or []
+            if self._apply_lock_first_order_if_needed(displayed_list):
+                return
             # CRITICAL: Skip mtime loop when exiting browse mode - it can invalidate thumbnails
             # while the worker is loading (race on network volumes like MiscFS), leaving placeholders empty
             if getattr(self.main_window, 'browse_view_exit_in_progress', False):
                 return
             # OPTIMIZATION: Skip expensive mtime checks for large result sets
-            # Only check mtime if we have a reasonable number of files (< 1000)
+            # Only check mtime if we have a reasonable number of files (< 500)
             # For larger sets (e.g., after cmd-K search), rely on cache manager's
             # built-in stale cache detection via mtime in get_cache_key()
-            if len(displayed_set) < 1000:
+            if len(displayed_set) < 500:
                 # Still check for file modifications (mtime changes) and invalidate cache if needed
                 # This ensures thumbnails stay up to date without full rebuild
                 for image_path in displayed_set:
@@ -99,6 +102,25 @@ class RefreshManager:
         
         # Files changed - do efficient refresh
         self._efficient_refresh_with_changes(current_files, displayed_set)
+
+    def _apply_lock_first_order_if_needed(self, images: List[str]) -> bool:
+        """Pin locked files to the top without re-sorting unlocked files. Returns True if updated."""
+        sm = getattr(self.main_window, 'sorting_manager', None)
+        if not sm or not sm.needs_locked_files_first(images):
+            return False
+        ordered = sm.reorder_locked_files_first(images)
+        if ordered == images:
+            return False
+        self.main_window._set_displayed_images_with_sync(ordered, sync=True)
+        if (
+            hasattr(self.main_window, 'thumbnail_container')
+            and self.main_window.thumbnail_container
+            and hasattr(self.main_window.thumbnail_container, 'canvas')
+        ):
+            self.main_window.thumbnail_container.canvas.reorder_thumbnails(
+                ordered, force_recalculate_grid=True
+            )
+        return True
     
     def _efficient_refresh_with_changes(self, current_files: Set[str], displayed_set: Set[str]):
         """Efficiently refresh directory when files changed - only updates what's necessary"""
@@ -224,23 +246,10 @@ class RefreshManager:
             current_files = self.main_window._get_current_directory_files()
         if current_files is None:
             return
-        current_files_list = list(current_files)
 
-        # CRITICAL: Always separate locked and unlocked files first
-        # Locked files must be at the top in their saved order from .prsort, regardless of sort mode
-        locked_paths, unlocked_paths = self.main_window.sorting_manager._separate_locked_unlocked(current_files_list)
-        
-        # Sorting (only unlocked files)
-        if self.main_window.current_sort_mode == SortMode.NAME:
-            unlocked_paths.sort(key=lambda path: path.lower(), reverse=self.main_window.is_reversed)
-        else:
-            try:
-                unlocked_paths.sort(key=self.main_window.sorting_manager.get_sort_key, reverse=not self.main_window.is_reversed)
-            except Exception:
-                unlocked_paths.sort(key=lambda p: p.lower())
-        
-        # Combine: locked files first (in their saved order), then unlocked files
-        current_files_list = locked_paths + unlocked_paths
+        # Mtime/cache maintenance only — do not re-sort (avoids reshuffling Random/CUSTOM).
+        displayed_images = self.main_window.get_displayed_images() or []
+        self._apply_lock_first_order_if_needed(displayed_images)
 
         self.main_window.update_status_bar_sections()
     

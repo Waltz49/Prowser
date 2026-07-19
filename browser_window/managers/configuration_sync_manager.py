@@ -118,14 +118,14 @@ class ConfigurationSyncManager:
                 message_type in ('load_directory', 'load_files', 'load_file_with_thumbnails', 'load_file_with_window')
             )
             already_deferred = configuration.pop('_api_load_deferred', False)
-            if (is_load_request and not already_deferred and
-                getattr(mw, 'thumbnail_worker', None) and mw.thumbnail_worker.isRunning()):
-                mw.thumbnail_worker.cancel()
-                mw.cleanup_worker_thread('thumbnail_worker', delete_after=False)
-                cfg = dict(configuration)
-                cfg['_api_load_deferred'] = True
-                QTimer.singleShot(50, lambda c=cfg: self._handle_configuration(c))
-                return
+            if is_load_request and not already_deferred:
+                bl = getattr(getattr(mw, 'cache_manager', None), 'background_loader', None)
+                if bl and bl.isRunning() and hasattr(mw, '_interrupt_thumbnail_loading'):
+                    mw._interrupt_thumbnail_loading()
+                    cfg = dict(configuration)
+                    cfg['_api_load_deferred'] = True
+                    QTimer.singleShot(50, lambda c=cfg: self._handle_configuration(c))
+                    return
             converted_config = {}
             if message_type == 'load_directory':
                 converted_config['directory'] = configuration.get('directory')

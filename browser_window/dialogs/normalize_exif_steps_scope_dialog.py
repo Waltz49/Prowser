@@ -15,22 +15,7 @@ from PySide6.QtWidgets import (
     QRadioButton,
     QVBoxLayout,
 )
-from thumbnails.thumbnail_constants import (
-    BUTTON_BG_DEFAULT_HEX,
-    BUTTON_BG_HOVER_HEX,
-    BUTTON_BG_PRESSED_HEX,
-    BUTTON_BORDER_DEFAULT_HEX,
-    BUTTON_BORDER_HOVER_HEX,
-    BUTTON_FOCUS_TEXT_HEX,
-    BUTTON_TEXT_DEFAULT_HEX,
-    BUTTON_TEXT_HOVER_HEX,
-    CURRENT_IMAGE_BORDER_COLOR_HEX,
-    DIALOG_BACKGROUND_HEX,
-    DIALOG_TEXT_COLOR_HEX,
-    TEXT_DISABLED_HEX,
-    WIDGET_BG_DISABLED_HEX,
-)
-from utils import file_string, normalize_path_for_display
+from utils import apply_standard_dialog_layout, file_string, get_standard_dialog_stylesheet, normalize_path_for_display
 
 
 class NormalizeExifStepsScopeDialog(QDialog):
@@ -49,68 +34,12 @@ class NormalizeExifStepsScopeDialog(QDialog):
         super().__init__(parent)
         self._scope: Optional[str] = None
 
-        bg_color = DIALOG_BACKGROUND_HEX
-        text_color = DIALOG_TEXT_COLOR_HEX
-
         self.setWindowTitle("Normalize EXIF Steps")
         self.setMinimumWidth(520)
-
-        self.setStyleSheet(f"""
-            QDialog {{
-                background-color: {bg_color};
-            }}
-            QLabel {{
-                font-size: 13px;
-                color: {text_color};
-            }}
-            QRadioButton {{
-                font-size: 13px;
-                color: {text_color};
-                spacing: 8px;
-            }}
-            QRadioButton:disabled {{
-                color: {TEXT_DISABLED_HEX};
-            }}
-            QPushButton {{
-                background-color: {BUTTON_BG_DEFAULT_HEX};
-                color: {BUTTON_TEXT_DEFAULT_HEX};
-                border: 1px solid {BUTTON_BORDER_DEFAULT_HEX};
-                border-radius: 5px;
-                padding: 6px 18px;
-                min-width: 100px;
-                font-size: 13px;
-                font-family: 'Arial Narrow', Arial;
-                letter-spacing: 0.5px;
-            }}
-            QPushButton:focus {{
-                background-color: {DIALOG_BACKGROUND_HEX};
-                color: {BUTTON_FOCUS_TEXT_HEX};
-                border: 1px solid {CURRENT_IMAGE_BORDER_COLOR_HEX};
-                outline: none;
-            }}
-            QPushButton:hover {{
-                background-color: {BUTTON_BG_HOVER_HEX};
-                color: {BUTTON_TEXT_HOVER_HEX};
-                border: 1px solid {BUTTON_BORDER_HOVER_HEX};
-            }}
-            QPushButton:pressed {{
-                background-color: {BUTTON_BG_PRESSED_HEX};
-                color: {BUTTON_FOCUS_TEXT_HEX};
-            }}
-            QPushButton:disabled {{
-                color: {TEXT_DISABLED_HEX};
-                background-color: {WIDGET_BG_DISABLED_HEX};
-                border-color: {DIALOG_BACKGROUND_HEX};
-            }}
-            QDialogButtonBox QPushButton {{
-                min-width: 80px;
-                padding: 6px 14px;
-            }}
-        """)
+        self.setStyleSheet(get_standard_dialog_stylesheet())
 
         layout = QVBoxLayout(self)
-        layout.setSpacing(12)
-        layout.setContentsMargins(16, 16, 16, 16)
+        apply_standard_dialog_layout(layout)
 
         intro = QLabel(
             "Scan for legacy [N] step suffixes in Image Model EXIF. Choose scope:"
