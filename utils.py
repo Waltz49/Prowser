@@ -311,6 +311,39 @@ def get_button_focus_colors() -> tuple:
     return (BUTTON_BG_HOVER_HEX, BUTTON_BORDER_HOVER_HEX, BUTTON_TEXT_HOVER_HEX)
 
 
+def get_compact_icon_button_style(
+    size_px: int,
+    *,
+    object_name: str = "compactIconBtn",
+    font_size: str = "16px",
+) -> str:
+    """Square compact button style for +/- and similar icon controls."""
+    from theme.theme import push_button_stylesheet
+    from theme.theme_service import get_active_theme
+
+    th = get_active_theme()
+    selector = f"QPushButton#{object_name}"
+    base = push_button_stylesheet(
+        th,
+        selector=selector,
+        min_width=f"{size_px}px",
+        padding="0px",
+        font_size=font_size,
+        border_radius="4px",
+    )
+    return (
+        base
+        + f"""
+    {selector} {{
+        max-width: {size_px}px;
+        min-height: {size_px}px;
+        max-height: {size_px}px;
+        font-weight: bold;
+    }}
+    """
+    )
+
+
 def get_dialog_shell_stylesheet() -> str:
     """Dialog window + child QWidget backgrounds (overrides global application QWidget fill)."""
     from theme.theme_service import get_active_theme

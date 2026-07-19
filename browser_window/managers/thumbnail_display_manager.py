@@ -406,38 +406,8 @@ class ThumbnailDisplayManager:
             return self.main_window.displayed_images.index(path)
         except ValueError:
             return None
-    
-    def set_thumbnail_size(self, size: int):
-        """Set thumbnail size"""
-        self.main_window.current_thumbnail_size = size
-        self.main_window.manual_thumbnail_size = True
-        self.generate_thumbnails(force_refresh=True)
-    
-    def set_dynamic_thumbnail_size(self):
-        """Set thumbnail size dynamically based on available space"""
-        if hasattr(self.main_window, 'thumbnail_operations_manager'):
-            self.main_window.current_thumbnail_size, _, _ = self.main_window.thumbnail_operations_manager.calculate_grid_for_images(len(self.main_window.displayed_images))
-            self.main_window.manual_thumbnail_size = False
-    
-    def _force_thumbnail_size_update(self, size: int):
-        """Force thumbnail size update"""
-        self.main_window.current_thumbnail_size = size
-        if hasattr(self.main_window, 'thumbnail_container') and self.main_window.thumbnail_container:
-            self.main_window.thumbnail_container.canvas.thumbnail_size = size
-            self.main_window.thumbnail_container.canvas.calculate_grid_layout()
-            self.main_window.thumbnail_container.canvas.update()
-    
+
     def reorder_thumbnail_layout(self):
         """Reorder thumbnails without regenerating"""
         if hasattr(self.main_window, 'thumbnail_container') and self.main_window.thumbnail_container:
             self.main_window.thumbnail_container.canvas.reorder_thumbnails(self.main_window.displayed_images, force_recalculate_grid=True)
-    
-    def refresh_thumbnails_for_transformation(self):
-        """Refresh thumbnails after image transformation"""
-        # Invalidate cache for transformed images
-        if hasattr(self.main_window, 'displayed_images') and self.main_window.displayed_images:
-            for image_path in self.main_window.displayed_images:
-                self.main_window.cache_manager.clear_cache_for_file(image_path)
-        
-        # Regenerate thumbnails
-        self.generate_thumbnails(force_refresh=True)

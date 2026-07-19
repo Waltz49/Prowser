@@ -24,7 +24,8 @@ from thumbnails.thumbnail_constants import (
 from config import get_config
 from exif.exif_utils import truncate_usercomment_before_prompt, usercomment_text_for_clipboard
 from theme.theme_service import get_active_theme
-from utils import create_gear_icon, get_main_window
+from utils import get_main_window, get_standard_dialog_stylesheet
+from widgets.gear_button_styles import create_dialog_gear_button, dialog_gear_button_stylesheet
 
 
 def _lmstudio_ui_enabled() -> bool:
@@ -174,102 +175,54 @@ def _overlay_chip_stylesheet() -> str:
 
 
 def _edit_exif_usercomment_stylesheet() -> str:
-    """Dialog chrome; text fields use global QDialog input rules from theme.py."""
+    """Standard dialog chrome plus EXIF-editor-specific controls."""
     th = get_active_theme()
-    bg_color = th.dialog_background_hex
-    text_color = th.dialog_text_color_hex
     splitter_handle = th.chrome_border_hex
     splitter_handle_hover = th.splitter_handle_hover_hex
-    return f"""
-            QDialog {{
-                background-color: {bg_color};
-            }}
-            QLabel {{
-                color: {text_color};
-                font-size: 13px;
-            }}
-            QPushButton {{
-                background-color: {BUTTON_BG_DEFAULT_HEX};
-                color: {BUTTON_TEXT_DEFAULT_HEX};
-                border: 1px solid {BUTTON_BORDER_DEFAULT_HEX};
-                border-radius: 5px;
-                padding: 6px 18px;
-                min-width: 80px;
-                font-size: 13px;
-                font-family: 'Arial Narrow', Arial;
-                letter-spacing: 0.5px;
-            }}
-            QPushButton:focus {{
-                background-color: {bg_color};
-                color: {BUTTON_FOCUS_TEXT_HEX};
-                border: 1px solid {CURRENT_IMAGE_BORDER_COLOR_HEX};
-                outline: none;
-            }}
-            QPushButton:hover {{
-                background-color: {BUTTON_BG_HOVER_HEX};
-                color: {BUTTON_TEXT_HOVER_HEX};
-                border: 1px solid {BUTTON_BORDER_HOVER_HEX};
-            }}
-            QPushButton:pressed {{
-                background-color: {BUTTON_BG_PRESSED_HEX};
-                color: {BUTTON_FOCUS_TEXT_HEX};
-            }}
-            QPushButton#settings_btn {{
-                background-color: {BUTTON_BG_DEFAULT_HEX};
-                color: {TEXT_DISABLED_HEX};
-                border: 1px solid {BUTTON_BORDER_DEFAULT_HEX};
-                border-radius: 6px;
-                min-width: 24px;
-                max-width: 24px;
-                min-height: 24px;
-                max-height: 24px;
-                padding: 2px;
-                font-size: 16px;
-            }}
-            QPushButton#settings_btn:hover {{
-                color: {BUTTON_TEXT_HOVER_HEX};
-                border: 1px solid {BUTTON_BORDER_HOVER_HEX};
-            }}
-            QPushButton#instructions_btn {{
-                background-color: {BUTTON_BG_DEFAULT_HEX};
-                color: {TEXT_DISABLED_HEX};
-                border: 1px solid {BUTTON_BORDER_DEFAULT_HEX};
-                border-radius: 6px;
-                min-width: 24px;
-                max-width: 24px;
-                min-height: 24px;
-                max-height: 24px;
-                padding: 2px;
-                font-size: 16px;
-            }}
-            QPushButton#instructions_btn:hover {{
-                color: {BUTTON_TEXT_HOVER_HEX};
-                border: 1px solid {BUTTON_BORDER_HOVER_HEX};
-            }}
-            QPushButton#voice_mic_btn {{
-                background-color: transparent;
-                border: none;
-                padding: 0px;
-                margin: 0px;
-                min-width: 0px;
-                max-width: 24px;
-                min-height: 0px;
-                max-height: 24px;
-            }}
-            QSplitter::handle {{
-                background-color: {splitter_handle};
-                border: none;
-            }}
-            QSplitter::handle:vertical {{
-                height: 6px;
-            }}
-            QSplitter::handle:vertical:hover {{
-                background-color: {splitter_handle_hover};
-            }}
-            QSplitter::handle:vertical:pressed {{
-                background-color: {splitter_handle_hover};
-            }}
-        """
+    extras = f"""
+        QLabel#editExifFilename {{
+            font-size: 16px;
+        }}
+        {dialog_gear_button_stylesheet()}
+        QPushButton#instructions_btn {{
+            background-color: {th.button_bg_default_hex};
+            color: {th.text_disabled_hex};
+            border: 1px solid {th.button_border_default_hex};
+            border-radius: 6px;
+            min-width: 24px;
+            max-width: 24px;
+            min-height: 24px;
+            max-height: 24px;
+            padding: 2px;
+            font-size: 16px;
+        }}
+        QPushButton#instructions_btn:hover {{
+            color: {th.button_text_hover_hex};
+            border: 1px solid {th.button_border_hover_hex};
+        }}
+        QPushButton#voice_mic_btn {{
+            background-color: transparent;
+            border: none;
+            padding: 0px;
+            margin: 0px;
+            min-width: 0px;
+            max-width: 24px;
+            min-height: 0px;
+            max-height: 24px;
+        }}
+        QSplitter::handle {{
+            background-color: {splitter_handle};
+            border: none;
+        }}
+        QSplitter::handle:vertical {{
+            height: 6px;
+        }}
+        QSplitter::handle:vertical:hover,
+        QSplitter::handle:vertical:pressed {{
+            background-color: {splitter_handle_hover};
+        }}
+    """
+    return get_standard_dialog_stylesheet() + extras
 
 
 class EditExifUserCommentDialog(QDialog):
@@ -315,17 +268,15 @@ class EditExifUserCommentDialog(QDialog):
         header_row.addWidget(self.thumb_label)
 
         self.filename_label = QLabel(f"<b>{self._base_filename}</b>")
+        self.filename_label.setObjectName("editExifFilename")
         self.filename_label.setWordWrap(True)
-        self.filename_label.setStyleSheet("font-size: 16px;")
         self.filename_label.setAlignment(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
 
-        self.settings_btn = QPushButton()
-        self.settings_btn.setObjectName("settings_btn")
-        self.settings_btn.setIconSize(QSize(16, 16))
-        self.settings_btn.setToolTip("Open Captioning settings")
-        self.settings_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.settings_btn = create_dialog_gear_button(
+            self,
+            tooltip="Open Captioning settings",
+        )
         self.settings_btn.clicked.connect(self._on_open_captioning_settings)
-        self.settings_btn.installEventFilter(self)
         if not _lmstudio_ui_enabled():
             self.settings_btn.hide()
 
@@ -458,10 +409,6 @@ class EditExifUserCommentDialog(QDialog):
 
     def _apply_theme_styles(self) -> None:
         self.setStyleSheet(_edit_exif_usercomment_stylesheet())
-        if self.settings_btn is not None:
-            self._settings_icon_normal = create_gear_icon(TEXT_DISABLED_HEX)
-            self._settings_icon_hover = create_gear_icon(BUTTON_TEXT_HOVER_HEX)
-            self.settings_btn.setIcon(self._settings_icon_normal)
         self.thumb_label.setStyleSheet(
             f"border: 1px solid {MULTISELECT_BORDER_COLOR_HEX}; border-radius: 5px;"
         )
@@ -591,15 +538,11 @@ class EditExifUserCommentDialog(QDialog):
                 self.thumb_label.setStyleSheet(
                     f"border: 1px solid {BUTTON_BORDER_HOVER_HEX}; border-radius: 5px;"
                 )
-            elif self.settings_btn is not None and obj is self.settings_btn:
-                self.settings_btn.setIcon(self._settings_icon_hover)
         elif event.type() == QEvent.Type.Leave:
             if obj is self.thumb_label:
                 self.thumb_label.setStyleSheet(
                     f"border: 1px solid {MULTISELECT_BORDER_COLOR_HEX}; border-radius: 5px;"
                 )
-            elif self.settings_btn is not None and obj is self.settings_btn:
-                self.settings_btn.setIcon(self._settings_icon_normal)
         return super().eventFilter(obj, event)
 
     def _save_geometry(self):

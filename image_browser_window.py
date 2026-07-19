@@ -77,20 +77,13 @@ from config import (
     get_config,
 )
 from browser_window.managers.configuration_sync_manager import ConfigurationSyncManager
-from browser_window.dialogs.delete_exif_dialog import DeleteExifDialog
-from browser_window.dialogs.normalize_exif_steps_dialog import NormalizeExifStepsDialog
-from browser_window.dialogs.normalize_exif_steps_scope_dialog import (
-    NormalizeExifStepsScopeDialog,
-)
 from browser_window.managers.directory_history_handler import DirectoryHistoryHandler, DirectoryHistoryHandlerForMenu
 from browser_window.managers.directory_loader import DirectoryLoader
 from browser_window.managers.event_handler import EventHandler
 from exif.exif_image_loader import (
     get_image_dimensions_fast_metadata,
-    get_image_dimensions_and_exif_date,
     load_image_with_exif_correction,
 )
-from exif.exif_utils import get_exif_bytes_from_pil_raw, get_exif_dict_from_pil
 from files.file_move_handler import FileMoveHandler
 from files.file_operations_manager import FileOperationsManager
 from files.file_tree_handler import FileTreeHandler
@@ -109,12 +102,9 @@ from browser_window.managers.exif_operations_manager import ExifOperationsManage
 from menu_manager import MenuManager
 from workers.message_handler import get_shared_message_handler
 from browser_window.managers.navigation_manager import NavigationManager
-from path_exclusions import _get_excluded_paths, _is_excluded_path
 from browser_window.sidebar.preview_widget import PreviewWidget
 from qt_key_debug import log_key_event, set_popup_callback
 from browser_window.managers.refresh_manager import RefreshManager
-from browser_window.dialogs.reset_date_dialog import ResetDateDialog
-from browser_window.dialogs.reset_exif_dialog import ResetExifDialog
 from browser_window.sidebar.right_sidebar_combined import RightSidebarCombinedWidget
 from browser_window.managers.selection_manager import SelectionManager
 from settings_dialog import SettingsDialog
@@ -149,9 +139,7 @@ from browser_window.managers.thumbnail_context_menu import ThumbnailContextMenuH
 
 from browser_window.managers.ui_layout_manager import UILayoutManager
 from utils import (
-    create_titled_progress_dialog,
     file_string,
-    get_file_extension,
     handle_filter_pattern_mismatch,
     is_macos_space_mode,
     is_root_or_system_volume,
@@ -440,6 +428,12 @@ class ImageBrowserWindow(QMainWindow):
         self.cache_manager.metadata_ready.connect(self.on_metadata_ready, Qt.QueuedConnection)
         self.cache_manager.fullimage_ready.connect(self.on_fullimage_ready, Qt.QueuedConnection)
         self.cache_manager.thumbnail_ready.connect(self.on_thumbnail_ready, Qt.QueuedConnection)
+
+        def _on_cache_metadata_invalidated(path, fields=None):
+            from event_bus import FILE_METADATA_CHANGED
+            self.event_bus.emit(FILE_METADATA_CHANGED, (path, fields))
+
+        self.cache_manager.set_metadata_changed_notifier(_on_cache_metadata_invalidated)
         
         # Browse view state (current_view_mode, current_index, current_image_path from file_data_model)
         # Flag to prevent browse view from opening when loading a directory
@@ -3473,7 +3467,7 @@ class ImageBrowserWindow(QMainWindow):
             self.canvas_manager.refresh_theme_styles()
         if getattr(self, "preview_widget", None) and hasattr(self.preview_widget, "refresh_theme_styles"):
             self.preview_widget.refresh_theme_styles()
-        exif_dlg = getattr(self, "_edit_exif_usercomment_dialog", None)
+        exif_dlg = getattr(self.exif_operations_manager, '_edit_exif_usercomment_dialog', None)
         if (
             exif_dlg is not None
             and exif_dlg.isVisible()
@@ -7293,62 +7287,7 @@ class ImageBrowserWindow(QMainWindow):
 
     def edit_exif_usercomment(self):
         """Open a dialog to view and edit the EXIF UserComment for the current image."""
-        # Determine the target image path
-        image_path = None
-        if self.current_view_mode == 'browse':
-            image_path = self.get_current_image_path()
-        elif self.current_view_mode == 'thumbnail':
-            selected_files = self.selection_manager.get_selected_files()
-            if selected_files and len(selected_files) == 1:
-                image_path = selected_files[0]
-
-        if not image_path or not os.path.exists(image_path):
-            self.status_notification.show_message("No image selected")
-            return
-
-        ext = os.path.splitext(image_path)[1].lower()
-        if ext not in {'.jpg', '.jpeg', '.png', '.tiff', '.tif', '.webp'}:
-            self.status_notification.show_message("This image format does not support EXIF user comments")
-            return
-
-        from exif.exif_utils import get_usercomment_from_path, decode_usercomment, encode_usercomment, restore_usercomment_to_file
-        from browser_window.dialogs.edit_exif_usercomment_dialog import EditExifUserCommentDialog
-
-        raw_bytes = get_usercomment_from_path(image_path)
-        original_text = decode_usercomment(raw_bytes) if raw_bytes else ""
-
-        existing = getattr(self, '_edit_exif_usercomment_dialog', None)
-        if existing is not None and existing.isVisible():
-            if existing.file_path == image_path:
-                from utils import raise_dialog_without_space_hop
-                raise_dialog_without_space_hop(existing)
-                return
-            existing.close()
-
-        dialog = EditExifUserCommentDialog(image_path, original_text, parent=self)
-        self._edit_exif_usercomment_dialog = dialog
-
-        def _on_edit_exif_usercomment_finished(result: int) -> None:
-            if getattr(self, '_edit_exif_usercomment_dialog', None) is dialog:
-                self._edit_exif_usercomment_dialog = None
-            if result != EditExifUserCommentDialog.DialogCode.Accepted:
-                return
-            new_text = dialog.get_text()
-            if new_text == original_text:
-                return
-            encoded = encode_usercomment(new_text)
-            success = restore_usercomment_to_file(image_path, encoded)
-            if success:
-                self.status_notification.show_message("EXIF user comment saved")
-                # Refresh Information sidebar if open
-                if getattr(self, 'right_sidebar', None) and getattr(self, 'right_sidebar_visible', False):
-                    if getattr(self, 'current_image_path', None) == image_path:
-                        self.right_sidebar.show_image_info_overlay()
-            else:
-                self.status_notification.show_message("Failed to save EXIF user comment")
-
-        dialog.finished.connect(_on_edit_exif_usercomment_finished)
-        present_auxiliary_dialog(dialog)
+        self.exif_operations_manager.edit_exif_usercomment()
 
     def convert_selected_images(self):
         """Convert selected images to a different format"""
@@ -9647,10 +9586,6 @@ class ImageBrowserWindow(QMainWindow):
 
     def update_filename_for_new_image(self):
         """Update detailed image info overlay for new image when toggled on."""
-        if self.right_sidebar_visible and self.current_image_path:
-            # Only update information overlay when Information section is visible
-            if hasattr(self.right_sidebar, 'is_information_visible') and self.right_sidebar.is_information_visible():
-                self.right_sidebar.show_image_info_overlay()
         # Refresh number overlay when image changes
         self.update_number_overlay()
 

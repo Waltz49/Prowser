@@ -12,7 +12,7 @@ import os
 from dataclasses import dataclass
 from datetime import datetime
 import traceback
-from typing import Dict, List, NamedTuple, Optional, Set, Tuple
+from typing import Dict, List, NamedTuple, Optional, Set, Tuple, Callable
 import time # Added for time.time()
 import inspect
 
@@ -548,6 +548,7 @@ class ImageCacheManager(QObject):
         
         # Thread safety
         self.cache_mutex = QMutex()
+        self._metadata_changed_notifier: Optional[Callable[[str, Optional[Set[str]]], None]] = None
         
         # Store ignore_exif_rotation setting to avoid reading from file every time
         # This prevents timing issues when settings are being saved
@@ -896,43 +897,44 @@ class ImageCacheManager(QObject):
     def get_metadata_sync(self, image_path: str) -> Optional[ImageMetadata]:
         """Get metadata synchronously (for background thread use)"""
         cache_key = self.get_cache_key(image_path)
-        
-        if cache_key in self.metadata_cache:
-            metadata = self.metadata_cache[cache_key]
-            # Optimized validation: only check file existence first (fast), then validate if needed
-            # Skip expensive os.stat() for files that likely haven't changed
-            try:
-                if not os.path.exists(image_path):
-                    # File doesn't exist, remove from cache
-                    if cache_key in self.metadata_cache:
-                        del self.metadata_cache[cache_key]
-                    return None
-                
-                # Validate mtime: _stat_cache can serve stale mtime if file was modified outside app.
-                # Invalidate _stat_cache and re-check key to detect file changes.
-                with QMutexLocker(self._stat_cache_mutex):
-                    self._stat_cache.pop(image_path, None)
-                fresh_key = self.get_cache_key(image_path)
-                if fresh_key != cache_key:
-                    with QMutexLocker(self.cache_mutex):
-                        self.metadata_cache.pop(cache_key, None)
-                    return None
-                # Validate source directory
-                current_source_dir = os.path.dirname(os.path.abspath(image_path))
-                if hasattr(metadata, 'source_directory') and metadata.source_directory:
-                    if metadata.source_directory == current_source_dir:
-                        return metadata
-                    else:
-                        with QMutexLocker(self.cache_mutex):
-                            self.metadata_cache.pop(cache_key, None)
-                        return None
-                else:
-                    with QMutexLocker(self.cache_mutex):
-                        self.metadata_cache.pop(cache_key, None)
-                    return None
-            except Exception:
-                pass
-        
+
+        with QMutexLocker(self.cache_mutex):
+            metadata = self.metadata_cache.get(cache_key)
+        if metadata is None:
+            return None
+
+        # Optimized validation: only check file existence first (fast), then validate if needed
+        # Skip expensive os.stat() for files that likely haven't changed
+        try:
+            if not os.path.exists(image_path):
+                # File doesn't exist, remove from cache
+                with QMutexLocker(self.cache_mutex):
+                    self.metadata_cache.pop(cache_key, None)
+                return None
+
+            # Validate mtime: _stat_cache can serve stale mtime if file was modified outside app.
+            # Invalidate _stat_cache and re-check key to detect file changes.
+            with QMutexLocker(self._stat_cache_mutex):
+                self._stat_cache.pop(image_path, None)
+            fresh_key = self.get_cache_key(image_path)
+            if fresh_key != cache_key:
+                with QMutexLocker(self.cache_mutex):
+                    self.metadata_cache.pop(cache_key, None)
+                return None
+            # Validate source directory
+            current_source_dir = os.path.dirname(os.path.abspath(image_path))
+            if hasattr(metadata, 'source_directory') and metadata.source_directory:
+                if metadata.source_directory == current_source_dir:
+                    return metadata
+                with QMutexLocker(self.cache_mutex):
+                    self.metadata_cache.pop(cache_key, None)
+                return None
+            with QMutexLocker(self.cache_mutex):
+                self.metadata_cache.pop(cache_key, None)
+            return None
+        except Exception:
+            pass
+
         return None
     
     def cache_metadata_sync(self, image_path: str, metadata: ImageMetadata):
@@ -1131,7 +1133,25 @@ class ImageCacheManager(QObject):
             self.save_metadata_cache()
             self._last_save_time = current_time
     
-    def clear_cache_for_file(self, image_path: str):
+    def set_metadata_changed_notifier(
+        self,
+        notifier: Optional[Callable[[str, Optional[Set[str]]], None]],
+    ) -> None:
+        """Register callback invoked when file metadata cache is invalidated."""
+        self._metadata_changed_notifier = notifier
+
+    def _emit_metadata_changed(
+        self,
+        image_path: str,
+        fields: Optional[Set[str]] = None,
+    ) -> None:
+        if self._metadata_changed_notifier:
+            try:
+                self._metadata_changed_notifier(image_path, fields)
+            except Exception:
+                traceback.print_exc()
+
+    def clear_cache_for_file(self, image_path: str, *, metadata_fields: Optional[Set[str]] = None):
         """Clear cache for a specific file (but preserve thumbnails)"""
         # Invalidate _stat_cache so get_cache_key/get_sort_key get fresh mtime from disk
         # (critical when mtime was changed by drag/drop or other in-app operations)
@@ -1181,6 +1201,8 @@ class ImageCacheManager(QObject):
             # DO NOT remove from disk cache - preserve thumbnail files
             # This allows thumbnails to persist across directory changes
             self.clear_cache_for_file_logic(image_path)
+
+        self._emit_metadata_changed(image_path, metadata_fields)
 
     def clear_thumbnails_for_file(self, image_path: str):
         """Clear thumbnails for a specific file (for transformation updates)"""
@@ -1240,12 +1262,20 @@ class ImageCacheManager(QObject):
         if not defer_invalidate:
             self.invalidate_thumbnail_dir_cache()
     
-    def clear_cache_for_files_batch(self, image_paths: List[str]):
+    def clear_cache_for_files_batch(
+        self,
+        image_paths: List[str],
+        *,
+        metadata_fields: Optional[Set[str]] = None,
+    ):
         """Clear cache for multiple files. Use instead of N separate clear_cache_for_file calls.
         Fetches thumbnail dir listing at most once, skips disk deletion during batch (orphaned
         thumbnails cleaned up lazily), invalidates once at end. Much faster for mass rename."""
         if not image_paths:
             return
+        for image_path in image_paths:
+            with QMutexLocker(self._stat_cache_mutex):
+                self._stat_cache.pop(image_path, None)
         for image_path in image_paths:
             if self.background_loader:
                 self.background_loader.remove_requests_for_file(image_path)
@@ -1267,6 +1297,8 @@ class ImageCacheManager(QObject):
                     del self.fullimage_cache[cache_key]
                 self.clear_cache_for_file_logic(image_path, skip_disk_deletion=True, defer_invalidate=True)
             self.invalidate_thumbnail_dir_cache()
+        for image_path in image_paths:
+            self._emit_metadata_changed(image_path, metadata_fields)
     
     def clear_cache(self, cache_type: str = "all"):
         """Clear cache"""

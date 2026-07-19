@@ -105,6 +105,7 @@ class InformationSidebar(QWidget):
         self._input_heading_signal_connected = False
         self._info_section_expanded_cache: Optional[Dict[str, bool]] = None
         self._action_nav_bar: InformationActionNavBar | None = None
+        self._metadata_refresh_timer: QTimer | None = None
         self._show_menu_bar = bool(
             main_window.config.load_settings().get("information_show_menu_bar", False)
         )
@@ -167,7 +168,52 @@ class InformationSidebar(QWidget):
         )
 
         self.attach_titlebar_tools()
+        self._subscribe_to_sidebar_events()
+
+    def _subscribe_to_sidebar_events(self) -> None:
+        event_bus = getattr(self.main_window, 'event_bus', None)
+        if not event_bus:
+            return
+        from event_bus import CURRENT_IMAGE_CHANGED, FILE_METADATA_CHANGED
+        event_bus.subscribe(FILE_METADATA_CHANGED, self._on_file_metadata_changed)
+        event_bus.subscribe(CURRENT_IMAGE_CHANGED, self._on_current_image_changed)
+
+    def _on_current_image_changed(self, path) -> None:
+        if not path:
+            return
+        if not self._is_information_pane_visible():
+            return
+        self._schedule_metadata_overlay_refresh()
+
+    def _is_information_pane_visible(self) -> bool:
+        right_sidebar = getattr(self.main_window, 'right_sidebar', None)
+        if right_sidebar is not None and hasattr(right_sidebar, 'is_information_visible'):
+            return bool(right_sidebar.is_information_visible())
+        return bool(self.info_text_edit and self.info_text_edit.isVisible())
+
+    def _schedule_metadata_overlay_refresh(self) -> None:
+        if self._metadata_refresh_timer is None:
+            self._metadata_refresh_timer = QTimer(self)
+            self._metadata_refresh_timer.setSingleShot(True)
+            self._metadata_refresh_timer.timeout.connect(self._refresh_metadata_overlay)
+        self._metadata_refresh_timer.stop()
+        self._metadata_refresh_timer.start(260)
+
+    def _refresh_metadata_overlay(self) -> None:
+        if not self._is_information_pane_visible():
+            return
+        self.show_image_info_overlay()
         self._update_action_nav_state()
+
+    def _on_file_metadata_changed(self, path, fields=None) -> None:
+        current_path = getattr(self.main_window, 'current_image_path', None)
+        if not current_path or not path:
+            return
+        if os.path.normpath(path) != os.path.normpath(current_path):
+            return
+        if not self._is_information_pane_visible():
+            return
+        self._schedule_metadata_overlay_refresh()
 
     def toggle_display(self):
         """Toggle the Information sidebar visibility"""
@@ -811,7 +857,9 @@ class InformationSidebar(QWidget):
         if success:
             if getattr(self.main_window, 'status_notification', None):
                 self.main_window.status_notification.show_message("EXIF user comment deleted")
-            self.show_image_info_overlay()
+            cache_manager = getattr(self.main_window, 'cache_manager', None)
+            if cache_manager:
+                cache_manager.clear_cache_for_file(image_path, metadata_fields={'exif'})
         else:
             if getattr(self.main_window, 'status_notification', None):
                 self.main_window.status_notification.show_message("Failed to delete EXIF user comment")

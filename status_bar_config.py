@@ -38,7 +38,7 @@ from thumbnails.thumbnail_constants import (
     DEFAULT_BORDER_COLOR_HEX,
 )
 from theme.theme_service import get_active_theme
-from utils import apply_standard_dialog_layout, get_standard_dialog_stylesheet
+from utils import apply_standard_dialog_layout, get_compact_icon_button_style, get_standard_dialog_stylesheet
 
 
 def qtcolor_to_hex(color):
@@ -73,49 +73,18 @@ class FilterEntryWidget(QWidget):
         self.text_input.setStyleSheet("QLineEdit { min-width: 150px; }")
         input_layout.addWidget(self.text_input)
         
-        # Delete button with trash icon - use standard application colors
+        # Delete button with trash icon - compact themed control
         delete_button_size = 12  # pixels
-        button_bg_default = BUTTON_BG_DEFAULT_HEX
-        button_text_default = BUTTON_TEXT_DEFAULT_HEX
-        button_border_default = BUTTON_BORDER_DEFAULT_HEX
-        button_bg_hover = BUTTON_BG_HOVER_HEX
-        button_text_hover = BUTTON_TEXT_HOVER_HEX
-        button_border_hover = BUTTON_BORDER_HOVER_HEX
-        button_bg_pressed = BUTTON_BG_PRESSED_HEX
-        focus_bg, focus_border, focus_text = self._get_focus_colors()
-        
         self.delete_button = QPushButton("−")
+        self.delete_button.setObjectName("filterDeleteBtn")
         self.delete_button.setFixedSize(delete_button_size, delete_button_size)
         self.delete_button.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
-        self.delete_button.setStyleSheet(f"""
-            QPushButton {{
-                background-color: {button_bg_default};
-                border: 1px solid {button_border_default};
-                border-radius: 4px;
-                color: {button_text_default};
-                font-size: 16px;
-                font-weight: bold;
-                min-width: {delete_button_size}px;
-                max-width: {delete_button_size}px;
-                min-height: {delete_button_size}px;
-                max-height: {delete_button_size}px;
-            }}
-            QPushButton:focus {{
-                background-color: {focus_bg};
-                color: {focus_text};
-                border: 1px solid {focus_border};
-                outline: none;
-            }}
-            QPushButton:hover {{
-                background-color: {button_bg_hover};
-                color: {button_text_hover};
-                border: 1px solid {button_border_hover};
-            }}
-            QPushButton:pressed {{
-                background-color: {button_bg_pressed};
-                color: {focus_text};
-            }}
-        """)
+        self.delete_button.setStyleSheet(
+            get_compact_icon_button_style(
+                delete_button_size,
+                object_name="filterDeleteBtn",
+            )
+        )
         self.delete_button.setToolTip("Delete this filter")
         self.delete_button.clicked.connect(lambda: self.delete_requested.emit(self))
         input_layout.addWidget(self.delete_button, 0)
@@ -281,49 +250,19 @@ class FilterDialog(QDialog):
         bottom_layout = QHBoxLayout()
         bottom_layout.setSpacing(8)
         
-        # Add button (+) - use standard application colors
-        add_button_size = 16
-        button_bg_default = BUTTON_BG_DEFAULT_HEX
-        button_text_default = BUTTON_TEXT_DEFAULT_HEX
-        button_border_default = BUTTON_BORDER_DEFAULT_HEX
-        button_bg_hover = BUTTON_BG_HOVER_HEX
-        button_text_hover = BUTTON_TEXT_HOVER_HEX
-        button_border_hover = BUTTON_BORDER_HOVER_HEX
-        button_bg_pressed = BUTTON_BG_PRESSED_HEX
-        focus_bg, focus_border, focus_text = self._get_focus_colors()
-        
+        # Add button (+)
+        add_button_size = 24
         self.add_button = QPushButton("+")
-        self.add_button.setFixedSize(24, 24)
+        self.add_button.setObjectName("filterAddBtn")
+        self.add_button.setFixedSize(add_button_size, add_button_size)
         self.add_button.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
-        self.add_button.setStyleSheet(f"""
-            QPushButton {{
-                background-color: {button_bg_default};
-                color: {button_text_default};
-                border: 1px solid {button_border_default};
-                border-radius: 4px;
-                font-size: 18px;
-                font-weight: bold;
-                min-width: {add_button_size}px;    
-                max-width: {add_button_size}px;
-                min-height: {add_button_size}px;
-                max-height: {add_button_size}px;
-            }}
-            QPushButton:focus {{
-                background-color: {focus_bg};
-                color: {focus_text};
-                border: 1px solid {focus_border};
-                outline: none;
-            }}
-            QPushButton:hover {{
-                background-color: {button_bg_hover};
-                color: {button_text_hover};
-                border: 1px solid {button_border_hover};
-            }}
-            QPushButton:pressed {{
-                background-color: {button_bg_pressed};
-                color: {focus_text};
-            }}
-        """)
+        self.add_button.setStyleSheet(
+            get_compact_icon_button_style(
+                add_button_size,
+                object_name="filterAddBtn",
+                font_size="18px",
+            )
+        )
         self.add_button.setToolTip("Add a new filter")
         self.add_button.clicked.connect(self._add_new_filter)
         bottom_layout.addWidget(self.add_button, 0)

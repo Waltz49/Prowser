@@ -23,40 +23,11 @@ from chat_plugins.chat_ui_common import (
     chat_prompt_edit_stylesheet,
     install_cmd_enter_accept,
 )
-from theme.theme_service import get_active_theme
 from utils import get_button_style, get_dialog_shell_stylesheet
-from widgets.gear_icon_button import GearIconButton
-
-CHAT_GEAR_BTN_SIZE = 26
-_CHAT_GEAR_ICON_PX = 18
-
-
-def _chat_gear_button_stylesheet() -> str:
-    t = get_active_theme()
-    sz = CHAT_GEAR_BTN_SIZE
-    return f"""
-        QPushButton#chatSystemPromptGearBtn {{
-            background-color: {t.dialog_background_hex};
-            border: 1px solid {t.border_default_hex};
-            border-radius: 3px;
-            padding: 0px;
-            min-width: {sz}px;
-            max-width: {sz}px;
-            min-height: {sz}px;
-            max-height: {sz}px;
-        }}
-        QPushButton#chatSystemPromptGearBtn:focus {{
-            border: 1px solid {t.current_image_border_color_hex};
-            outline: none;
-        }}
-        QPushButton#chatSystemPromptGearBtn:hover {{
-            background-color: {t.tab_button_hover_bg_hex};
-            border: 1px solid {t.tab_button_hover_bg_hex};
-        }}
-        QPushButton#chatSystemPromptGearBtn:pressed {{
-            background-color: {t.sidebar_splitter_handle_hex};
-        }}
-    """
+from widgets.gear_button_styles import (
+    chat_gear_button_stylesheet,
+    create_chat_gear_button,
+)
 
 
 def edit_chat_system_prompt(parent: QWidget | None, current: str) -> str | None:
@@ -82,13 +53,9 @@ def edit_chat_system_prompt(parent: QWidget | None, current: str) -> str | None:
     install_cmd_enter_accept(dialog, edit)
 
     gear_row = QHBoxLayout()
-    gear_button = GearIconButton(
+    gear_button = create_chat_gear_button(
         dialog,
-        size_px=CHAT_GEAR_BTN_SIZE,
-        icon_px=_CHAT_GEAR_ICON_PX,
         tooltip="Manage saved system prompts",
-        object_name="chatSystemPromptGearBtn",
-        stylesheet=_chat_gear_button_stylesheet(),
     )
 
     def _open_prompt_library() -> None:
@@ -132,7 +99,7 @@ def edit_chat_system_prompt(parent: QWidget | None, current: str) -> str | None:
     dialog.setStyleSheet(
         get_dialog_shell_stylesheet()
         + get_button_style()
-        + _chat_gear_button_stylesheet()
+        + chat_gear_button_stylesheet()
     )
     edit.setFocus()
 

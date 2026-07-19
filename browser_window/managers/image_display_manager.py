@@ -62,11 +62,6 @@ class ImageDisplayManager:
             # CRITICAL: Still sync UI components when exiting browse view
             # This ensures tree, preview, and Information sidebar stay in sync when returning to thumbnail mode
             if current_image_path:
-                # Update info sidebar if visible
-                if hasattr(self.main_window, 'right_sidebar_visible') and self.main_window.right_sidebar_visible:
-                    if hasattr(self.main_window, 'right_sidebar') and self.main_window.right_sidebar:
-                        self.main_window.right_sidebar.show_image_info_overlay()
-                
                 # Update preview widget if visible
                 if hasattr(self.main_window, 'update_preview_if_visible'):
                     self.main_window.update_preview_if_visible()
@@ -108,16 +103,11 @@ class ImageDisplayManager:
                     self.main_window.update_status_bar_current_image(current_image_path, displayed)
                     self.main_window._last_status_bar_image_path = current_image_path
         
-        # 2. Update info sidebar if visible (for both browse and thumbnail modes)
-        if hasattr(self.main_window, 'right_sidebar_visible') and self.main_window.right_sidebar_visible and current_image_path:
-            if hasattr(self.main_window, 'right_sidebar') and self.main_window.right_sidebar:
-                self.main_window.right_sidebar.show_image_info_overlay()
-        
-        # 3. Update preview widget if visible
+        # 2. Update preview widget if visible
         if hasattr(self.main_window, 'update_preview_if_visible'):
             self.main_window.update_preview_if_visible()
         
-        # 4. Update file tree highlighting (but not during slideshow, only when tree is showing)
+        # 3. Update file tree highlighting (but not during slideshow, only when tree is showing)
         if current_image_path and self.main_window.current_view_mode != 'slideshow':
             if (self.main_window._is_file_tree_showing() and 
                 hasattr(self.main_window, 'file_tree_handler') and 
@@ -213,12 +203,6 @@ class ImageDisplayManager:
         """Update filename display for new image"""
         if hasattr(self.main_window, 'browse_view_handler') and self.main_window.browse_view_handler:
             self.main_window.browse_view_handler.update_filename_for_new_image()
-    
-    def show_image_info_overlay(self):
-        """Show image info overlay in right sidebar"""
-        if hasattr(self.main_window, 'right_sidebar_visible') and self.main_window.right_sidebar_visible:
-            if hasattr(self.main_window, 'right_sidebar') and self.main_window.right_sidebar:
-                self.main_window.right_sidebar.show_image_info_overlay()
     
     def toggle_thumbnail_filename_overlay(self):
         """Toggle thumbnail filename overlay"""

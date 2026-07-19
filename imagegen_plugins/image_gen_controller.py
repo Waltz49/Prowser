@@ -2485,16 +2485,11 @@ class ImageGenController(QObject):
                         ),
                         quantization=plugin.quantize_for_exif(values),
                     )
-                    current = getattr(mw, "current_image_path", None)
-                    sidebar = getattr(mw, "right_sidebar", None)
-                    if (
-                        sidebar is not None
-                        and current
-                        and os.path.normpath(current)
-                        == os.path.normpath(output_path)
-                        and hasattr(sidebar, "show_image_info_overlay")
-                    ):
-                        sidebar.show_image_info_overlay()
+                    cache_manager = getattr(mw, 'cache_manager', None)
+                    if cache_manager:
+                        cache_manager.clear_cache_for_file(
+                            output_path, metadata_fields={'exif'}
+                        )
                 except Exception as e:
                     print(
                         "DEBUG make_readable_user_comment_before_browse: "

@@ -16,6 +16,7 @@ from theme.theme import (
     push_button_stylesheet,
 )
 from theme.theme_service import get_active_theme
+from widgets.gear_button_styles import settings_gear_button_stylesheet
 from widgets.gear_icon_button import GearIconButton
 
 _SETTINGS_DIALOG_OBJECT_NAME = "settingsDialog"
@@ -94,34 +95,6 @@ def resolve_settings_chrome_from_widget(widget: Any) -> SettingsDialogChrome:
 
 _SETTINGS_GEAR_BTN_SIZE = 22
 _SETTINGS_GEAR_ICON_PX = 18
-
-
-def settings_gear_button_stylesheet(chrome: SettingsDialogChrome) -> str:
-    """Small gear icon button for settings preference row titles."""
-    sz = _SETTINGS_GEAR_BTN_SIZE
-    return f"""
-        QPushButton#settingsPreferenceGearBtn {{
-            background-color: {chrome.control_bg_hex};
-            border: 1px solid {chrome.control_border_hex};
-            border-radius: 3px;
-            padding: 0px;
-            min-width: {sz}px;
-            max-width: {sz}px;
-            min-height: {sz}px;
-            max-height: {sz}px;
-        }}
-        QPushButton#settingsPreferenceGearBtn:focus {{
-            border: 1px solid {chrome.focus_border_hex};
-            outline: none;
-        }}
-        QPushButton#settingsPreferenceGearBtn:hover {{
-            background-color: {chrome.control_hover_bg_hex};
-            border: 1px solid {chrome.control_hover_border_hex};
-        }}
-        QPushButton#settingsPreferenceGearBtn:pressed {{
-            background-color: {chrome.tab_checked_bg_hex};
-        }}
-    """
 
 
 class SettingsGearButton(GearIconButton):

@@ -24,6 +24,7 @@ THUMBNAIL_CLICKED = "thumbnail_clicked"  # payload: (index, cmd_pressed, shift_p
 SETTINGS_CHANGED = "settings_changed"  # payload: dict (changed settings)
 FILE_OPERATION_COMPLETE = "file_operation_complete"  # payload: (operation_type, paths, success)
 DELETED_PLACEHOLDERS_CHANGED = "deleted_placeholders_changed"  # payload: None - views should repaint
+FILE_METADATA_CHANGED = "file_metadata_changed"  # payload: (path: str, fields: Optional[set])
 
 
 class EventBus(QObject):

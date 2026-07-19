@@ -27,12 +27,43 @@ class SortingManager:
         """
         self.main_window = main_window
 
+    def _get_sort_metadata(self, image_path: str):
+        """Return cached metadata, loading into cache on miss."""
+        cache_manager = self.main_window.cache_manager
+        metadata = cache_manager.get_metadata_sync(image_path)
+        if metadata is None:
+            cache_manager._ensure_metadata_exists(image_path)
+            metadata = cache_manager.get_metadata_sync(image_path)
+        return metadata
+
+    def _get_exif_timestamp_for_sort(self, image_path: str) -> Optional[float]:
+        metadata = self._get_sort_metadata(image_path)
+        if metadata and metadata.exif_taken_time is not None:
+            return metadata.exif_taken_time
+        try:
+            result = get_image_dimensions_and_exif_date(image_path)
+            if result and len(result) >= 2:
+                return result[1]
+        except Exception:
+            pass
+        return None
+
+    def _get_dimensions_for_sort(self, image_path: str):
+        metadata = self._get_sort_metadata(image_path)
+        if metadata and metadata.width > 0 and metadata.height > 0:
+            return metadata.width, metadata.height
+        dimensions = get_image_dimensions_fast_metadata(image_path)
+        if dimensions and len(dimensions) == 2:
+            width, height = dimensions
+            if width > 0 and height > 0:
+                return width, height
+        return None
+
     def get_sort_key(self, path):
         """Get sort key for file sorting - consolidated from multiple duplicate functions"""
         try:
-            cache_key = self.main_window.cache_manager.get_cache_key(path)
-            if cache_key in self.main_window.cache_manager.metadata_cache:
-                metadata = self.main_window.cache_manager.metadata_cache[cache_key]
+            metadata = self.main_window.cache_manager.get_metadata_sync(path)
+            if metadata:
                 return metadata.modified_time
             if not self.main_window.cache_manager.is_in_app_cache_directory(path):
                 return os.stat(path).st_mtime
@@ -528,25 +559,18 @@ class SortingManager:
         from datetime import datetime
         from collections import defaultdict
         
-        # Import here to avoid circular dependencies
-        from exif.exif_image_loader import get_image_dimensions_and_exif_date
-        
         # Group images by month based on EXIF date
         month_groups = defaultdict(list)  # {month_key: [file_paths]}
         undated_files = []  # Files without EXIF data
         
         for image_path in images:
             try:
-                # Get EXIF date
-                result = get_image_dimensions_and_exif_date(image_path)
-                if result and len(result) >= 2:
-                    _, exif_timestamp = result
-                    if exif_timestamp is not None:
-                        # Group by month (YYYY-MM)
-                        dt = datetime.fromtimestamp(exif_timestamp)
-                        month_key = dt.strftime("%Y-%m")
-                        month_groups[month_key].append((image_path, exif_timestamp))
-                        continue
+                exif_timestamp = self._get_exif_timestamp_for_sort(image_path)
+                if exif_timestamp is not None:
+                    dt = datetime.fromtimestamp(exif_timestamp)
+                    month_key = dt.strftime("%Y-%m")
+                    month_groups[month_key].append((image_path, exif_timestamp))
+                    continue
             except Exception:
                 pass
             
@@ -600,25 +624,18 @@ class SortingManager:
         from datetime import datetime
         from collections import defaultdict
         
-        # Import here to avoid circular dependencies
-        from exif.exif_image_loader import get_image_dimensions_and_exif_date
-        
         # Group images by year based on EXIF date
         year_groups = defaultdict(list)  # {year_key: [file_paths]}
         undated_files = []  # Files without EXIF data
         
         for image_path in images:
             try:
-                # Get EXIF date
-                result = get_image_dimensions_and_exif_date(image_path)
-                if result and len(result) >= 2:
-                    _, exif_timestamp = result
-                    if exif_timestamp is not None:
-                        # Group by year (YYYY)
-                        dt = datetime.fromtimestamp(exif_timestamp)
-                        year_key = dt.strftime("%Y")
-                        year_groups[year_key].append((image_path, exif_timestamp))
-                        continue
+                exif_timestamp = self._get_exif_timestamp_for_sort(image_path)
+                if exif_timestamp is not None:
+                    dt = datetime.fromtimestamp(exif_timestamp)
+                    year_key = dt.strftime("%Y")
+                    year_groups[year_key].append((image_path, exif_timestamp))
+                    continue
             except Exception:
                 pass
             
@@ -670,38 +687,16 @@ class SortingManager:
         """Sort images by size (width × height), then by width for same area, then by path."""
         def get_size_sort_key(path):
             try:
-                # Ensure metadata exists in cache (will load it if not cached)
-                self.main_window.cache_manager._ensure_metadata_exists(path)
-                
-                # Quick check for cached metadata first
-                cache_key = self.main_window.cache_manager.get_cache_key(path)
-                if cache_key in self.main_window.cache_manager.metadata_cache:
-                    metadata = self.main_window.cache_manager.metadata_cache[cache_key]
-                    if metadata and hasattr(metadata, 'width') and hasattr(metadata, 'height'):
-                        if metadata.width > 0 and metadata.height > 0:
-                            area = metadata.width * metadata.height
-                            # Return tuple: (area, width, path) - when reverse=True, wider comes first for same area
-                            # When reverse=False, we need to negate width to make wider come first
-                            if self.main_window.is_reversed:
-                                return (area, -metadata.width, path.lower())  # Smallest first: negate width so wider comes first
-                            else:
-                                return (area, metadata.width, path.lower())  # Largest first: wider comes first naturally
-                
-                # Fallback to fast metadata lookup
-                dimensions = get_image_dimensions_fast_metadata(path)
-                if dimensions and len(dimensions) == 2:
+                dimensions = self._get_dimensions_for_sort(path)
+                if dimensions:
                     width, height = dimensions
-                    if width > 0 and height > 0:
-                        area = width * height
-                        if self.main_window.is_reversed:
-                            return (area, -width, path.lower())  # Smallest first: negate width so wider comes first
-                        else:
-                            return (area, width, path.lower())  # Largest first: wider comes first naturally
-                
-                # If dimensions unavailable, use (0, 0, path) (will be sorted to beginning)
+                    area = width * height
+                    if self.main_window.is_reversed:
+                        return (area, -width, path.lower())
+                    return (area, width, path.lower())
                 return (0, 0, path.lower())
             except Exception:
-                return (0, 0, path.lower())  # Sort failed images to end
+                return (0, 0, path.lower())
         
         images.sort(key=get_size_sort_key, reverse=not self.main_window.is_reversed)
         return images
@@ -722,26 +717,13 @@ class SortingManager:
         """Sort images by dimensions: width first (numeric), then height (numeric)."""
         def get_dimensions_sort_key(path):
             try:
-                # Quick check for cached metadata first
-                cache_key = self.main_window.cache_manager.get_cache_key(path)
-                if cache_key in self.main_window.cache_manager.metadata_cache:
-                    metadata = self.main_window.cache_manager.metadata_cache[cache_key]
-                    if metadata and hasattr(metadata, 'width') and hasattr(metadata, 'height'):
-                        if metadata.width > 0 and metadata.height > 0:
-                            # Return tuple: (width, height, path) for numeric sorting
-                            return (metadata.width, metadata.height, path.lower())
-                
-                # Fallback to fast metadata lookup
-                dimensions = get_image_dimensions_fast_metadata(path)
-                if dimensions and len(dimensions) == 2:
+                dimensions = self._get_dimensions_for_sort(path)
+                if dimensions:
                     width, height = dimensions
-                    if width > 0 and height > 0:
-                        return (width, height, path.lower())
-                
-                # If dimensions unavailable, use (0, 0, path) (will be sorted to beginning)
+                    return (width, height, path.lower())
                 return (0, 0, path.lower())
             except Exception:
-                return (0, 0, path.lower())  # Sort failed images to end
+                return (0, 0, path.lower())
         
         images.sort(key=get_dimensions_sort_key, reverse=self.main_window.is_reversed)
         return images

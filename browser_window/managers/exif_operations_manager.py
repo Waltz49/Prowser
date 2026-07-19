@@ -23,6 +23,8 @@ from utils import (
     create_titled_progress_dialog,
     file_string,
     is_root_or_system_volume,
+    present_auxiliary_dialog,
+    raise_dialog_without_space_hop,
     show_styled_information,
     show_styled_warning,
 )
@@ -31,12 +33,30 @@ from utils import (
 class ExifOperationsManager:
     """Batch EXIF date and step-suffix operations (delegated from ImageBrowserWindow)."""
 
+    _FIELDS_EXIF = frozenset({'exif'})
+    _FIELDS_MTIME = frozenset({'mtime'})
+    _FIELDS_EXIF_MTIME = frozenset({'exif', 'mtime'})
+
     def __init__(self, main_window):
         self.main_window = main_window
 
     @property
     def mw(self):
         return self.main_window
+
+    def _after_exif_batch_success(self, modified_paths, metadata_fields=None) -> None:
+        """Invalidate per-file cache (emits FILE_METADATA_CHANGED) and refresh the directory."""
+        paths = [file_path for file_path in modified_paths if file_path]
+        if not paths:
+            return
+        cache_manager = getattr(self.mw, 'cache_manager', None)
+        if cache_manager:
+            if len(paths) == 1:
+                cache_manager.clear_cache_for_file(paths[0], metadata_fields=metadata_fields)
+            else:
+                cache_manager.clear_cache_for_files_batch(paths, metadata_fields=metadata_fields)
+        if hasattr(self.mw, 'debounce_refresh_directory'):
+            self.mw.debounce_refresh_directory()
 
     def reset_date_to_exif(self):
         """Reset modification dates of selected images to match their EXIF data"""
@@ -54,19 +74,6 @@ class ExifOperationsManager:
         if not selected_files:
             self.mw.status_notification.show_message("No files selected")
             return
-
-        # First confirmation dialog (default Cancel)
-        # reply = QMessageBox.question(
-        #     self,
-        #     "Reset Date to EXIF",
-        #     f"Scan {len(selected_files)} selected {file_string(len(selected_files))} for EXIF date data?\n\n"
-        #     f"This will identify files that need their modification dates reset.",
-        #     QMessageBox.StandardButton.Ok | QMessageBox.StandardButton.Cancel,
-        #     QMessageBox.StandardButton.Cancel
-        # )
-
-        # if reply != QMessageBox.StandardButton.Ok:
-        #     return
 
         # Scan selected images for EXIF data
         files_to_change = []
@@ -133,16 +140,10 @@ class ExifOperationsManager:
                     f"Successfully reset dates for {success_count} {file_string(success_count)}"
                 )
 
-            # Refresh directory to update displayed dates
-            if hasattr(self, 'debounce_refresh_directory'):
-                self.mw.debounce_refresh_directory()
-
-            # Update Information sidebar if visible and showing current image
-            if getattr(self.mw, 'right_sidebar', None) and getattr(self.mw, 'right_sidebar_visible', None):
-                if getattr(self.mw, 'current_image_path', None):
-                    # Check if current image was one of the files that was modified
-                    if any(self.mw.current_image_path == file_path for file_path, _, _ in files_to_change):
-                        self.mw.right_sidebar.show_image_info_overlay()
+            self._after_exif_batch_success(
+                [file_path for file_path, _, _ in files_to_change],
+                metadata_fields=self._FIELDS_MTIME,
+            )
         else:
             self.mw.status_notification.show_message(f"Failed to reset dates for {error_count} {file_string(error_count)}")
 
@@ -368,16 +369,10 @@ class ExifOperationsManager:
                     f"Successfully updated EXIF dates for {success_count} {file_string(success_count)}"
                 )
 
-            # Refresh directory to update displayed dates
-            if hasattr(self, 'debounce_refresh_directory'):
-                self.mw.debounce_refresh_directory()
-
-            # Update Information sidebar if visible and showing current image
-            if getattr(self.mw, 'right_sidebar', None) and getattr(self.mw, 'right_sidebar_visible', None):
-                if getattr(self.mw, 'current_image_path', None):
-                    # Check if current image was one of the files that was modified
-                    if any(self.mw.current_image_path == file_path for file_path, _, _ in files_to_update):
-                        self.mw.right_sidebar.show_image_info_overlay()
+            self._after_exif_batch_success(
+                [file_path for file_path, _, _ in files_to_update],
+                metadata_fields=self._FIELDS_EXIF,
+            )
         else:
             self.mw.status_notification.show_message(f"Failed to update EXIF dates for {error_count} {file_string(error_count)}")
 
@@ -775,16 +770,10 @@ class ExifOperationsManager:
                     f"Successfully deleted EXIF dates from {success_count} {file_string(success_count)}"
                 )
 
-            # Refresh directory to update displayed dates
-            if hasattr(self, 'debounce_refresh_directory'):
-                self.mw.debounce_refresh_directory()
-
-            # Update Information sidebar if visible and showing current image
-            if getattr(self.mw, 'right_sidebar', None) and getattr(self.mw, 'right_sidebar_visible', None):
-                if getattr(self.mw, 'current_image_path', None):
-                    # Check if current image was one of the files that was modified
-                    if any(self.mw.current_image_path == file_path for file_path, _ in files_to_delete):
-                        self.mw.right_sidebar.show_image_info_overlay()
+            self._after_exif_batch_success(
+                [file_path for file_path, _ in files_to_delete],
+                metadata_fields=self._FIELDS_EXIF,
+            )
         else:
             self.mw.status_notification.show_message(f"Failed to delete EXIF dates from {error_count} {file_string(error_count)}")
 
@@ -957,21 +946,76 @@ class ExifOperationsManager:
                     f"Successfully normalized EXIF steps in "
                     f"{success_count} {file_string(success_count)}"
                 )
-            if hasattr(self, 'debounce_refresh_directory'):
-                self.mw.debounce_refresh_directory()
-            if getattr(self.mw, 'right_sidebar', None) and getattr(
-                self, 'right_sidebar_visible', None
-            ):
-                current_path = getattr(self.mw, 'current_image_path', None)
-                if current_path:
-                    current_norm = _normalize_exif_path(current_path)
-                    if any(
-                        current_norm == _normalize_exif_path(file_path)
-                        for file_path, _ in files_to_update
-                    ):
-                        self.mw.right_sidebar.show_image_info_overlay()
+            self._after_exif_batch_success(
+                [file_path for file_path, _ in files_to_update],
+                metadata_fields=self._FIELDS_EXIF,
+            )
         else:
             self.mw.status_notification.show_message(
                 f"Failed to normalize EXIF steps in {error_count} "
                 f"{file_string(error_count)}"
             )
+
+    def edit_exif_usercomment(self):
+        """Open a dialog to view and edit the EXIF UserComment for the current image."""
+        image_path = None
+        if self.mw.current_view_mode == 'browse':
+            image_path = self.mw.get_current_image_path()
+        elif self.mw.current_view_mode == 'thumbnail':
+            selected_files = self.mw.selection_manager.get_selected_files()
+            if selected_files and len(selected_files) == 1:
+                image_path = selected_files[0]
+
+        if not image_path or not os.path.exists(image_path):
+            self.mw.status_notification.show_message("No image selected")
+            return
+
+        ext = os.path.splitext(image_path)[1].lower()
+        if ext not in {'.jpg', '.jpeg', '.png', '.tiff', '.tif', '.webp'}:
+            self.mw.status_notification.show_message(
+                "This image format does not support EXIF user comments"
+            )
+            return
+
+        from exif.exif_utils import (
+            decode_usercomment,
+            encode_usercomment,
+            get_usercomment_from_path,
+            restore_usercomment_to_file,
+        )
+        from browser_window.dialogs.edit_exif_usercomment_dialog import EditExifUserCommentDialog
+
+        raw_bytes = get_usercomment_from_path(image_path)
+        original_text = decode_usercomment(raw_bytes) if raw_bytes else ""
+
+        existing = getattr(self, '_edit_exif_usercomment_dialog', None)
+        if existing is not None and existing.isVisible():
+            if existing.file_path == image_path:
+                raise_dialog_without_space_hop(existing)
+                return
+            existing.close()
+
+        dialog = EditExifUserCommentDialog(image_path, original_text, parent=self.mw)
+        self._edit_exif_usercomment_dialog = dialog
+
+        def _on_edit_exif_usercomment_finished(result: int) -> None:
+            if getattr(self, '_edit_exif_usercomment_dialog', None) is dialog:
+                self._edit_exif_usercomment_dialog = None
+            if result != EditExifUserCommentDialog.DialogCode.Accepted:
+                return
+            new_text = dialog.get_text()
+            if new_text == original_text:
+                return
+            encoded = encode_usercomment(new_text)
+            success = restore_usercomment_to_file(image_path, encoded)
+            if success:
+                self.mw.status_notification.show_message("EXIF user comment saved")
+                self._after_exif_batch_success(
+                    [image_path],
+                    metadata_fields=self._FIELDS_EXIF,
+                )
+            else:
+                self.mw.status_notification.show_message("Failed to save EXIF user comment")
+
+        dialog.finished.connect(_on_edit_exif_usercomment_finished)
+        present_auxiliary_dialog(dialog)
