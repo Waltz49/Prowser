@@ -183,6 +183,8 @@ class LmStudioInstructionsPane:
         toggle_tooltip: str = "Show/hide system prompt for Prompt AI",
         line_count: int = LMSTUDIO_INSTRUCTIONS_LINE_COUNT,
         image_gen_styled: bool = False,
+        inline_toggle_in_label_row: bool = False,
+        trailing_header_widget: Optional[QWidget] = None,
         on_visibility_changed: Optional[Callable[[], None]] = None,
         on_text_changed: Optional[Callable[[], None]] = None,
         on_editor_expanded_changed: Optional[Callable[[], None]] = None,
@@ -201,6 +203,8 @@ class LmStudioInstructionsPane:
         self._line_count = max(1, int(line_count))
         self._toggle_tooltip = toggle_tooltip
         self._image_gen_styled = bool(image_gen_styled)
+        self._inline_toggle_in_label_row = bool(inline_toggle_in_label_row)
+        self._trailing_header_widget = trailing_header_widget
         self._instructions_edit: Optional[QPlainTextEdit] = None
         self._widget: Optional[QWidget] = None
         self._toolbar_host: Optional[QWidget] = None
@@ -383,7 +387,28 @@ class LmStudioInstructionsPane:
                 edit.setPlainText(saved_text)
             if self._on_text_changed is not None:
                 edit.textChanged.connect(self._on_text_changed)
-            instructions_container.addWidget(label)
+            if self._inline_toggle_in_label_row or self._trailing_header_widget is not None:
+                label_row = QWidget()
+                label_row_layout = QHBoxLayout(label_row)
+                label_row_layout.setContentsMargins(0, 0, 0, 0)
+                label_row_layout.setSpacing(4)
+                label_row_layout.addWidget(label)
+                label_row_layout.addStretch(1)
+                if self._inline_toggle_in_label_row:
+                    label_row_layout.addWidget(
+                        self.toggle_button(),
+                        0,
+                        Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
+                    )
+                if self._trailing_header_widget is not None:
+                    label_row_layout.addWidget(
+                        self._trailing_header_widget,
+                        0,
+                        Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
+                    )
+                instructions_container.addWidget(label_row)
+            else:
+                instructions_container.addWidget(label)
             instructions_container.addWidget(
                 maybe_wrap_plain_text_edit_with_voice_mic(edit), 0
             )

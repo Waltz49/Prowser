@@ -29,15 +29,14 @@ DEFAULT_SILENCE_END_MS = int(os.environ.get("SILENCE_END_MS", "1200"))
 SILENCE_END_MS_MIN = 400
 SILENCE_END_MS_MAX = 5000
 MAX_RECORD_SEC = int(os.environ.get("MAX_RECORD_SEC", "30"))
-VOICE_MIC_CORNER_INSET_PX = 0
-VOICE_MIC_OFFSET_X = 3
-VOICE_MIC_OFFSET_Y = 3  # up from bottom-left anchor
+VOICE_MIC_OFFSET_X = 2  # inset from right border
+VOICE_MIC_OFFSET_Y = 2  # inset from bottom border
 VOICE_MIC_ICON_HEIGHT = 24
 VOICE_MIC_ICON_WIDTH = max(12, round(VOICE_MIC_ICON_HEIGHT * 112 / 181))
 
 
 def voice_mic_button_stylesheet() -> str:
-    """Override dialog-wide QPushButton min sizes so the mic stays flush left."""
+    """Override dialog-wide QPushButton min sizes so the mic stays compact."""
     return f"""
         QPushButton#voice_mic_btn {{
             background-color: transparent;
@@ -53,17 +52,16 @@ def voice_mic_button_stylesheet() -> str:
 
 
 def _position_voice_mic(edit: QPlainTextEdit, mic: QWidget) -> None:
-    """Place mic at the bottom-left of the text field, flush with its border."""
+    """Place mic at the bottom-right of the text field with a small inset."""
     parent = mic.parentWidget()
     if parent is None:
         return
     from PySide6.QtCore import QPoint
 
-    bottom_left = edit.mapTo(parent, QPoint(0, edit.height()))
-    inset = VOICE_MIC_CORNER_INSET_PX
+    bottom_right = edit.mapTo(parent, QPoint(edit.width(), edit.height()))
     mic.move(
-        bottom_left.x() + inset + VOICE_MIC_OFFSET_X,
-        bottom_left.y() - mic.height() - inset - VOICE_MIC_OFFSET_Y,
+        bottom_right.x() - mic.width() - VOICE_MIC_OFFSET_X,
+        bottom_right.y() - mic.height() - VOICE_MIC_OFFSET_Y,
     )
     mic.raise_()
 
@@ -469,7 +467,7 @@ class _VoiceMicResizeFilter(QObject):
 
 
 class VoiceMicTextEditWrapper(QWidget):
-    """QPlainTextEdit with a lower-left microphone overlay."""
+    """QPlainTextEdit with a lower-right microphone overlay."""
 
     def __init__(self, edit: QPlainTextEdit, parent: QWidget | None = None):
         super().__init__(parent)

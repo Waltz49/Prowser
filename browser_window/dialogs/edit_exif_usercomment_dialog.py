@@ -6,19 +6,23 @@ Dialog for editing EXIF UserComment on a single image file.
 import os
 from PySide6.QtWidgets import (
     QApplication, QDialog, QVBoxLayout, QHBoxLayout, QLabel,
-    QPlainTextEdit, QPushButton, QMessageBox, QWidget, QSizePolicy
+    QPlainTextEdit, QPushButton, QWidget, QSizePolicy
 )
 from PySide6.QtCore import Qt, QSize, QTimer, QByteArray, QEvent
-from PySide6.QtGui import QIcon, QPixmap, QPainter, QPen, QColor, QTextCursor
+from PySide6.QtGui import QTextCursor
+from thumbnails.information_action_nav import (
+    INFO_NAV_ACTION_ORDER_NO_EDIT,
+    InformationActionNavBar,
+)
 from thumbnails.thumbnail_constants import (
     MULTISELECT_BORDER_COLOR_HEX,
     BUTTON_BG_DEFAULT_HEX, BUTTON_TEXT_DEFAULT_HEX, BUTTON_BORDER_DEFAULT_HEX,
     BUTTON_BG_HOVER_HEX, BUTTON_TEXT_HOVER_HEX, BUTTON_BORDER_HOVER_HEX,
     BUTTON_BG_PRESSED_HEX, BUTTON_FOCUS_TEXT_HEX, CURRENT_IMAGE_BORDER_COLOR_HEX,
-    ACCENT_COLOR_HEX, TEXT_DISABLED_HEX, VALIDATION_SUCCESS_COLOR_HEX,
+    TEXT_DISABLED_HEX,
 )
 from config import get_config
-from exif.exif_utils import truncate_usercomment_before_prompt
+from exif.exif_utils import truncate_usercomment_before_prompt, usercomment_text_for_clipboard
 from theme.theme_service import get_active_theme
 from utils import create_gear_icon, get_main_window
 
@@ -92,6 +96,17 @@ def _initial_prompt_from_usercomment(text: str):
         return text.strip()
 
 
+def _imagegen_edit_ai_available() -> bool:
+    if not _imagegen_ui_enabled():
+        return False
+    try:
+        from imagegen_plugins.image_gen_menu import imagegen_edit_plugins_available
+
+        return imagegen_edit_plugins_available()
+    except ImportError:
+        return False
+
+
 def _open_imagegen_create_from_text_dialog(main_window, *, user_comment: str) -> None:
     if not _imagegen_ui_enabled():
         return
@@ -131,35 +146,6 @@ def _speak_or_stop(text: str) -> bool:
     from speech_utils import speak_or_stop
 
     return speak_or_stop(text)
-
-
-def _create_copy_icon(color: str = ACCENT_COLOR_HEX) -> QIcon:
-    """Create a copy icon: two small squares offset diagonally (standard copy graphic)."""
-    pixmap = QPixmap(18, 18)
-    pixmap.fill(QColor(0, 0, 0, 0))
-    painter = QPainter(pixmap)
-    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-    painter.setPen(QPen(QColor(color), 1.5))
-    painter.setBrush(Qt.BrushStyle.NoBrush)
-    # Back square (top-left)
-    painter.drawRect(2, 2, 8, 8)
-    # Front square (offset down-right)
-    painter.drawRect(6, 6, 8, 8)
-    painter.end()
-    return QIcon(pixmap)
-
-
-def _create_check_icon(color: str = VALIDATION_SUCCESS_COLOR_HEX) -> QIcon:
-    """Create a checkmark icon for copy confirmation feedback."""
-    pixmap = QPixmap(18, 18)
-    pixmap.fill(QColor(0, 0, 0, 0))
-    painter = QPainter(pixmap)
-    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-    painter.setPen(QPen(QColor(color), 2.0))
-    painter.drawLine(3, 9, 7, 14)
-    painter.drawLine(7, 14, 15, 4)
-    painter.end()
-    return QIcon(pixmap)
 
 
 def _overlay_chip_stylesheet() -> str:
@@ -227,45 +213,6 @@ def _edit_exif_usercomment_stylesheet() -> str:
             QPushButton:pressed {{
                 background-color: {BUTTON_BG_PRESSED_HEX};
                 color: {BUTTON_FOCUS_TEXT_HEX};
-            }}
-            QPushButton#ear_btn {{
-                background-color: {BUTTON_BG_DEFAULT_HEX};
-                color: {TEXT_DISABLED_HEX};
-                border: 1px solid {BUTTON_BORDER_DEFAULT_HEX};
-                border-radius: 6px;
-                min-width: 24px;
-                max-width: 24px;
-                min-height: 24px;
-                max-height: 24px;
-                padding: 2px;
-                font-size: 16px;
-            }}
-            QPushButton#ear_btn:hover {{
-                color: {BUTTON_TEXT_HOVER_HEX};
-                border: 1px solid {BUTTON_BORDER_HOVER_HEX};
-            }}
-            QPushButton#ear_btn[speaking="true"] {{
-                color: {BUTTON_TEXT_HOVER_HEX};
-                border: 1px solid {BUTTON_BORDER_HOVER_HEX};
-            }}
-            QPushButton#copy_btn {{
-                background-color: {BUTTON_BG_DEFAULT_HEX};
-                color: {TEXT_DISABLED_HEX};
-                border: 1px solid {BUTTON_BORDER_DEFAULT_HEX};
-                border-radius: 6px;
-                min-width: 24px;
-                max-width: 24px;
-                min-height: 24px;
-                max-height: 24px;
-                padding: 2px;
-            }}
-            QPushButton#copy_btn:hover {{
-                color: {BUTTON_TEXT_HOVER_HEX};
-                border: 1px solid {BUTTON_BORDER_HOVER_HEX};
-            }}
-            QPushButton#copy_btn:pressed {{
-                background-color: {BUTTON_BG_PRESSED_HEX};
-                border: 1px solid {VALIDATION_SUCCESS_COLOR_HEX};
             }}
             QPushButton#settings_btn {{
                 background-color: {BUTTON_BG_DEFAULT_HEX};
@@ -342,8 +289,9 @@ class EditExifUserCommentDialog(QDialog):
         self._dot_timer.setInterval(400)
         self._dot_timer.timeout.connect(self._on_dot_tick)
         self._text_edit_container = None
-        self.generate_btn = None
         self.ai_btn = None
+        self._action_nav: InformationActionNavBar | None = None
+        self.settings_btn = None
 
         self.setWindowTitle("Edit EXIF User Comment")
         self.setMinimumWidth(480)
@@ -370,31 +318,7 @@ class EditExifUserCommentDialog(QDialog):
         self.filename_label.setWordWrap(True)
         self.filename_label.setStyleSheet("font-size: 16px;")
         self.filename_label.setAlignment(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
-        header_row.addWidget(self.filename_label, 1)
 
-        # Ear, copy, and settings buttons (upper right) - stacked vertically
-        btn_stack = QVBoxLayout()
-        btn_stack.setSpacing(0)
-        btn_stack.setContentsMargins(0, 0, 0, 0)
-        self.ear_btn = QPushButton("꡴")  # ear emoji
-        self.ear_btn.setObjectName("ear_btn")
-        self.ear_btn.setToolTip("Read text aloud (click again to stop)")
-        self.ear_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.ear_btn.clicked.connect(self._on_read_aloud)
-        if not _audio_output_ui_enabled():
-            self.ear_btn.hide()
-        from speech_utils import register_speech_state_listener
-
-        register_speech_state_listener(self._on_speech_state_changed)
-        btn_stack.addWidget(self.ear_btn, 0, Qt.AlignmentFlag.AlignRight)
-        self.copy_btn = QPushButton()
-        self.copy_btn.setObjectName("copy_btn")
-        self.copy_btn.setIconSize(QSize(16, 16))
-        self.copy_btn.setToolTip("Copy user comment to clipboard (UTF-8).\nOption+click to copy raw text.")
-        self.copy_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.copy_btn.clicked.connect(self._on_copy_to_clipboard)
-        self.copy_btn.installEventFilter(self)
-        btn_stack.addWidget(self.copy_btn, 0, Qt.AlignmentFlag.AlignRight)
         self.settings_btn = QPushButton()
         self.settings_btn.setObjectName("settings_btn")
         self.settings_btn.setIconSize(QSize(16, 16))
@@ -404,7 +328,34 @@ class EditExifUserCommentDialog(QDialog):
         self.settings_btn.installEventFilter(self)
         if not _lmstudio_ui_enabled():
             self.settings_btn.hide()
-        btn_stack.addWidget(self.settings_btn, 0, Qt.AlignmentFlag.AlignRight)
+
+        self._action_nav = InformationActionNavBar(
+            self,
+            action_order=INFO_NAV_ACTION_ORDER_NO_EDIT,
+            include_stretch=False,
+            contents_margins=(0, 6, 0, 0),
+        )
+        self._action_nav.action_triggered.connect(self._on_info_action)
+        delete_btn = self._action_nav.button("delete")
+        if delete_btn is not None:
+            delete_btn.setToolTip("Clear comment text")
+        from speech_utils import register_speech_state_listener
+
+        register_speech_state_listener(self._on_speech_state_changed)
+
+        header_info_col = QVBoxLayout()
+        header_info_col.setSpacing(0)
+        header_info_col.setContentsMargins(0, 0, 0, 0)
+        header_info_col.addWidget(self.filename_label)
+        header_action_row = QHBoxLayout()
+        header_action_row.setContentsMargins(0, 0, 0, 0)
+        header_action_row.setSpacing(4)
+        header_action_row.addWidget(self._action_nav, 0, Qt.AlignmentFlag.AlignLeft)
+        header_action_row.addStretch(1)
+        header_info_col.addLayout(header_action_row)
+
+        header_row.addLayout(header_info_col, 1)
+
         self._instructions_pane = None
         if _is_lmstudio_services_available():
             from imagegen_plugins.lmstudio_instructions_pane import LmStudioInstructionsPane
@@ -414,12 +365,14 @@ class EditExifUserCommentDialog(QDialog):
                 toggle_tooltip=(
                     "Show/hide Instructions field (override AI user prompt)"
                 ),
+                inline_toggle_in_label_row=True,
+                trailing_header_widget=self.settings_btn,
             )
             self.instructions_btn = self._instructions_pane.toggle_button()
-            btn_stack.addWidget(self.instructions_btn, 0, Qt.AlignmentFlag.AlignRight)
         else:
             self.instructions_btn = None
-        header_row.addLayout(btn_stack, 0)
+            if _lmstudio_ui_enabled():
+                header_action_row.insertWidget(1, self.settings_btn, 0, Qt.AlignmentFlag.AlignLeft)
 
         main_layout.addLayout(header_row)
 
@@ -429,7 +382,7 @@ class EditExifUserCommentDialog(QDialog):
         self.text_edit.setPlaceholderText("Enter user comment…")
         self.text_edit.setMinimumHeight(80)
         self.text_edit.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        self.text_edit.textChanged.connect(self._sync_generate_btn_enabled)
+        self.text_edit.textChanged.connect(self._update_action_nav_state)
         self._text_edit_display = _maybe_wrap_plain_text_edit_with_voice_mic(self.text_edit)
         text_edit_widget = self._wrap_text_edit_with_overlays()
 
@@ -479,6 +432,7 @@ class EditExifUserCommentDialog(QDialog):
         self.finished.connect(self._save_geometry)
 
         self._apply_theme_styles()
+        self._update_action_nav_state()
         self.text_edit.setFocus()
 
     def _repolish_theme_text_inputs(self) -> None:
@@ -493,20 +447,20 @@ class EditExifUserCommentDialog(QDialog):
 
     def _apply_theme_styles(self) -> None:
         self.setStyleSheet(_edit_exif_usercomment_stylesheet())
-        self._copy_icon_normal = _create_copy_icon(TEXT_DISABLED_HEX)
-        self._copy_icon_hover = _create_copy_icon(BUTTON_TEXT_HOVER_HEX)
-        self._settings_icon_normal = create_gear_icon(TEXT_DISABLED_HEX)
-        self._settings_icon_hover = create_gear_icon(BUTTON_TEXT_HOVER_HEX)
-        self.copy_btn.setIcon(self._copy_icon_normal)
-        self.settings_btn.setIcon(self._settings_icon_normal)
+        if self.settings_btn is not None:
+            self._settings_icon_normal = create_gear_icon(TEXT_DISABLED_HEX)
+            self._settings_icon_hover = create_gear_icon(BUTTON_TEXT_HOVER_HEX)
+            self.settings_btn.setIcon(self._settings_icon_normal)
         self.thumb_label.setStyleSheet(
             f"border: 1px solid {MULTISELECT_BORDER_COLOR_HEX}; border-radius: 5px;"
         )
-        chip_style = _overlay_chip_stylesheet()
-        if self.generate_btn is not None:
-            self.generate_btn.setStyleSheet(chip_style)
+        if self._action_nav is not None:
+            self._action_nav.refresh_theme_styles()
+            from speech_utils import is_speaking
+
+            self._action_nav.set_speak_highlighted(is_speaking())
         if self.ai_btn is not None:
-            self.ai_btn.setStyleSheet(chip_style)
+            self.ai_btn.setStyleSheet(_overlay_chip_stylesheet())
         if self._instructions_pane is not None:
             self._instructions_pane.sync_toggle_highlight()
         self._repolish_theme_text_inputs()
@@ -514,12 +468,11 @@ class EditExifUserCommentDialog(QDialog):
     def refresh_theme_styles(self) -> None:
         """Re-apply palette while the dialog stays open across a theme change."""
         self._apply_theme_styles()
+        self._update_action_nav_state()
 
     def _wrap_text_edit_with_overlays(self) -> QWidget:
-        """Wrap the comment editor so action chips can overlay the lower-right corner."""
-        has_generate = _imagegen_create_from_text_available()
-        has_recaption = _is_lmstudio_services_available()
-        if not has_generate and not has_recaption:
+        """Wrap the comment editor so the Recaption chip can overlay the lower-right corner."""
+        if not _is_lmstudio_services_available():
             return self._text_edit_display
 
         self._text_edit_container = QWidget()
@@ -528,44 +481,32 @@ class EditExifUserCommentDialog(QDialog):
         container_layout.setSpacing(0)
         container_layout.addWidget(self._text_edit_display)
 
-        if has_generate:
-            self.generate_btn = QPushButton("Create", self._text_edit_container)
-            self.generate_btn.setToolTip(
-                "Open Create an image from text with this caption as the prompt"
-            )
-            self.generate_btn.clicked.connect(self._on_generate_image_from_caption)
-            self.generate_btn.setEnabled(False)
-            self.generate_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-            self.generate_btn.setStyleSheet(_overlay_chip_stylesheet())
-
-        if has_recaption:
-            self.ai_btn = QPushButton("Recaption", self._text_edit_container)
-            self.ai_btn.setToolTip(
-                "Generate an AI caption using LMStudio\n"
-                "(requires a vision model loaded in LMStudio)"
-            )
-            self.ai_btn.clicked.connect(self._on_ai_caption)
-            self.ai_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-            self.ai_btn.setStyleSheet(_overlay_chip_stylesheet())
+        self.ai_btn = QPushButton("Recaption", self._text_edit_container)
+        self.ai_btn.setToolTip(
+            "Generate an AI caption using LMStudio\n"
+            "(requires a vision model loaded in LMStudio)"
+        )
+        self.ai_btn.clicked.connect(self._on_ai_caption)
+        self.ai_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.ai_btn.setStyleSheet(_overlay_chip_stylesheet())
 
         self._text_edit_container.installEventFilter(self)
         self._position_text_edit_overlays()
         return self._text_edit_container
 
+    def _voice_mic_overlay_reserve(self) -> int:
+        """Horizontal space to leave at the bottom-right for the voice mic."""
+        mic = getattr(self._text_edit_display, "_mic_btn", None)
+        if mic is None or not mic.isVisible():
+            return 0
+        return mic.width() + 2 + 4  # mic width + right inset + gap before chips
+
     def _position_text_edit_overlays(self) -> None:
         if self._text_edit_container is None:
             return
         container = self._text_edit_container
-        right = container.width() - 2
+        right = container.width() - 2 - self._voice_mic_overlay_reserve()
         bottom = container.height() - 2
-        gap = 4
-
-        if self.generate_btn is not None:
-            btn = self.generate_btn
-            btn.adjustSize()
-            btn.move(right - btn.width(), bottom - btn.height())
-            btn.raise_()
-            right = btn.x() - gap
 
         if self.ai_btn is not None:
             btn = self.ai_btn
@@ -573,19 +514,53 @@ class EditExifUserCommentDialog(QDialog):
             btn.move(right - btn.width(), bottom - btn.height())
             btn.raise_()
 
-    def _on_speech_state_changed(self, _speaking: bool) -> None:
-        QTimer.singleShot(0, self._sync_ear_btn_speaking_highlight)
+    def _action_nav_specs(self) -> dict[str, dict[str, object]]:
+        text = self.text_edit.toPlainText()
+        has_comment = bool(text.strip())
+        in_progress = self._ai_caption_in_progress()
+        return {
+            "copy": {"visible": True, "enabled": has_comment},
+            "speak": {
+                "visible": _audio_output_ui_enabled(),
+                "enabled": has_comment,
+            },
+            "delete": {"visible": True, "enabled": has_comment},
+            "create": {
+                "visible": _imagegen_create_from_text_available(),
+                "enabled": self._has_caption_for_generate() and not in_progress,
+            },
+            "editai": {
+                "visible": _imagegen_edit_ai_available(),
+                "enabled": True,
+            },
+        }
 
-    def _sync_ear_btn_speaking_highlight(self) -> None:
-        if not hasattr(self, "ear_btn"):
+    def _update_action_nav_state(self) -> None:
+        if self._action_nav is None:
+            return
+        self._action_nav.apply_specs(self._action_nav_specs())
+
+    def _on_info_action(self, action_id: str) -> None:
+        if action_id == "copy":
+            self._on_copy_to_clipboard()
+        elif action_id == "speak":
+            self._on_read_aloud()
+        elif action_id == "delete":
+            self._on_delete_user_comment()
+        elif action_id == "create":
+            self._on_generate_image_from_caption()
+        elif action_id == "editai":
+            self._on_edit_with_ai()
+
+    def _on_speech_state_changed(self, _speaking: bool) -> None:
+        QTimer.singleShot(0, self._sync_speak_action_highlight)
+
+    def _sync_speak_action_highlight(self) -> None:
+        if self._action_nav is None:
             return
         from speech_utils import is_speaking
 
-        speaking = is_speaking()
-        self.ear_btn.setProperty("speaking", "true" if speaking else "false")
-        style = self.ear_btn.style()
-        style.unpolish(self.ear_btn)
-        style.polish(self.ear_btn)
+        self._action_nav.set_speak_highlighted(is_speaking())
 
     def _unregister_speech_state_listener(self) -> None:
         from speech_utils import unregister_speech_state_listener
@@ -605,18 +580,14 @@ class EditExifUserCommentDialog(QDialog):
                 self.thumb_label.setStyleSheet(
                     f"border: 1px solid {BUTTON_BORDER_HOVER_HEX}; border-radius: 5px;"
                 )
-            elif obj is self.copy_btn:
-                self.copy_btn.setIcon(self._copy_icon_hover)
-            elif obj is self.settings_btn:
+            elif self.settings_btn is not None and obj is self.settings_btn:
                 self.settings_btn.setIcon(self._settings_icon_hover)
         elif event.type() == QEvent.Type.Leave:
             if obj is self.thumb_label:
                 self.thumb_label.setStyleSheet(
                     f"border: 1px solid {MULTISELECT_BORDER_COLOR_HEX}; border-radius: 5px;"
                 )
-            elif obj is self.copy_btn:
-                self.copy_btn.setIcon(self._copy_icon_normal)
-            elif obj is self.settings_btn:
+            elif self.settings_btn is not None and obj is self.settings_btn:
                 self.settings_btn.setIcon(self._settings_icon_normal)
         return super().eventFilter(obj, event)
 
@@ -672,7 +643,7 @@ class EditExifUserCommentDialog(QDialog):
                     self._text_splitter.setSizes(saved_sizes)
         except Exception:
             pass
-        self._sync_generate_btn_enabled()
+        self._update_action_nav_state()
         self._position_text_edit_overlays()
         super().showEvent(event)
 
@@ -708,18 +679,10 @@ class EditExifUserCommentDialog(QDialog):
     def _on_reset(self):
         self._stop_active_caption(disconnect=False)
         self.text_edit.setPlainText(self.original_text)
-        self._sync_generate_btn_enabled()
+        self._update_action_nav_state()
 
     def _has_caption_for_generate(self) -> bool:
         return bool(_initial_prompt_from_usercomment(self.text_edit.toPlainText()))
-
-    def _sync_generate_btn_enabled(self) -> None:
-        if self.generate_btn is None:
-            return
-        in_progress = self.ai_btn is not None and not self.ai_btn.isEnabled()
-        self.generate_btn.setEnabled(
-            self._has_caption_for_generate() and not in_progress
-        )
 
     def _on_generate_image_from_caption(self):
         main_window = get_main_window() or self.parent()
@@ -738,20 +701,38 @@ class EditExifUserCommentDialog(QDialog):
         text = self.text_edit.toPlainText().strip()
         text = truncate_usercomment_before_prompt(text)
         _speak_or_stop(text)
-        QTimer.singleShot(0, self._sync_ear_btn_speaking_highlight)
+        QTimer.singleShot(0, self._sync_speak_action_highlight)
 
     def _on_copy_to_clipboard(self):
         mods = QApplication.keyboardModifiers()
-        raw = bool(
-            mods & (Qt.KeyboardModifier.AltModifier | Qt.KeyboardModifier.ControlModifier)
+        copy_full = bool(mods & Qt.KeyboardModifier.AltModifier)
+        text = usercomment_text_for_clipboard(
+            self.text_edit.toPlainText(),
+            copy_full=copy_full,
         )
-        text = self.text_edit.toPlainText()
-        if not raw:
-            text = truncate_usercomment_before_prompt(text)
-            text = text.replace(";", ".")  # replace semicolons with periods for clipboard copy only
         from copy_feedback import copy_text_to_clipboard
 
         copy_text_to_clipboard(text, anchor=self.text_edit)
+
+    def _on_delete_user_comment(self) -> None:
+        """Clear the comment editor without modifying the file on disk."""
+        self._stop_active_caption(disconnect=False)
+        self.text_edit.setPlainText("")
+        self._update_action_nav_state()
+
+    def _on_edit_with_ai(self) -> None:
+        main_window = get_main_window() or self.parent()
+        if main_window is None:
+            return
+        try:
+            from imagegen_plugins.image_gen_menu import open_imagegen_edit_from_text_dialog
+        except ImportError:
+            return
+        open_imagegen_edit_from_text_dialog(
+            main_window,
+            user_comment=self.text_edit.toPlainText(),
+            source_image_paths=[self.file_path],
+        )
 
     def _on_dot_tick(self):
         if self._ai_caption_error_dialog_open:
@@ -812,7 +793,7 @@ class EditExifUserCommentDialog(QDialog):
             self.ai_btn.setEnabled(True)
             self.ai_btn.setText("Recaption")
             self._position_text_edit_overlays()
-        self._sync_generate_btn_enabled()
+        self._update_action_nav_state()
         if not disconnect:
             self._caption_cancelled_on_close = False
 
@@ -855,7 +836,7 @@ class EditExifUserCommentDialog(QDialog):
         self.ai_btn.setEnabled(False)
         self.ai_btn.setText("…")
         self._position_text_edit_overlays()
-        self._sync_generate_btn_enabled()
+        self._update_action_nav_state()
         self._text_before_ai = self.text_edit.toPlainText()
         self._dot_phase = 0
         self._dot_timer.start()
@@ -931,7 +912,7 @@ class EditExifUserCommentDialog(QDialog):
             self._set_text_edit_streaming_content(self.text_edit, caption)
         finally:
             self.text_edit.blockSignals(False)
-        self._sync_generate_btn_enabled()
+        self._update_action_nav_state()
 
     def _show_ai_caption_error(self, error_msg: str) -> None:
         if self._ai_caption_error_dialog_open:
@@ -960,7 +941,7 @@ class EditExifUserCommentDialog(QDialog):
             self.ai_btn.setEnabled(True)
             self.ai_btn.setText("Recaption")
             self._position_text_edit_overlays()
-        self._sync_generate_btn_enabled()
+        self._update_action_nav_state()
 
     def get_text(self) -> str:
         return self.text_edit.toPlainText()

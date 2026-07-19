@@ -30,8 +30,12 @@ from thumbnails.information_tools_menu import (
     show_information_tools_menu,
 )
 from thumbnails.sidebar_pane_layout import MIN_INFORMATION_CONTENT_HEIGHT
-from thumbnails.thumbnail_constants import ALT_SYMBOL, COPY_SYMBOL
-from theme.theme_base import asset_path, job_pane_tools_icon_path
+from thumbnails.information_action_nav import (
+    INFO_NAV_ACTION_ORDER,
+    InformationActionNavBar,
+)
+from thumbnails.thumbnail_constants import ALT_SYMBOL
+from theme.theme_base import job_pane_tools_icon_path
 from theme.theme_service import get_active_theme
 from utils import (
     format_file_size,
@@ -50,12 +54,6 @@ from search.reference_graph import (
     resolve_reference_entries_map,
     resolve_reference_path,
 )
-
-# Footer function switcher uses 28px; scale the same assets down for info-pane action bar.
-_INFO_ACTION_ICON_PX = 18
-_INFO_ACTION_BTN_PX = 26
-_INFO_NAV_ACTION_ORDER = ("edit", "copy", "speak", "delete", "create", "editai")
-
 
 # Content inset via viewport margins so the vertical scrollbar stays flush right.
 _INFO_VIEWPORT_MARGIN_LEFT = 18
@@ -106,8 +104,7 @@ class InformationSidebar(QWidget):
         self._overlay_has_image_model = False
         self._input_heading_signal_connected = False
         self._info_section_expanded_cache: Optional[Dict[str, bool]] = None
-        self._action_nav_widget: QWidget | None = None
-        self._action_nav_buttons: Dict[str, QPushButton] = {}
+        self._action_nav_bar: InformationActionNavBar | None = None
         self._show_menu_bar = bool(
             main_window.config.load_settings().get("information_show_menu_bar", False)
         )
@@ -256,139 +253,31 @@ class InformationSidebar(QWidget):
             self._on_anchor_clicked(QUrl(scheme))
 
     def _setup_action_nav_bar(self, parent_layout: QVBoxLayout) -> None:
-        nav_widget = QWidget(self)
-        self._action_nav_widget = nav_widget
-        nav_widget.setAutoFillBackground(True)
-        nav_layout = QHBoxLayout(nav_widget)
-        nav_layout.setContentsMargins(8, 4, 8, 4)
-        nav_layout.setSpacing(4)
-
-        btn_defs = {
-            "edit": (None, "edit://"),
-            "copy": (COPY_SYMBOL, "copy://"),
-            "speak": ("꡴", "speak://"),
-            "delete": (None, "delete://"),
-            "create": (None, "create://"),
-            "editai": (None, "editai://"),
-        }
-        for action_id in _INFO_NAV_ACTION_ORDER:
-            text, anchor = btn_defs[action_id]
-            btn = QPushButton(text or "")
-            btn.setToolTip(self._ANCHOR_TOOLTIPS[anchor])
-            btn.clicked.connect(
-                lambda _checked=False, aid=action_id: self.trigger_info_action(aid)
-            )
-            btn.setFocusPolicy(Qt.NoFocus)
-            btn.setFixedSize(_INFO_ACTION_BTN_PX, _INFO_ACTION_BTN_PX)
-            if text is None:
-                btn.setIconSize(QSize(_INFO_ACTION_ICON_PX, _INFO_ACTION_ICON_PX))
-            self._action_nav_buttons[action_id] = btn
-            nav_layout.addWidget(btn)
-
-        nav_layout.addStretch(1)
-        nav_widget.hide()
-        parent_layout.addWidget(nav_widget)
-
-    def _info_action_chip_button_stylesheet(self, *, highlighted: bool = False) -> str:
-        th = get_active_theme()
-        border = (
-            getattr(th, "button_border_hover_hex", th.accent_color_hex)
-            if highlighted
-            else th.information_icon_cell_border_muted_hex
+        nav_bar = InformationActionNavBar(
+            self,
+            action_order=INFO_NAV_ACTION_ORDER,
+            contents_margins=(8, 4, 8, 4),
         )
-        fg = (
-            getattr(th, "button_border_hover_hex", th.accent_color_hex)
-            if highlighted
-            else th.information_action_icon_muted_hex
-        )
-        hover_border = getattr(th, "button_border_hover_hex", th.accent_color_hex)
-        px = _INFO_ACTION_BTN_PX
-        return f"""
-            QPushButton {{
-                background-color: {th.information_action_chip_bg_hex};
-                border: 1px solid {border};
-                border-radius: 6px;
-                color: {fg};
-                padding: 0px;
-                font-size: 14px;
-                min-width: {px}px;
-                max-width: {px}px;
-                min-height: {px}px;
-                max-height: {px}px;
-            }}
-            QPushButton:hover {{
-                border-color: {hover_border};
-                color: {hover_border};
-            }}
-            QPushButton:disabled {{
-                color: {th.text_disabled_hex};
-                border-color: {th.information_icon_cell_border_muted_hex};
-            }}
-        """
-
-    def _info_action_image_button_stylesheet(self, *, highlighted: bool = False) -> str:
-        th = get_active_theme()
-        border = (
-            getattr(th, "button_border_hover_hex", th.accent_color_hex)
-            if highlighted
-            else th.information_icon_cell_border_muted_hex
-        )
-        hover_border = getattr(th, "button_border_hover_hex", th.accent_color_hex)
-        px = _INFO_ACTION_BTN_PX
-        return f"""
-            QPushButton {{
-                background-color: {th.information_action_chip_bg_hex};
-                border: 1px solid {border};
-                border-radius: 6px;
-                padding: 0px;
-                min-width: {px}px;
-                max-width: {px}px;
-                min-height: {px}px;
-                max-height: {px}px;
-            }}
-            QPushButton:hover {{
-                border-color: {hover_border};
-            }}
-            QPushButton:disabled {{
-                border-color: {th.information_icon_cell_border_muted_hex};
-            }}
-        """
-
-    def _style_action_nav_buttons(self) -> None:
-        th = get_active_theme()
-        if self._action_nav_widget is not None:
-            self._action_nav_widget.setStyleSheet(th.file_tree_nav_container_stylesheet())
-
-        speak_highlight = is_speaking()
-        for action_id, btn in self._action_nav_buttons.items():
-            if action_id in ("edit", "create", "editai", "delete"):
-                icon_map = {
-                    "edit": ("comment_icon.png", "comment_icon_hover.png"),
-                    "create": ("fromText.png", "fromText_hover.png"),
-                    "editai": ("editAI.png", "editAI_hover.png"),
-                    "delete": ("trash_icon.png", "trash_icon_hover.png"),
-                }
-                normal, hover = icon_map[action_id]
-                btn.setIcon(QIcon(asset_path(normal)))
-                btn.setStyleSheet(self._info_action_image_button_stylesheet())
-            else:
-                highlighted = speak_highlight if action_id == "speak" else False
-                btn.setStyleSheet(self._info_action_chip_button_stylesheet(highlighted=highlighted))
+        nav_bar.setAutoFillBackground(True)
+        nav_bar.action_triggered.connect(self.trigger_info_action)
+        nav_bar.hide()
+        self._action_nav_bar = nav_bar
+        parent_layout.addWidget(nav_bar)
 
     def _update_action_nav_state(self) -> None:
-        if self._action_nav_widget is None:
+        if self._action_nav_bar is None:
             return
         specs = {spec["action_id"]: spec for spec in self.info_action_specs()}
-        any_visible = False
-        for action_id, btn in self._action_nav_buttons.items():
+        bar_specs = {}
+        for action_id in INFO_NAV_ACTION_ORDER:
             spec = specs.get(action_id, {})
-            visible = bool(spec.get("visible")) and self._show_menu_bar
-            btn.setVisible(visible)
-            btn.setEnabled(bool(spec.get("enabled", True)))
-            if visible:
-                any_visible = True
-        self._action_nav_widget.setVisible(any_visible)
-        self._style_action_nav_buttons()
+            bar_specs[action_id] = {
+                "visible": bool(spec.get("visible")) and self._show_menu_bar,
+                "enabled": bool(spec.get("enabled", True)),
+            }
+        any_visible = self._action_nav_bar.apply_specs(bar_specs)
+        self._action_nav_bar.setVisible(any_visible)
+        self._action_nav_bar.set_speak_highlighted(is_speaking())
 
 
     def show_info(self):
@@ -426,7 +315,9 @@ class InformationSidebar(QWidget):
             )
         if hasattr(self, "_link_tooltip_label"):
             self._link_tooltip_label.setStyleSheet(th.information_link_tooltip_stylesheet())
-        self._style_action_nav_buttons()
+        if self._action_nav_bar is not None:
+            self._action_nav_bar.refresh_theme_styles()
+            self._action_nav_bar.set_speak_highlighted(is_speaking())
         if getattr(self, "_last_overlay_data", None):
             self._refresh_overlay_for_hover(getattr(self, "_hovered_anchor", None))
 
@@ -715,7 +606,9 @@ class InformationSidebar(QWidget):
         QTimer.singleShot(0, self._refresh_speak_action_highlight)
 
     def _refresh_speak_action_highlight(self) -> None:
-        self._style_action_nav_buttons()
+        if self._action_nav_bar is not None:
+            self._action_nav_bar.refresh_theme_styles()
+            self._action_nav_bar.set_speak_highlighted(is_speaking())
 
     def eventFilter(self, obj, event):
         """Show tooltip and red highlight when hovering over information action links."""
