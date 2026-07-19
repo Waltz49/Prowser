@@ -2052,6 +2052,9 @@ class ImageGenDialog(ImageGenDimensionAspectMixin, QDialog):
         values = finalize_run_values(
             self.plugin.pipeline_id, self.collect_values()
         )
+        from imagegen_plugins.ai_prompt_exit import sync_ui_prompt_exit_for_run_values
+
+        sync_ui_prompt_exit_for_run_values(values, self)
         from imagegen_plugins.flux_prompt_job import (
             allow_empty_prompt_for_flux_ai_job,
             apply_flux_prompt_job_to_prepare_run_values,
