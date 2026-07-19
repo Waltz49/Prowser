@@ -1885,6 +1885,19 @@ class FileOperationsManager:
             else:
                 occupied_numbers.add(number)
 
+        # Pre-build stem -> filepath map for O(1) pattern conflict checks
+        stem_to_filepath = {}
+        for filename_upper, filepath in existing_files_map.items():
+            stem, _ = os.path.splitext(filename_upper)
+            stem_to_filepath[stem] = filepath
+
+        def path_occupied_by_non_source(stem: str) -> bool:
+            filepath = stem_to_filepath.get(stem)
+            if filepath is None:
+                return False
+            norm_path = os.path.normpath(os.path.realpath(filepath))
+            return norm_path not in source_paths_normalized
+
         MAX_SEQ = 10 ** increment_length - 1
         total_images = len(images_to_rename)
         assigned_targets = set()  # UPPER(target filename)
@@ -1917,13 +1930,8 @@ class FileOperationsManager:
                         if next_seq is not None:
                             cand_pat_dash = f"{prefix}-{'{:0{w}d}'.format(src_num,w=increment_length)}".upper()
                             cand_pat_nodash = f"{prefix}{'{:0{w}d}'.format(src_num,w=increment_length)}".upper()
-                            for existing_fn_upper in existing_files_map.keys():
-                                name_wo_ext, _ = os.path.splitext(existing_fn_upper)
-                                if name_wo_ext == cand_pat_dash or name_wo_ext == cand_pat_nodash:
-                                    norm_path = os.path.normpath(os.path.realpath(existing_files_map[existing_fn_upper]))
-                                    if norm_path not in source_paths_normalized:
-                                        next_seq = None
-                                        break
+                            if path_occupied_by_non_source(cand_pat_dash) or path_occupied_by_non_source(cand_pat_nodash):
+                                next_seq = None
 
             # Micro-optimize: Don't check all files for each candidate, check using pre-built sets.
             if next_seq is None:
@@ -1955,20 +1963,11 @@ class FileOperationsManager:
                             candidate += 1
                             continue
 
-                    # Safety: Check all files in dir for any sequence number match (slow only if many files)
-                    # This is pattern match, not full filename/ext.
+                    # Safety: check pattern match via stem index (O(1) per candidate)
                     cand_pat_dash = f"{prefix}-{'{:0{w}d}'.format(candidate,w=increment_length)}".upper()
                     cand_pat_nodash = f"{prefix}{'{:0{w}d}'.format(candidate,w=increment_length)}".upper()
-                    did_conflict = False
-                    for existing_fn_upper in existing_files_map.keys():
-                        name_wo_ext, _ = os.path.splitext(existing_fn_upper)
-                        if name_wo_ext == cand_pat_dash or name_wo_ext == cand_pat_nodash:
-                            norm_path = os.path.normpath(os.path.realpath(existing_files_map[existing_fn_upper]))
-                            if norm_path not in source_paths_normalized:
-                                occupied_numbers.add(candidate)
-                                did_conflict = True
-                                break
-                    if did_conflict:
+                    if path_occupied_by_non_source(cand_pat_dash) or path_occupied_by_non_source(cand_pat_nodash):
+                        occupied_numbers.add(candidate)
                         candidate += 1
                         continue
 
@@ -3403,17 +3402,8 @@ class FileOperationsManager:
                     if not os.access(file_dir, os.W_OK):
                         non_renameable_files.append((os.path.basename(image_path), "Parent directory not writable"))
                         continue
-                    try:
-                        test_temp_name = f".prowser_rename_test_{int(time.time() * 1000000)}"
-                        test_temp_path = os.path.join(file_dir, test_temp_name)
-                        os.rename(image_path, test_temp_path)
-                        os.rename(test_temp_path, image_path)
-                    except PermissionError:
+                    if not os.access(image_path, os.W_OK):
                         non_renameable_files.append((os.path.basename(image_path), "Permission denied: cannot rename file"))
-                    except OSError as e:
-                        non_renameable_files.append((os.path.basename(image_path), f"OS error: {str(e)}"))
-                    except Exception as e:
-                        non_renameable_files.append((os.path.basename(image_path), f"Unexpected error: {str(e)}"))
                 except Exception as e:
                     non_renameable_files.append((os.path.basename(image_path), f"Permission check failed: {str(e)}"))
             if non_renameable_files:
@@ -3457,6 +3447,18 @@ class FileOperationsManager:
                 progress_dialog.setValue(phase_progress)
                 progress_dialog.setLabelText(message)
                 QApplication.processEvents()
+
+            # Prepare background CLIP process early so cache is synced before name calculation
+            if hasattr(mw, 'background_clip_controller') and mw.background_clip_controller:
+                def cache_prep_callback(message):
+                    progress_dialog.setLabelText(message)
+                    QApplication.processEvents()
+                if not mw.background_clip_controller.prepare_for_mass_rename(
+                    progress_callback=cache_prep_callback,
+                ):
+                    mw.status_notification.show_message(
+                        "Warning: Background CLIP process did not flush in time. Proceeding anyway."
+                    )
 
             # --------- SORT LOGIC: New code supporting two sort modes ------------------
             # Initialize original_displayed_order for date setting after rename
@@ -3870,12 +3872,6 @@ class FileOperationsManager:
                     self._highlight_first_non_locked_after_rename(mw, target_directory, rename_map_dict)
                     restart_background_loading()
                     return
-            
-            # Prepare background CLIP process for mass rename
-            # This flushes background cache, imports it, and pauses the process
-            if hasattr(mw, 'background_clip_controller') and mw.background_clip_controller:
-                if not mw.background_clip_controller.prepare_for_mass_rename():
-                    mw.status_notification.show_message("Warning: Background CLIP process did not flush in time. Proceeding anyway.")
             
             # NEW: Collect pre-rename features and invalidate cache
             if settings.get('preserve_features_on_rename', True):

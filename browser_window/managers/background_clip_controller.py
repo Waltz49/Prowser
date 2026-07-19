@@ -13,6 +13,7 @@ import select
 import traceback
 from typing import Optional, List
 from PySide6.QtCore import QObject, Signal, QTimer
+from PySide6.QtWidgets import QApplication
 
 from config import get_config
 from utils import _usleep_ms
@@ -612,18 +613,19 @@ class BackgroundClipController(QObject):
         self._send_control_command("flush_and_pause")
         self._update_status_bar()
     
-    def wait_for_flush_and_pause(self, timeout: float = 90.0) -> bool:
+    def wait_for_flush_and_pause(self, timeout: float = 45.0, progress_callback=None) -> bool:
         """
         Wait for background process to flush and pause
         
         Args:
             timeout: Maximum time to wait in seconds
+            progress_callback: Optional callable(message) for UI updates during wait
             
         Returns:
             True if flush_and_pause completed (or worker already idle), False if timeout
         """
         start_time = time.time()
-        check_interval_ms = 500  # Check every 500ms
+        poll_interval_ms = 50  # Short poll; processEvents keeps UI responsive
         # flush_and_pause may fail to deliver if the command socket is not ready yet (e.g. worker
         # just restarted after "socket not responding"). Status can show "running" while the worker
         # never received the command — resend periodically until we see a paused/idle state.
@@ -631,6 +633,8 @@ class BackgroundClipController(QObject):
         last_resend_time = start_time - resend_interval_sec
         last_status_log_time = 0.0
         status_log_interval_sec = 5.0
+        last_progress_update = 0.0
+        progress_update_interval_sec = 0.5
 
         while time.time() - start_time < timeout:
             if not self.is_process_running():
@@ -649,8 +653,15 @@ class BackgroundClipController(QObject):
             if status_str and (now - last_status_log_time >= status_log_interval_sec):
                 print(f"{RED}Waiting for flush and pause... current status: {status_str}{RESET}")
                 last_status_log_time = now
-            # Use _usleep_ms() instead of time.sleep() to avoid GIL acquisition and UI blocking
-            _usleep_ms(check_interval_ms)
+            if progress_callback and (now - last_progress_update >= progress_update_interval_sec):
+                elapsed = int(now - start_time)
+                progress_callback(f"Syncing background cache... ({elapsed}s)")
+                last_progress_update = now
+            # Brief GIL-free sleep, then pump Qt events so the UI stays responsive
+            _usleep_ms(poll_interval_ms)
+            app = QApplication.instance()
+            if app is not None:
+                app.processEvents()
 
         return False
     
@@ -680,7 +691,7 @@ class BackgroundClipController(QObject):
         # If no status file, assume inactive
         return False
     
-    def prepare_for_mass_rename(self) -> bool:
+    def prepare_for_mass_rename(self, progress_callback=None) -> bool:
         """
         Prepare for mass rename operation:
         1. Request background process to flush and pause
@@ -688,6 +699,9 @@ class BackgroundClipController(QObject):
         3. Import background cache files
         4. Merge background index
         5. Clear background index
+        
+        Args:
+            progress_callback: Optional callable(message) for UI updates
         
         Returns:
             True if successful, False if timeout or error
@@ -697,21 +711,22 @@ class BackgroundClipController(QObject):
             return True
         
         # Step 1: Request flush and pause
+        if progress_callback:
+            progress_callback("Syncing background cache...")
         self.flush_and_pause_process()
         
         # Step 2: Wait for flush completion
-        # Increased timeout to 90 seconds to accommodate large cache flushes
-        flush_timeout = 90.0
-        flush_completed = self.wait_for_flush_and_pause(timeout=flush_timeout)
+        flush_timeout = 45.0
+        flush_completed = self.wait_for_flush_and_pause(
+            timeout=flush_timeout,
+            progress_callback=progress_callback,
+        )
         
         if not flush_completed:
             print(f"WARNING: Background process did not flush and pause within {flush_timeout} seconds. "
                   f"This may happen with very large caches.")
             # CRITICAL: Even if timeout occurred, we still need to import cache files
             # The background process may have flushed some data before timeout
-            # Add a small delay to let any in-progress writes complete
-            import time
-            time.sleep(2.0)  # Wait 2 seconds for any in-progress writes to complete
             print("Attempting to import cache files despite timeout...")
         
         # Step 3-5: Import and merge cache (handled by BackgroundCacheImporter)
@@ -719,7 +734,11 @@ class BackgroundClipController(QObject):
         imported_count = 0
         if hasattr(self.main_window, 'background_cache_importer') and self.main_window.background_cache_importer:
             try:
-                imported_count = self.main_window.background_cache_importer.import_all_pending()
+                if progress_callback:
+                    progress_callback("Importing background cache...")
+                imported_count = self.main_window.background_cache_importer.import_all_pending(
+                    progress_callback=progress_callback,
+                )
                 if imported_count > 0:
                     print(f"Imported {imported_count} background cache files before mass rename")
             except Exception as e:

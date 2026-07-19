@@ -9,8 +9,9 @@ import os
 import fcntl
 import time
 from pathlib import Path
-from typing import Optional, Set
+from typing import Optional, Set, Callable
 from PySide6.QtCore import QObject, QTimer, Signal, QMutexLocker
+from PySide6.QtWidgets import QApplication
 
 from config import get_config
 
@@ -67,10 +68,13 @@ class BackgroundCacheImporter(QObject):
         path_to_remove = clip_cache_dir / f"{dir_hash}.npz"
         self.imported_files.discard(path_to_remove)
     
-    def import_all_pending(self) -> int:
+    def import_all_pending(self, progress_callback: Optional[Callable[[str], None]] = None) -> int:
         """
         Import all pending background cache files immediately.
         Used before mass rename operations.
+        
+        Args:
+            progress_callback: Optional callable(message) for UI updates
         
         Returns:
             Number of files imported
@@ -92,7 +96,14 @@ class BackgroundCacheImporter(QObject):
         
         # Find all .npz files in clip cache directory
         current_time = time.time()
-        for npz_file in clip_cache_dir.glob("*.npz"):
+        npz_files = list(clip_cache_dir.glob("*.npz"))
+        total_npz = len(npz_files)
+        for file_idx, npz_file in enumerate(npz_files):
+            if progress_callback and file_idx % 25 == 0:
+                progress_callback(f"Importing background cache... ({file_idx}/{total_npz})")
+                app = QApplication.instance()
+                if app is not None:
+                    app.processEvents()
             # Check if we've already imported this file
             if npz_file in self.imported_files:
                 continue
