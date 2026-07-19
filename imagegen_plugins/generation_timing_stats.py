@@ -39,6 +39,7 @@ class GenerationTimingRow:
     height: int
     steps: int
     quant: str
+    lora_stack: tuple[str, ...]
     run_count: int
     total_seconds: float
     avg_seconds: float
@@ -261,7 +262,7 @@ def list_timing_rows() -> List[GenerationTimingRow]:
     _load_store()
     rows: List[GenerationTimingRow] = []
     for key, entry in reversed(_store.items()):
-        model_id, steps, width, height, quant, _lora_stack = key
+        model_id, steps, width, height, quant, lora_stack = key
         rows.append(
             GenerationTimingRow(
                 model_name=_model_display_name_for_id(str(model_id)),
@@ -270,6 +271,7 @@ def list_timing_rows() -> List[GenerationTimingRow]:
                 height=int(height),
                 steps=int(steps),
                 quant=str(quant or ""),
+                lora_stack=tuple(str(item) for item in lora_stack),
                 run_count=int(entry.run_count),
                 total_seconds=float(entry.total_seconds),
                 avg_seconds=entry.average_seconds,
