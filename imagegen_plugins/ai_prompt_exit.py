@@ -54,7 +54,7 @@ def apply_image_ai_exit_to_payload(payload: dict) -> None:
 
 
 def apply_image_ai_exit_to_prompt_values(values: dict) -> bool:
-    """Apply image prompt exit to dialog/job values; return True if prompt changed."""
+    """Apply image prompt exit to submit/job values; return True if prompt changed."""
     from imagegen_plugins.flux_prompt_job import has_flux_prompt_ai_job
 
     if has_flux_prompt_ai_job(values):
@@ -69,35 +69,13 @@ def apply_image_ai_exit_to_prompt_values(values: dict) -> bool:
     return True
 
 
-def apply_image_ai_exit_to_prompt_edit(edit) -> bool:
-    """Run image prompt exit when the user leaves a prompt field."""
-    if getattr(edit, "_image_gen_skip_prompt_exit", False):
-        return False
-    raw = edit.toPlainText()
-    filtered = apply_image_ai_exit(raw)
-    if filtered == raw:
-        return False
-    edit._image_gen_skip_prompt_exit = True
-    try:
-        from imagegen_plugins.image_gen_form_layout import (
-            image_gen_prompt_edit_set_plain_text,
-        )
-
-        image_gen_prompt_edit_set_plain_text(edit, filtered)
-    finally:
-        edit._image_gen_skip_prompt_exit = False
-    return True
-
-
-def sync_ui_prompt_exit_for_run_values(values: dict, owner=None) -> None:
-    """Apply image prompt exit on dialog submit and sync the prompt field."""
-    if not apply_image_ai_exit_to_prompt_values(values):
-        return
-    if owner is None:
-        return
-    setter = getattr(owner, "set_prompt_text", None)
-    if setter is not None:
-        setter(str(values.get("prompt") or ""))
+def imagegen_values_for_dialog_save(values: dict, panel) -> dict:
+    """Persist dialog settings using the user's raw prompt text."""
+    out = dict(values)
+    getter = getattr(panel, "get_prompt_text", None)
+    if getter is not None:
+        out["prompt"] = getter()
+    return out
 
 
 def describe_ai_exit_env(env_var: str) -> str:

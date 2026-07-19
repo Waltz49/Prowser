@@ -323,12 +323,6 @@ class ImageGenPromptPlainTextEdit(QPlainTextEdit):
         self._image_gen_updating_height = False
         self._update_height()
 
-    def focusOutEvent(self, event) -> None:
-        super().focusOutEvent(event)
-        from imagegen_plugins.ai_prompt_exit import apply_image_ai_exit_to_prompt_edit
-
-        apply_image_ai_exit_to_prompt_edit(self)
-
     def set_line_limits(
         self,
         min_lines: int = IMAGE_GEN_PROMPT_MIN_LINE_COUNT,
@@ -381,28 +375,6 @@ def create_image_gen_prompt_edit(
 
 
 _IMAGE_GEN_PROMPT_AUTO_HEIGHT_ATTR = "_image_gen_prompt_auto_height"
-_IMAGE_GEN_PROMPT_EXIT_FOCUS_ATTR = "_image_gen_prompt_exit_focus_filter"
-
-
-def _wire_image_gen_prompt_exit_on_focus_out(edit: QPlainTextEdit) -> None:
-    if isinstance(edit, ImageGenPromptPlainTextEdit):
-        return
-    if getattr(edit, _IMAGE_GEN_PROMPT_EXIT_FOCUS_ATTR, None) is not None:
-        return
-
-    class _PromptExitFocusFilter(QObject):
-        def eventFilter(self, obj, event) -> bool:
-            if event.type() == QEvent.Type.FocusOut:
-                from imagegen_plugins.ai_prompt_exit import (
-                    apply_image_ai_exit_to_prompt_edit,
-                )
-
-                apply_image_ai_exit_to_prompt_edit(obj)
-            return super().eventFilter(obj, event)
-
-    filt = _PromptExitFocusFilter(edit)
-    edit.installEventFilter(filt)
-    setattr(edit, _IMAGE_GEN_PROMPT_EXIT_FOCUS_ATTR, filt)
 
 
 def _attach_image_gen_prompt_auto_height(
@@ -469,7 +441,6 @@ def configure_image_gen_prompt_edit(
         edit.set_line_limits(min_lines, max_lines)
         return
     _attach_image_gen_prompt_auto_height(edit, min_lines, max_lines)
-    _wire_image_gen_prompt_exit_on_focus_out(edit)
 
 
 def wrap_image_gen_bordered_field(

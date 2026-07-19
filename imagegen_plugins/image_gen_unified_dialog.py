@@ -827,7 +827,14 @@ class ImageGenUnifiedDialog(QDialog):
 
         if not confirm_model_download_if_needed(plugin, self._main_window):
             return
-        save_plugin_dialog_settings(self._function, plugin.plugin_id, values)
+        from imagegen_plugins.ai_prompt_exit import imagegen_values_for_dialog_save
+
+        panel = self._current_panel
+        save_plugin_dialog_settings(
+            self._function,
+            plugin.plugin_id,
+            imagegen_values_for_dialog_save(values, panel) if panel is not None else values,
+        )
         set_active_plugin_for_function(self._main_window, self._function, plugin)
         job_id = self._replace_job_id
         if self._controller.is_queued_job_replaceable(job_id):

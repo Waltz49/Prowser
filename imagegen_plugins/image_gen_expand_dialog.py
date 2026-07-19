@@ -623,9 +623,9 @@ class ImageGenExpandDialog(ImageGenDimensionAspectMixin, QDialog):
         values = finalize_run_values(
             self.plugin.pipeline_id, self.collect_values()
         )
-        from imagegen_plugins.ai_prompt_exit import sync_ui_prompt_exit_for_run_values
+        from imagegen_plugins.ai_prompt_exit import apply_image_ai_exit_to_prompt_values
 
-        sync_ui_prompt_exit_for_run_values(values, self)
+        apply_image_ai_exit_to_prompt_values(values)
         from imagegen_plugins.flux_prompt_job import (
             allow_empty_prompt_for_flux_ai_job,
             apply_flux_prompt_job_to_prepare_run_values,
@@ -663,8 +663,12 @@ class ImageGenExpandDialog(ImageGenDimensionAspectMixin, QDialog):
         values = self._prepare_run_values()
         if values is None:
             return False
+        from imagegen_plugins.ai_prompt_exit import imagegen_values_for_dialog_save
+
         save_plugin_dialog_settings(
-            self._function, self.plugin.plugin_id, values
+            self._function,
+            self.plugin.plugin_id,
+            imagegen_values_for_dialog_save(values, self),
         )
         from imagegen_plugins.image_gen_menu import start_imagegen_without_closing
 
