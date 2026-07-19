@@ -34,7 +34,7 @@ from status_bar_config import StatusBarManager
 from files.file_move_handler import FileMoveHandler
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QTreeView, QFileSystemModel,
     QHeaderView, QPushButton, QLabel, QMessageBox, QStyleOptionViewItem,
-    QStyledItemDelegate, QStyle, QApplication, QDialog, QButtonGroup, QFrame, QMenu, QLineEdit
+    QStyledItemDelegate, QStyle, QApplication, QDialog, QFrame, QMenu, QLineEdit
 )
 from PySide6.QtGui import (QPainter, QPen, QFont, QColor, QPalette, QKeyEvent, QMouseEvent, QIcon, QPixmap,
     QDragEnterEvent, QDragMoveEvent, QDropEvent, QBrush, QPainterPath, QAction
@@ -496,6 +496,17 @@ class CustomTreeView(QTreeView):
         """Handle context menu (right-click) for directory nodes"""
         index = self.indexAt(event.pos())
         if not index.isValid():
+            handler = (
+                getattr(self.main_window, "file_tree_handler", None)
+                if self.main_window
+                else None
+            )
+            if handler is not None:
+                from files.tree_tools_menu import show_tree_context_menu
+
+                show_tree_context_menu(handler, self.mapToGlobal(event.pos()))
+                event.accept()
+                return
             super().contextMenuEvent(event)
             return
 
@@ -2928,6 +2939,8 @@ class FileTreeHandler(QObject):
         self.filter_proxy: Optional[CustomFileSystemFilter] = None
         self.file_tree: Optional[QTreeView] = None
         self.current_dir_label: Optional[QLabel] = None
+        self._toolbar: Optional[Any] = None
+        self._show_toolbar: bool = True
         self.home_button: Optional[QPushButton] = None
         self.collapse_all_button: Optional[QPushButton] = None
         self.current_highlighted_directory: Optional[str] = None
@@ -3595,6 +3608,12 @@ class FileTreeHandler(QObject):
         layout = QVBoxLayout(self.file_tree_widget)
         layout.setContentsMargins(5, 5, 7, 5)
         self.setup_navigation_controls(layout)
+        self.file_tree_widget.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.file_tree_widget.customContextMenuRequested.connect(
+            lambda pos: self._show_tree_pane_context_menu(
+                self.file_tree_widget.mapToGlobal(pos)
+            )
+        )
         self.file_model = QFileSystemModel()
 
         # --- BEGIN macOS Fix: Show Mounted Volumes ---
@@ -3614,6 +3633,8 @@ class FileTreeHandler(QObject):
         self.filter_proxy = CustomFileSystemFilter(main_window=self.main_window)
         self.filter_proxy.setSourceModel(self.file_model)
         self._ensure_image_discovery_service()
+        if self._toolbar is not None:
+            self._toolbar.redraw_filter_icons()
         self.current_filter_pattern: Optional[str] = None
         self.file_tree = CustomTreeView()
         self.file_tree.set_main_window(self.main_window)
@@ -3812,230 +3833,31 @@ class FileTreeHandler(QObject):
         painter.end()
         return QIcon(pixmap)
 
-    @staticmethod
-    def _file_tree_filter_toolbar_button_stylesheet(
-        theme: Any, focus_bg: str, focus_border: str, focus_text: str
-    ) -> str:
-        """Same chrome as nav icon buttons, with :checked for exclusive filter mode."""
-        base = theme.file_tree_nav_icon_button_stylesheet(
-            focus_bg, focus_border, focus_text, dim=False
-        )
-        t = theme
-        pressed = (
-            QColor(t._file_tree_control_surface_hex()).darker(112).name()
-            if t.theme_id == "light"
-            else QColor(t._file_tree_control_surface_hex()).lighter(108).name()
-        )
-        hover = t._file_tree_control_surface_hover_hex()
-        return (
-            base
-            + f"""
-            QPushButton:checked {{
-                background-color: {pressed};
-            }}
-            QPushButton:checked:hover {{
-                background-color: {hover};
-            }}
-        """
-        )
-
     def setup_navigation_controls(self, layout: QVBoxLayout) -> None:
-        nav_widget = QWidget()
-        self._nav_widget = nav_widget
-        nav_widget.setAutoFillBackground(True)
-        nav_layout = QHBoxLayout(nav_widget)
-        nav_layout.setContentsMargins(0, 0, 0, 5)
+        from files.tree_toolbar import FileTreeToolbar
 
         _theme = get_active_theme()
-        self._nav_bar_default_style = _theme.file_tree_nav_container_stylesheet().strip()
-        nav_widget.setStyleSheet(self._nav_bar_default_style)
+        settings = self.main_window.config.load_settings()
+        self._show_toolbar = bool(settings.get("file_tree_show_toolbar", True))
 
-        def make_btn(text: str, tooltip: str, slot: Callable[[], None]) -> QPushButton:
-            btn = QPushButton(text)
-            btn.setToolTip(tooltip)
-            btn.setMaximumWidth(30)
-            from utils import get_button_focus_colors
-            focus_bg, focus_border, focus_text = get_button_focus_colors()
-            btn.setStyleSheet(
-                _theme.file_tree_nav_icon_button_stylesheet(focus_bg, focus_border, focus_text, dim=True)
-            )
-            btn.clicked.connect(slot)
-            return btn
-
-        self.home_button = QPushButton()
-        self.home_button.setToolTip("Go to Home Directory\nNavigate to your home folder")
-        self.home_button.setMaximumWidth(30)
-        self.home_button.setIconSize(QSize(20, 20))
-        # Get focus colors from centralized function
-        from utils import get_button_focus_colors
-        focus_bg, focus_border, focus_text = get_button_focus_colors()
-        self.home_button.setStyleSheet(
-            _theme.file_tree_nav_icon_button_stylesheet(focus_bg, focus_border, focus_text, dim=False)
-        )
-        self.home_button.clicked.connect(self.go_to_home_directory)
-        self.update_home_button_icon()
-
-        self.collapse_all_button = QPushButton()
-        self.collapse_all_button.setToolTip("Collapse to home directory\nCollapse all and expand to home directory")
-        self.collapse_all_button.setMaximumWidth(30)
-        self.collapse_all_button.setIconSize(QSize(20, 20))
-        self.collapse_all_button.setIcon(self._create_squeeze_icon())
-        # Get focus colors from centralized function
-        from utils import get_button_focus_colors
-        focus_bg, focus_border, focus_text = get_button_focus_colors()
-        self.collapse_all_button.setStyleSheet(
-            _theme.file_tree_nav_icon_button_stylesheet(focus_bg, focus_border, focus_text, dim=False)
-        )
-        self.collapse_all_button.clicked.connect(self.collapse_all)
-
-        # Rename status toggle button
-        self.rename_status_button = QPushButton()
-        self.rename_status_button.setToolTip("Toggle Rename Status Check\nCheck if files matching filter pattern also match rename pattern and are sequentially numbered")
-        self.rename_status_button.setMaximumWidth(30)
-        self.rename_status_button.setIconSize(QSize(20, 20))
-        # Get focus colors from centralized function
-        from utils import get_button_focus_colors
-        focus_bg, focus_border, focus_text = get_button_focus_colors()
-        self.rename_status_button.setStyleSheet(
-            _theme.file_tree_nav_icon_button_stylesheet(focus_bg, focus_border, focus_text, dim=False)
-        )
-        self.rename_status_button.clicked.connect(self._toggle_rename_status)
-        self.update_rename_status_button_icon()
-
-        self.settings_button = QPushButton()
-        self.settings_button.setToolTip("Open Settings\nConfigure application preferences")
-        self.settings_button.setMaximumWidth(30)
-        self.settings_button.setIconSize(QSize(20, 20))
-        self.settings_button.setIcon(QIcon(asset_path("gear.svg")))
-        self.settings_button.setStyleSheet(
-            _theme.file_tree_nav_icon_button_stylesheet(focus_bg, focus_border, focus_text, dim=False)
-        )
-        self.settings_button.clicked.connect(self.open_settings_to_max_images)
         self.current_dir_label = QLabel("")
         self.current_dir_label.setStyleSheet(_theme.file_tree_current_dir_label_stylesheet())
         self.current_dir_label.setWordWrap(True)
-        self.home_button.setFocusPolicy(Qt.NoFocus)
-        self.collapse_all_button.setFocusPolicy(Qt.NoFocus)
-        self.rename_status_button.setFocusPolicy(Qt.NoFocus)
-        self.settings_button.setFocusPolicy(Qt.NoFocus)
         self.current_dir_label.setFocusPolicy(Qt.NoFocus)
-        # nav_layout.addWidget(self.home_button)
-        nav_layout.addWidget(self.collapse_all_button)
-        nav_layout.addWidget(self.rename_status_button)
-        nav_layout.addWidget(self.settings_button)
-        nav_layout.addStretch(1)
 
-        # --- Tree View Filtering Buttons (right-aligned group; same style as nav icon buttons) ---
-        filter_buttons_widget = QWidget()
-        filter_buttons_layout = QHBoxLayout(filter_buttons_widget)
-        filter_buttons_layout.setContentsMargins(0, 0, 0, 0)
-        filter_buttons_layout.setSpacing(4)
+        self._toolbar = FileTreeToolbar(self)
+        self._nav_widget = self._toolbar
+        self.collapse_all_button = self._toolbar.collapse_all_button
+        self.rename_status_button = self._toolbar.rename_status_button
+        self.settings_button = self._toolbar.settings_button
+        self._filter_mode_buttons = self._toolbar._filter_mode_buttons
+        self._filter_icon_redraw = self._toolbar.redraw_filter_icons
+        self._toolbar.set_toolbar_visible(self._show_toolbar)
+        layout.addWidget(self._toolbar)
 
-        filter_btn_ss = self._file_tree_filter_toolbar_button_stylesheet(
-            _theme, focus_bg, focus_border, focus_text
-        )
+        self.update_rename_status_button_icon()
 
-        # These represent: all ("no filter"), images, images matching filter
-        def create_filter_icon(mode: str, selected: bool) -> QIcon:
-            """Create a pen-drawn icon for each filter mode"""
-            # Create icon sized for 18x18 display (will be scaled)
-            icon_pixmap_size = 18
-            pixmap = QPixmap(icon_pixmap_size, icon_pixmap_size)
-            pixmap.fill(QColor(0, 0, 0, 0))
-            painter = QPainter(pixmap)
-            painter.setRenderHint(QPainter.Antialiasing)
-
-            _ft = get_active_theme()
-            pen_color = QColor(
-                _ft.file_tree_filter_icon_selected_hex if selected else _ft.file_tree_filter_icon_unselected_hex
-            )
-            pen_width = 1.5
-
-            if mode == "all":
-                # Draw large X shape (diagonal lines crossing)
-                painter.setPen(QPen(pen_color, pen_width))
-                # Diagonal from top-left to bottom-right
-                painter.drawLine(4, 4, 14, 14)
-                # Diagonal from top-right to bottom-left
-                painter.drawLine(14, 4, 4, 14)
-            elif mode == "images":
-                # Draw hollow square outline
-                painter.setPen(QPen(pen_color, pen_width))
-                painter.setBrush(Qt.NoBrush)
-                # Draw square outline centered
-                painter.drawRect(5, 5, 8, 8)
-            elif mode == "use_filter":
-                # Draw funnel shape
-                painter.setPen(QPen(pen_color, pen_width))
-                painter.setBrush(Qt.NoBrush)
-                # Funnel: closed triangle (like top part of letter "Y"), with vertical stem
-                # Draw the funnel body as a triangle pointing down
-                # Draw hollow funnel (each outer line individually)
-                # Top edge
-                painter.drawLine(QPoint(5, 4), QPoint(14, 4))
-                # Left side
-                painter.drawLine(QPoint(5, 4), QPoint(8, 10))
-                painter.drawLine(QPoint(8, 10), QPoint(8, 15))
-                # Right side
-                painter.drawLine(QPoint(14, 4), QPoint(10, 10))
-                painter.drawLine(QPoint(10, 10), QPoint(10, 15))
-
-                # Bottom edge
-                painter.drawLine(QPoint(8, 15), QPoint(10, 15))
-
-            painter.end()
-            return QIcon(pixmap)
-
-        filter_modes = [
-            ("all", "Filtering: None\nShow all folders regardless of image content"),
-            ("images", "Filtering: Has Images\nOnly display folders that contain at least one image"),
-            ("use_filter", "Filtering: Pattern Matching\nOnly display folders with images matching the filter pattern in Settings"),
-        ]
-        self._filter_mode_buttons: Dict[str, QPushButton] = {}
-        self._filter_mode_group = QButtonGroup(self)
-        self._filter_mode_group.setExclusive(True)
-
-        # Get current filter mode
-        current_mode = 'images'
-        if getattr(self, 'filter_proxy', None):
-            current_mode = self.filter_proxy.normalize_filtered_tree_mode()
-
-        icon_size = 20
-        for mode, tooltip in filter_modes:
-            btn = QPushButton()
-            btn.setToolTip(tooltip)
-            btn.setCheckable(True)
-            btn.setChecked(current_mode == mode)
-            btn.setIcon(create_filter_icon(mode, current_mode == mode))
-            btn.setIconSize(QSize(icon_size, icon_size))
-            btn.setMaximumWidth(30)
-            btn.setStyleSheet(filter_btn_ss)
-            btn.setFocusPolicy(Qt.NoFocus)
-            btn.clicked.connect(lambda checked, m=mode: self._on_tree_filter_mode_selected(m))
-            filter_buttons_layout.addWidget(btn)
-            self._filter_mode_buttons[mode] = btn
-            self._filter_mode_group.addButton(btn)
-
-        nav_layout.addWidget(filter_buttons_widget, 0)
-
-        # Function to update button icons when filter mode changes
-        def filter_icon_redraw():
-            """Update button icons and checked state when filter mode changes"""
-            if not hasattr(self, 'filter_proxy') or not self.filter_proxy:
-                return
-            mode = self.filter_proxy.normalize_filtered_tree_mode()
-            for m in self._filter_mode_buttons:
-                btn = self._filter_mode_buttons[m]
-                btn.setChecked(mode == m)
-                btn.setIcon(create_filter_icon(m, mode == m))
-
-        self._filter_icon_redraw = filter_icon_redraw
-
-        # Do not add the directory label to the nav_layout
-
-        layout.addWidget(nav_widget)
-
-        # Add the directory label on a new line (below the nav bar)
+        # Directory label row below the toolbar
         dir_label_container = QWidget()
         self._dir_label_container = dir_label_container
         dir_label_container.setAutoFillBackground(True)
@@ -4045,49 +3867,129 @@ class FileTreeHandler(QObject):
         dir_label_layout.addWidget(self.current_dir_label, 1)
         layout.addWidget(dir_label_container)
 
+    def attach_titlebar_tools(self, header) -> None:
+        from PySide6.QtGui import QIcon
+        from PySide6.QtCore import QSize
+        from theme.theme_base import job_pane_tools_icon_path
+        from files.tree_tools_menu import show_tree_tools_menu
+
+        if header is None:
+            return
+        btn = QPushButton()
+        btn.setIcon(QIcon(job_pane_tools_icon_path()))
+        btn.setIconSize(QSize(14, 14))
+        btn.setToolTip("File tree tools")
+        btn.clicked.connect(lambda: show_tree_tools_menu(self, btn))
+        if hasattr(header, "set_tools_button"):
+            header.set_tools_button(btn)
+
+    def _show_tree_pane_context_menu(self, global_pos) -> None:
+        from files.tree_tools_menu import show_tree_context_menu
+
+        show_tree_context_menu(self, global_pos)
+
+    def is_tree_toolbar_visible(self) -> bool:
+        return bool(self._show_toolbar)
+
+    def set_tree_toolbar_visible(self, visible: bool) -> None:
+        visible = bool(visible)
+        if self._show_toolbar == visible:
+            return
+        self._show_toolbar = visible
+        self.main_window.config.update_setting("file_tree_show_toolbar", visible)
+        if self._toolbar is not None:
+            self._toolbar.set_toolbar_visible(visible)
+
+    def tree_toolbar_action_specs(self) -> List[Dict[str, Any]]:
+        current_mode = "images"
+        if getattr(self, "filter_proxy", None):
+            current_mode = self.filter_proxy.normalize_filtered_tree_mode()
+        rename_enabled = False
+        if (
+            self.main_window
+            and hasattr(self.main_window, "rename_status_manager")
+            and self.main_window.rename_status_manager
+        ):
+            rename_enabled = self.main_window.rename_status_manager.is_enabled()
+        return [
+            {
+                "action_id": "collapse",
+                "label": "Collapse to Home Directory",
+                "visible": True,
+                "enabled": True,
+            },
+            {
+                "action_id": "rename_status",
+                "label": "Toggle Rename Status Check",
+                "visible": True,
+                "enabled": True,
+                "checkable": True,
+                "checked": rename_enabled,
+            },
+            {
+                "action_id": "settings",
+                "label": "Open Settings",
+                "visible": True,
+                "enabled": True,
+            },
+            {
+                "action_id": "filter_all",
+                "label": "Filtering: None",
+                "visible": True,
+                "enabled": True,
+                "checkable": True,
+                "checked": current_mode == "all",
+            },
+            {
+                "action_id": "filter_images",
+                "label": "Filtering: Has Images",
+                "visible": True,
+                "enabled": True,
+                "checkable": True,
+                "checked": current_mode == "images",
+            },
+            {
+                "action_id": "filter_use_filter",
+                "label": "Filtering: Pattern Matching",
+                "visible": True,
+                "enabled": True,
+                "checkable": True,
+                "checked": current_mode == "use_filter",
+            },
+        ]
+
+    def trigger_tree_toolbar_action(self, action_id: str) -> None:
+        if action_id == "collapse":
+            self.collapse_all()
+        elif action_id == "rename_status":
+            self._toggle_rename_status()
+        elif action_id == "settings":
+            self.open_settings_to_max_images()
+        elif action_id == "filter_all":
+            self._on_tree_filter_mode_selected("all")
+        elif action_id == "filter_images":
+            self._on_tree_filter_mode_selected("images")
+        elif action_id == "filter_use_filter":
+            self._on_tree_filter_mode_selected("use_filter")
+
     def refresh_theme_styles(self) -> None:
         """Re-apply file tree panel and tree chrome after theme change."""
         theme = get_active_theme()
-        from utils import get_button_focus_colors
 
         shell_ss = theme.file_tree_pane_shell_stylesheet()
         if hasattr(self, "file_tree_widget") and self.file_tree_widget:
             self.file_tree_widget.setStyleSheet(shell_ss)
         if hasattr(self, "_dir_label_container") and self._dir_label_container:
             self._dir_label_container.setStyleSheet(shell_ss)
-        focus_bg, focus_border, focus_text = get_button_focus_colors()
         if hasattr(self, "file_tree") and self.file_tree:
             self.file_tree.setStyleSheet(theme.file_tree_panel_stylesheet())
-        if hasattr(self, "_nav_widget") and self._nav_widget:
+        if self._toolbar is not None:
+            self._toolbar.refresh_theme_styles()
+        elif hasattr(self, "_nav_widget") and self._nav_widget:
             self._nav_bar_default_style = theme.file_tree_nav_container_stylesheet().strip()
             self._nav_widget.setStyleSheet(self._nav_bar_default_style)
-        if hasattr(self, "home_button") and self.home_button:
-            self.home_button.setStyleSheet(
-                theme.file_tree_nav_icon_button_stylesheet(focus_bg, focus_border, focus_text, dim=False)
-            )
-        if hasattr(self, "collapse_all_button") and self.collapse_all_button:
-            self.collapse_all_button.setStyleSheet(
-                theme.file_tree_nav_icon_button_stylesheet(focus_bg, focus_border, focus_text, dim=False)
-            )
-        if hasattr(self, "rename_status_button") and self.rename_status_button:
-            self.rename_status_button.setStyleSheet(
-                theme.file_tree_nav_icon_button_stylesheet(focus_bg, focus_border, focus_text, dim=False)
-            )
-        if hasattr(self, "settings_button") and self.settings_button:
-            self.settings_button.setStyleSheet(
-                theme.file_tree_nav_icon_button_stylesheet(focus_bg, focus_border, focus_text, dim=False)
-            )
         if hasattr(self, "current_dir_label") and self.current_dir_label:
             self.current_dir_label.setStyleSheet(theme.file_tree_current_dir_label_stylesheet())
-        filter_btn_ss = self._file_tree_filter_toolbar_button_stylesheet(
-            theme, focus_bg, focus_border, focus_text
-        )
-        if hasattr(self, "_filter_mode_buttons") and self._filter_mode_buttons:
-            for btn in self._filter_mode_buttons.values():
-                if btn:
-                    btn.setStyleSheet(filter_btn_ss)
-            if hasattr(self, "_filter_icon_redraw"):
-                self._filter_icon_redraw()
 
     def _update_dir_label(self, directory: str) -> None:
         """Update the directory label with truncated path."""

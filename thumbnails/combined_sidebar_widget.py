@@ -689,6 +689,10 @@ class CombinedSidebarWidget(QWidget):
             
             # Update initial header color based on current focus state
             self._update_tree_header_focus(self.tree_widget.hasFocus())
+
+            handler = getattr(self.main_window, "file_tree_handler", None)
+            if handler is not None:
+                handler.attach_titlebar_tools(self.tree_header)
             
     def set_preview_widget(self, preview_widget):
         """Set the preview widget in the preview section"""

@@ -418,6 +418,7 @@ class ImageBrowserConfig:
             # Custom colors when ui_theme == 'light' (defaults match built-in light palette)
             'light_theme_colors': default_light_theme_colors(),
             'file_tree_visible': True,  # Default to showing file tree
+            'file_tree_show_toolbar': True,  # File tree pane action toolbar
             'status_bar_visible': True,  # Default to showing status bar
             'thumbnail_filename_visible': False,  # Default to hiding thumbnail filenames
             'preview_visible': False,  # Default to hiding preview panel

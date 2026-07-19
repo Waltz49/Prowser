@@ -357,6 +357,7 @@ class EditExifUserCommentDialog(QDialog):
         header_row.addLayout(header_info_col, 1)
 
         self._instructions_pane = None
+        self.instructions_btn = None
         if _is_lmstudio_services_available():
             from imagegen_plugins.lmstudio_instructions_pane import LmStudioInstructionsPane
 
@@ -365,14 +366,24 @@ class EditExifUserCommentDialog(QDialog):
                 toggle_tooltip=(
                     "Show/hide Instructions field (override AI user prompt)"
                 ),
-                inline_toggle_in_label_row=True,
-                trailing_header_widget=self.settings_btn,
             )
             self.instructions_btn = self._instructions_pane.toggle_button()
-        else:
-            self.instructions_btn = None
-            if _lmstudio_ui_enabled():
-                header_action_row.insertWidget(1, self.settings_btn, 0, Qt.AlignmentFlag.AlignLeft)
+            header_action_row.addWidget(
+                self.instructions_btn,
+                0,
+                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
+            )
+            header_action_row.addWidget(
+                self.settings_btn,
+                0,
+                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
+            )
+        elif _lmstudio_ui_enabled():
+            header_action_row.addWidget(
+                self.settings_btn,
+                0,
+                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
+            )
 
         main_layout.addLayout(header_row)
 
