@@ -1497,6 +1497,7 @@ class MenuManager:
             debug_menu.addAction(reset_gen_settings_action)
 
             see_timings_action = QAction("See timings", self.main_window)
+            see_timings_action.setShortcut(QKeySequence("Ctrl+Shift+T"))
             see_timings_action.triggered.connect(self._debug_see_generation_timings)
             debug_menu.addAction(see_timings_action)
 
