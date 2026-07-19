@@ -1437,11 +1437,14 @@ class ClickableFileCountLabel(QLabel):
         menu = QMenu(self)
         menu.setStyleSheet(_status_bar_popup_menu_stylesheet())
         
-        # Get current setting
-        from config import get_config
-        config = get_config()
-        settings = config.load_settings()
-        background_clip_enabled = settings.get('background_clip_enabled', False)
+        # Use runtime controller state (status bar toggle updates this without reloading settings)
+        background_clip_enabled = False
+        controller = getattr(self.main_window, 'background_clip_controller', None)
+        if controller is not None:
+            background_clip_enabled = controller.enabled
+        else:
+            from config import get_config
+            background_clip_enabled = get_config().load_settings().get('background_clip_enabled', False)
         
         # Add toggle action - show opposite of current state
         if background_clip_enabled:
@@ -1466,7 +1469,10 @@ class ClickableFileCountLabel(QLabel):
         """Toggle the background extraction setting and update the process"""
         if not self.main_window:
             return
-        
+
+        from config import get_config
+        get_config().update_setting('background_clip_enabled', enabled)
+
         # Update setting via on_settings_changed to trigger all the necessary handlers
         if hasattr(self.main_window, 'on_settings_changed'):
             self.main_window.on_settings_changed({'background_clip_enabled': enabled})

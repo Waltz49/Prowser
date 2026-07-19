@@ -6030,23 +6030,6 @@ class ImageBrowserWindow(QMainWindow):
                         self.background_cache_importer.stop()
                     self.background_clip_controller.stop_process()
         
-        # Handle background CLIP extraction setting changes
-        if 'background_clip_enabled' in new_settings:
-            background_clip_enabled = new_settings.get('background_clip_enabled', False)
-            if hasattr(self, 'background_clip_controller'):
-                self.background_clip_controller.set_enabled(background_clip_enabled)
-                if background_clip_enabled:
-                    if hasattr(self, 'idle_detector'):
-                        self.idle_detector.start()
-                    if hasattr(self, 'background_cache_importer'):
-                        self.background_cache_importer.start()
-                else:
-                    if hasattr(self, 'idle_detector'):
-                        self.idle_detector.stop()
-                    if hasattr(self, 'background_cache_importer'):
-                        self.background_cache_importer.stop()
-                    self.background_clip_controller.stop_process()
-        
         # Handle CLIP model name changes
         if 'clip_model_name' in new_settings:
             clip_model_name = new_settings.get('clip_model_name', 'openai/clip-vit-base-patch32')
