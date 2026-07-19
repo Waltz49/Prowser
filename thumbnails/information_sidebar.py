@@ -10,13 +10,28 @@ from html import escape, unescape
 from typing import Any, Dict, List, Optional, Tuple
 
 from PIL.ExifTags import GPSTAGS
-from PySide6.QtCore import QEvent, Qt, QTimer, QSize
-from PySide6.QtWidgets import QLabel, QTextBrowser, QVBoxLayout, QWidget
+from PySide6.QtCore import QEvent, Qt, QTimer, QSize, QUrl
+from PySide6.QtGui import QIcon
+from PySide6.QtWidgets import (
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
+    QTextBrowser,
+    QVBoxLayout,
+    QWidget,
+)
 
 from thumbnails.combined_sidebar_widget import HeaderWidget
+from thumbnails.information_tools_menu import (
+    _audio_output_ui_enabled,
+    _imagegen_create_available,
+    _imagegen_edit_ai_available,
+    show_information_context_menu,
+    show_information_tools_menu,
+)
 from thumbnails.sidebar_pane_layout import MIN_INFORMATION_CONTENT_HEIGHT
 from thumbnails.thumbnail_constants import ALT_SYMBOL, COPY_SYMBOL
-from theme.theme_base import asset_file_url
+from theme.theme_base import asset_path, job_pane_tools_icon_path
 from theme.theme_service import get_active_theme
 from utils import (
     format_file_size,
@@ -36,18 +51,10 @@ from search.reference_graph import (
     resolve_reference_path,
 )
 
-# Footer function switcher uses 28px; scale the same assets down for info-pane chips.
+# Footer function switcher uses 28px; scale the same assets down for info-pane action bar.
 _INFO_ACTION_ICON_PX = 18
-
-
-def _info_action_icon_html(icon_name: str) -> str:
-    """HTML img for info-pane action chips (imagegen, trash, etc.)."""
-    url = asset_file_url(icon_name)
-    px = _INFO_ACTION_ICON_PX
-    return (
-        f'<img src="{url}" width="{px}" height="{px}" '
-        f'style="display:block;margin:0;padding:0;border:none;">'
-    )
+_INFO_ACTION_BTN_PX = 26
+_INFO_NAV_ACTION_ORDER = ("edit", "copy", "speak", "delete", "create", "editai")
 
 
 # Content inset via viewport margins so the vertical scrollbar stays flush right.
@@ -99,6 +106,11 @@ class InformationSidebar(QWidget):
         self._overlay_has_image_model = False
         self._input_heading_signal_connected = False
         self._info_section_expanded_cache: Optional[Dict[str, bool]] = None
+        self._action_nav_widget: QWidget | None = None
+        self._action_nav_buttons: Dict[str, QPushButton] = {}
+        self._show_menu_bar = bool(
+            main_window.config.load_settings().get("information_show_menu_bar", False)
+        )
         self.setup_ui()
 
     def setup_ui(self):
@@ -118,6 +130,8 @@ class InformationSidebar(QWidget):
         self.information_header = header
         self.information_header.hide_button.clicked.connect(self.toggle_display)
         right_sidebar_layout.addWidget(self.information_header)
+
+        self._setup_action_nav_bar(right_sidebar_layout)
 
         # Create scrollable text browser for EXIF info (QTextBrowser for link handling)
         self.info_text_edit = QTextBrowser(self)
@@ -144,10 +158,238 @@ class InformationSidebar(QWidget):
         self.info_text_edit.hide()
         right_sidebar_layout.addWidget(self.info_text_edit)
 
+        self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.customContextMenuRequested.connect(
+            lambda pos: show_information_context_menu(self, self.mapToGlobal(pos))
+        )
+        self.info_text_edit.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.info_text_edit.customContextMenuRequested.connect(
+            lambda pos: show_information_context_menu(
+                self, self.info_text_edit.viewport().mapToGlobal(pos)
+            )
+        )
+
+        self.attach_titlebar_tools()
+        self._update_action_nav_state()
+
     def toggle_display(self):
         """Toggle the Information sidebar visibility"""
         if hasattr(self.main_window, 'toggle_information_display'):
             self.main_window.toggle_information_display()
+
+    def attach_titlebar_tools(self) -> None:
+        header = self.information_header
+        if header is None:
+            return
+        btn = QPushButton()
+        btn.setIcon(QIcon(job_pane_tools_icon_path()))
+        btn.setIconSize(QSize(14, 14))
+        btn.setToolTip("File information tools")
+        btn.clicked.connect(lambda: show_information_tools_menu(self, btn))
+        if hasattr(header, "set_tools_button"):
+            header.set_tools_button(btn)
+
+    def is_action_menu_bar_visible(self) -> bool:
+        return bool(self._show_menu_bar)
+
+    def set_action_menu_bar_visible(self, visible: bool) -> None:
+        visible = bool(visible)
+        if self._show_menu_bar == visible:
+            return
+        self._show_menu_bar = visible
+        self.main_window.config.update_setting("information_show_menu_bar", visible)
+        self._update_action_nav_state()
+
+    def info_action_specs(self) -> List[Dict[str, Any]]:
+        data = getattr(self, "_last_overlay_data", None) or {}
+        speakable = str(data.get("speakable_plain_text") or "")
+        has_comment = bool(speakable.strip())
+        return [
+            {
+                "action_id": "edit",
+                "label": "Edit User Comment",
+                "visible": True,
+                "enabled": True,
+            },
+            {
+                "action_id": "copy",
+                "label": "Copy to Clipboard",
+                "visible": True,
+                "enabled": has_comment,
+            },
+            {
+                "action_id": "speak",
+                "label": "Read User Comment Aloud",
+                "visible": _audio_output_ui_enabled(),
+                "enabled": has_comment,
+            },
+            {
+                "action_id": "delete",
+                "label": "Delete User Comment",
+                "visible": True,
+                "enabled": has_comment,
+            },
+            {
+                "action_id": "create",
+                "label": "Create Image from this prompt",
+                "visible": _imagegen_create_available(),
+                "enabled": True,
+            },
+            {
+                "action_id": "editai",
+                "label": "Edit this image with AI",
+                "visible": _imagegen_edit_ai_available(),
+                "enabled": True,
+            },
+        ]
+
+    def trigger_info_action(self, action_id: str) -> None:
+        scheme = {
+            "speak": "speak://",
+            "copy": "copy://",
+            "edit": "edit://",
+            "create": "create://",
+            "editai": "editai://",
+            "delete": "delete://",
+        }.get(action_id)
+        if scheme:
+            self._on_anchor_clicked(QUrl(scheme))
+
+    def _setup_action_nav_bar(self, parent_layout: QVBoxLayout) -> None:
+        nav_widget = QWidget(self)
+        self._action_nav_widget = nav_widget
+        nav_widget.setAutoFillBackground(True)
+        nav_layout = QHBoxLayout(nav_widget)
+        nav_layout.setContentsMargins(8, 4, 8, 4)
+        nav_layout.setSpacing(4)
+
+        btn_defs = {
+            "edit": (None, "edit://"),
+            "copy": (COPY_SYMBOL, "copy://"),
+            "speak": ("꡴", "speak://"),
+            "delete": (None, "delete://"),
+            "create": (None, "create://"),
+            "editai": (None, "editai://"),
+        }
+        for action_id in _INFO_NAV_ACTION_ORDER:
+            text, anchor = btn_defs[action_id]
+            btn = QPushButton(text or "")
+            btn.setToolTip(self._ANCHOR_TOOLTIPS[anchor])
+            btn.clicked.connect(
+                lambda _checked=False, aid=action_id: self.trigger_info_action(aid)
+            )
+            btn.setFocusPolicy(Qt.NoFocus)
+            btn.setFixedSize(_INFO_ACTION_BTN_PX, _INFO_ACTION_BTN_PX)
+            if text is None:
+                btn.setIconSize(QSize(_INFO_ACTION_ICON_PX, _INFO_ACTION_ICON_PX))
+            self._action_nav_buttons[action_id] = btn
+            nav_layout.addWidget(btn)
+
+        nav_layout.addStretch(1)
+        nav_widget.hide()
+        parent_layout.addWidget(nav_widget)
+
+    def _info_action_chip_button_stylesheet(self, *, highlighted: bool = False) -> str:
+        th = get_active_theme()
+        border = (
+            getattr(th, "button_border_hover_hex", th.accent_color_hex)
+            if highlighted
+            else th.information_icon_cell_border_muted_hex
+        )
+        fg = (
+            getattr(th, "button_border_hover_hex", th.accent_color_hex)
+            if highlighted
+            else th.information_action_icon_muted_hex
+        )
+        hover_border = getattr(th, "button_border_hover_hex", th.accent_color_hex)
+        px = _INFO_ACTION_BTN_PX
+        return f"""
+            QPushButton {{
+                background-color: {th.information_action_chip_bg_hex};
+                border: 1px solid {border};
+                border-radius: 6px;
+                color: {fg};
+                padding: 0px;
+                font-size: 14px;
+                min-width: {px}px;
+                max-width: {px}px;
+                min-height: {px}px;
+                max-height: {px}px;
+            }}
+            QPushButton:hover {{
+                border-color: {hover_border};
+                color: {hover_border};
+            }}
+            QPushButton:disabled {{
+                color: {th.text_disabled_hex};
+                border-color: {th.information_icon_cell_border_muted_hex};
+            }}
+        """
+
+    def _info_action_image_button_stylesheet(self, *, highlighted: bool = False) -> str:
+        th = get_active_theme()
+        border = (
+            getattr(th, "button_border_hover_hex", th.accent_color_hex)
+            if highlighted
+            else th.information_icon_cell_border_muted_hex
+        )
+        hover_border = getattr(th, "button_border_hover_hex", th.accent_color_hex)
+        px = _INFO_ACTION_BTN_PX
+        return f"""
+            QPushButton {{
+                background-color: {th.information_action_chip_bg_hex};
+                border: 1px solid {border};
+                border-radius: 6px;
+                padding: 0px;
+                min-width: {px}px;
+                max-width: {px}px;
+                min-height: {px}px;
+                max-height: {px}px;
+            }}
+            QPushButton:hover {{
+                border-color: {hover_border};
+            }}
+            QPushButton:disabled {{
+                border-color: {th.information_icon_cell_border_muted_hex};
+            }}
+        """
+
+    def _style_action_nav_buttons(self) -> None:
+        th = get_active_theme()
+        if self._action_nav_widget is not None:
+            self._action_nav_widget.setStyleSheet(th.file_tree_nav_container_stylesheet())
+
+        speak_highlight = is_speaking()
+        for action_id, btn in self._action_nav_buttons.items():
+            if action_id in ("edit", "create", "editai", "delete"):
+                icon_map = {
+                    "edit": ("comment_icon.png", "comment_icon_hover.png"),
+                    "create": ("fromText.png", "fromText_hover.png"),
+                    "editai": ("editAI.png", "editAI_hover.png"),
+                    "delete": ("trash_icon.png", "trash_icon_hover.png"),
+                }
+                normal, hover = icon_map[action_id]
+                btn.setIcon(QIcon(asset_path(normal)))
+                btn.setStyleSheet(self._info_action_image_button_stylesheet())
+            else:
+                highlighted = speak_highlight if action_id == "speak" else False
+                btn.setStyleSheet(self._info_action_chip_button_stylesheet(highlighted=highlighted))
+
+    def _update_action_nav_state(self) -> None:
+        if self._action_nav_widget is None:
+            return
+        specs = {spec["action_id"]: spec for spec in self.info_action_specs()}
+        any_visible = False
+        for action_id, btn in self._action_nav_buttons.items():
+            spec = specs.get(action_id, {})
+            visible = bool(spec.get("visible")) and self._show_menu_bar
+            btn.setVisible(visible)
+            btn.setEnabled(bool(spec.get("enabled", True)))
+            if visible:
+                any_visible = True
+        self._action_nav_widget.setVisible(any_visible)
+        self._style_action_nav_buttons()
+
 
     def show_info(self):
         """Show the info text edit widget"""
@@ -184,6 +426,7 @@ class InformationSidebar(QWidget):
             )
         if hasattr(self, "_link_tooltip_label"):
             self._link_tooltip_label.setStyleSheet(th.information_link_tooltip_stylesheet())
+        self._style_action_nav_buttons()
         if getattr(self, "_last_overlay_data", None):
             self._refresh_overlay_for_hover(getattr(self, "_hovered_anchor", None))
 
@@ -196,8 +439,8 @@ class InformationSidebar(QWidget):
             f"{ALT_SYMBOL}+click to copy full user comment."
         ),
         "edit://": "Edit user comment",
-        "create://": "Create an image from text...",
-        "editai://": "Edit an image with AI...",
+        "create://": "Create image from this prompt",
+        "editai://": "Edit this image with AI",
         "delete://": "Delete user comment",
         "cancelgen://": "Cancel generation",
         "skipcooldown://": "Skip cooldown",
@@ -468,43 +711,11 @@ class InformationSidebar(QWidget):
             idx += 2
         return ''.join(out)
 
-    def _imagegen_action_cells(self, hovered_anchor, icon_box, spacer_box) -> str:
-        """Optional Create / Edit-with-AI icon cells when imagegen plugins are available."""
-        try:
-            from imagegen_plugins.image_gen_menu import (
-                imagegen_edit_plugins_available,
-                imagegen_plugins_available,
-            )
-        except ImportError:
-            return ""
-        cells = ""
-        if imagegen_plugins_available():
-            create_icon = _info_action_icon_html(
-                "fromText_hover.png" if hovered_anchor == "create://" else "fromText.png"
-            )
-            cells += spacer_box() + icon_box(
-                "create://", create_icon, "Create an image from text...", image=True
-            )
-        if imagegen_edit_plugins_available():
-            edit_icon = _info_action_icon_html(
-                "editAI_hover.png" if hovered_anchor == "editai://" else "editAI.png"
-            )
-            cells += spacer_box() + icon_box(
-                "editai://", edit_icon, "Edit an image with AI...", image=True
-            )
-        return cells
-
-    def _action_icon_highlighted(self, href: str, hovered_anchor: str | None) -> bool:
-        if href == "speak://" and is_speaking():
-            return True
-        return href == hovered_anchor
-
     def _on_speech_state_changed(self, _speaking: bool) -> None:
         QTimer.singleShot(0, self._refresh_speak_action_highlight)
 
     def _refresh_speak_action_highlight(self) -> None:
-        if getattr(self, "_last_overlay_data", None):
-            self._refresh_overlay_for_hover(getattr(self, "_hovered_anchor", None))
+        self._style_action_nav_buttons()
 
     def eventFilter(self, obj, event):
         """Show tooltip and red highlight when hovering over information action links."""
@@ -658,9 +869,10 @@ class InformationSidebar(QWidget):
         except ImportError:
             return
         data = getattr(self, "_last_overlay_data", None) or {}
+        user_comment = data.get("speakable_plain_text") or ""
         open_imagegen_create_from_text_dialog(
             self.main_window,
-            user_comment=data.get("speakable_plain_text"),
+            user_comment=user_comment,
         )
 
     def _on_edit_with_ai(self):
@@ -670,9 +882,10 @@ class InformationSidebar(QWidget):
         except ImportError:
             return
         data = getattr(self, "_last_overlay_data", None) or {}
+        user_comment = data.get("speakable_plain_text") or ""
         open_imagegen_edit_dialog(
             self.main_window,
-            user_comment=data.get("speakable_plain_text"),
+            user_comment=user_comment,
         )
 
     def _on_delete_user_comment(self):
@@ -1144,6 +1357,7 @@ class InformationSidebar(QWidget):
                 info_text, preserve_scroll=True, scroll_pos=scroll_pos
             )
             self.info_text_edit.blockSignals(False)
+        self._update_action_nav_state()
 
     def _ensure_input_heading_signal_connected(self) -> None:
         if self._input_heading_signal_connected:
@@ -1283,104 +1497,16 @@ class InformationSidebar(QWidget):
             html_parts.append('</div>')
             return ''.join(html_parts)
 
-        # Constants for font size and color
-        ACTION_ICON_FONT_SIZE = "16px"
-        ACTION_ICON_COLOR = _th.information_action_icon_muted_hex
-        ACTION_ICON_HOVER_COLOR = getattr(_th, "button_border_hover_hex", _th.accent_color_hex)
-        SPEAK_ICON = "꡴"
-        edit_icon = _info_action_icon_html(
-            "comment_icon_hover.png" if hovered_anchor == "edit://" else "comment_icon.png"
-        )
-        delete_icon = _info_action_icon_html(
-            "trash_icon_hover.png" if hovered_anchor == "delete://" else "trash_icon.png"
-        )
-
-        # Edit button (always shown); speak/copy/delete only when description is long enough
-        # Render each button as a boxed icon using a table with borders on <td>
-        def icon_button_anchor(href, icon, title, *, image=False):
-            if image:
-                return (
-                    f'<a href="{href}" '
-                    f'style="display:block;line-height:0;text-decoration:none;cursor:pointer;" '
-                    f'title="{title}">{icon}</a>'
-                )
-            color = ACTION_ICON_HOVER_COLOR if self._action_icon_highlighted(href, hovered_anchor) else ACTION_ICON_COLOR
-            return (
-                f'<a href="{href}" '
-                f'style="display:block; color:{color}; text-decoration:none; cursor:pointer; '
-                f'font-size:{ACTION_ICON_FONT_SIZE}; line-height:22px;" '
-                f'title="{title}">{icon}</a>'
-            )
-
-        def icon_box(href, icon, title, *, image=False):
-            is_hovered = self._action_icon_highlighted(href, hovered_anchor)
-            border_color = ACTION_ICON_HOVER_COLOR if is_hovered else _th.information_icon_cell_border_muted_hex
-            if image:
-                px = _INFO_ACTION_ICON_PX
-                return (
-                    f'<td style="border:1px solid {border_color}; border-radius:6px; padding:0;'
-                    f' width:{px}px; height:{px}px; text-align:center; vertical-align:middle;'
-                    f' background:{_th.information_action_chip_bg_hex};">'
-                    f'{icon_button_anchor(href, icon, title, image=True)}'
-                    f'</td>'
-                )
-            return (
-                f'<td style="border:1px solid {border_color}; border-radius:6px; padding:0 6px; text-align:center;'
-                f' background:{_th.information_action_chip_bg_hex}; min-width:26px;">'
-                f'{icon_button_anchor(href, icon, title)}'
-                f'</td>'
-            )
-
-        def spacer_box(width=27):
-            # Use 1x1 black GIF (PNG base64 caused libpng IHDR CRC errors in Qt WebEngine)
-            return (
-                f'<td style="width:{width}px; border:none;">'
-                f'&nbsp;&nbsp;'
-                f'</td>'
-            )
-
-        create_cells = self._imagegen_action_cells(hovered_anchor, icon_box, spacer_box)
-
-        # Table for [SPEAK] [space] [COPY] [space] [EDIT] [space] [CREATE?] [space] [DELETE]
-        # If no description, show only EDIT (+ CREATE when imagegen available), else all actions
-        try:
-            from bundle_capabilities import audio_output_ui_enabled
-
-            _speak_ui = audio_output_ui_enabled()
-        except ImportError:
-            _speak_ui = True
-        if speakable_plain_text and len(speakable_plain_text) > 0:
-            action_icons = '<table cellpadding="0" cellspacing="0" style="margin-bottom:3px;"><tr>'
-            if _speak_ui:
-                action_icons += icon_box("speak://", SPEAK_ICON, "Read aloud (click again to stop)") + spacer_box()
-            action_icons += (
-                icon_box("copy://", COPY_SYMBOL, "Copy to clipboard")
-                + spacer_box()
-                + icon_box("edit://", edit_icon, "Edit user comment", image=True)
-                + create_cells
-                + spacer_box()
-                + icon_box("delete://", delete_icon, "Delete user comment", image=True)
-                + '</tr></table><br><br>'
-            )
-        else:
-            action_icons = (
-                '<table cellpadding="0" cellspacing="0" style="margin-bottom:3px;"><tr>'
-                + icon_box("edit://", edit_icon, "Edit user comment", image=True)
-                + create_cells
-                + '</tr></table><br><br>'
-            )
-
-        # Add Description if present (as full-width row below table)
+        # Add Description if present (action buttons live in the menu bar / context menu only)
         if description:
             description = description.replace('\x00', '')
             if description.strip() and not (description.strip().startswith("b'") or description.strip().startswith('b"')):
                 description = self._wrap_description_with_collapsible_sections(description)
-                html_parts.append(f'<div style="padding-top: 10px; padding-bottom: 6px; margin-top: 10px; border-top: 1px solid {bdr}; color: {text_hex}; font-size: 12pt;">{action_icons}{description}</div>')
+                html_parts.append(f'<div style="padding-top: 10px; padding-bottom: 6px; margin-top: 10px; border-top: 1px solid {bdr}; color: {text_hex}; font-size: 12pt;">{description}</div>')
             else:
-                html_parts.append(f'<div style="padding-top: 10px; padding-bottom: 6px; margin-top: 10px; border-top: 1px solid {bdr}; color: {text_hex}; font-size: 12pt;">{action_icons}</div>')
+                html_parts.append(f'<div style="padding-top: 10px; padding-bottom: 6px; margin-top: 10px; border-top: 1px solid {bdr}; color: {text_hex}; font-size: 12pt;"></div>')
         else:
-            # No user comment: show edit button so user can add one
-            html_parts.append(f'<div style="padding-top: 10px; padding-bottom: 6px; margin-top: 10px; border-top: 1px solid {bdr}; color: {text_hex}; font-size: 12pt;">{action_icons} Add user comment</div>')
+            html_parts.append(f'<div style="padding-top: 10px; padding-bottom: 6px; margin-top: 10px; border-top: 1px solid {bdr}; color: {text_hex}; font-size: 12pt;">Add user comment</div>')
 
         html_parts.append('</div>')
         return ''.join(html_parts)
@@ -1662,6 +1788,7 @@ class InformationSidebar(QWidget):
             self.info_text_edit.clear()
             self._apply_info_html_to_browser(info_text)
             self._refresh_input_to_active_job_heading()
+            self._update_action_nav_state()
 
     def hide_image_info_overlay(self):
         """Hide image info overlay"""

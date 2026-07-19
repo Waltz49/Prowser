@@ -2124,7 +2124,7 @@ class ImageGenDialog(ImageGenDimensionAspectMixin, QDialog):
             sync_image_gen_generate_enabled(
                 self, panel=self, plugin_installed=self._selected_plugin_installed()
             )
-        elif initial_prompt:
+        elif initial_prompt is not None:
             self.set_prompt_text(initial_prompt)
 
     def _on_generate(self) -> None:

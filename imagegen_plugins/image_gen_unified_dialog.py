@@ -365,9 +365,9 @@ class ImageGenUnifiedDialog(QDialog):
                 self._current_panel._set_edit_source_paths(
                     list(self._edit_source_paths_override)
                 )
-            if initial_prompt and self._current_panel is not None:
+            if initial_prompt is not None and self._current_panel is not None:
                 restore = getattr(self._current_panel, "restore_state", None)
-                if restore is not None and initial_prompt:
+                if restore is not None:
                     restore(None, initial_prompt=initial_prompt)
             if auto_generate:
                 self._schedule_auto_generate()

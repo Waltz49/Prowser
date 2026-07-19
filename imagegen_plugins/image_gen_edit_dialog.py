@@ -1579,7 +1579,7 @@ class ImageGenEditDialog(ImageGenDimensionAspectMixin, QDialog):
                 self._load_plugin_state(saved_override=state.values)
                 self._populate_field_rows()
             sync_image_gen_generate_enabled(self, panel=self)
-        elif initial_prompt:
+        elif initial_prompt is not None:
             self.set_prompt_text(initial_prompt)
 
     def _on_generate(self) -> None:

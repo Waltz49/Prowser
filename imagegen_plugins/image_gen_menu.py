@@ -464,6 +464,8 @@ def imagegen_create_from_text_available() -> bool:
 
 def initial_prompt_from_usercomment(raw: Optional[str]) -> Optional[str]:
     """Prompt text from EXIF user comment (same rules as image-gen Import)."""
+    if raw is not None and not str(raw).strip():
+        return ""
     if not raw:
         return None
     from exif.exif_utils import truncate_usercomment_before_prompt
@@ -472,13 +474,22 @@ def initial_prompt_from_usercomment(raw: Optional[str]) -> Optional[str]:
     return text or None
 
 
+def _dialog_initial_prompt_from_user_comment(
+    user_comment: Optional[str],
+) -> Optional[str]:
+    """Priming for unified dialogs; empty EXIF comment maps to an empty prompt field."""
+    if user_comment is not None and not str(user_comment).strip():
+        return ""
+    return initial_prompt_from_usercomment(user_comment)
+
+
 def open_imagegen_prompt_dialog(
     main_window, *, user_comment: Optional[str] = None
 ) -> None:
     """Open the last-used function dialog (⌥/), optionally primed."""
     start_active_imagegen_generation(
         main_window,
-        initial_prompt=initial_prompt_from_usercomment(user_comment),
+        initial_prompt=_dialog_initial_prompt_from_user_comment(user_comment),
     )
 
 
@@ -493,7 +504,7 @@ def open_imagegen_create_from_text_dialog(
         FUNCTION_CREATE,
         main_window,
         controller,
-        initial_prompt=initial_prompt_from_usercomment(user_comment),
+        initial_prompt=_dialog_initial_prompt_from_user_comment(user_comment),
         auto_generate=auto_generate,
     )
 
@@ -516,7 +527,7 @@ def open_imagegen_edit_from_text_dialog(
         FUNCTION_EDIT,
         main_window,
         controller,
-        initial_prompt=initial_prompt_from_usercomment(user_comment),
+        initial_prompt=_dialog_initial_prompt_from_user_comment(user_comment),
         auto_generate=auto_generate,
         source_image_paths=paths,
     )
@@ -533,7 +544,7 @@ def open_imagegen_edit_dialog(
         FUNCTION_EDIT,
         main_window,
         controller,
-        initial_prompt=initial_prompt_from_usercomment(user_comment),
+        initial_prompt=_dialog_initial_prompt_from_user_comment(user_comment),
         auto_import_available=True,
     )
 

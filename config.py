@@ -427,6 +427,7 @@ class ImageBrowserConfig:
             'right_sidebar_width': 300,  # Default width for right sidebar (info panel)
             'right_sidebar_visible': False,  # Default to hiding right sidebar (legacy; derived from information/shortcuts)
             'information_sidebar_visible': False,  # Default to hiding Information widget (I key)
+            'information_show_menu_bar': False,  # File Information pane action toolbar
             'shortcuts_sidebar_visible': False,  # Default to hiding Shortcuts within right_sidebar (O key)
             'shortcuts_sidebar_scroll_position': 0,  # Vertical scroll position for Shortcuts widget
             'shortcuts_splitter_sizes': [150, 250, 120],  # [shortcuts, information, jobs] heights for right sidebar splitter
