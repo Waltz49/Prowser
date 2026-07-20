@@ -124,18 +124,13 @@ def _normalize_host_slice(
     catalog: Dict[str, Any],
 ) -> Dict[str, List[str]]:
     enabled = slice_.get("enabled_ids")
-    hidden = slice_.get("hidden_ids")
     return {
         "enabled_ids": [
             str(x)
             for x in (enabled if isinstance(enabled, list) else [])
             if str(x) in catalog and catalog[str(x)].host_id == host_id
         ],
-        "hidden_ids": [
-            str(x)
-            for x in (hidden if isinstance(hidden, list) else [])
-            if str(x) in catalog and catalog[str(x)].host_id == host_id
-        ],
+        "hidden_ids": [],
     }
 
 
@@ -147,7 +142,6 @@ def _normalize_model_slice(
 ) -> Dict[str, List[str]]:
     ms = model_support if isinstance(model_support, dict) else {}
     enabled = slice_.get("enabled_ids")
-    hidden = slice_.get("hidden_ids")
     return {
         "enabled_ids": [
             str(x)
@@ -157,14 +151,7 @@ def _normalize_model_slice(
                 catalog[str(x)], model_key, model_support=ms
             )
         ],
-        "hidden_ids": [
-            str(x)
-            for x in (hidden if isinstance(hidden, list) else [])
-            if str(x) in catalog
-            and entry_matches_lora_model(
-                catalog[str(x)], model_key, model_support=ms
-            )
-        ],
+        "hidden_ids": [],
     }
 
 
@@ -338,13 +325,11 @@ def enabled_lora_ids_for_model(
     settings: Optional[Dict[str, Any]] = None,
 ) -> Tuple[str, ...]:
     st = model_state(settings, model_key)
-    hidden = frozenset(st["hidden_ids"])
     catalog = _catalog_for_lc(lora_catalog_from_settings(settings))
     return tuple(
         x
         for x in st["enabled_ids"]
         if x in catalog
-        and x not in hidden
         and entry_matches_lora_model(catalog[x], model_key, settings=settings)
     )
 

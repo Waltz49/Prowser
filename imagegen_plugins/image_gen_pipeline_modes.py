@@ -504,6 +504,9 @@ def merge_defaults(
     if saved:
         base.update(saved)
     if lora_host_for_pipeline(pipeline_id) == HOST_SD15:
+        from imagegen_plugins.mflux_lora_presets import strip_lora_payload_keys_for_host
+
+        strip_lora_payload_keys_for_host(base, host_id=HOST_SD15, pop=True)
         raw_stack = base.get("mflux_lora_stack")
         pid = coerce_lora_preset_id(base.get("mflux_lora", "none"))
         if pid == "none" and isinstance(raw_stack, list) and raw_stack:
@@ -517,6 +520,10 @@ def merge_defaults(
         if "mflux_lora" in base:
             base["mflux_lora"] = coerce_lora_preset_id(base["mflux_lora"])
     else:
+        from imagegen_plugins.lora_host_registry import HOST_FLUX1_T2I
+        from imagegen_plugins.mflux_lora_presets import strip_lora_payload_keys_for_host
+
+        strip_lora_payload_keys_for_host(base, host_id=HOST_FLUX1_T2I, pop=True)
         if "mflux_lora" in base:
             base["mflux_lora"] = coerce_lora_preset_id(base["mflux_lora"])
         raw_stack = base.get("mflux_lora_stack")

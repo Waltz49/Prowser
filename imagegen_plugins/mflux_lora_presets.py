@@ -22,9 +22,10 @@ from imagegen_plugins.lora_catalog import (
     lora_choices_for_plugin,
     lora_choices_for_pipeline,
     lora_entry_min_steps,
+    lora_weights_file_is_valid,
     manual_download_help,
 )
-from imagegen_plugins.lora_host_registry import HOST_SD15, lora_host_for_pipeline
+from imagegen_plugins.lora_host_registry import HOST_FLUX1_T2I, HOST_SD15, lora_host_for_pipeline
 
 FLUX_LORA_CATALOG = LORA_CATALOG
 
@@ -152,7 +153,13 @@ def resolve_lora_path(preset_id: str, *, cache_dir: Optional[Path] = None) -> st
 
     if entry.local_path:
         if entry.host_id == HOST_SD15:
-            return str(Path(entry.local_path).expanduser().resolve())
+            resolved = str(Path(entry.local_path).expanduser().resolve())
+            if not lora_weights_file_is_valid(Path(resolved)):
+                raise RuntimeError(
+                    f"LoRA download looks incomplete or corrupt: {resolved}. "
+                    "Delete it and try again, or download manually from Hugging Face."
+                )
+            return resolved
         return _resolve_local_path(entry)
 
     dest_path = catalog_cache_path(entry)
@@ -162,10 +169,21 @@ def resolve_lora_path(preset_id: str, *, cache_dir: Optional[Path] = None) -> st
     dest_dir.mkdir(parents=True, exist_ok=True)
     dest_path = dest_dir / entry.filename
     if dest_path.is_file() and dest_path.stat().st_size > 1024:
-        resolved = str(dest_path.resolve())
-        if entry.host_id != HOST_SD15:
-            _assert_mflux_compatible_lora(resolved, host_id=entry.host_id)
-        return resolved
+        if lora_weights_file_is_valid(dest_path):
+            resolved = str(dest_path.resolve())
+            if entry.host_id == HOST_SD15:
+                if not lora_weights_file_is_valid(dest_path):
+                    raise RuntimeError(
+                        f"LoRA download looks incomplete or corrupt: {dest_path}. "
+                        "Delete it and try again, or download manually from Hugging Face."
+                    )
+            elif entry.host_id != HOST_SD15:
+                _assert_mflux_compatible_lora(resolved, host_id=entry.host_id)
+            return resolved
+        try:
+            dest_path.unlink()
+        except OSError:
+            pass
 
     try:
         from huggingface_hub import hf_hub_download
@@ -187,7 +205,13 @@ def resolve_lora_path(preset_id: str, *, cache_dir: Optional[Path] = None) -> st
     if not path.is_file():
         raise RuntimeError(f"LoRA download failed: {downloaded}")
     resolved = str(path.resolve())
-    if entry.host_id != HOST_SD15:
+    if entry.host_id == HOST_SD15:
+        if not lora_weights_file_is_valid(path):
+            raise RuntimeError(
+                f"LoRA download looks incomplete or corrupt: {path}. "
+                "Delete it and try again, or download manually from Hugging Face."
+            )
+    elif entry.host_id != HOST_SD15:
         _assert_mflux_compatible_lora(resolved, host_id=entry.host_id)
     return resolved
 
@@ -250,6 +274,28 @@ def _uses_sd15_single_lora(
 
     hf = str(values.get("hf_model_id") or "").strip()
     return hf in SD15_LORA_MODEL_KEYS
+
+
+MFLUX_LORA_PAYLOAD_KEYS: Tuple[str, ...] = ("mflux_lora_paths", "mflux_lora_scales")
+SD15_LORA_PAYLOAD_KEYS: Tuple[str, ...] = ("sd15_lora_paths", "sd15_lora_scales")
+
+
+def strip_lora_payload_keys_for_host(
+    values: Dict[str, Any],
+    *,
+    host_id: str,
+    pop: bool = True,
+) -> None:
+    """Drop resolved LoRA paths that belong to a different pipeline family."""
+    if host_id == HOST_SD15:
+        foreign = MFLUX_LORA_PAYLOAD_KEYS
+    else:
+        foreign = SD15_LORA_PAYLOAD_KEYS
+    for key in foreign:
+        if pop:
+            values.pop(key, None)
+        elif key in values:
+            del values[key]
 
 
 def _strip_sd15_lora_stack_keys(values: Dict[str, Any], *, pop: bool) -> None:
@@ -368,6 +414,7 @@ def apply_lora_to_mflux_payload(
     if not stack:
         merged.pop("mflux_lora_paths", None)
         merged.pop("mflux_lora_scales", None)
+        strip_lora_payload_keys_for_host(merged, host_id=HOST_FLUX1_T2I, pop=True)
         return
 
     from config import get_config
@@ -388,10 +435,17 @@ def apply_lora_to_mflux_payload(
     paths: List[str] = []
     scales: List[float] = []
 
+    strip_lora_payload_keys_for_host(merged, host_id=HOST_FLUX1_T2I, pop=True)
+
     for preset_id in stack:
         entry = get_lora_entry(preset_id)
         if entry is None:
             raise ValueError(f"Unknown mflux LoRA preset: {preset_id}")
+        if entry.host_id == HOST_SD15:
+            raise ValueError(
+                f"LoRA «{entry.display_name}» is for SD 1.5 only. "
+                "Select an SD 1.5 model in Create, or pick a FLUX/Klein LoRA."
+            )
 
         if model_key and not lora_probe_passed_for_model(
             preset_id, model_key, settings
@@ -454,4 +508,7 @@ __all__ = [
     "normalize_lora_stack_from_values",
     "repopulate_mflux_lora_combo",
     "resolve_lora_path",
+    "strip_lora_payload_keys_for_host",
+    "MFLUX_LORA_PAYLOAD_KEYS",
+    "SD15_LORA_PAYLOAD_KEYS",
 ]

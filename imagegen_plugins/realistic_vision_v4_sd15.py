@@ -22,7 +22,7 @@ REALISTIC_VISION_V4_SD15_PLUGIN = ImageGenModelPlugin(
         "negative_prompt": "",
         "width": 512,
         "height": 512,
-        "steps": 25,
+        "steps": 36, # was 25
         "guidance_scale": 7.5,
         "seed": 0,
         "random_seed": True,

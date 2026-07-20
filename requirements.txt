@@ -22,6 +22,7 @@ face_recognition
 mflux
 diffusers
 accelerate
+peft
 sdnq
 requests
 

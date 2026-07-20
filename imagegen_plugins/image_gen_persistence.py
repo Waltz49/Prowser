@@ -1161,9 +1161,37 @@ def remove_user_lora(lora_id: str) -> None:
             if not isinstance(slice_, dict):
                 continue
             enabled = [x for x in (slice_.get("enabled_ids") or []) if x != lora_id]
-            hidden = [x for x in (slice_.get("hidden_ids") or []) if x != lora_id]
-            bm[mk] = {"enabled_ids": enabled, "hidden_ids": hidden}
+            bm[mk] = {"enabled_ids": enabled, "hidden_ids": []}
         lc["by_model"] = bm
+        imagegen["lora_catalog"] = lc
+
+    _mutate_imagegen_settings(mutate)
+
+
+def remove_lora_enabled_everywhere(lora_id: str) -> None:
+    """Remove a LoRA id from enabled lists for every base model and host in settings."""
+    from imagegen_plugins.lora_catalog_settings import migrate_lora_catalog
+
+    lid = str(lora_id or "").strip()
+    if not lid:
+        return
+
+    def mutate(imagegen: dict) -> None:
+        lc = migrate_lora_catalog(dict(imagegen.get("lora_catalog") or {}))
+        bm = dict(lc.get("by_model") or {})
+        for mk, slice_ in list(bm.items()):
+            if not isinstance(slice_, dict):
+                continue
+            enabled = [x for x in (slice_.get("enabled_ids") or []) if x != lid]
+            bm[mk] = {"enabled_ids": enabled, "hidden_ids": []}
+        lc["by_model"] = bm
+        bh = dict(lc.get("by_host") or {})
+        for hid, slice_ in list(bh.items()):
+            if not isinstance(slice_, dict):
+                continue
+            enabled = [x for x in (slice_.get("enabled_ids") or []) if x != lid]
+            bh[hid] = {"enabled_ids": enabled, "hidden_ids": []}
+        lc["by_host"] = bh
         imagegen["lora_catalog"] = lc
 
     _mutate_imagegen_settings(mutate)

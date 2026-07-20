@@ -5,14 +5,23 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
-from imagegen_plugins.lora_catalog import get_lora_entry, lora_model_key_from_values, lora_probe_passed_for_model
+from imagegen_plugins.lora_catalog import (
+    get_lora_entry,
+    lora_model_key_from_values,
+    lora_probe_passed_for_model,
+)
 from imagegen_plugins.lora_host_registry import HOST_SD15
-from imagegen_plugins.mflux_lora_presets import _normalize_preset_id, resolve_lora_path
+from imagegen_plugins.mflux_lora_presets import (
+    _normalize_preset_id,
+    resolve_lora_path,
+    strip_lora_payload_keys_for_host,
+)
 
 
 def apply_lora_to_sd15_payload(merged: Dict[str, object]) -> None:
     """Set sd15_lora_paths/scales when a catalog LoRA is selected."""
     merged.pop("mflux_lora_stack", None)
+    strip_lora_payload_keys_for_host(merged, host_id=HOST_SD15, pop=True)
     preset_id = _normalize_preset_id(merged.pop("mflux_lora", "none") or "none")
     if preset_id == "none":
         merged.pop("sd15_lora_paths", None)

@@ -101,6 +101,7 @@ FULL_BUILD_COLLECT_ALL: tuple[str, ...] = (
     "mlx",
     "diffusers",
     "accelerate",
+    "peft",
     "sdnq",
     "transformers",
     "requests",
@@ -125,6 +126,7 @@ MIN_BUILD_COLLECT_ALL: tuple[str, ...] = (
 FULL_SPEC_COLLECT_PACKAGES: tuple[str, ...] = (
     "diffusers",
     "accelerate",
+    "peft",
     "mflux",
     "mlx",
     "face_recognition_models",
@@ -161,6 +163,7 @@ FULL_SPEC_COPY_METADATA: tuple[str, ...] = (
     "diffusers",
     "huggingface_hub",
     "accelerate",
+    "peft",
     "tokenizers",
     "safetensors",
 ) + TRANSFORMERS_RUNTIME_METADATA
@@ -196,6 +199,7 @@ FULL_BUILD_EXTRA_HIDDEN: tuple[str, ...] = SIMILARITY_EXTRA_HIDDEN + (
     "diffusers.pipelines.z_image",
     "sdnq",
     "accelerate",
+    "peft",
     "requests",
     "faster_whisper",
     "ctranslate2",
@@ -226,6 +230,7 @@ FULL_EXTRA_COLLECT_SUBMODULES: tuple[str, ...] = (
     "mlx",
     "diffusers",
     "accelerate",
+    "peft",
 )
 
 MIN_EXTRA_COLLECT_SUBMODULES: tuple[str, ...] = ()

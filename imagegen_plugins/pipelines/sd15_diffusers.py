@@ -14,10 +14,12 @@ import os
 import random
 import sys
 import time
+from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
 from imagegen_plugins.hf_model_ids import REALISTIC_VISION_V4_NOVAE, SD15_DEFAULT_VAE
 from imagegen_plugins.image_gen_dim_limits import payload_max_generation_dimension
+from imagegen_plugins.lora_catalog import lora_weights_file_is_valid
 
 _DEFAULT_HF_MODEL_ID = REALISTIC_VISION_V4_NOVAE
 _DEFAULT_VAE_HF_MODEL_ID = SD15_DEFAULT_VAE
@@ -25,6 +27,7 @@ _DEFAULT_VAE_HF_MODEL_ID = SD15_DEFAULT_VAE
 _pipe = None
 _loaded_model_key: Optional[Tuple[str, str]] = None
 _active_lora_key: Optional[Tuple[str, float]] = None
+_active_lora_peft: bool = False
 
 
 def diffusers_is_installed() -> bool:
@@ -76,11 +79,66 @@ def _release_torch_allocators() -> None:
 
 
 def unload_pipeline() -> None:
-    global _pipe, _loaded_model_key, _active_lora_key
+    global _pipe, _loaded_model_key, _active_lora_key, _active_lora_peft
     _pipe = None
     _loaded_model_key = None
     _active_lora_key = None
+    _active_lora_peft = False
     _release_torch_allocators()
+
+
+def _validate_lora_file(path: Path) -> None:
+    if not lora_weights_file_is_valid(path):
+        raise RuntimeError(
+            f"LoRA file is missing or corrupt: {path}. "
+            "Re-download from Settings → LoRA (Install) or delete the cache file and try again."
+        )
+
+
+def _require_peft_backend() -> None:
+    from diffusers.utils import USE_PEFT_BACKEND
+
+    if USE_PEFT_BACKEND:
+        return
+    raise RuntimeError(
+        "SD 1.5 LoRAs require the PEFT package (diffusers 0.38+). "
+        "Install with: pip install peft"
+    )
+
+
+def _unload_sd15_lora(pipe: Any) -> None:
+    global _active_lora_peft
+    if _active_lora_peft:
+        try:
+            from peft import PeftModel
+
+            if isinstance(pipe.unet, PeftModel):
+                pipe.unet = pipe.unet.unload()
+        except Exception:
+            pass
+        _active_lora_peft = False
+        return
+    try:
+        pipe.unload_lora_weights()
+    except Exception:
+        pass
+
+
+def _load_sd15_lora_weights(pipe: Any, path: str) -> None:
+    global _active_lora_peft
+    _require_peft_backend()
+    lora_path = Path(path).expanduser().resolve()
+    _validate_lora_file(lora_path)
+    parent = lora_path.parent
+    if (parent / "adapter_config.json").is_file():
+        from peft import PeftModel
+
+        pipe.unet = PeftModel.from_pretrained(pipe.unet, str(parent))
+        pipe.unet.set_adapter("default")
+        _active_lora_peft = True
+        return
+    pipe.load_lora_weights(str(lora_path))
+    _active_lora_peft = False
 
 
 def _sync_lora_weights(pipe: Any, lora_paths: Any, lora_scales: Any) -> Optional[float]:
@@ -93,14 +151,12 @@ def _sync_lora_weights(pipe: Any, lora_paths: Any, lora_scales: Any) -> Optional
     key = (path, scale) if path else None
     if key == _active_lora_key:
         return scale if path else None
-    try:
-        pipe.unload_lora_weights()
-    except Exception:
-        pass
+    if _active_lora_key is not None:
+        _unload_sd15_lora(pipe)
     _active_lora_key = None
     if not path:
         return None
-    pipe.load_lora_weights(path)
+    _load_sd15_lora_weights(pipe, path)
     _active_lora_key = key
     return scale
 

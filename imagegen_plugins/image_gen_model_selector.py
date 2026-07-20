@@ -416,6 +416,8 @@ def values_after_plugin_switch(
         "mflux_lora_stack",
         "mflux_lora_paths",
         "mflux_lora_scales",
+        "sd15_lora_paths",
+        "sd15_lora_scales",
         "hf_model_id",
     ):
         out.pop(key, None)

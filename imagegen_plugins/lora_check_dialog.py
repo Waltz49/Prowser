@@ -80,7 +80,7 @@ def run_check_loras_dialog(parent) -> None:
             parent,
             "Check LoRAs",
             "No LoRAs are visible in Settings → LoRA. "
-            "Restore hidden entries or add catalog entries first.",
+            "Enable LoRAs for this model or run Tools → Debug → Check LoRAs first.",
         )
         return
 
@@ -199,18 +199,13 @@ def run_check_loras_dialog(parent) -> None:
 
         sd = getattr(mw, "settings_dialog", None)
         if sd is not None and getattr(sd, "isVisible", lambda: False)():
-            from imagegen_plugins.lora_catalog_settings import (
-                enabled_lora_ids_for_model,
-                hidden_lora_ids_for_model,
-            )
+            from imagegen_plugins.lora_catalog_settings import enabled_lora_ids_for_model
 
             model_key = (
                 sd._current_lora_model_key()
                 if hasattr(sd, "_current_lora_model_key")
                 else FLUX1_DEV
             )
-            if hasattr(sd, "_lora_hidden_ids"):
-                sd._lora_hidden_ids = set(hidden_lora_ids_for_model(model_key, settings))
             if hasattr(sd, "_rebuild_lora_settings_grid"):
                 sd._rebuild_lora_settings_grid()
             if hasattr(sd, "_apply_lora_settings_to_widgets"):

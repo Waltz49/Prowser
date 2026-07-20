@@ -22,7 +22,7 @@ ANYTHING_FURRY_SD15_PLUGIN = ImageGenModelPlugin(
         "negative_prompt": "low quality, blurry, bad anatomy",
         "width": 512,
         "height": 512,
-        "steps": 25,
+        "steps": 36, # was 25
         "guidance_scale": 7.0,
         "seed": 0,
         "random_seed": True,

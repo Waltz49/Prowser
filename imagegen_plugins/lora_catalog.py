@@ -13,8 +13,6 @@ from imagegen_plugins.lora_catalog_settings import (
     enabled_lora_ids_for_host,
     enabled_lora_ids_for_model,
     entry_overrides_from_lc,
-    hidden_lora_ids_for_host,
-    hidden_lora_ids_for_model,
     lora_catalog_from_settings,
     migrate_lora_catalog,
 )
@@ -155,6 +153,26 @@ def catalog_cache_path(entry: FluxLoraEntry) -> Optional[Path]:
     return DEFAULT_CACHE / entry.repo_id.replace("/", "__") / entry.filename
 
 
+def lora_weights_file_is_valid(path: Path) -> bool:
+    """True when a LoRA weights file exists and can be opened (safetensors or legacy)."""
+    try:
+        resolved = path.expanduser().resolve()
+    except OSError:
+        return False
+    if not resolved.is_file() or resolved.stat().st_size < 1024:
+        return False
+    if resolved.suffix.lower() != ".safetensors":
+        return True
+    try:
+        from safetensors import safe_open
+
+        with safe_open(str(resolved), framework="pt") as f:
+            next(iter(f.keys()), None)
+        return True
+    except Exception:
+        return False
+
+
 def is_lora_installed(
     lora_id: str,
     settings: Optional[Dict[str, Any]] = None,
@@ -165,11 +183,11 @@ def is_lora_installed(
     path = catalog_cache_path(entry)
     if path is None:
         return False
-    if path.is_file() and path.stat().st_size > 1024:
+    if lora_weights_file_is_valid(path):
         return True
     if entry.local_path:
         alt = _ALT_CACHE / "paper-cutout" / path.name
-        if alt.is_file() and alt.stat().st_size > 1024:
+        if lora_weights_file_is_valid(alt):
             return True
     return False
 
@@ -301,12 +319,10 @@ def catalog_entries_for_model(
     model_key: str = "",
 ) -> Tuple[FluxLoraEntry, ...]:
     """Settings grid: LoRAs that match this base model and passed Check LoRAs (if run)."""
-    hidden = hidden_lora_ids_for_model(model_key, settings)
     return tuple(
         e
         for e in catalog_entries_sorted(settings)
         if lora_probe_passed_for_model(e.lora_id, model_key, settings)
-        and e.lora_id not in hidden
     )
 
 
@@ -318,19 +334,12 @@ def catalog_entries_for_settings(
 ) -> Tuple[FluxLoraEntry, ...]:
     if model_key:
         return catalog_entries_for_model(settings, model_key)
-    hidden = (
-        hidden_lora_ids_for_host(host_id, settings)
-        if host_id
-        else all_hidden_lora_ids(settings)
-    )
     entries = (
         entries_for_host(host_id, settings)
         if host_id
         else catalog_entries_sorted(settings)
     )
-    return tuple(
-        e for e in entries if e.mflux_compatible is not False and e.lora_id not in hidden
-    )
+    return tuple(e for e in entries if e.mflux_compatible is not False)
 
 
 def enabled_lora_ids(
@@ -357,8 +366,6 @@ def lora_visible_for_run(
     if not entry_matches_lora_model(entry, model_key, settings=settings):
         return False
     if not lora_probe_passed_for_model(lora_id, model_key, settings):
-        return False
-    if lora_id in hidden_lora_ids_for_model(model_key, settings):
         return False
     if lora_id not in enabled_lora_ids_for_model(model_key, settings):
         return False
@@ -467,3 +474,140 @@ def sample_flux_lora_download_entries() -> Tuple[FluxLoraEntry, ...]:
 
 def _lora_download_local_dir(entry: FluxLoraEntry) -> Path:
     return DEFAULT_CACHE / entry.repo_id.replace("/", "__")
+
+
+def model_keys_for_lora_entry(
+    entry: FluxLoraEntry,
+    settings: Optional[Dict[str, Any]] = None,
+) -> Tuple[str, ...]:
+    """Base models in Settings → LoRA that use this catalog entry."""
+    from imagegen_plugins.lora_model_registry import LORA_SETTINGS_MODEL_ORDER
+    from imagegen_plugins.lora_user_entries import is_user_lora_id
+
+    if is_user_lora_id(entry.lora_id):
+        supported = lora_model_support(settings).get(entry.lora_id)
+        if supported:
+            order = set(LORA_SETTINGS_MODEL_ORDER)
+            return tuple(str(m) for m in supported if str(m) in order)
+        base = (entry.base_hf_model_id or "").strip()
+        return (base,) if base else ()
+    return tuple(
+        mk
+        for mk in LORA_SETTINGS_MODEL_ORDER
+        if entry_matches_lora_model(entry, mk, settings=settings)
+    )
+
+
+def _lora_enabled_for_model(
+    lora_id: str,
+    model_key: str,
+    settings: Optional[Dict[str, Any]],
+    draft_by_model: Optional[Dict[str, Any]],
+) -> bool:
+    if isinstance(draft_by_model, dict) and model_key in draft_by_model:
+        slice_ = draft_by_model.get(model_key)
+        if isinstance(slice_, dict):
+            return lora_id in (slice_.get("enabled_ids") or [])
+    from imagegen_plugins.lora_catalog_settings import model_state
+
+    return lora_id in (model_state(settings, model_key).get("enabled_ids") or [])
+
+
+def lora_shared_model_labels(
+    entry: FluxLoraEntry,
+    settings: Optional[Dict[str, Any]] = None,
+) -> Tuple[str, ...]:
+    """Display names for base models that share this LoRA weights file."""
+    from imagegen_plugins.hf_model_ids import lora_model_display_name
+
+    models = model_keys_for_lora_entry(entry, settings)
+    if len(models) <= 1:
+        return ()
+    return tuple(lora_model_display_name(mk) for mk in models)
+
+
+def lora_disk_delete_allowed(
+    entry: FluxLoraEntry,
+    settings: Optional[Dict[str, Any]] = None,
+    *,
+    draft_by_model: Optional[Dict[str, Any]] = None,
+) -> bool:
+    """
+    Whether the trash control may delete this LoRA from disk.
+
+    When multiple base models share one weights file, deletion is blocked while
+    any of those models still has the LoRA enabled.
+    """
+    models = model_keys_for_lora_entry(entry, settings)
+    if len(models) <= 1:
+        return True
+    for model_key in models:
+        if _lora_enabled_for_model(entry.lora_id, model_key, settings, draft_by_model):
+            return False
+    return True
+
+
+def _remove_empty_parents(path: Path, *, stop_at: Path) -> None:
+    try:
+        stop_resolved = stop_at.expanduser().resolve()
+    except OSError:
+        return
+    cur = path
+    while True:
+        try:
+            cur = cur.resolve()
+        except OSError:
+            break
+        if cur == stop_resolved:
+            break
+        if not cur.is_dir():
+            break
+        try:
+            if any(cur.iterdir()):
+                break
+            cur.rmdir()
+        except OSError:
+            break
+        cur = cur.parent
+
+
+def delete_installed_lora_files(entry: FluxLoraEntry) -> None:
+    """Remove downloaded LoRA weights from disk (and empty cache directories)."""
+    import shutil
+
+    from imagegen_plugins.lora_user_entries import is_user_lora_id
+
+    if is_user_lora_id(entry.lora_id):
+        from imagegen_plugins.image_gen_persistence import remove_user_lora
+
+        remove_user_lora(entry.lora_id)
+        return
+
+    if entry.repo_id:
+        dest_dir = _lora_download_local_dir(entry)
+        if dest_dir.is_dir():
+            shutil.rmtree(dest_dir, ignore_errors=True)
+            return
+
+    path = catalog_cache_path(entry)
+    if path is None:
+        return
+    try:
+        resolved = path.expanduser().resolve()
+    except OSError:
+        return
+    if resolved.is_file():
+        parent = resolved.parent
+        resolved.unlink(missing_ok=True)
+        _remove_empty_parents(parent, stop_at=DEFAULT_CACHE)
+        return
+    if entry.local_path:
+        local = Path(entry.local_path).expanduser()
+        try:
+            local = local.resolve()
+        except OSError:
+            return
+        if local.is_file():
+            parent = local.parent
+            local.unlink(missing_ok=True)
+            _remove_empty_parents(parent, stop_at=DEFAULT_CACHE)
