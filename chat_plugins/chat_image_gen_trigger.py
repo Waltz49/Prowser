@@ -99,12 +99,16 @@ def prepare_user_message_for_storage(
     main_window,
     *,
     automatic_create: bool = False,
+    keep_selection_trigger: bool = False,
 ) -> tuple[str, list[str], Optional[ImageGenChatCommand]]:
     """Apply ``{}`` trigger and record auto image-gen intent; keep slash commands in *text*."""
     from chat_plugins.chat_selection_image_trigger import apply_selection_image_trigger
 
     text, image_paths = apply_selection_image_trigger(
-        text, image_paths, main_window
+        text,
+        image_paths,
+        main_window,
+        keep_trigger_in_text=keep_selection_trigger,
     )
     if automatic_create:
         text = strip_create_commands_from_user_message(text)

@@ -266,13 +266,15 @@ class ChatMessageWidget(QWidget):
         if self._body_label is not None:
             self._body_label.stackUnder(self._thumb_row)
 
-    def _sync_image_thumb_row(self) -> None:
+    def _sync_image_thumb_row(self, *, force: bool = False) -> None:
         if self._thumb_row is None:
             return
         paths = list(self._message.image_paths or [])
         if paths:
             allow_remove = self._message.role in ("user", "assistant") and self._editing
-            self._thumb_row.set_image_paths(paths, allow_remove=allow_remove)
+            self._thumb_row.set_image_paths(
+                paths, allow_remove=allow_remove, force=force
+            )
             self._thumb_row.show()
             self._raise_image_thumb_row()
         else:
@@ -515,7 +517,7 @@ class ChatMessageWidget(QWidget):
             self._edit_input.hide()
         self._editing = False
         if self._thumb_row is not None:
-            self._sync_image_thumb_row()
+            self._sync_image_thumb_row(force=True)
         if self._body_label is not None:
             self._body_label.setText(self._message.text or "")
             self._body_label.show()

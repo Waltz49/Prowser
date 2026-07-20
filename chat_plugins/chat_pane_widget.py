@@ -42,6 +42,9 @@ from chat_plugins.chat_image_gen_trigger import (
     prepare_user_message_for_storage,
     user_message_wants_assistant_sources,
 )
+from chat_plugins.chat_selection_image_trigger import (
+    user_message_has_selection_image_trigger,
+)
 from chat_plugins.chat_image_store import ChatImageStore, reset_image_store_session
 from chat_plugins.chat_persistence import (
     clear_persisted_chat_files,
@@ -912,6 +915,7 @@ class ChatPaneWidget(QWidget):
                 image_paths,
                 self.main_window,
                 automatic_create=self._automatic_create,
+                keep_selection_trigger=True,
             )
         old_image_paths = list(msg.image_paths or [])
         old_source_paths = list(msg.source_image_paths) if msg.role == "user" else []
@@ -940,7 +944,10 @@ class ChatPaneWidget(QWidget):
             )
         elif msg.role == "assistant":
             msg.image_paths = normalize_assistant_message_image_paths(image_paths)
-        images_changed = sorted(old_image_paths) != sorted(msg.image_paths or [])
+        images_changed = sorted(old_image_paths) != sorted(msg.image_paths or []) or (
+            msg.role == "user"
+            and sorted(old_source_paths) != sorted(msg.source_image_paths or [])
+        )
         text_changed = msg.text != old_text
         for i, widget in enumerate(self._message_widgets):
             if widget.message_id() != message_id:
@@ -993,7 +1000,35 @@ class ChatPaneWidget(QWidget):
             w.deleteLater()
         self._streaming_widget = None
         self._set_generation_stop_ui(False)
+        user_msg = self._session.messages[user_idx]
+        if user_msg.role == "user" and user_message_has_selection_image_trigger(
+            user_msg.text
+        ):
+            self._refresh_user_message_selection_trigger(user_msg.message_id)
         self._request_assistant_response()
+
+    def _refresh_user_message_selection_trigger(self, message_id: str) -> None:
+        """Re-apply ``{}`` on redo so images match the current browser selection."""
+        idx = self._session.index_of(message_id)
+        if idx < 0:
+            return
+        msg = self._session.messages[idx]
+        if msg.role != "user" or not user_message_has_selection_image_trigger(msg.text):
+            return
+        text, image_paths, image_gen_auto = prepare_user_message_for_storage(
+            msg.text,
+            list(msg.image_paths or []),
+            self.main_window,
+            automatic_create=self._automatic_create,
+            keep_selection_trigger=True,
+        )
+        if (
+            text == msg.text
+            and sorted(image_paths) == sorted(msg.image_paths or [])
+            and image_gen_auto == msg.image_gen_auto
+        ):
+            return
+        self._on_edit_saved(message_id, text, image_paths)
 
     def _auto_create_from_text_if_available(self, text: str) -> None:
         if not chat_create_from_text_available():

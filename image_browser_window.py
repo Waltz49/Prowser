@@ -1450,6 +1450,11 @@ class ImageBrowserWindow(QMainWindow):
             purge_all_chat_ephemeral_data(self)
         except ImportError:
             pass
+
+        try:
+            self._persist_chrome_visibility_to_config()
+        except Exception:
+            pass
         
         super().closeEvent(event)
 
@@ -9326,6 +9331,7 @@ class ImageBrowserWindow(QMainWindow):
             QTimer.singleShot(50, self._browse_after_chrome_layout_change)
         elif self.current_view_mode == 'thumbnail':
             QTimer.singleShot(50, self.update_max_thumbnail_size)
+        self._persist_chrome_visibility_to_config()
         return is_visible_fn()
 
     def _toggle_pane_with_chrome_restore(
@@ -9340,6 +9346,74 @@ class ImageBrowserWindow(QMainWindow):
             return self._show_sidebar_pane_only(side, layout_key, is_visible_fn, set_visible_fn)
         set_visible_fn(not is_visible_fn())
         return is_visible_fn()
+
+    def _write_chrome_layout_visibility_to_config(self, layout: dict) -> None:
+        """Write pane/status visibility flags used on next app launch."""
+        status_vis = bool(layout.get('status_bar_visible', False))
+        tree_vis = bool(layout.get('left_tree_visible', False))
+        preview_vis = bool(layout.get('left_preview_visible', False))
+        chat_vis = bool(layout.get('left_chat_visible', False))
+        info_vis = bool(layout.get('right_information_visible', False))
+        shortcuts_vis = bool(layout.get('right_shortcuts_visible', False))
+        jobs_vis = bool(layout.get('right_jobs_visible', False))
+        right_vis = info_vis or shortcuts_vis or jobs_vis
+
+        self.config.update_setting('status_bar_visible', status_vis)
+        self.config.update_setting('file_tree_visible', tree_vis)
+        self.config.update_setting('preview_visible', preview_vis)
+        self.config.update_setting('chat_visible', chat_vis)
+        self.config.update_setting('information_sidebar_visible', info_vis)
+        self.config.update_setting('shortcuts_sidebar_visible', shortcuts_vis)
+        self.config.update_setting('jobs_visible', jobs_vis)
+        self.config.update_setting('right_sidebar_visible', right_vis)
+
+        self.file_tree_visible = tree_vis
+        self.preview_visible = preview_vis
+        self.chat_visible = chat_vis
+        self.jobs_visible = jobs_vis
+        self.right_sidebar_visible = right_vis
+
+    def _persist_chrome_visibility_to_config(self) -> None:
+        """Persist on-screen chrome visibility (F4 hide, partial reveal, or normal layout)."""
+        if getattr(self, '_chrome_suppressed', False):
+            layout = {
+                'status_bar_visible': False,
+                'left_tree_visible': False,
+                'left_preview_visible': False,
+                'left_chat_visible': False,
+                'right_information_visible': False,
+                'right_shortcuts_visible': False,
+                'right_jobs_visible': False,
+            }
+        else:
+            partial = getattr(self, '_chrome_partial_side', None)
+            if partial == 'left':
+                cs = self.combined_sidebar
+                layout = {
+                    'status_bar_visible': False,
+                    'left_tree_visible': cs.is_tree_visible(),
+                    'left_preview_visible': cs.is_preview_visible(),
+                    'left_chat_visible': (
+                        cs.is_chat_visible() if hasattr(cs, 'is_chat_visible') else False
+                    ),
+                    'right_information_visible': False,
+                    'right_shortcuts_visible': False,
+                    'right_jobs_visible': False,
+                }
+            elif partial == 'right':
+                rs = self.right_sidebar
+                layout = {
+                    'status_bar_visible': False,
+                    'left_tree_visible': False,
+                    'left_preview_visible': False,
+                    'left_chat_visible': False,
+                    'right_information_visible': rs.is_information_visible(),
+                    'right_shortcuts_visible': rs.is_shortcuts_visible(),
+                    'right_jobs_visible': rs.is_jobs_visible(),
+                }
+            else:
+                layout = self._capture_chrome_layout()
+        self._write_chrome_layout_visibility_to_config(layout)
 
     def _capture_chrome_layout(self) -> dict:
         cs = self.combined_sidebar
@@ -9393,6 +9467,7 @@ class ImageBrowserWindow(QMainWindow):
             self._set_splitter_sizes_safe([0, total_width, 0])
         self._update_chrome_menu_actions()
         self._peek_layout_update()
+        self._persist_chrome_visibility_to_config()
 
     def _restore_chrome_layout(self, layout: dict):
         self._chrome_suppressed = False
@@ -9424,6 +9499,7 @@ class ImageBrowserWindow(QMainWindow):
             self._update_chrome_menu_actions()
             self._peek_layout_update()
         self._sync_left_sidebar_tab_order()
+        self._write_chrome_layout_visibility_to_config(layout)
 
     def _after_chrome_status_restore(self):
         self._update_chrome_menu_actions()
@@ -9450,6 +9526,15 @@ class ImageBrowserWindow(QMainWindow):
         else:
             self._update_chrome_menu_actions()
             self._peek_layout_update()
+        self._write_chrome_layout_visibility_to_config({
+            'status_bar_visible': True,
+            'left_tree_visible': True,
+            'left_preview_visible': True,
+            'left_chat_visible': True,
+            'right_information_visible': True,
+            'right_shortcuts_visible': True,
+            'right_jobs_visible': True,
+        })
 
     def _update_chrome_menu_actions(self):
         if hasattr(self, 'toggle_status_bar_action'):

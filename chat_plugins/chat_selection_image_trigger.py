@@ -52,12 +52,19 @@ def apply_selection_image_trigger(
     text: str,
     image_paths: list[str],
     main_window,
+    *,
+    keep_trigger_in_text: bool = False,
 ) -> tuple[str, list[str]]:
-    """Strip ``{}`` and replace message images with the current selection when present."""
+    """Replace message images with the current selection when ``{}`` is present.
+
+    When *keep_trigger_in_text* is false (new user submit), ``{}`` is removed from
+    stored text. When true (edit save / redo), ``{}`` stays in the prompt so later
+    redo/cmd-R can substitute the current selection again.
+    """
     if not user_message_has_selection_image_trigger(text):
         return text, image_paths
-    stripped = strip_selection_image_trigger(text)
+    stored_text = text if keep_trigger_in_text else strip_selection_image_trigger(text)
     selected = selected_images_for_chat(main_window)
     if selected:
-        return stripped, selected
-    return stripped, image_paths
+        return stored_text, selected
+    return stored_text, image_paths

@@ -322,10 +322,16 @@ class ChatImageThumbRow(QWidget):
     def image_paths(self) -> list[str]:
         return list(self._paths)
 
-    def set_image_paths(self, paths: list[str], *, allow_remove: bool = True) -> None:
+    def set_image_paths(
+        self,
+        paths: list[str],
+        *,
+        allow_remove: bool = True,
+        force: bool = False,
+    ) -> None:
         new_paths = [os.path.abspath(p) for p in (paths or []) if p][:MAX_CHAT_IMAGES]
         self._allow_remove = allow_remove
-        if new_paths == self._paths:
+        if not force and new_paths == self._paths:
             if self.effective_allow_remove():
                 self.refresh_hover_under_cursor()
             return
