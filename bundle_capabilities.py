@@ -22,7 +22,7 @@ def _frozen_min_bundle_without_imagegen() -> bool:
 
 
 def is_min_bundle() -> bool:
-    """True for pyInstallerBuild.sh --min bundles or when ``main.py --min`` is used."""
+    """True for pyInstallerBuild.sh --min bundles or when ``prowser.py --min`` is used."""
     global _min_bundle_cached
     if _min_bundle_cached is not None:
         return _min_bundle_cached

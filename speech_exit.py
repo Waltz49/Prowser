@@ -139,7 +139,7 @@ def say_exit_argv(text: str) -> list[str]:
 
 
 def describe_say_exit_env() -> str:
-    """One-line status for PROWSER_SAY_EXIT (for ``main.py --env``)."""
+    """One-line status for PROWSER_SAY_EXIT (for ``prowser.py --env``)."""
     raw = os.environ.get(ENV_SAY_EXIT)
     if raw is None or not str(raw).strip():
         return f"{ENV_SAY_EXIT}: No environment variable"

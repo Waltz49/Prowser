@@ -8,4 +8,4 @@ else
     . ./venv/bin/activate
 fi
 
-python main.py "$@"
+python prowser.py "$@"

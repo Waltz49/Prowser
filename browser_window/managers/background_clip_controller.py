@@ -48,7 +48,7 @@ class BackgroundClipController(QObject):
         self.current_status = {"status": "stopped", "last_update": 0.0}
         
         # Import worker module - multiprocessing will use the imported module directly
-        # This avoids the issue of main.py getting involved when using subprocess
+        # This avoids the issue of prowser.py getting involved when using subprocess
         try:
             from workers.background_clip_worker import main as worker_main
             self.worker_main = worker_main
@@ -179,7 +179,7 @@ class BackgroundClipController(QObject):
             try:
                 # Always use 'spawn' on macOS (required for PyTorch/MPS compatibility)
                 # 'fork' causes CoreFoundation errors and crashes with MPS/Objective-C runtime
-                # PyInstaller handles spawn correctly when freeze_support() is called in main.py
+                # PyInstaller handles spawn correctly when freeze_support() is called in prowser.py
                 ctx = multiprocessing.get_context('spawn')
                 
                 self._process_check_cache = None  # Invalidate - we're starting a process

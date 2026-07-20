@@ -9,7 +9,7 @@ import faulthandler
 import signal
 # ##  DO NOT REMOVE THIS COMMENT: #############################################################################################
 #  --- use the followig to profile the code as it runs ---
-# bbkill; python -m cProfile -o profile.stats main.py -l 0 /Volumes/MiscFS/&
+# bbkill; python -m cProfile -o profile.stats prowser.py -l 0 /Volumes/MiscFS/&
 #
 # python -c "
 # import pstats
@@ -19,13 +19,13 @@ import signal
 # " |sort -rnk 1|less
 
 #  --- use the followig to capture hang traces ---
-# printf "bt all\nq\n"|lldb -p $(pgrep -f main.py)
+# printf "bt all\nq\n"|lldb -p $(pgrep -f prowser.py)
 #
 #  --- use the followig to capture memory usage on macOS ---
-# vmmap -summary $(pgrep -f python.*main.py)
+# vmmap -summary $(pgrep -f python.*prowser.py)
 #
 #  --- use the followig to capture CPU usage ---
-# ps aux | grep main.py | grep -v grep | awk '{print $2}' | xargs -I {} ps -p {} -o %cpu= | awk '{sum+=$1} END {print sum}'
+# ps aux | grep prowser.py | grep -v grep | awk '{print $2}' | xargs -I {} ps -p {} -o %cpu= | awk '{sum+=$1} END {print sum}'
 #
 #  --- use the followig to capture network usage ---
 # ##############################################################################################################################
@@ -42,7 +42,7 @@ def dump_threads_on_signal(signum, frame):
 
 signal.signal(signal.SIGUSR1, dump_threads_on_signal)
 
-# python -m trace --ignore-dir=$(python -c 'import sys; print(":".join(sys.path[1:]))') --trace main.py
+# python -m trace --ignore-dir=$(python -c 'import sys; print(":".join(sys.path[1:]))') --trace prowser.py
 
 # Standard library imports
 import argparse

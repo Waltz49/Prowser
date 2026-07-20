@@ -2243,7 +2243,7 @@ class MenuManager:
     def apply_dark_theme(self):
         """Apply dark theme to match the web version
         
-        Note: Theme is now applied globally via QApplication.setStyleSheet() in main.py.
+        Note: Theme is now applied globally via QApplication.setStyleSheet() in prowser.py.
         This method is kept for backward compatibility but does nothing.
         """
         # Theme is applied globally, no action needed

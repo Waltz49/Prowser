@@ -32,20 +32,20 @@ class CommandLineHelpDialog(MarkdownDialog):
         )
 
     def _get_command_line_help(self):
-        """Run main.py -h and capture the output"""
+        """Run prowser.py -h and capture the output"""
         if getattr(sys, 'frozen', False):
             cmd = [sys.executable, '-h']
             cwd = os.path.dirname(os.path.abspath(sys.executable))
         else:
             project_root = self._project_root()
-            main_py = os.path.join(project_root, 'main.py')
+            prowser_py = os.path.join(project_root, 'prowser.py')
             venv_python = os.path.join(
                 project_root, 'venv_image_browser', 'bin', 'python'
             )
             python_exe = (
                 venv_python if os.path.exists(venv_python) else sys.executable
             )
-            cmd = [python_exe, main_py, '-h']
+            cmd = [python_exe, prowser_py, '-h']
             cwd = project_root
 
         try:

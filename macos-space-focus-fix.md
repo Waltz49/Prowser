@@ -7,7 +7,7 @@ In the **bundled** app running `--fullscreen` on a dedicated macOS Space, two ac
 1. **Submit** on the Edit Image dialog
 2. **Press J** to toggle the Jobs pane while a job was running
 
-Dev mode (`python main.py`) did not reproduce the Space bounce reliably.
+Dev mode (`python prowser.py`) did not reproduce the Space bounce reliably.
 
 ## Root causes (confirmed by runtime logs)
 

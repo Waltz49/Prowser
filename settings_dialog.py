@@ -9435,7 +9435,7 @@ if __name__ == "__main__":
 
     app = QApplication(sys.argv)
     
-    # Apply global dark theme stylesheet for consistent UI styling (same as main.py)
+    # Apply global dark theme stylesheet for consistent UI styling (same as prowser.py)
     from thumbnails.thumbnail_constants import get_dark_theme_stylesheet
     app.setStyleSheet(get_dark_theme_stylesheet())
 

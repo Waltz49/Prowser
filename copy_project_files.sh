@@ -52,7 +52,7 @@ FEATURE_PACKAGES=(
 )
 
 # Root-level Python files that are dev-only — not shipped in source copies.
-# Keep in sync with reachable modules from main.py (see list_runtime_assets.py).
+# Keep in sync with reachable modules from prowser.py (see list_runtime_assets.py).
 ROOT_PY_EXCLUDE=(
     block_test.py
     create_sample_images.py
@@ -69,7 +69,7 @@ ROOT_PY_EXCLUDE=(
 
 # Required after copy (paths relative to target).
 REQUIRED_PATHS=(
-    main.py
+    prowser.py
     image_browser_window.py
     event_bus.py
     sorting_manager.py
@@ -207,7 +207,7 @@ resolve_python_cmd() {
 list_runtime_asset_paths() {
     local python_cmd
     python_cmd="$(resolve_python_cmd)"
-    "$python_cmd" "$SCRIPT_DIR/list_runtime_assets.py" --from-main
+    "$python_cmd" "$SCRIPT_DIR/list_runtime_assets.py" --from-prowser
 }
 
 list_reachable_root_py() {
@@ -245,7 +245,7 @@ verify_copy() {
     while IFS= read -r py_name; do
         [ -n "$py_name" ] || continue
         if [ ! -f "$TARGET_DIR/$py_name" ]; then
-            print_error "Missing runtime module (reachable from main.py): $py_name"
+            print_error "Missing runtime module (reachable from prowser.py): $py_name"
             missing=1
         fi
     done < <(list_reachable_root_py)
@@ -301,8 +301,8 @@ fi
 print_info "Source directory: $SCRIPT_DIR"
 print_info "Target directory: $TARGET_DIR"
 
-if [ ! -f "$SCRIPT_DIR/main.py" ]; then
-    print_error "Source directory does not appear to be the image_browser project (main.py not found)"
+if [ ! -f "$SCRIPT_DIR/prowser.py" ]; then
+    print_error "Source directory does not appear to be the image_browser project (prowser.py not found)"
     exit 1
 fi
 
@@ -356,7 +356,7 @@ do
     copy_and_count "$py"
 done
 
-print_info "Copying runtime asset files (referenced from main.py)..."
+print_info "Copying runtime asset files (referenced from prowser.py)..."
 while IFS= read -r asset_rel; do
     [ -n "$asset_rel" ] || continue
     copy_and_count "$asset_rel"

@@ -98,10 +98,10 @@ def _module_to_path(module: str) -> Path | None:
     return None
 
 
-def _reachable_py_files_from_main() -> list[Path]:
-    """Python modules imported (transitively) from main.py."""
+def _reachable_py_files_from_prowser() -> list[Path]:
+    """Python modules imported (transitively) from prowser.py."""
     seen: set[Path] = set()
-    stack = [_REPO_ROOT / "main.py"]
+    stack = [_REPO_ROOT / "prowser.py"]
     while stack:
         path = stack.pop()
         if path in seen or not path.is_file():
@@ -161,16 +161,16 @@ def _asset_names_from_py_files(py_files: list[Path]) -> list[str]:
     return sorted(n for n in expanded if (_ASSETS_DIR / n).is_file())
 
 
-def collect_runtime_asset_names(*, from_main: bool = False) -> list[str]:
-    py_files = _reachable_py_files_from_main() if from_main else _iter_py_files()
+def collect_runtime_asset_names(*, from_prowser: bool = False) -> list[str]:
+    py_files = _reachable_py_files_from_prowser() if from_prowser else _iter_py_files()
     return _asset_names_from_py_files(py_files)
 
 
 def reachable_root_py_filenames() -> list[str]:
-    """Root-level .py modules imported (transitively) from main.py."""
+    """Root-level .py modules imported (transitively) from prowser.py."""
     return sorted(
         p.name
-        for p in _reachable_py_files_from_main()
+        for p in _reachable_py_files_from_prowser()
         if p.parent == _REPO_ROOT and p.suffix == ".py"
     )
 
@@ -178,14 +178,14 @@ def reachable_root_py_filenames() -> list[str]:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "--from-main",
+        "--from-prowser",
         action="store_true",
-        help="Only scan Python reachable from main.py (omit dev-only modules).",
+        help="Only scan Python reachable from prowser.py (omit dev-only modules).",
     )
     parser.add_argument(
         "--reachable-root-py",
         action="store_true",
-        help="Print root-level .py filenames reachable from main.py (one per line).",
+        help="Print root-level .py filenames reachable from prowser.py (one per line).",
     )
     parser.add_argument(
         "--format",
@@ -198,7 +198,7 @@ def main() -> int:
         for name in reachable_root_py_filenames():
             print(name)
         return 0
-    names = collect_runtime_asset_names(from_main=args.from_main)
+    names = collect_runtime_asset_names(from_prowser=args.from_prowser)
     if args.format == "paths":
         for name in names:
             print(f"assets/{name}")

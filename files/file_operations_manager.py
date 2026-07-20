@@ -5965,7 +5965,7 @@ class FileOperationsManager:
                     button_layout.addWidget(no_button)
                     layout.addLayout(button_layout)
 
-                    # Styling is applied globally via QApplication.setStyleSheet() in main.py
+                    # Styling is applied globally via QApplication.setStyleSheet() in prowser.py
 
                     reply_result = [None]
                     yes_button.clicked.connect(lambda: (reply_result.__setitem__(0, QMessageBox.StandardButton.Yes), error_dialog.accept()))

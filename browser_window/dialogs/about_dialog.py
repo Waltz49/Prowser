@@ -518,7 +518,7 @@ def main():
     """Test function to run the about dialog independently"""
     import sys
 
-    # Ensure package root is on path so `from __init__ import __version__` works when not launched via main.py
+    # Ensure package root is on path so `from __init__ import __version__` works when not launched via prowser.py
     _root = os.path.dirname(os.path.abspath(__file__))
     if _root not in sys.path:
         sys.path.insert(0, _root)

@@ -56,7 +56,7 @@ Deliverable: [docs/restructure-plan.md](docs/restructure-plan.md) (this plan, ke
 - **Move-only**: `git mv` files; update `import` paths and build/copy scripts. No behavior changes, refactors, or renames unless required to break an import cycle.
 - **One domain per step**: Each step creates or extends **one** package; land, test, then continue.
 - **Flat packages at repo root** (your choice): `slideshow/`, `search/`, `cache/`, etc. sit beside [browser_window/](browser_window/) and [imagegen_plugins/](imagegen_plugins/). Do **not** use the empty [prowser/](prowser/) umbrella unless a later optional step explicitly migrates.
-- **Thin core stays at root**: [main.py](main.py), [image_browser_window.py](image_browser_window.py), [config.py](config.py), [file_data_model.py](file_data_model.py), [event_bus.py](event_bus.py), [utils.py](utils.py), [sort_mode.py](sort_mode.py).
+- **Thin core stays at root**: [prowser.py](prowser.py), [image_browser_window.py](image_browser_window.py), [config.py](config.py), [file_data_model.py](file_data_model.py), [event_bus.py](event_bus.py), [utils.py](utils.py), [sort_mode.py](sort_mode.py).
 - **Dependency rules** (document in [ARCHITECTURE.md](ARCHITECTURE.md) after Step 0):
   - Core must not import UI packages.
   - Feature packages must not `import image_browser_window` (use `sort_mode`, `event_bus`, duck-typed `main_window` args).
@@ -65,7 +65,7 @@ Deliverable: [docs/restructure-plan.md](docs/restructure-plan.md) (this plan, ke
 ```mermaid
 flowchart TB
   subgraph core [Root core]
-    main[main.py]
+    prowser[prowser.py]
     ibw[image_browser_window.py]
     model[file_data_model.py]
     bus[event_bus.py]
@@ -105,12 +105,12 @@ flowchart TB
 ```bash
 source venv_image_browser/bin/activate
 python -m compileall -q .   # or targeted package
-python -c "import image_browser_window; import main"
-./main.py /tmp              # smoke: window opens
+python -c "import image_browser_window; import prowser"
+./prowser.py /tmp              # smoke: window opens
 python -m pytest tests/ -q  # if tests touch moved modules
 ```
 
-PyInstaller: entry is [main.py](main.py) with `pathex` to repo root ([Prowser.spec](Prowser.spec)); new packages are usually discovered automatically. If a frozen build fails with `ModuleNotFoundError`, add the package to hiddenimports in spec/directives.
+PyInstaller: entry is [prowser.py](prowser.py) with `pathex` to repo root ([Prowser.spec](Prowser.spec)); new packages are usually discovered automatically. If a frozen build fails with `ModuleNotFoundError`, add the package to hiddenimports in spec/directives.
 
 ---
 
@@ -128,7 +128,7 @@ PyInstaller: entry is [main.py](main.py) with `pathex` to repo root ([Prowser.sp
 
 **Also**: Add a short "Package boundaries" section to [ARCHITECTURE.md](ARCHITECTURE.md).
 
-**Risk**: Low. **Test**: compile + `./main.py`.
+**Risk**: Low. **Test**: compile + `./prowser.py`.
 
 ---
 
@@ -310,7 +310,7 @@ Update imports in [image_browser_window.py](image_browser_window.py) only. **Pur
 
 | Area | Package / location |
 |------|-------------------|
-| Entry + orchestrator | `main.py`, `image_browser_window.py` |
+| Entry + orchestrator | `prowser.py`, `image_browser_window.py` |
 | Core shared | `config`, `file_data_model`, `event_bus`, `utils`, `sort_mode`, … |
 | Main window UI | `browser_window/` |
 | Image generation | `imagegen_plugins/` |

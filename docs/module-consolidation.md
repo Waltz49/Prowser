@@ -92,7 +92,7 @@ Dialogs, managers, and sidebar pieces that were only used by the main window, in
 | `status_bar_config.py` | `filter_dialog` |
 | `similarity_reorder.py` | `list_utils` |
 | `window_sync.py` | `model_sync` |
-| `main.py` | `apple_events_handler` |
+| `prowser.py` | `apple_events_handler` |
 | `quick_person_search.py` | `quick_person_face_pick_dialog` |
 | `theme_service.py` | `light_theme_definitions` |
 | `edit_exif_usercomment_dialog.py` | `lmstudio_launcher` (later folded into `image_browser_window.py`) |
@@ -104,7 +104,7 @@ Dialogs, managers, and sidebar pieces that were only used by the main window, in
 
 ## Post-merge fixes (startup)
 
-The bulk merge left some inlined code incomplete. These were repaired so `./main.py` starts cleanly:
+The bulk merge left some inlined code incomplete. These were repaired so `./prowser.py` starts cleanly:
 
 1. **Missing class bodies** — Six modules were deleted before their classes were fully inlined: `window_model_bridge`, `mvc_controller`, `idle_detector`, `background_cache_importer`, `rename_status_manager`, `sidebar_jobs_widget`. Bodies restored from git into `image_browser_window.py`.
 
@@ -134,8 +134,8 @@ After fixes:
 
 ```bash
 python -m py_compile image_browser_window.py
-python -c "import image_browser_window; import main"
-./main.py
+python -c "import image_browser_window; import prowser"
+./prowser.py
 ```
 
 Recommended manual smoke tests: browse/thumbnail views, EXIF edit, image generation dialogs, help menus, right sidebar (Organize / Jobs), background CLIP idle import.

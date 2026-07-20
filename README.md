@@ -86,7 +86,7 @@ Common formats include JPEG, PNG, GIF, BMP, TIFF, WebP, SVG, HEIC, and HEIF. Not
 
 ### Entry and layout
 
-- **Entry:** `main.py` 
+- **Entry:** `prowser.py` 
 
 AI related tasks run in separate processes, not on the UI thread. You can force processes vs threads with the `--background [process|thread]` flag.
 By default, the app uses threads when bundled into an app, and processes when run from source.

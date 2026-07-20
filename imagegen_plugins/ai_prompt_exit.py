@@ -79,7 +79,7 @@ def imagegen_values_for_dialog_save(values: dict, panel) -> dict:
 
 
 def describe_ai_exit_env(env_var: str) -> str:
-    """One-line status for an exit env var (for ``main.py --env``)."""
+    """One-line status for an exit env var (for ``prowser.py --env``)."""
     raw = os.environ.get(env_var)
     if raw is None or not str(raw).strip():
         return f"{env_var}: No environment variable"

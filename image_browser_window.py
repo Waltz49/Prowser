@@ -1468,7 +1468,7 @@ class ImageBrowserWindow(QMainWindow):
         self.setWindowTitle("Prowser")
         self.setMinimumSize(400, 600)
         self.resize(1200, 800)
-        # Note: immediate_macos_space_mode handling moved to main.py after window.show() for proper timing
+        # Note: immediate_macos_space_mode handling moved to prowser.py after window.show() for proper timing
         
         self.setFocusPolicy(Qt.NoFocus)  # Prevent main window from being in tab order
         

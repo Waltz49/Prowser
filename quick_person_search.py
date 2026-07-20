@@ -339,10 +339,11 @@ def run_quick_person_search(main_window) -> None:
 
     if errors:
         warning_title = "Quick Person Search"
+        error_sep = "\n\n"
         if len(paths) == 1:
-            warning_body = f"No faces were found.\n\n{'\n\n'.join(errors)}"
+            warning_body = f"No faces were found.\n\n{error_sep.join(errors)}"
         else:
-            warning_body = f"Some images could not be used.\n\n{'\n\n'.join(errors)}"
+            warning_body = f"Some images could not be used.\n\n{error_sep.join(errors)}"
         show_styled_warning(mw, warning_title, warning_body)
         return
 

@@ -1,13 +1,13 @@
 # Prowser architecture (code-derived)
 
-Native macOS image browser (PySide6). Entry: `main.py` → `ImageBrowserWindow`.
+Native macOS image browser (PySide6). Entry: `prowser.py` → `ImageBrowserWindow`.
 
 Package restructure (Steps 0–12) is complete; see `docs/restructure-plan.md` for history.
 
 ## Boot
 
-- `run.sh` → `python main.py` (uses `venv_image_browser/`, falls back to `venv/`)
-- Frozen workers: `--model-tasks-worker`, `--imagegen-worker` (see `main.py` `_frozen_subprocess_bootstrap`)
+- `run.sh` → `python prowser.py` (uses `venv_image_browser/`, falls back to `venv/`)
+- Frozen workers: `--model-tasks-worker`, `--imagegen-worker` (see `prowser.py` `_frozen_subprocess_bootstrap`)
 - `--profile` / `-p DIR` — alternate profile root (default `~/.prowser`)
 - `--background {default,thread,process}` — model-tasks worker thread vs subprocess (`workers/model_tasks_launch.py`)
 - `--test-create-deps` — frozen-only diagnostic for Create/Image menu dependencies

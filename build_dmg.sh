@@ -104,8 +104,8 @@ for sh in setup.sh run.sh pyInstallerBuild.sh build_dmg.sh copy_project_files.sh
     fi
 done
 
-if [ ! -f "$SOURCE_STAGING/main.py" ] || [ ! -f "$SOURCE_STAGING/setup.sh" ] || [ ! -d "$SOURCE_STAGING/browser_window" ]; then
-    echo "❌ Error: source folder is incomplete after copy (need main.py, setup.sh, browser_window/)"
+if [ ! -f "$SOURCE_STAGING/prowser.py" ] || [ ! -f "$SOURCE_STAGING/setup.sh" ] || [ ! -d "$SOURCE_STAGING/browser_window" ]; then
+    echo "❌ Error: source folder is incomplete after copy (need prowser.py, setup.sh, browser_window/)"
     exit 1
 fi
 

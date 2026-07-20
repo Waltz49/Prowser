@@ -78,7 +78,7 @@ export SCRIPT_DIR
 
 # Configuration
 APP_NAME="Prowser"
-MAIN_SCRIPT="$SCRIPT_DIR/main.py"
+MAIN_SCRIPT="$SCRIPT_DIR/prowser.py"
 ICON_FILE="$SCRIPT_DIR/Prowser.icns"
 BUILD_DIR="$SCRIPT_DIR/dist"
 SPEC_FILE="$SCRIPT_DIR/${APP_NAME}.spec"
@@ -794,7 +794,7 @@ for _pkg in $SPEC_COPY_METADATA:
 _hidden_from_directives = $HIDDEN_IMPORTS
 
 a = Analysis(
-    ['main.py'],
+    ['prowser.py'],
     pathex=$PATHEX_JSON,
     binaries=_imagegen_collect_binaries,
     datas=[
