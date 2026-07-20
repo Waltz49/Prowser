@@ -33,6 +33,7 @@ from chat_plugins.chat_ui_common import (
     create_chat_from_text_button,
     create_chat_redo_button,
     create_chat_stop_button,
+    _icon_button_chrome_stylesheet,
     _local_paths_from_mime,
 )
 from theme.theme_service import get_active_theme
@@ -547,3 +548,14 @@ class ChatMessageWidget(QWidget):
             )
         if self._edit_input is not None:
             self._edit_input.setStyleSheet(chat_prompt_edit_stylesheet())
+        action_ss = _icon_button_chrome_stylesheet()
+        for btn in (
+            self._edit_btn,
+            self._redo_btn,
+            self._delete_btn,
+            self._from_text_btn,
+            self._favorite_btn,
+            self._stop_btn,
+        ):
+            if btn is not None:
+                btn.setStyleSheet(action_ss)

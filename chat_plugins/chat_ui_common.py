@@ -705,7 +705,6 @@ def _icon_button_chrome_stylesheet() -> str:
     th = get_active_theme()
     sz = _ICON_BTN_SIZE
     btn_bg = th.sidebar_background_color_hex
-    btn_hover = th.widget_bg_hover_hex
     return f"""
         QPushButton {{
             background-color: {btn_bg};
@@ -718,7 +717,8 @@ def _icon_button_chrome_stylesheet() -> str:
             max-height: {sz}px;
         }}
         QPushButton:hover {{
-            background-color: {btn_hover};
+            background-color: {th.button_bg_hover_hex};
+            border: 1px solid {th.button_border_hover_hex};
         }}
         QPushButton:disabled {{
             opacity: 0.35;
@@ -801,6 +801,7 @@ class _ChatIconButtonHover(QObject):
         self._normal_icon = normal_icon
         self._hover_icon = hover_icon
         button.installEventFilter(self)
+        button.setIcon(normal_icon)
 
     def eventFilter(self, obj: QObject, event: QEvent) -> bool:
         if event.type() == QEvent.Type.Destroy:
