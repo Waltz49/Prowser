@@ -15,8 +15,9 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from thumbnails.thumbnail_constants import asset_path
 from theme.theme_service import get_active_theme
+from widgets.gear_button_styles import create_tree_toolbar_gear_button
+from widgets.icon_hover_swap import IconHoverSwap, attach_icon_hover_swap
 
 _TOOLBAR_BTN_PX = 26
 _ICON_PX = 20
@@ -31,7 +32,7 @@ _FILTER_MODES = (
 )
 
 
-def create_tree_filter_icon(mode: str, selected: bool) -> QIcon:
+def create_tree_filter_icon(mode: str, selected: bool, *, hover: bool = False) -> QIcon:
     """Pen-drawn filter mode icon (all / images / pattern)."""
     icon_pixmap_size = 18
     pixmap = QPixmap(icon_pixmap_size, icon_pixmap_size)
@@ -40,11 +41,12 @@ def create_tree_filter_icon(mode: str, selected: bool) -> QIcon:
     painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
     th = get_active_theme()
-    pen_color = QColor(
-        th.file_tree_filter_icon_selected_hex
-        if selected
-        else th.file_tree_filter_icon_unselected_hex
-    )
+    if selected:
+        pen_color = QColor(th.file_tree_filter_icon_selected_hex)
+    elif hover:
+        pen_color = QColor(th.file_tree_filter_icon_selected_hex)
+    else:
+        pen_color = QColor(th.file_tree_filter_icon_unselected_hex)
     pen_width = 1.5
 
     if mode == "all":
@@ -81,14 +83,19 @@ def filter_toolbar_button_stylesheet(
         else QColor(theme._file_tree_control_surface_hex()).lighter(108).name()
     )
     hover = theme._file_tree_control_surface_hover_hex()
+    hover_border = getattr(theme, "button_border_hover_hex", theme.current_image_border_color_hex)
     return (
         base
         + f"""
+            QPushButton:hover {{
+                border: 1px solid {hover_border};
+            }}
             QPushButton:checked {{
                 background-color: {pressed};
             }}
             QPushButton:checked:hover {{
                 background-color: {hover};
+                border: 1px solid {hover_border};
             }}
         """
     )
@@ -105,7 +112,23 @@ class FileTreeToolbar(QWidget):
         self.settings_button: Optional[QPushButton] = None
         self._filter_mode_buttons: Dict[str, QPushButton] = {}
         self._filter_mode_group: Optional[QButtonGroup] = None
+        self._icon_hovers: Dict[str, IconHoverSwap] = {}
         self._setup_ui()
+
+    def _nav_button_stylesheet(self) -> str:
+        from utils import get_button_focus_colors
+
+        focus_bg, focus_border, focus_text = get_button_focus_colors()
+        th = get_active_theme()
+        hover_border = getattr(th, "button_border_hover_hex", th.current_image_border_color_hex)
+        base = th.file_tree_nav_icon_button_stylesheet(
+            focus_bg, focus_border, focus_text, dim=False
+        )
+        return base + f"""
+            QPushButton:hover {{
+                border: 1px solid {hover_border};
+            }}
+        """
 
     def _make_icon_button(
         self,
@@ -113,12 +136,15 @@ class FileTreeToolbar(QWidget):
         tooltip: str,
         on_click: Callable[[], None],
         icon: QIcon | None = None,
+        hover_icon: QIcon | None = None,
         checkable: bool = False,
         filter_stylesheet: str | None = None,
+        hover_key: str | None = None,
     ) -> QPushButton:
         btn = QPushButton()
         btn.setToolTip(tooltip)
         btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        btn.setCursor(Qt.CursorShape.PointingHandCursor)
         btn.setFixedSize(_TOOLBAR_BTN_PX, _TOOLBAR_BTN_PX)
         btn.setIconSize(QSize(_ICON_PX, _ICON_PX))
         if icon is not None:
@@ -129,18 +155,22 @@ class FileTreeToolbar(QWidget):
         if filter_stylesheet is not None:
             btn.setStyleSheet(filter_stylesheet)
         else:
-            self._apply_nav_button_style(btn)
+            btn.setStyleSheet(self._nav_button_stylesheet())
+        if hover_key and icon is not None and hover_icon is not None:
+            self._icon_hovers[hover_key] = attach_icon_hover_swap(btn, icon, hover_icon)
         return btn
 
-    def _apply_nav_button_style(self, btn: QPushButton) -> None:
-        from utils import get_button_focus_colors
-
-        focus_bg, focus_border, focus_text = get_button_focus_colors()
-        btn.setStyleSheet(
-            get_active_theme().file_tree_nav_icon_button_stylesheet(
-                focus_bg, focus_border, focus_text, dim=False
+    def set_rename_status_icons(self, normal_icon: QIcon, hover_icon: QIcon) -> None:
+        """Update rename-status toggle icons (normal + hover)."""
+        if self.rename_status_button is None:
+            return
+        swap = self._icon_hovers.get("rename_status")
+        if swap is None:
+            swap = attach_icon_hover_swap(
+                self.rename_status_button, normal_icon, hover_icon
             )
-        )
+            self._icon_hovers["rename_status"] = swap
+        swap.set_icons(normal_icon, hover_icon)
 
     def _setup_ui(self) -> None:
         self.setAutoFillBackground(True)
@@ -155,10 +185,16 @@ class FileTreeToolbar(QWidget):
         left.setSpacing(4)
 
         handler = self._handler
+        th = get_active_theme()
+        squeeze_normal = handler._create_squeeze_icon(th.file_tree_nav_button_text_dim_hex)
+        squeeze_hover = handler._create_squeeze_icon(th.file_tree_nav_button_text_hex)
+
         self.collapse_all_button = self._make_icon_button(
             tooltip="Collapse to home directory\nCollapse all and expand to home directory",
             on_click=handler.collapse_all,
-            icon=handler._create_squeeze_icon(),
+            icon=squeeze_normal,
+            hover_icon=squeeze_hover,
+            hover_key="collapse",
         )
         self.rename_status_button = self._make_icon_button(
             tooltip=(
@@ -167,12 +203,12 @@ class FileTreeToolbar(QWidget):
                 "and are sequentially numbered"
             ),
             on_click=handler._toggle_rename_status,
+            hover_key="rename_status",
         )
-        self.settings_button = self._make_icon_button(
+        self.settings_button = create_tree_toolbar_gear_button(
             tooltip="Open Settings\nConfigure application preferences",
-            on_click=handler.open_settings_to_max_images,
-            icon=QIcon(asset_path("gear.svg")),
         )
+        self.settings_button.clicked.connect(handler.open_settings_to_max_images)
         left.addWidget(self.collapse_all_button)
         left.addWidget(self.rename_status_button)
         left.addWidget(self.settings_button)
@@ -197,12 +233,16 @@ class FileTreeToolbar(QWidget):
         self._filter_mode_group.setExclusive(True)
 
         for mode, tooltip in _FILTER_MODES:
+            normal = create_tree_filter_icon(mode, current_mode == mode, hover=False)
+            hover = create_tree_filter_icon(mode, current_mode == mode, hover=True)
             btn = self._make_icon_button(
                 tooltip=tooltip,
                 on_click=lambda _checked=False, m=mode: handler._on_tree_filter_mode_selected(m),
-                icon=create_tree_filter_icon(mode, current_mode == mode),
+                icon=normal,
+                hover_icon=hover,
                 checkable=True,
                 filter_stylesheet=filter_btn_ss,
+                hover_key=f"filter_{mode}",
             )
             btn.setChecked(current_mode == mode)
             self._filter_mode_buttons[mode] = btn
@@ -223,12 +263,20 @@ class FileTreeToolbar(QWidget):
             return
         mode = handler.filter_proxy.normalize_filtered_tree_mode()
         for m, btn in self._filter_mode_buttons.items():
-            btn.setChecked(mode == m)
-            btn.setIcon(create_tree_filter_icon(m, mode == m))
+            selected = mode == m
+            btn.setChecked(selected)
+            normal = create_tree_filter_icon(m, selected, hover=False)
+            hover = create_tree_filter_icon(m, selected, hover=True)
+            swap = self._icon_hovers.get(f"filter_{m}")
+            if swap is not None:
+                swap.set_icons(normal, hover)
+            else:
+                btn.setIcon(normal)
 
     def refresh_theme_styles(self) -> None:
         theme = get_active_theme()
         self.setStyleSheet(theme.file_tree_nav_container_stylesheet())
+        nav_ss = self._nav_button_stylesheet()
         from utils import get_button_focus_colors
 
         focus_bg, focus_border, focus_text = get_button_focus_colors()
@@ -238,14 +286,26 @@ class FileTreeToolbar(QWidget):
         for btn in (
             self.collapse_all_button,
             self.rename_status_button,
-            self.settings_button,
         ):
             if btn is not None:
-                self._apply_nav_button_style(btn)
+                btn.setStyleSheet(nav_ss)
+        if self.settings_button is not None:
+            from widgets.gear_button_styles import tree_toolbar_gear_button_stylesheet
+
+            self.settings_button.setStyleSheet(tree_toolbar_gear_button_stylesheet())
         for btn in self._filter_mode_buttons.values():
             if btn is not None:
                 btn.setStyleSheet(filter_btn_ss)
         self.redraw_filter_icons()
+        handler = self._handler
+        if hasattr(handler, "update_rename_status_button_icon"):
+            handler.update_rename_status_button_icon()
+        if self.collapse_all_button is not None:
+            squeeze_normal = handler._create_squeeze_icon(theme.file_tree_nav_button_text_dim_hex)
+            squeeze_hover = handler._create_squeeze_icon(theme.file_tree_nav_button_text_hex)
+            swap = self._icon_hovers.get("collapse")
+            if swap is not None:
+                swap.set_icons(squeeze_normal, squeeze_hover)
 
     def action_icon(self, action_id: str) -> QIcon:
         mapping = {

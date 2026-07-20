@@ -6,12 +6,11 @@ from __future__ import annotations
 from typing import Dict, Iterable, Optional
 
 from PySide6.QtCore import Qt, QSize, Signal
-from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QHBoxLayout, QPushButton, QWidget
 
-from theme.theme_base import asset_path
 from theme.theme_service import get_active_theme
 from thumbnails.thumbnail_constants import ALT_SYMBOL, COPY_SYMBOL
+from widgets.icon_hover_swap import IconHoverSwap, attach_icon_hover_swap, icon_pair_from_assets
 
 INFO_ACTION_ICON_PX = 18
 INFO_ACTION_BTN_PX = 26
@@ -128,6 +127,7 @@ class InformationActionNavBar(QWidget):
         self._include_stretch = include_stretch
         self._buttons: Dict[str, QPushButton] = {}
         self._speak_highlighted = False
+        self._icon_hovers: Dict[str, IconHoverSwap] = {}
 
         layout = QHBoxLayout(self)
         layout.setContentsMargins(*contents_margins)
@@ -178,8 +178,13 @@ class InformationActionNavBar(QWidget):
         self.setStyleSheet(th.file_tree_nav_container_stylesheet())
         for action_id, btn in self._buttons.items():
             if action_id in _IMAGE_ACTION_IDS:
-                normal, _hover = _IMAGE_ICON_PATHS[action_id]
-                btn.setIcon(QIcon(asset_path(normal)))
+                normal_name, hover_name = _IMAGE_ICON_PATHS[action_id]
+                normal, hover = icon_pair_from_assets(normal_name, hover_name)
+                swap = self._icon_hovers.get(action_id)
+                if swap is None:
+                    self._icon_hovers[action_id] = attach_icon_hover_swap(btn, normal, hover)
+                else:
+                    swap.set_icons(normal, hover)
                 btn.setStyleSheet(info_action_image_button_stylesheet())
             else:
                 highlighted = self._speak_highlighted if action_id == "speak" else False

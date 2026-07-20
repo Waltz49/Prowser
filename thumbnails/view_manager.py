@@ -475,6 +475,8 @@ class CanvasManager(QWidget):
         """Handle thumbnail click from canvas - emit event for subscriber to handle"""
         if hasattr(self.main_window, 'event_bus') and self.main_window.event_bus:
             self.main_window.event_bus.emit(THUMBNAIL_CLICKED, (index, cmd_pressed, shift_pressed, macos_ctrl_pressed))
+        elif hasattr(self.main_window, 'browser_controller'):
+            self.main_window.browser_controller._on_thumbnail_clicked(index, cmd_pressed, shift_pressed, macos_ctrl_pressed)
         elif hasattr(self.main_window, 'navigation_manager'):
             self.main_window.navigation_manager.handle_thumbnail_click(index, cmd_pressed, shift_pressed, macos_ctrl_pressed)
     
@@ -515,7 +517,7 @@ class CanvasManager(QWidget):
                 if correct_index is not None:
                     # Match single-click behavior: clear selection first, then set indices
                     if hasattr(self.main_window, 'clear_selection'):
-                        self.main_window.clear_selection(hilite=False)
+                        self.main_window.clear_selection()
                     # Set highlight_index and last_clicked_index before opening fullscreen
                     # This ensures the correct image is selected, matching single-click behavior
                     if hasattr(self.main_window, 'mvc_controller'):
@@ -1088,6 +1090,8 @@ class ListCanvasManager(QWidget):
         from event_bus import THUMBNAIL_CLICKED
         if hasattr(self.main_window, 'event_bus') and self.main_window.event_bus:
             self.main_window.event_bus.emit(THUMBNAIL_CLICKED, (index, cmd_pressed, shift_pressed, macos_ctrl_pressed))
+        elif hasattr(self.main_window, 'browser_controller'):
+            self.main_window.browser_controller._on_thumbnail_clicked(index, cmd_pressed, shift_pressed, macos_ctrl_pressed)
         elif hasattr(self.main_window, 'navigation_manager'):
             self.main_window.navigation_manager.handle_thumbnail_click(index, cmd_pressed, shift_pressed, macos_ctrl_pressed)
     
@@ -2162,8 +2166,6 @@ class ViewManager:
             self.main_window.stacked_widget.setCurrentIndex(1)
             # Set browse mode after setting up the view
             self.main_window.current_view_mode = 'browse'
-            if hasattr(self.main_window, '_emit_view_mode_changed'):
-                self.main_window._emit_view_mode_changed()
             self.main_window.browse_view_action.setEnabled(False)
             
             # Update browse view widget background with current theme shell color
@@ -2291,8 +2293,6 @@ class ViewManager:
                 self.main_window.current_view_mode = 'list'
                 # Restore sidebar BEFORE emitting view mode changed (same as thumbnail branch)
                 self.main_window.manage_sidebar_visibility_for_view_mode('list')
-                if hasattr(self.main_window, '_emit_view_mode_changed'):
-                    self.main_window._emit_view_mode_changed()
                 self.main_window._return_to_list_view = False  # Reset flag
                 # Update list view to highlight current image
                 self.update_list_view()
@@ -2302,8 +2302,6 @@ class ViewManager:
                 # Restore sidebar BEFORE emitting view mode changed, so _immediate_splitter_update
                 # sees correct layout (avoids refresh-then-resize double refresh when tree visible)
                 self.main_window.manage_sidebar_visibility_for_view_mode('thumbnail')
-                if hasattr(self.main_window, '_emit_view_mode_changed'):
-                    self.main_window._emit_view_mode_changed()
                 # Ensure thumbnails are populated when exiting browse mode
                 if self.main_window.displayed_images:
                     canvas = (

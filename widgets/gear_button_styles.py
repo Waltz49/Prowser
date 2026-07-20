@@ -16,6 +16,8 @@ CHAT_GEAR_BTN_SIZE = 26
 CHAT_GEAR_ICON_PX = 18
 DIALOG_GEAR_BTN_SIZE = 24
 DIALOG_GEAR_ICON_PX = 16
+TREE_TOOLBAR_GEAR_BTN_SIZE = 26
+TREE_TOOLBAR_GEAR_ICON_PX = 20
 
 
 def chat_gear_button_stylesheet() -> str:
@@ -110,6 +112,47 @@ def create_chat_gear_button(
         tooltip=tooltip,
         object_name="chatSystemPromptGearBtn",
         stylesheet=chat_gear_button_stylesheet(),
+    )
+
+
+def tree_toolbar_gear_button_stylesheet() -> str:
+    """Gear button chrome matching file-tree toolbar nav buttons."""
+    from utils import get_button_focus_colors
+
+    t = get_active_theme()
+    focus_bg, focus_border, focus_text = get_button_focus_colors()
+    base = t.file_tree_nav_icon_button_stylesheet(
+        focus_bg, focus_border, focus_text, dim=False
+    )
+    sz = TREE_TOOLBAR_GEAR_BTN_SIZE
+    return (
+        base.replace("QPushButton {", "QPushButton#treeToolbarGearBtn {", 1)
+        .replace("QPushButton:hover", "QPushButton#treeToolbarGearBtn:hover", 1)
+        .replace("QPushButton:pressed", "QPushButton#treeToolbarGearBtn:pressed", 1)
+        .replace("QPushButton:focus", "QPushButton#treeToolbarGearBtn:focus", 1)
+        + f"""
+        QPushButton#treeToolbarGearBtn {{
+            min-width: {sz}px;
+            max-width: {sz}px;
+            min-height: {sz}px;
+            max-height: {sz}px;
+        }}
+    """
+    )
+
+
+def create_tree_toolbar_gear_button(
+    parent: Optional[QWidget] = None,
+    *,
+    tooltip: str = "",
+) -> GearIconButton:
+    return GearIconButton(
+        parent,
+        size_px=TREE_TOOLBAR_GEAR_BTN_SIZE,
+        icon_px=TREE_TOOLBAR_GEAR_ICON_PX,
+        tooltip=tooltip,
+        object_name="treeToolbarGearBtn",
+        stylesheet=tree_toolbar_gear_button_stylesheet(),
     )
 
 

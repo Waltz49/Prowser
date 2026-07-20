@@ -6272,11 +6272,8 @@ class FileOperationsManager:
                     if placeholders:
                         placeholders.discard(unique_path)
                         placeholders.discard(original_path)
-                    # Synchronous repaint (os.path.exists at paint time handles the X)
-                    if hasattr(mw, 'thumbnail_container') and mw.thumbnail_container and hasattr(mw.thumbnail_container, 'canvas'):
-                        mw.thumbnail_container.canvas.repaint()
-                    if getattr(mw, 'current_view_mode', None) == 'list' and hasattr(mw, 'view_manager') and mw.view_manager:
-                        mw.view_manager.update_list_view()
+                    if hasattr(mw, '_emit_deleted_placeholders_changed'):
+                        mw._emit_deleted_placeholders_changed()
 
                     if mw.current_view_mode == 'browse':
                         displayed = mw.get_displayed_images()
@@ -6364,9 +6361,8 @@ class FileOperationsManager:
                         placeholders.discard(fi['path'])
                     for p in restored_files:
                         placeholders.discard(p)
-                # Synchronous repaint (file is already on disk, os.path.exists handles it)
-                if hasattr(mw, 'thumbnail_container') and mw.thumbnail_container and hasattr(mw.thumbnail_container, 'canvas'):
-                    mw.thumbnail_container.canvas.repaint()
+                if hasattr(mw, '_emit_deleted_placeholders_changed'):
+                    mw._emit_deleted_placeholders_changed()
                 if getattr(mw, 'current_view_mode', None) == 'list' and hasattr(mw, 'view_manager') and mw.view_manager:
                     mw.view_manager.update_list_view()
             else:
@@ -6394,10 +6390,8 @@ class FileOperationsManager:
                     placeholders.discard(original_path)
                 if hasattr(mw, 'cache_manager') and mw.cache_manager:
                     mw.cache_manager.clear_cache_for_file(original_path)
-                if hasattr(mw, 'thumbnail_container') and mw.thumbnail_container and hasattr(mw.thumbnail_container, 'canvas'):
-                    mw.thumbnail_container.canvas.repaint()
-                if getattr(mw, 'current_view_mode', None) == 'list' and hasattr(mw, 'view_manager') and mw.view_manager:
-                    mw.view_manager.update_list_view()
+                if hasattr(mw, '_emit_deleted_placeholders_changed'):
+                    mw._emit_deleted_placeholders_changed()
                 mw.status_notification.show_file_operation_message(f"Restored: {filename}")
                 return
 

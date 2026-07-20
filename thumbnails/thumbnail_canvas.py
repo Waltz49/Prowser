@@ -1133,6 +1133,21 @@ class ThumbnailCanvas(QWidget):
             from event_bus import DELETED_PLACEHOLDERS_CHANGED
             main_window.event_bus.subscribe(DELETED_PLACEHOLDERS_CHANGED, self.update)
 
+    def _browser_services(self):
+        return getattr(self.main_window, 'browser_services', None)
+
+    def _get_displayed_images(self):
+        services = self._browser_services()
+        if services is not None:
+            return services.displayed_images
+        return getattr(self.main_window, 'displayed_images', [])
+
+    def _get_cache_manager(self):
+        services = self._browser_services()
+        if services is not None and services.cache_manager is not None:
+            return services.cache_manager
+        return getattr(self.main_window, 'cache_manager', None)
+
     def set_thumbnails(self, image_paths: List[str], thumbnail_size: int):
         """Set the thumbnails to display"""
         self._overlay_height_cache.clear()
@@ -2652,7 +2667,7 @@ class ThumbnailCanvas(QWidget):
             # This works for both directory mode and specific files mode
             try:
                 if (not hasattr(self.main_window, 'displayed_images') or 
-                    image_path not in self.main_window.displayed_images):
+                    image_path not in self._get_displayed_images()):
                     return  # Path is no longer in displayed_images, ignore this callback
             except (AttributeError, RuntimeError):
                 # Main window might be in inconsistent state during directory switch
@@ -4213,9 +4228,10 @@ class ThumbnailCanvas(QWidget):
             thumbnail.image_path = new_path
             
             # Invalidate cache for both old and new paths
-            if hasattr(self.main_window, 'cache_manager') and self.main_window.cache_manager:
-                self.main_window.cache_manager.clear_cache_for_file(original_path)
-                self.main_window.cache_manager.clear_cache_for_file(new_path)
+            cache_manager = self._get_cache_manager()
+            if cache_manager:
+                cache_manager.clear_cache_for_file(original_path)
+                cache_manager.clear_cache_for_file(new_path)
             
             # Store the new path to track after refresh
             renamed_path = new_path
@@ -4263,8 +4279,9 @@ class ThumbnailCanvas(QWidget):
                     hasattr(self.main_window, 'highlight_index') and
                     self.main_window.highlight_index is not None):
                     current_index = self.main_window.highlight_index
-                    if (0 <= current_index < len(self.main_window.displayed_images) and
-                        self.main_window.displayed_images[current_index] == renamed_path):
+                    displayed = self._get_displayed_images()
+                    if (0 <= current_index < len(displayed) and
+                        displayed[current_index] == renamed_path):
                         # Already correctly highlighted, nothing to do
                         return
                 

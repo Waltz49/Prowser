@@ -10,17 +10,13 @@ from typing import List, Optional, Set
 # Third-party imports
 from PySide6.QtCore import QTimer
 
-from event_bus import THUMBNAIL_CLICKED
-
 
 class NavigationManager:
     """Manages navigation, selection, and highlighting for the Image Browser"""
     
     def __init__(self, main_window):
         self.main_window = main_window
-        # Subscribe to thumbnail clicks via event bus
-        if hasattr(main_window, 'event_bus') and main_window.event_bus:
-            main_window.event_bus.subscribe(THUMBNAIL_CLICKED, self._on_thumbnail_clicked)
+        # THUMBNAIL_CLICKED handled by BrowserController (command layer)
         
     def compute_next_index(self, current_index: int, axis: str, step_sign: int) -> int:
         """Compute next index for grid navigation."""
@@ -210,11 +206,7 @@ class NavigationManager:
         
         self.main_window._emit_selection_changed()
         
-        # Note: highlight_image() is called by the caller to ensure proper syncing
-
-    def _on_thumbnail_clicked(self, image_index: int, cmd_pressed: bool, shift_pressed: bool, macos_ctrl_pressed: bool):
-        """Handle THUMBNAIL_CLICKED event from event bus"""
-        self.handle_thumbnail_click(image_index, cmd_pressed, shift_pressed, macos_ctrl_pressed)
+        # Note: highlight sync is via FileDataModel CURRENT_INDEX_CHANGED subscriber
 
     def handle_thumbnail_click(self, image_index: int, cmd_pressed: bool, shift_pressed: bool, macos_ctrl_pressed: bool):
         """Handle thumbnail click with support for multiple selection and range selection.
@@ -264,22 +256,21 @@ class NavigationManager:
         
         if shift_pressed:
             self.handle_range_selection(thumbnail_index)
+            self.main_window._sync_highlight_index_from_current_image_path()
+            if hasattr(self.main_window, 'file_data_model'):
+                self.main_window.file_data_model.set_current_index(thumbnail_index)
         elif cmd_pressed:
-            # Cmd+click = multiselect (add/toggle selection)
             if hasattr(self.main_window, 'selection_manager') and self.main_window.selection_manager:
                 self.main_window.selection_manager.select_thumbnail(thumbnail_index, add_to_selection=True)
             else:
                 self.main_window.highlight_index = thumbnail_index
                 self.main_window.last_clicked_index = thumbnail_index
-                self.main_window.highlight_image()
         elif macos_ctrl_pressed:
-            # macOS Control+click = context menu only - set highlight, no selection change
             self.main_window.highlight_index = thumbnail_index
             self.main_window.last_clicked_index = thumbnail_index
-            self.main_window.highlight_image()
         else:
             # Regular click - clear selection and open fullscreen or highlight image
-            self.main_window.clear_selection(hilite=False) #DGN: hilite=False is test for extra scoll problems
+            self.main_window.clear_selection()
             self.main_window.highlight_index = thumbnail_index
             self.main_window.last_clicked_index = thumbnail_index
             # Open fullscreen on single click (same as space or f keys)
@@ -296,7 +287,6 @@ class NavigationManager:
                 # Use the file path to open fullscreen - it will find the correct index
                 self.main_window.view_mode_manager.open_browse_view(thumbnail_index)
             else:
-                self.main_window.highlight_image()
                 self.main_window.update()
 
     def get_selected_files(self) -> List[str]:

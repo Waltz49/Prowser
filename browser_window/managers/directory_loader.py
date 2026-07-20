@@ -523,6 +523,8 @@ class DirectoryLoader:
                         self.main_window.duplicate_sections = []
                     if hasattr(self.main_window, 'deleted_file_placeholders'):
                         self.main_window.deleted_file_placeholders.clear()
+                        if hasattr(self.main_window, '_emit_deleted_placeholders_changed'):
+                            self.main_window._emit_deleted_placeholders_changed()
         
         # Clear any existing windowing context when loading new files
         # This prevents the old windowing state from interfering with the new files

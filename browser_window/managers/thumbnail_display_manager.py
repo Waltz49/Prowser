@@ -298,6 +298,8 @@ class ThumbnailDisplayManager:
                 for file_path in files_to_remove:
                     if file_path in current_images:
                         placeholders.add(file_path)
+                if hasattr(self.main_window, '_emit_deleted_placeholders_changed'):
+                    self.main_window._emit_deleted_placeholders_changed()
         else:
             # Normal mode: remove from displayed_images
             for file_path in files_to_remove:

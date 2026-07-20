@@ -3715,8 +3715,8 @@ class FileTreeHandler(QObject):
         self.file_tree.installEventFilter(self)
         layout.addWidget(self.file_tree)
 
-    def _create_checkmark_icon(self, active: bool) -> QIcon:
-        """Create a checkmark icon - green when active, black when inactive, with white border"""
+    def _create_checkmark_icon(self, active: bool, *, hover: bool = False) -> QIcon:
+        """Create a checkmark icon - green when active, dark when inactive, with white border."""
         pixmap = QPixmap(20, 20)
         pixmap.fill(QColor(0, 0, 0, 0))  # Transparent background
 
@@ -3737,11 +3737,10 @@ class FileTreeHandler(QObject):
         painter.drawLine(x2, y2, x3, y3)
 
         # Draw colored checkmark on top (thinner)
-        # Choose color based on active state
         if active:
-            checkmark_color = QColor(0, 255, 0)  # Green
+            checkmark_color = QColor(102, 255, 102) if hover else QColor(0, 255, 0)
         else:
-            checkmark_color = QColor(0, 0, 0)    # Black
+            checkmark_color = QColor(120, 120, 120) if hover else QColor(0, 0, 0)
 
         checkmark_pen = QPen(checkmark_color, 2)
         checkmark_pen.setCapStyle(Qt.RoundCap)
@@ -4018,7 +4017,11 @@ class FileTreeHandler(QObject):
 
     def update_rename_status_button_icon(self) -> None:
         """Update the rename status button icon based on current state"""
-        if not hasattr(self, 'rename_status_button') or not self.rename_status_button:
+        btn = getattr(self, "rename_status_button", None)
+        toolbar = getattr(self, "_toolbar", None)
+        if not btn and toolbar is not None:
+            btn = toolbar.rename_status_button
+        if not btn:
             return
 
         # Check if rename status is enabled
@@ -4028,9 +4031,12 @@ class FileTreeHandler(QObject):
                 self.main_window.rename_status_manager):
             is_enabled = self.main_window.rename_status_manager.is_enabled()
 
-        # Update icon
-        icon = self._create_checkmark_icon(is_enabled)
-        self.rename_status_button.setIcon(icon)
+        normal = self._create_checkmark_icon(is_enabled, hover=False)
+        hover = self._create_checkmark_icon(is_enabled, hover=True)
+        if toolbar is not None and hasattr(toolbar, 'set_rename_status_icons'):
+            toolbar.set_rename_status_icons(normal, hover)
+        else:
+            btn.setIcon(normal)
 
     def update_home_button_icon(self) -> None:
         """Update the home button icon color based on whether current directory is home"""

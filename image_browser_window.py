@@ -258,6 +258,83 @@ class ImageBrowserWindow(QMainWindow):
         if getattr(self, 'file_data_model', None):
             self.file_data_model.set_current_view_mode(value)
 
+    @property
+    def selected_files(self) -> set:
+        if getattr(self, 'selection_model', None):
+            return self.selection_model.selected_files
+        return set()
+
+    @selected_files.setter
+    def selected_files(self, value: set):
+        if getattr(self, 'selection_model', None):
+            self.selection_model.selected_files = value
+
+    @property
+    def range_anchor_index(self):
+        if getattr(self, 'selection_model', None):
+            return self.selection_model.range_anchor_index
+        return None
+
+    @range_anchor_index.setter
+    def range_anchor_index(self, value):
+        if getattr(self, 'selection_model', None):
+            self.selection_model.range_anchor_index = value
+
+    @property
+    def cmd_multi_origin_index(self):
+        if getattr(self, 'selection_model', None):
+            return self.selection_model.cmd_multi_origin_index
+        return None
+
+    @cmd_multi_origin_index.setter
+    def cmd_multi_origin_index(self, value):
+        if getattr(self, 'selection_model', None):
+            self.selection_model.cmd_multi_origin_index = value
+
+    @property
+    def cmd_multi_axis(self):
+        if getattr(self, 'selection_model', None):
+            return self.selection_model.cmd_multi_axis
+        return None
+
+    @cmd_multi_axis.setter
+    def cmd_multi_axis(self, value):
+        if getattr(self, 'selection_model', None):
+            self.selection_model.cmd_multi_axis = value
+
+    @property
+    def cmd_multi_sign(self) -> int:
+        if getattr(self, 'selection_model', None):
+            return self.selection_model.cmd_multi_sign
+        return 0
+
+    @cmd_multi_sign.setter
+    def cmd_multi_sign(self, value: int):
+        if getattr(self, 'selection_model', None):
+            self.selection_model.cmd_multi_sign = value
+
+    @property
+    def last_clicked_index(self):
+        if getattr(self, 'selection_model', None):
+            return self.selection_model.last_clicked_index
+        return None
+
+    @last_clicked_index.setter
+    def last_clicked_index(self, value):
+        if getattr(self, 'selection_model', None):
+            self.selection_model.last_clicked_index = value
+
+    @property
+    def most_recent_selected_index(self):
+        if getattr(self, 'selection_model', None):
+            return self.selection_model.most_recent_selected_index
+        return None
+
+    @most_recent_selected_index.setter
+    def most_recent_selected_index(self, value):
+        if getattr(self, 'selection_model', None):
+            self.selection_model.most_recent_selected_index = value
+
     def __init__(self, fullscreen: bool = False, 
                 target_file: Optional[str] = None,
                 immediate_macos_space_mode: bool = False, 
@@ -293,8 +370,13 @@ class ImageBrowserWindow(QMainWindow):
         # Initialize FileDataModel for centralized data management
         from file_data_model import FileDataModel
         from event_bus import EventBus
+        from selection_model import SelectionModel
+        from browser_window.infra.selection_model_bridge import SelectionModelBridge
         self.file_data_model = FileDataModel()
         self.event_bus = EventBus()
+        self.selection_model = SelectionModel()
+        self._selection_model_bridge = SelectionModelBridge(self.selection_model, self.event_bus)
+        self._selection_model_bridge.connect()
         # displayed_images, highlight_index, current_index, current_image_path, current_directory, current_view_mode
         # are now properties delegating to file_data_model (single source of truth)
         self.current_thumbnail_size = MIN_THUMBNAIL_SIZE
@@ -336,16 +418,7 @@ class ImageBrowserWindow(QMainWindow):
         # Convert format conflict session (set when Show Conflicts is used; cleared leaving DUPLICATES mode)
         self.convert_conflict_context: Optional[dict] = None
 
-        # Multiple selection support - using file names as source of truth
-        self.selected_files: set = set()  # Set[str] containing full file paths
-        # multi_select_mode is now a property derived from selected_files
-        self.range_anchor_index = None
-        # CMD+Arrow multi-select tracking
-        self.cmd_multi_origin_index: Optional[int] = None
-        self.cmd_multi_axis: Optional[str] = None  # 'h' or 'v'
-        self.cmd_multi_sign: int = 0  # -1 or +1
-        
-        
+        # Multiple selection support - SelectionModel is source of truth (properties delegate above)
         # Copy toggle state tracking for imagegen files
         self._copy_toggle_state: set = set()
         
@@ -491,18 +564,32 @@ class ImageBrowserWindow(QMainWindow):
         self.thumbnail_display_manager = ThumbnailDisplayManager(self)
         self.selection_manager = SelectionManager(self)
         self.image_display_manager = ImageDisplayManager(self)
+        from browser_window.infra.browser_controller import BrowserController
+        from browser_window.infra.browser_services import BrowserServices
+        from browser_window.managers.thumbnail_highlight_subscriber import ThumbnailHighlightSubscriber
+        from browser_window.managers.navigation_ui_subscriber import NavigationUiSubscriber
+        self.thumbnail_highlight_subscriber = ThumbnailHighlightSubscriber(self)
+        self.navigation_ui_subscriber = NavigationUiSubscriber(self)
         self.sidebar_manager = SidebarManager(self)
         self.view_mode_manager = ViewModeManager(self)
         self.event_handler = EventHandler(self)
         self.configuration_sync_manager = ConfigurationSyncManager(self)
         self.lock_manager = LockManager(self)
         self.exif_operations_manager = ExifOperationsManager(self)
-        # MVC Controller - thin controller, updates model only
-        from browser_window.infra.mvc_controller import MVCController
-        self.mvc_controller = MVCController(self.file_data_model, self.event_bus)
-        self.mvc_controller.register_service('directory_loader', self.directory_loader)
-        self.mvc_controller.register_service('sorting_manager', self.sorting_manager)
-        self.mvc_controller.wire_event_bus()
+        self.browser_controller = BrowserController(self.file_data_model, self.event_bus, self)
+        self.browser_controller.register_service('directory_loader', self.directory_loader)
+        self.browser_controller.register_service('sorting_manager', self.sorting_manager)
+        self.browser_controller.register_service('navigation', self.navigation_manager)
+        self.browser_controller.wire_event_bus()
+        self.mvc_controller = self.browser_controller
+        self.browser_services = BrowserServices(
+            event_bus=self.event_bus,
+            file_data_model=self.file_data_model,
+            selection_model=self.selection_model,
+            main_window=self,
+            cache_manager=self.cache_manager,
+            config=self.config,
+        )
         
         # Initialize lazy-loaded components to None to avoid hasattr checks
         self._cached_grid_columns = None
@@ -694,6 +781,7 @@ class ImageBrowserWindow(QMainWindow):
         # Clear deleted placeholders when switching to non-formatted mode
         if mode not in (SortMode.EXIF_DATE, SortMode.EXIF_YEAR, SortMode.DUPLICATES) and hasattr(self, 'deleted_file_placeholders'):
             self.deleted_file_placeholders.clear()
+            self._emit_deleted_placeholders_changed()
         
         # Also clear section separators in thumbnail canvas if it exists
         if getattr(self, 'thumbnail_container', None):
@@ -837,21 +925,14 @@ class ImageBrowserWindow(QMainWindow):
         )
 
     def clear_deleted_placeholders_for_paths(self, paths):
-        """Remove paths from deleted_file_placeholders and trigger synchronous repaint."""
+        """Remove paths from deleted_file_placeholders and trigger repaint via event bus."""
         placeholders = getattr(self, 'deleted_file_placeholders', None)
         if not placeholders or not paths:
             return
         for p in paths:
             if p:
                 placeholders.discard(p)
-        # Synchronous repaint - file is on disk, os.path.exists() at paint time controls the X
-        if hasattr(self, 'thumbnail_container') and self.thumbnail_container and hasattr(self.thumbnail_container, 'canvas'):
-            self.thumbnail_container.canvas.repaint()
-        if getattr(self, 'current_view_mode', None) == 'list':
-            if hasattr(self, 'list_view_container') and self.list_view_container and hasattr(self.list_view_container, 'canvas'):
-                self.list_view_container.canvas.repaint()
-            if hasattr(self, 'view_manager') and self.view_manager:
-                self.view_manager.update_list_view()
+        self._emit_deleted_placeholders_changed()
 
     def remove_thumbnails_for_files(self, files_to_remove, active_file_path=None):
         """Remove specific thumbnails for deleted files without rebuilding the entire grid.
@@ -927,8 +1008,8 @@ class ImageBrowserWindow(QMainWindow):
             # Skip state save if files are provided (will be saved after load_specific_files completes)
             if not files:
                 self.directory_stack_history_handler.save_current_state('image_browser_window.refresh_from_configuration')
-            if hasattr(self, 'most_recent_selected_index'):
-                del self.most_recent_selected_index #DGN    
+            if getattr(self, 'selection_model', None) is not None:
+                self.most_recent_selected_index = None  # DGN
 
             # If multiple explicit files are requested, force thumbnail mode handling
             # unless fullscreen is explicitly requested via command line
@@ -2238,7 +2319,6 @@ class ImageBrowserWindow(QMainWindow):
             
             self.stacked_widget.setCurrentIndex(0)
             self.current_view_mode = 'thumbnail'
-            self._emit_view_mode_changed()
             if hasattr(self, 'list_view_action'):
                 self.list_view_action.setChecked(False)
             # Restore sidebar visibility
@@ -2263,7 +2343,6 @@ class ImageBrowserWindow(QMainWindow):
             # Switch to list view
             self.stacked_widget.setCurrentIndex(2)  # List view is index 2
             self.current_view_mode = 'list'
-            self._emit_view_mode_changed()
             if hasattr(self, 'list_view_action'):
                 self.list_view_action.setChecked(True)
             
@@ -3854,7 +3933,6 @@ class ImageBrowserWindow(QMainWindow):
         if switch_to_browse_view:
             self.stacked_widget.setCurrentIndex(1)  # Switch to browse view
             self.current_view_mode = 'browse'
-            self._emit_view_mode_changed()
             self.manage_sidebar_visibility_for_view_mode('browse')
             # Set up browse view state immediately
             self.browse_view_action.setEnabled(False)
@@ -5048,9 +5126,9 @@ class ImageBrowserWindow(QMainWindow):
         """Select all thumbnails in thumbnail mode"""
         return self.selection_manager.select_all_thumbnails()
     
-    def clear_selection(self, hilite=True):
+    def clear_selection(self):
         """Clear all selected thumbnails"""
-        return self.selection_manager.clear_selection(hilite)
+        return self.selection_manager.clear_selection()
 
     def _get_selected_indices_for_display(self) -> set:
         """Convert selected_files to indices for visual display only"""
@@ -5063,22 +5141,23 @@ class ImageBrowserWindow(QMainWindow):
         return indices
 
     def _emit_selection_changed(self, highlight_index: Optional[int] = None):
-        """Emit SELECTION_CHANGED event - subscribers (SelectionManager, MenuManager) react.
-        Payload: (selected_files: Set[str], highlight_index: Optional[int])"""
+        """Emit SELECTION_CHANGED event - subscribers (SelectionManager, MenuManager) react."""
+        if hasattr(self, 'selection_model') and self.selection_model:
+            self.selection_model.emit_selection_changed(highlight_index)
+            return
         from event_bus import SELECTION_CHANGED
         selected = set(getattr(self, 'selected_files', set()))
         self.event_bus.emit(SELECTION_CHANGED, (selected, highlight_index))
 
-    def _emit_view_mode_changed(self):
-        """Emit VIEW_MODE_CHANGED event - subscribers (UILayoutManager, SidebarManager, etc.) react."""
+    def _emit_deleted_placeholders_changed(self) -> None:
+        """Emit DELETED_PLACEHOLDERS_CHANGED so canvas/list subscribers repaint."""
         if hasattr(self, 'event_bus') and self.event_bus:
-            from event_bus import VIEW_MODE_CHANGED
-            mode = getattr(self, 'current_view_mode', 'thumbnail')
-            self.event_bus.emit(VIEW_MODE_CHANGED, mode)
+            from event_bus import DELETED_PLACEHOLDERS_CHANGED
+            self.event_bus.emit(DELETED_PLACEHOLDERS_CHANGED, None)
 
-    def update_canvas_selection(self, highlight_index: Optional[int] = None):
+    def update_canvas_selection(self):
         """Centralized method to update canvas selection state"""
-        return self.selection_manager.update_canvas_selection(highlight_index)
+        return self.selection_manager.update_canvas_selection()
  
     def select_thumbnail(self, index: int, add_to_selection: bool = False):
         """Optimized selection logic for thumbnails."""

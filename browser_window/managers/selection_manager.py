@@ -25,7 +25,7 @@ class SelectionManager:
 
     def _on_selection_changed(self, selected: Set[str], highlight_index: Optional[int] = None):
         """Handle SELECTION_CHANGED event - update canvas selection display"""
-        self.update_canvas_selection(highlight_index)
+        self.update_canvas_selection()
     
     def select_all_thumbnails(self):
         """Select all thumbnails in thumbnail mode"""
@@ -42,14 +42,13 @@ class SelectionManager:
         # Update highlight to first item
         if self.main_window.displayed_images:
             self.main_window.highlight_index = 0
-            self.main_window.highlight_image()
     
-    def clear_selection(self, hilite=True):
+    def clear_selection(self):
         """Clear all selected thumbnails"""
         # Set highlight to the last selected item before clearing
-        if hasattr(self.main_window, 'most_recent_selected_index'):
+        if hasattr(self.main_window, 'most_recent_selected_index') and self.main_window.most_recent_selected_index is not None:
             self.main_window.highlight_index = self.main_window.most_recent_selected_index #DGN
-            del self.main_window.most_recent_selected_index #DGN
+            self.main_window.most_recent_selected_index = None #DGN
         elif self.main_window.selected_files:
             # Find the index of the last selected file (preserve order from displayed_images)
             last_index = -1
@@ -66,8 +65,6 @@ class SelectionManager:
         self.main_window.cmd_multi_origin_index = None
         self.main_window.cmd_multi_axis = None
         self.main_window.cmd_multi_sign = 0
-        if hilite:
-            self.main_window.highlight_image() #DGN: removal is test for extra scoll problems
     
     def _get_selected_indices_for_display(self) -> set:
         """Convert selected_files to indices for visual display only"""
@@ -79,7 +76,7 @@ class SelectionManager:
                 indices.add(i)
         return indices
     
-    def update_canvas_selection(self, highlight_index: Optional[int] = None):
+    def update_canvas_selection(self):
         """Centralized method to update canvas selection state on grid and list views."""
         display_indices = self._get_selected_indices_for_display()
         multi = self.main_window.multi_select_mode
@@ -91,8 +88,6 @@ class SelectionManager:
                 container.set_selected_indices(display_indices)
             if hasattr(container, "set_multi_select_mode"):
                 container.set_multi_select_mode(multi)
-            if highlight_index is not None and hasattr(container, "set_highlighted_index"):
-                container.set_highlighted_index(highlight_index)
     
     def select_thumbnail(self, index: int, add_to_selection: bool = False):
         """Optimized selection logic for thumbnails."""
@@ -151,8 +146,7 @@ class SelectionManager:
             # Reset cmd+arrow multi-select state
             reset_cmd_multi_state()
         
-        # Update highlight
-        self.main_window.highlight_image()
+        # Highlight sync via FileDataModel CURRENT_INDEX_CHANGED subscriber
     
     def handle_thumbnail_click(self, image_index: int, cmd_pressed: bool, shift_pressed: bool, macos_ctrl_pressed: bool = False):
         """Handle thumbnail click with support for multiple selection and range selection."""
@@ -170,7 +164,6 @@ class SelectionManager:
         # Sync highlight_index from current_image_path (source of truth)
         # Don't set highlight_index directly - it's already set by set_current_image_by_path
         self.main_window._sync_highlight_index_from_current_image_path()
-        self.main_window.highlight_image()
     
     def get_selected_files(self) -> List[str]:
         """Get list of file paths for selected thumbnails."""
@@ -191,11 +184,9 @@ class SelectionManager:
         return list(self._get_selected_indices_for_display())
     
     def ensure_multi_mode(self):
-        """Ensure multi-select mode is enabled"""
-        if not self.main_window.multi_select_mode:
-            self.main_window.multi_select_mode = True
-            if hasattr(self.main_window, 'menu_manager') and self.main_window.menu_manager:
-                self.main_window.menu_manager.update_edit_menu_states()
+        """Ensure multi-select mode is active (delegates to main window)."""
+        if hasattr(self.main_window, "ensure_multi_mode"):
+            self.main_window.ensure_multi_mode()
     
     def _toggle_index(self, idx: int):
         """Toggle selection of thumbnail at index"""

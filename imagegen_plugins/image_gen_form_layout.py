@@ -768,8 +768,8 @@ def image_gen_field_reset_trash_stylesheet(
             outline: none;
         }}
         {selector}:hover {{
-            background-color: {t.tab_button_hover_bg_hex};
-            border: 1px solid {t.tab_button_hover_bg_hex};
+            background-color: {t.button_bg_hover_hex};
+            border: 1px solid {t.button_border_hover_hex};
         }}
         {selector}:pressed {{
             background-color: {t.sidebar_splitter_handle_hex};
@@ -919,8 +919,8 @@ def image_gen_gear_settings_btn_stylesheet(
             outline: none;
         }}
         {selector}:hover {{
-            background-color: {t.tab_button_hover_bg_hex};
-            border: 1px solid {t.tab_button_hover_bg_hex};
+            background-color: {t.button_bg_hover_hex};
+            border: 1px solid {t.button_border_hover_hex};
         }}
         {selector}:pressed {{
             background-color: {t.sidebar_splitter_handle_hex};
@@ -1007,8 +1007,8 @@ def image_gen_prompt_copy_btn_stylesheet(
             outline: none;
         }}
         {selector}:hover {{
-            background-color: {t.tab_button_hover_bg_hex};
-            border: 1px solid {t.tab_button_hover_bg_hex};
+            background-color: {t.button_bg_hover_hex};
+            border: 1px solid {t.button_border_hover_hex};
             color: {t.button_text_hover_hex};
         }}
         {selector}:pressed {{
@@ -1052,8 +1052,8 @@ def image_gen_prompt_clear_btn_stylesheet(
             outline: none;
         }}
         {selector}:hover {{
-            background-color: {t.tab_button_hover_bg_hex};
-            border: 1px solid {t.tab_button_hover_bg_hex};
+            background-color: {t.button_bg_hover_hex};
+            border: 1px solid {t.button_border_hover_hex};
         }}
         {selector}:pressed {{
             background-color: {t.sidebar_splitter_handle_hex};
@@ -1192,8 +1192,8 @@ def image_gen_prompt_voice_mic_btn_stylesheet(
             outline: none;
         }}
         {selector}:hover {{
-            background-color: {t.tab_button_hover_bg_hex};
-            border: 1px solid {t.tab_button_hover_bg_hex};
+            background-color: {t.button_bg_hover_hex};
+            border: 1px solid {t.button_border_hover_hex};
         }}
         {selector}:pressed {{
             background-color: {t.sidebar_splitter_handle_hex};
@@ -1372,8 +1372,8 @@ def image_gen_dim_helper_icon_stylesheet(
             outline: none;
         }}
         {selector}:hover {{
-            background-color: {t.tab_button_hover_bg_hex};
-            border: 1px solid {t.tab_button_hover_bg_hex};
+            background-color: {t.button_bg_hover_hex};
+            border: 1px solid {t.button_border_hover_hex};
             image: {hover_url};
         }}
         {selector}:pressed {{
