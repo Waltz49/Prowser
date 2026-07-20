@@ -9,6 +9,7 @@ Press **F1** or **/** in the app for context-sensitive help. Menu items also sho
 ## Table of Contents
 
 - [Thumbnail View](#thumbnail-view)
+- [List View](#list-view)
 - [Browse View (Fullscreen)](#browse-view-fullscreen)
 - [Slideshow Mode](#slideshow-mode)
 - [Slideshow2 Mode (Panning Image)](#slideshow2-mode-panning-image)
@@ -93,7 +94,7 @@ Press **F1** or **/** in the app for context-sensitive help. Menu items also sho
 | T | Toggle file tree |
 | P | Toggle preview widget |
 | J | Toggle jobs pane (when enabled) |
-| F4, . | Toggle chrome (menu bar, etc.) |
+| F4, ., Cmd+. | Toggle chrome (menu bar, etc.) |
 | F12 | Toggle list view |
 | Cmd+Return | Collapse file tree |
 | Cmd+Shift+Return | Expand file tree |
@@ -148,6 +149,11 @@ Press **F1** or **/** in the app for context-sensitive help. Menu items also sho
 | Cmd+P | Search by person |
 | ⌃⌘P | Quick person search |
 | Cmd+= | Cache Faces |
+| F5 | Show reference graph for active image |
+
+## List View
+
+Toggle with **F12** from thumbnail view. In list view, **+** / **=** and **-** adjust row height; **0** resets row height to the default. Most thumbnail shortcuts (navigation, sorting, file ops) also apply in list view.
 
 ## Browse View (Fullscreen)
 
@@ -204,7 +210,8 @@ Press **F1** or **/** in the app for context-sensitive help. Menu items also sho
 | B | Toggle status bar |
 | Cmd+I | Toggle number overlay |
 | F3 | Image history |
-| F4, . | Toggle chrome |
+| F5 | Show reference graph for active image |
+| F4, ., Cmd+. | Toggle chrome |
 | Cmd+Return / Cmd+Shift+Return | Collapse/expand file tree |
 
 ### Desktop & Maps

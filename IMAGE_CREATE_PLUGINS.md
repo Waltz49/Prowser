@@ -27,7 +27,7 @@ This guide explains how the system works and how to add a new model without touc
 | `infill` | Infill with Pixelmator… | Mask-based infill via Pixelmator Pro |
 | `infill_paint` | Infill by painting… | Paint a mask in-app, then infill |
 
-Settings for each model (sliders, seed, etc.) are saved per model in `~/.prowser/data/settings.json` under `imagegen.models.<plugin_id>`. The active model per function is stored in `imagegen.active_plugin_by_function`; the last-used function (for ⌥/) is `imagegen.last_function`.
+Settings for each model (sliders, seed, etc.) are saved per function and plugin in `~/.prowser/data/settings.json` under `imagegen.dialogs.<function>.<plugin_id>` (legacy keys under `imagegen.models.<plugin_id>` are migrated on load). The active model per function is stored in `imagegen.active_plugin_by_function`; the last-used function (for ⌥/) is `imagegen.last_function`.
 
 ---
 
@@ -45,9 +45,13 @@ The design splits **what the user sees** (plugin) from **how images are actually
   Image menu                   Main window (Qt)
        │                              │
        ▼                              ▼
-  discover_plugins()          ImageGenUnifiedDialog (per function)
-       │                              │
-       ▼                              ▼
+  discover_plugins()          ImageGenUnifiedDialog (stacked panels)
+       │                      ├─ ImageGenDialog (create)
+       │                      ├─ ImageGenEditDialog
+       │                      ├─ ImageGenExpandDialog
+       │                      ├─ ImageGenInfillDialog
+       │                      └─ ImageGenInfillPaintDialog
+       ▼                              │
   ImageGenModelPlugin  ──────►  ImageGenController
        │                              │
        │ build_payload()              │ start_generate_job()
@@ -72,27 +76,42 @@ imagegen_plugins/
   image_gen_registry.py       # ImageGenModelPlugin class
   image_gen_pipeline_modes.py # PipelineMode table, dialog fields, payload builder
   image_gen_menu.py           # Image menu, ⌥/ shortcut
-  image_gen_unified_dialog.py # Function switcher + per-function panels
+  image_gen_unified_dialog.py # Single window; stacked per-function panels
+  image_gen_dialog.py         # Create (text-to-image) panel
+  image_gen_edit_dialog.py    # Edit panel
+  image_gen_expand_dialog.py  # Expand / outpaint panel
+  image_gen_infill_dialog.py  # Pixelmator infill panel
+  image_gen_infill_paint_dialog.py  # Paint-mask infill panel
   image_gen_controller.py     # Start/cancel jobs, open result in browse
-  image_gen_persistence.py      # Save/load per-model settings
+  image_gen_persistence.py    # Save/load per-model settings (thread-safe)
   image_gen_active_model.py   # active_plugin_by_function, last_function
+  image_gen_model_selector.py # Model dropdown; installed vs available
   image_gen_model_availability.py  # “Download model?” before first run
   image_gen_install_hint.py   # Message when backend package is missing
   image_gen_job_queue_dialog.py  # Job queue UI
-  lora_catalogs/              # Per-host LoRA catalogs (FLUX1, Fill, Klein, SD15)
+  lora_catalogs/              # Per-host LoRA catalogs (FLUX1 T2I/Fill, Klein, SD15)
+  lora_catalog.py             # Unified catalog facade
+  lora_catalog_settings.py    # by_host / by_model state in settings.json
   lora_host_registry.py       # Which catalog applies to which pipeline
+  lora_model_registry.py      # Per-base-model LoRA compatibility
+  mflux_lora_presets.py       # MFLUX LoRA download, key check, payload wiring
+  sd15_lora_presets.py        # SD 1.5 LoRA (peft) download and payload wiring
+  sd15_plugin_shared.py       # Shared SD 1.5 create dialog field layout
+  sceneworks_klein_mlx.py     # SceneWorks MLX tier helpers (Q4/Q8/BF16)
   flux_schnell_mflux.py       # Example create plugin (thin)
-  sana_sprint_600m.py           # Example create plugin (thin)
+  sana_sprint_600m.py         # Example create plugin (thin)
   flux_klein_create.py        # FLUX.2 Klein create variants
   flux_klein_edit.py            # FLUX.2 Klein edit variants
   flux_klein_expand.py          # FLUX.2 Klein expand variants
+  flux_klein_sceneworks.py      # SceneWorks pre-quantized Klein 9B KV MLX
   flux_fill_expand.py           # FLUX.1 Fill expand
   flux_fill_infill.py           # FLUX.1 Fill infill
-  realistic_vision_v4_sd15.py   # SD 1.5 example
+  realistic_vision_v4_sd15.py    # SD 1.5 example
+  anything_furry_sd15.py        # SD 1.5 anime/furry example
   pipelines/
     mflux_schnell.py            # FLUX via MFLUX/MLX
     sana_sprint.py              # SANA via diffusers
-    sd15_diffusers.py           # Stable Diffusion 1.5
+    sd15_diffusers.py           # Stable Diffusion 1.5 (+ peft LoRA)
     z_image_turbo.py            # Z-Image Turbo SDNQ
     mflux_fill_expand.py        # FLUX Fill expand/infill
     mflux_flux2_klein_create.py # FLUX.2 Klein create
@@ -116,6 +135,8 @@ A **plugin file** is usually short: it constructs one or more `ImageGenModelPlug
 
 A **pipeline** defines step/guidance/dimension limits, the worker script under `pipelines/`, and how to test if the backend is installed (`pipeline_is_available`).
 
+The model dropdown (`image_gen_model_selector.py`) lists only **installed** plugins for each function: the pipeline backend must be present and model weights must already be in the Hugging Face cache. Plugins with missing deps or weights show as unavailable with install/download hints.
+
 ---
 
 ## Dialog fields
@@ -137,21 +158,23 @@ Common fields (prompt, width, height, steps, guidance, seed, random seed) are ad
 
 ## LoRA adapters
 
-LoRA dropdowns appear when a plugin declares a `lora_host_id`. Which adapters appear is controlled in **Settings → LoRA**.
+LoRA dropdowns appear when a plugin declares a `lora_host_id`. Which adapters appear is controlled in **Settings → LoRA** (per base model).
 
 | Piece | Role |
 |-------|------|
 | `imagegen_plugins/lora_catalogs/` | Curated catalogs per host (FLUX1 T2I, FLUX1 Fill, FLUX2 Klein, SD15) |
-| `settings.json` → `imagegen.lora_catalog.enabled_ids` | User-enabled LoRA ids |
-| `imagegen_plugins/mflux_lora_presets.py` / `sd15_lora_presets.py` | Download weights, key-layout check, payload wiring |
+| `imagegen_plugins/lora_catalog_settings.py` | `by_host`, `by_model`, `user_entries`, `entry_overrides` in settings |
+| `settings.json` → `imagegen.lora_catalog` | Enabled/hidden ids per host and per base model |
+| `imagegen_plugins/mflux_lora_presets.py` / `sd15_lora_presets.py` | Download weights, compatibility check, payload wiring |
 
 **Behavior:**
 
 - Enable LoRAs in **Settings → LoRA**. Checked entries (plus any already downloaded) appear in the dialog when compatible with that pipeline and base model.
-- Trash an entry to hide it; hidden ids are stored in `imagegen.lora_catalog.deleted_ids`.
+- Trash an entry to hide it; hidden ids are stored in `hidden_ids` (per host and per model slice).
 - Weights download from Hugging Face on first generate.
 - Only **MFLUX verified** entries are known good for MFLUX pipelines; untested entries need a successful local run.
-- Klein Edit does not expose LoRA (different architecture).
+- SD 1.5 LoRAs use **peft** in `sd15_diffusers.py`; Klein Edit does not expose LoRA (different architecture).
+- Import custom LoRAs via **Settings → LoRA → Import** (`lora_import_dialog.py`).
 
 To add catalog entries at dev time, inspect repos with `scripts/build_flux_lora_catalog_snippet.py` and edit the appropriate file under `lora_catalogs/`.
 
@@ -190,16 +213,19 @@ For progressive preview (MFLUX stepwise PNGs), the worker may print JSON lines t
 Install from the Prowser project directory with your venv activated:
 
 ```bash
-pip install -r minimal_requirements.txt
+pip install -r requirements.txt
 ```
+
+(`setup.sh` installs from `minimal_requirements.txt`, which is kept in sync with `requirements.txt`.)
 
 | Backend | Packages | Used by |
 |---------|----------|---------|
-| MFLUX / MLX | `mflux` (and MLX stack it pulls in) | FLUX Schnell, Fill, Klein plugins |
+| MFLUX / MLX | `mflux` (and MLX stack it pulls in) | FLUX Schnell, Fill, Klein, SceneWorks plugins |
 | diffusers | `diffusers`, `accelerate`, `torch` | SANA Sprint, SD 1.5 plugins |
+| SD 1.5 LoRA | `peft` | SD 1.5 pipelines with LoRA adapters |
 | SDNQ | `sdnq` (via Z-Image pipeline) | Z-Image Turbo plugin |
 
-If a backend is missing, that model appears disabled with a tooltip pointing at `minimal_requirements.txt`.
+If a backend is missing, that model appears disabled with a tooltip pointing at `requirements.txt`.
 
 **First-time model weights:** On first generate, Prowser may ask to download several gigabytes from Hugging Face. Weights are cached in the standard Hugging Face hub cache. For gated models, set `HF_TOKEN` or run `hf auth login`.
 
@@ -245,7 +271,7 @@ For PyInstaller bundles, also add a branch in `imagegen_plugins/image_gen_worker
 
 ### 6. Dependencies
 
-Add new Python packages to `minimal_requirements.txt` with a one-line comment.
+Add new Python packages to `requirements.txt` (and regenerate `minimal_requirements.txt` with `generate_minimal_requirements.py` if needed) with a one-line comment.
 
 ### 7. Test in Prowser
 
@@ -269,14 +295,17 @@ Add new Python packages to `minimal_requirements.txt` with a one-line comment.
 | Realistic Vision V4.0 | `realistic_vision_v4_sd15` | `sd15_diffusers` |
 | Anything Furry | `anything_furry_sd15` | `sd15_diffusers` |
 | FLUX.2-klein-4B / 9B / 9b-kv | `flux_klein_*_create` | `mflux_flux2_klein_create` |
+| FLUX.2 Klein 9B KV MLX (SceneWorks) | `sceneworks_klein_9b_kv_mlx_create` | `mflux_flux2_klein_create` |
 
 ### Edit / expand / infill
 
 | Function | Plugin ids | Pipeline |
 |----------|------------|----------|
-| Edit | `flux_klein_*_edit` | `mflux_flux2_klein_edit` |
-| Expand | `flux_fill_expand`, `flux_klein_*_expand` | `mflux_fill_expand`, `mflux_flux2_klein_expand` |
+| Edit | `flux_klein_*_edit`, `sceneworks_klein_9b_kv_mlx_edit` | `mflux_flux2_klein_edit` |
+| Expand | `flux_fill_expand`, `flux_klein_*_expand`, `sceneworks_klein_9b_kv_mlx_expand` | `mflux_fill_expand`, `mflux_flux2_klein_expand` |
 | Infill | `flux_fill_infill` | `mflux_fill_infill` |
+
+SceneWorks plugins share Klein pipelines but use pre-quantized MLX tiers (Q4/Q8/BF16) from `SceneWorks/flux2-klein-9b-kv-mlx` instead of on-the-fly MFLUX quantization.
 
 Use `flux_schnell_mflux.py` and `sana_sprint_600m.py` as templates for thin plugins.
 
@@ -297,6 +326,20 @@ Relevant keys in `~/.prowser/data/settings.json`:
       "infill": "flux_fill_infill"
     },
     "dialog_geometry": "...",
+    "dialogs": {
+      "create": { "flux_schnell_mflux": { "steps": 4, "mflux_quantize": 3 } },
+      "edit": { }
+    },
+    "lora_catalog": {
+      "by_host": {
+        "flux1_t2i": { "enabled_ids": [], "hidden_ids": [] }
+      },
+      "by_model": {
+        "flux1_schnell": { "enabled_ids": [], "hidden_ids": [] }
+      },
+      "user_entries": {},
+      "entry_overrides": {}
+    },
     "models": {
       "flux_schnell_mflux": { "steps": 4, "mflux_quantize": 3 },
       "sana_sprint_600m": { "steps": 2, "guidance_scale": 4.5 }
@@ -305,7 +348,7 @@ Relevant keys in `~/.prowser/data/settings.json`:
 }
 ```
 
-Legacy `active_plugin_id` is migrated to `active_plugin_by_function.create` on load.
+Per-function dialog values are stored under `imagegen.dialogs.<function>.<plugin_id>`. Legacy flat `imagegen.models` keys are still read for migration. LoRA state migrates from legacy `enabled_ids` / `deleted_ids` to `by_host` / `by_model` with `hidden_ids` on load.
 
 ---
 
@@ -334,7 +377,7 @@ Legacy `active_plugin_id` is migrated to `active_plugin_by_function.create` on l
 | Symptom | Things to check |
 |---------|------------------|
 | No Image menu | `--min` build, or `bundle_capabilities.imagegen_ui_enabled()` false |
-| Model grayed out | Backend not installed; install packages from `minimal_requirements.txt` |
+| Model grayed out | Backend not installed, or weights not in HF cache; install packages from `requirements.txt` |
 | Dialog never appears | Dependencies OK? Try ⌥/; check terminal / `~/.prowser/logs` |
 | “Unknown pipeline_id” | `model_tasks_worker._run_generate` not updated for your pipeline |
 | Download prompt every time | HF cache path for your `hf_model_id` |

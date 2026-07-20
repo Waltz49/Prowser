@@ -2,6 +2,8 @@
 
 Native macOS image browser (PySide6). Entry: `main.py` → `ImageBrowserWindow`.
 
+Package restructure (Steps 0–12) is complete; see `docs/restructure-plan.md` for history.
+
 ## Boot
 
 - `run.sh` → `python main.py` (uses `venv_image_browser/`, falls back to `venv/`)
@@ -29,6 +31,8 @@ Navigation and refresh contracts are documented in `file_data_model.py` and `bro
 
 `image_browser_window.py` wires managers and views. Prefer adding logic in a `*_manager.py` module rather than growing the window file.
 
+Root-level UI wiring (not under `browser_window/`): `menu_manager.py`, `keyboard_handler.py`, `settings_dialog.py`.
+
 ### `browser_window/` layout
 
 | Subpackage | Role |
@@ -40,16 +44,24 @@ Navigation and refresh contracts are documented in `file_data_model.py` and `bro
 
 ### Managers (representative)
 
-- **Navigation / display:** `navigation_manager`, `image_display_manager`, `thumbnails/view_manager`, `view_mode_manager`, `selection_manager`, `directory_history_handler`, `event_handler`
-- **Files:** `directory_loader`, `files/file_operations_manager`, `files/file_tree_handler`, `refresh_manager`, `sorting_manager` (root), `lock_manager`, `files/file_move_handler`
-- **Thumbnails:** `thumbnail_display_manager`, `cache/image_cache`, `thumbnails/thumbnail_canvas`, `thumbnails/list_canvas`, `thumbnail_context_menu`, `thumbnails/thumbnail_operations_manager`
-- **Views:** `files/browse_view_handler`, `thumbnails/combined_sidebar_widget` (left), `thumbnails/information_sidebar`
-- **AI / similarity:** `similarity_search_manager`, `search/cnn_image_similarity_sorter`, `background_clip_controller`
-- **Slideshow:** `slideshow/slideshow_manager`, `slideshow2_manager`, `slideshow3_manager`, `slideshow/slideshow_image_loader`
-- **UI chrome:** `menu_manager` (root), `keyboard_handler` (root), `ui_layout_manager`, `sidebar_manager`, `status_bar_config`, `status_notification`, `wallpaper_manager`, `window_event_filters`
-- **Settings UI:** `settings_dialog` (+ `settings/widgets/multi_row_tab_widget.py`)
+- **Navigation / display:** `navigation_manager`, `image_display_manager`, `view_mode_manager`, `selection_manager`, `directory_history_handler`, `event_handler`, `navigation_ui_subscriber`
+- **Files:** `directory_loader`, `refresh_manager`, `lock_manager`, `rename_status_manager`, `resize_images`, `exif_operations_manager`
+- **Thumbnails / views:** `thumbnail_display_manager`, `thumbnail_context_menu`, `thumbnail_highlight_subscriber`, `sidebar_manager`, `ui_layout_manager`, `wallpaper_manager`, `window_event_filters`
+- **AI / similarity:** `similarity_search_manager`, `background_clip_controller`, `lmstudio_launcher`
+- **Chrome:** `configuration_sync_manager`, `status_notification`
+- **Settings UI:** `settings_dialog.py` (root) + `settings/widgets/multi_row_tab_widget.py`
 - **Image generation:** `imagegen_plugins/` (registry, worker, dialogs, `image_gen_controller.py`)
 - **Workers / background:** `workers/` (model tasks, CLIP worker, message pipe, beachball guards, idle detector)
+
+Domain packages (imported by managers; not all listed):
+
+| Package | Role |
+|---------|------|
+| `files/` | `file_operations_manager`, `file_tree_handler`, `file_move_handler`, `browse_view_handler`, `prsort_io.py` |
+| `thumbnails/` | `view_manager`, `thumbnail_canvas`, `list_canvas`, `combined_sidebar_widget`, `information_sidebar`, `thumbnail_operations_manager` |
+| `slideshow/` | `slideshow_manager`, `slideshow2_manager`, `slideshow3_manager`, `slideshow_image_loader` |
+| `search/` | `cnn_image_similarity_sorter`, `similarity_reorder.py` |
+| `sorting_manager` | Root-level sort orchestration |
 
 ## Shared utilities
 
@@ -98,3 +110,6 @@ python -m pytest tests/ -q
 | `test_prsort_io.py` | `files/prsort_io.py` |
 | `test_path_exclusions.py` | `path_exclusions.py` |
 | `test_prowser_temp_files.py` | `prowser_temp_files.py` |
+| `test_exif_reference_paths.py` | EXIF reference path handling |
+| `test_job_queue_persistence.py` | Image-gen job queue persistence |
+| `test_sidebar_pane_layout.py` | Sidebar pane layout |

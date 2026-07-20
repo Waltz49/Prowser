@@ -12,7 +12,7 @@ The first time you use AI-based features (similarity sort, text search, or Creat
 
 - Browse images in a grid or fullscreen with keyboard and mouse
 - Move, copy, rename, delete (to Trash), lock files, and undo deletes
-- Search by image similarity, image description, duplicates,and face recognition
+- Search by image similarity, image description, duplicates, and face recognition
 - Slideshows, EXIF tools, external editor integration, set desktop wallpaper
 - Local AI image generation and manipulation (**Image** menu) when dependencies are installed
 - Models for similarity sort, text search, and face recognition and AI image manipulation are downloaded automatically the first time you use them.
@@ -23,7 +23,7 @@ Press **F1** or **/** in the app for keyboard shortcuts for the current view. Se
 
 - **macOS** on Apple Silicon. This was written to run on a 16GB M2 MacBook Air.
 - **Python 3.14** if run from source (DMG files include all dependencies)
-- Dependencies listed in `minimal_requirements.txt` (installed by `setup.sh` if run from source)
+- Dependencies listed in `requirements.txt` (`setup.sh` installs from `minimal_requirements.txt`; use `requirements.txt` for the complete set, including `peft` for SD 1.5 LoRAs)
 
 ## Permissions
 
@@ -69,7 +69,7 @@ To create an installation DMG file after creating the app bundle:
 
 ## Settings (Profiles)
 
-Settings and caches live under `~/.prowser/` by default. Open the settings dialog with **⌘.** (Command–period).
+Settings and caches live under `~/.prowser/` by default. Open the settings dialog with **⌘,** (Command–comma).
 To use a different profile directory:
 
 ```bash
@@ -88,8 +88,8 @@ Common formats include JPEG, PNG, GIF, BMP, TIFF, WebP, SVG, HEIC, and HEIF. Not
 
 - **Entry:** `main.py` 
 
-AI related tasks run in separate processes, not on the UI thread.  you can force processes vs threads with the --background [process|thread] flag.
-By default, the app will use threads when bundled into an app, and processes when run from source.
+AI related tasks run in separate processes, not on the UI thread. You can force processes vs threads with the `--background [process|thread]` flag.
+By default, the app uses threads when bundled into an app, and processes when run from source.
 
 ## More documentation
 
