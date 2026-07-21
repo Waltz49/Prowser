@@ -232,10 +232,10 @@ class ImageBrowserConfig:
     
     @property
     def audio_dir(self) -> Path:
-        """Get audio cache directory: ~/.prowser/audio/"""
-        audio_dir = self._prowser_home / "audio"
-        audio_dir.mkdir(exist_ok=True)
-        return audio_dir
+        """Get audio scratch directory: {profile}/tmp/audio/"""
+        from prowser_temp_files import prowser_temp_subdir
+
+        return Path(prowser_temp_subdir("audio"))
     
     @property
     def data_dir(self) -> Path:
@@ -317,12 +317,12 @@ class ImageBrowserConfig:
     
     @property
     def kml_dir(self) -> Path:
-        """Get KML directory: ~/.prowser/kml/"""
-        kml_dir = self._prowser_home / "kml"
-        kml_dir.mkdir(exist_ok=True)
-        return kml_dir
+        """Get KML scratch directory: {profile}/tmp/kml/"""
+        from prowser_temp_files import prowser_temp_subdir
+
+        return Path(prowser_temp_subdir("kml"))
     
-    # Audio cache files (in ~/.prowser/audio/)
+    # Audio scratch files (in {profile}/tmp/audio/)
     
     def ensure_directories(self):
         """Ensure all required directories exist"""
@@ -476,7 +476,7 @@ class ImageBrowserConfig:
             # Image creation directory (generated images; disabled => ~/Downloads)
             'image_creation_directory': {'path': None, 'enabled': False},
 
-            # Work temp files (infill, masking, etc.); None/blank => /tmp/prowser_{user}/
+            # Work temp files (infill, masking, etc.); None/blank => ~/.prowser/tmp
             'temporary_files_directory': None,
 
             # Ignore directories (list of dicts with 'path' and 'enabled' keys to ignore in search, find duplicates, etc.)

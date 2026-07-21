@@ -6,7 +6,6 @@ Handles GPS location extraction from EXIF data and opening map applications
 
 import os
 import subprocess
-import tempfile
 import time
 import shutil
 from typing import Optional, Tuple, List
@@ -147,8 +146,9 @@ def create_kml_file(image_data_list: List[Tuple[str, float, float, Optional[int]
     Returns:
         Path to the created KML file
     """
-    # Create temporary KML file
-    kml_fd, kml_path = tempfile.mkstemp(suffix='.kml', prefix='image_browser_')
+    from prowser_temp_files import prowser_mkstemp_path
+
+    kml_path = prowser_mkstemp_path(prefix="image_browser_", suffix=".kml")
     try:
         if not image_data_list:
             raise ValueError("No image data provided")
@@ -215,14 +215,12 @@ def create_kml_file(image_data_list: List[Tuple[str, float, float, Optional[int]
 </kml>'''
 
         # Write KML content to file
-        with os.fdopen(kml_fd, 'w', encoding='utf-8') as f:
+        with open(kml_path, 'w', encoding='utf-8') as f:
             f.write(kml_content)
 
         return kml_path
     except Exception:
-        # Close file descriptor if there's an error
         try:
-            os.close(kml_fd)
             os.remove(kml_path)
         except Exception:
             pass

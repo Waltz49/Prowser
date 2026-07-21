@@ -31,8 +31,13 @@ def invalidate_temporary_files_directory_cache() -> None:
 
 
 def default_temporary_files_directory(user_id: Optional[str] = None) -> str:
-    uid = user_id or getpass.getuser()
-    return os.path.abspath(f"/tmp/prowser_{uid}")
+    _ = user_id  # API compatibility; default follows active profile, not username.
+    try:
+        from config import get_config
+
+        return os.path.abspath(str(get_config().prowsers_home / "tmp"))
+    except Exception:
+        return os.path.abspath(os.path.join(os.path.expanduser("~"), ".prowser", "tmp"))
 
 
 def _normalize_path(path: str) -> str:
@@ -46,7 +51,7 @@ def _path_from_raw(raw: object, user_id: str) -> str:
 
 
 def resolve_temporary_files_directory(settings: Optional[dict] = None) -> str:
-    """Configured temp work dir, or default /tmp/prowser_{user}/ when unset."""
+    """Configured temp work dir, or default ~/.prowser/tmp when unset."""
     global _cached_raw, _cached_resolved
 
     if settings is not None:

@@ -77,7 +77,7 @@ def watch_stepwise_to_output(
             if parsed is None:
                 continue
             file_seed, step_num, total = parsed
-            if file_seed != seed or step_num >= total:
+            if file_seed != seed or step_num > total:
                 continue
             full = os.path.join(stepwise_dir, name)
             if not os.path.isfile(full) or os.path.getsize(full) < 64:

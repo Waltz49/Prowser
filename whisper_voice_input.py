@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import contextlib
 import os
-import tempfile
 import threading
 import wave
 from dataclasses import dataclass
@@ -247,8 +246,9 @@ def record_utterance(
 def transcribe_audio(model, pcm) -> str:
     import numpy as np
 
-    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
-        wav_path = tmp.name
+    from prowser_temp_files import prowser_mkstemp_path
+
+    wav_path = prowser_mkstemp_path(prefix="whisper-", suffix=".wav")
     try:
         with wave.open(wav_path, "wb") as wf:
             wf.setnchannels(1)

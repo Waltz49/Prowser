@@ -139,6 +139,7 @@ class ImageGenController(QObject):
         self._progressive_browse_opened = False
         self._task_status_info_html: str = ""
         self._step_progress_start_time: Optional[float] = None
+        self._step_progress_completed_at: Optional[float] = None
         self._expand_source_path: str = ""
         self._expand_base_path: str = ""
         self._aspect_pad_temp_paths: list[str] = []
@@ -869,6 +870,9 @@ class ImageGenController(QObject):
         start = self._step_progress_start_time
         if start is None:
             return None
+        completed_at = self._step_progress_completed_at
+        if completed_at is not None:
+            return completed_at - start
         return time.perf_counter() - start
 
     def _snapshot_live_timing(
@@ -1309,6 +1313,7 @@ class ImageGenController(QObject):
         """Clear step/elapsed/timing used by progress bars (not copy-batch counters)."""
         self._reset_live_queue_progress()
         self._step_progress_start_time = None
+        self._step_progress_completed_at = None
         self._frozen_elapsed_seconds = None
         self._job_ai_chars_received = 0
         self._job_ai_last_progress_bucket = -1
@@ -2323,6 +2328,12 @@ class ImageGenController(QObject):
                     self._step_seconds_per_step = elapsed_seconds / step_i
             self._live_step = step_i
             self._live_step_total = total_i
+            if (
+                step_i >= total_i
+                and total_i > 0
+                and self._step_progress_completed_at is None
+            ):
+                self._step_progress_completed_at = time.perf_counter()
             self._task_status_info_html = self._apply_live_steps_progress(
                 self._task_status_info_html
             )

@@ -1,16 +1,45 @@
 """
-Redirect print() (stdout) to a single chmod-600 file per POSIX uid under the temp dir,
-while also teeing to the real terminal. All app processes for that user share this path
-so one `less +F` session can follow the combined output.
+Redirect print() (stdout) to a single chmod-600 file per POSIX uid under the profile
+logs directory, while also teeing to the real terminal. All app processes for that
+user share this path so one `less +F` session can follow the combined output.
 """
 
 import os
 import sys
-import tempfile
 import threading
+import contextlib
 
 PRINT_LOG_FILE_PATH = None
 _print_log_lock = threading.Lock()
+
+
+class _NullTerminal:
+    def write(self, _s):
+        pass
+
+    def flush(self):
+        pass
+
+    def fileno(self):
+        return -1
+
+    def isatty(self):
+        return False
+
+
+@contextlib.contextmanager
+def quiet_console_stdout():
+    """Suppress tee to the terminal; View log file still receives output."""
+    out = sys.stdout
+    if not isinstance(out, _StdoutToPrintLog):
+        yield
+        return
+    saved = out._terminal
+    out._terminal = _NullTerminal()
+    try:
+        yield
+    finally:
+        out._terminal = saved
 
 
 class _StdoutToPrintLog:
@@ -92,7 +121,16 @@ def clear_print_log_file() -> None:
 
 
 def session_print_log_path() -> str:
-    return os.path.join(tempfile.gettempdir(), f'image_browser_print_{os.getuid()}.log')
+    try:
+        from config import get_config
+
+        logs_dir = get_config().logs_dir
+        logs_dir.mkdir(parents=True, exist_ok=True)
+        return str(logs_dir / f"image_browser_print_{os.getuid()}.log")
+    except Exception:
+        log_dir = os.path.join(os.path.expanduser("~"), ".prowser", "logs")
+        os.makedirs(log_dir, exist_ok=True)
+        return os.path.join(log_dir, f"image_browser_print_{os.getuid()}.log")
 
 
 def setup_stdout_print_log(truncate: bool = False) -> None:

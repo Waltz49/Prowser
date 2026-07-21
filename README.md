@@ -76,7 +76,70 @@ To use a different profile directory:
 ./run.sh -p ~/.prowser-test
 ```
 
-New files created by AI go to ~/Downloads by default but that can be changed in the settings dialog.
+The `-p` path uses the same layout as `~/.prowser/` below.
+
+New files created by AI go to `~/Downloads` by default; change that in the settings dialog (**Image creation directory**).
+
+### Profile layout
+
+```
+~/.prowser/                          # or path passed to -p
+├── data/
+│   ├── settings.json                # app preferences
+│   ├── instance.lock                # single-instance lock
+│   ├── chat_session_settings.json   # chat pane preferences
+│   ├── chat_session_data.json       # saved conversation (when enabled)
+│   └── chat_session_images/         # chat images kept across restarts
+├── logs/
+│   ├── image_browser_print_<uid>.log  # Tools → Debug → View log
+│   ├── image_browser_message_debug.log
+│   ├── messages.log
+│   ├── keyboard.log
+│   └── drag_drop.log
+├── tmp/                             # disposable work files (see below)
+│   ├── chat_conversation/<id>/    # ephemeral chat image copies
+│   ├── wallpaper/                   # wallpaper scratch
+│   ├── pixelmator/                  # Pixelmator export staging
+│   ├── kml/                         # map KML export and rotated previews
+│   ├── audio/                       # audio scratch cache
+│   ├── imagegen-*                   # generation/infill/mask intermediates
+│   ├── whisper-*.wav                # voice-input scratch audio
+│   └── say-exit-*.wav               # exit-speech scratch audio
+├── cache/
+│   ├── image_browser_cache/
+│   │   ├── thumbnails/
+│   │   └── metadata/
+│   ├── hashes/
+│   └── image_recognition/           # similarity, CLIP, face models/cache
+```
+
+### Temporary and scratch files
+
+Most short-lived work files live under **`~/.prowser/tmp/`** (or `{profile}/tmp/`). That includes image-generation intermediates, infill/mask exports, wallpaper and Pixelmator staging, map KML exports, ephemeral chat image copies, and short WAV/audio scratch files.
+
+Override the work-temp root in **Settings → Temporary files directory**; when blank, the default is `{profile}/tmp/`.
+
+**Safe cleanup** (quit Prowser first):
+
+```bash
+rm -rf ~/.prowser/tmp
+```
+
+Persistent chat (conversation JSON and images under `data/chat_session_*`) is kept separately when **Preserve chat across sessions** is enabled.
+
+**Outside the profile** (still used by the app):
+
+| Location | Purpose |
+|----------|---------|
+| `/tmp/image_browser_pipe_<username>` | Named pipe for controlling a running instance ([API.md](API.md)) |
+| `/tmp/trashes-<username>` | Temporary “view copy of trash” browse folder; removed on quit |
+| `/tmp/exception.txt` | Debug decorator output (cleared at startup) |
+| `/tmp/prowserfault.log` | Thread dumps when signal `USR1` is sent |
+| `/tmp/slideshow2.log`, `/tmp/points.txt` | Slideshow2 debug output |
+| System temp dir | Brief atomic-write scratch for cache/index updates |
+| Next to edited images | `*.tmp` sidecar files during EXIF writes |
+
+Generated images saved by the user go to the configured **image creation directory** (default `~/Downloads`), not under the profile.
 
 ## Supported formats
 

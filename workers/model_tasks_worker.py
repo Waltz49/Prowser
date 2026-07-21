@@ -41,6 +41,72 @@ from imagegen_plugins.lmstudio_caption import (
 
 
 _APPLIED = False
+_MFLUX_TQDM_SHIM_APPLIED = False
+_MFLUX_LORA_QUIET_APPLIED = False
+
+
+class _MfluxTimeSteps:
+    """tqdm stand-in for mflux Config.time_steps (no background monitor thread)."""
+
+    __slots__ = ("_iter", "_start", "format_dict", "n")
+
+    def __init__(self, start: int, stop: int) -> None:
+        self._iter = range(start, stop)
+        self._start = time.perf_counter()
+        self.format_dict = {"elapsed": 0.0}
+        self.n = max(0, stop - start)
+
+    def __iter__(self):
+        for t in self._iter:
+            self.format_dict["elapsed"] = time.perf_counter() - self._start
+            yield t
+        self.format_dict["elapsed"] = time.perf_counter() - self._start
+
+    def __len__(self) -> int:
+        return self.n
+
+
+def apply_mflux_worker_tqdm_shim() -> None:
+    """Avoid tqdm monitor-thread locks in the inline model-tasks worker thread."""
+    global _MFLUX_TQDM_SHIM_APPLIED
+    if _MFLUX_TQDM_SHIM_APPLIED:
+        return
+    try:
+        from mflux.models.common.config.config import Config
+    except ImportError:
+        return
+    _MFLUX_TQDM_SHIM_APPLIED = True
+
+    def _time_steps_fget(self):
+        if self._time_steps is None:
+            self._time_steps = _MfluxTimeSteps(
+                self.init_time_step,
+                self.num_inference_steps,
+            )
+        return self._time_steps
+
+    Config.time_steps = property(_time_steps_fget)
+
+
+def apply_mflux_worker_lora_quiet_shim() -> None:
+    """Suppress mflux LoRA loader chatter on the terminal during generation."""
+    global _MFLUX_LORA_QUIET_APPLIED
+    if _MFLUX_LORA_QUIET_APPLIED:
+        return
+    try:
+        from mflux.models.common.lora.mapping.lora_loader import LoRALoader
+        from print_log_redirect import quiet_console_stdout
+    except ImportError:
+        return
+    _MFLUX_LORA_QUIET_APPLIED = True
+    _orig_load = LoRALoader.load_and_apply_lora
+
+    @staticmethod
+    def _load_and_apply_lora_quiet(*args, **kwargs):
+        with quiet_console_stdout():
+            return _orig_load(*args, **kwargs)
+
+    LoRALoader.load_and_apply_lora = _load_and_apply_lora_quiet
 
 
 def _sysctl_string(name: str) -> str:
@@ -148,7 +214,7 @@ _LOADED_KIND: Optional[str] = None  # None | "image" | "lmstudio"
 _SHUTDOWN = object()
 _active_emit: Optional[Callable[[Dict[str, Any]], None]] = None
 
-_WORKER_LOG_SKIP_TYPES = frozenset({"flux_prompt_chunk"})
+_WORKER_LOG_SKIP_TYPES = frozenset({"flux_prompt_chunk", "result"})
 
 
 def _log_worker_message_to_view_log(msg: Dict[str, Any]) -> None:
@@ -156,8 +222,6 @@ def _log_worker_message_to_view_log(msg: Dict[str, Any]) -> None:
     msg_type = msg.get("type")
     if msg_type in _WORKER_LOG_SKIP_TYPES:
         return
-    if msg_type == "result":
-        print(json.dumps(msg, indent=2, ensure_ascii=False), flush=True)
 
 
 def _stdout_emit(msg: Dict[str, Any]) -> None:
@@ -188,6 +252,8 @@ def _worker_setup() -> None:
         pass
     try:
         apply_mflux_macos_subprocess_shim()
+        apply_mflux_worker_tqdm_shim()
+        apply_mflux_worker_lora_quiet_shim()
     except ImportError:
         pass
 
@@ -247,6 +313,8 @@ def _run_generate(payload: Dict[str, Any], job_id: str) -> None:
 
     try:
         apply_mflux_macos_subprocess_shim()
+        apply_mflux_worker_tqdm_shim()
+        apply_mflux_worker_lora_quiet_shim()
     except ImportError:
         pass
 

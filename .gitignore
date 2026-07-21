@@ -45,8 +45,7 @@ prowser.php
 /debug_*.py
 /generate_*.py
 /test_*.py
-/tests/
-!tests/**
+**/tests/
 block_test.py
 create_sample_images.py
 defsize.py
