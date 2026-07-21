@@ -520,17 +520,6 @@ def chat_prompt_edit_stylesheet() -> str:
     """
 
 
-def chat_peek_zone_note_stylesheet(*, active: bool = False) -> str:
-    """Muted note text for the chat input peek-zone indicator row."""
-    th = get_active_theme()
-    color = th.sidebar_text_color_hex if active else th.shortcuts_note_muted_hex
-    return f"""
-        QLabel {{
-            color: {color};
-            font-size: 12pt;
-        }}
-    """
-
 
 CHAT_PROMPT_LIBRARY_PREVIEW_MAX_LINES = 4
 _PROMPT_PREVIEW_STYLE_PADDING_V = 12

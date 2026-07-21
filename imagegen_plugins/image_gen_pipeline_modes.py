@@ -382,9 +382,6 @@ def generation_status_display_size(
 _pipeline_available_cache: dict[str, bool] = {}
 
 
-def invalidate_pipeline_availability_cache() -> None:
-    _pipeline_available_cache.clear()
-
 
 def warm_pipeline_availability_cache(
     plugins: Optional[Iterable[Any]] = None,

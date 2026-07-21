@@ -117,16 +117,6 @@ class ImageDisplayManager:
         if hasattr(self.main_window, 'browse_view_handler') and self.main_window.browse_view_handler:
             self.main_window.browse_view_handler.update_filename_for_new_image()
     
-    def toggle_thumbnail_filename_overlay(self):
-        """Toggle thumbnail filename overlay"""
-        if hasattr(self.main_window, 'browse_view_handler') and self.main_window.browse_view_handler:
-            self.main_window.browse_view_handler.toggle_filename_overlay()
-    
-    def toggle_information_display(self):
-        """Toggle Information sidebar display"""
-        if hasattr(self.main_window, 'toggle_information_display'):
-            self.main_window.toggle_information_display()
-    
     def update_filename_menu_text(self):
         """Update filename menu text"""
         if hasattr(self.main_window, 'menu_manager') and self.main_window.menu_manager:

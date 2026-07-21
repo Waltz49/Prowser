@@ -162,26 +162,6 @@ def _exif_scalar_present(value: Any) -> bool:
     return True
 
 
-def lora_name_for_exif(lora_value: Any) -> Optional[str]:
-    """LoRA label for EXIF (display name, not filesystem path)."""
-    if not _exif_scalar_present(lora_value):
-        return None
-    from imagegen_plugins.flux_lora_catalog import get_lora_entry
-    from imagegen_plugins.mflux_lora_presets import coerce_lora_preset_id
-
-    preset_id = coerce_lora_preset_id(lora_value)
-    if preset_id == "none":
-        return None
-    entry = get_lora_entry(preset_id)
-    if entry is not None:
-        return entry.display_name
-    text = str(lora_value).strip()
-    if not text or text.lower() == "none":
-        return None
-    if os.sep in text or text.endswith(".safetensors"):
-        return os.path.basename(text)
-    return text
-
 
 _EXIF_PARAM_LINE_INT = re.compile(
     r"^\s*(Seed|Steps|Quantization)\s*:\s*(\d+)\s*$", re.IGNORECASE
@@ -862,24 +842,6 @@ def make_readable_user_comment_before_browse(
     ):
         return
 
-
-def _write_exif_user_comment_pil(image_path: str, user_comment: str) -> None:
-    """Write UserComment via PIL save (in-progress mflux JSON pretty-print only)."""
-    if not image_path or not user_comment:
-        return
-    try:
-        from PIL import Image
-    except ImportError:
-        return
-    try:
-        with Image.open(image_path) as img:
-            exif = img.getexif()
-            if exif is None:
-                exif = {}
-            exif[TAG_USERCOMMENT] = user_comment
-            img.save(image_path, exif=exif)
-    except Exception:
-        pass
 
 
 def write_exif_user_comment(

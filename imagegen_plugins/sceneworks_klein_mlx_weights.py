@@ -171,9 +171,3 @@ def init_flux2_klein_from_sceneworks_tier(
     return model
 
 
-def sceneworks_model_path_for_repo(repo_id: str, tier: str = DEFAULT_MLX_TIER) -> str | None:
-    if not is_sceneworks_klein_mlx_repo(repo_id):
-        return None
-    from imagegen_plugins.sceneworks_klein_mlx import resolve_tier_model_path
-
-    return resolve_tier_model_path(repo_id, tier)

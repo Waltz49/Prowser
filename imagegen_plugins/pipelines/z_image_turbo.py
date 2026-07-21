@@ -26,12 +26,6 @@ _pipe = None
 _loaded_hf_model_id: Optional[str] = None
 
 
-def diffusers_is_installed() -> bool:
-    from pyinstaller_frozen_support import diffusers_is_installed as _installed
-
-    return _installed()
-
-
 def z_image_turbo_is_installed() -> bool:
     """True when diffusers Z-Image pipeline module and SDNQ are available (no import)."""
     from pyinstaller_frozen_support import sdnq_is_installed, z_image_pipeline_is_installed

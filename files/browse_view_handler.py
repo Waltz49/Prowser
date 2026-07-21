@@ -98,16 +98,6 @@ class BrowseViewHandler:
             self.main_window.scroll_y = 0
             self.main_window.browse_zoom_pinned = False
     
-    def ensure_browse_view_focus(self):
-        """Ensure proper focus for browse view keyboard event handling"""
-        if self.main_window.current_view_mode != 'browse':
-            return
-        if should_preserve_window_focus(self.main_window):
-            self.main_window.browse_view_input_ready = True
-            return
-        self.main_window.raise_()
-        self.main_window.browse_view_input_ready = True
-    
     def resize_browse_view_image_container(self):
         """Resize the image container in browse view mode to account for sidebar changes"""
         if self.main_window.current_view_mode == 'browse' and hasattr(self.main_window, 'image_container'):

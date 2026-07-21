@@ -78,11 +78,3 @@ def prune_walk_dirs(
     return False
 
 
-def is_under_cache_dir(root_resolved: str, cache_dir_resolved: Optional[str]) -> bool:
-    """True if root is the cache dir or inside it."""
-    if not cache_dir_resolved:
-        return False
-    return (
-        root_resolved == cache_dir_resolved
-        or root_resolved.startswith(cache_dir_resolved + os.sep)
-    )

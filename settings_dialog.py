@@ -2997,11 +2997,6 @@ class SettingsDialog(QDialog):
         self._update_transparency_color_button()
         self._update_browse_border_color_button()
 
-    def _sync_browse_transparency_to_current_settings(self) -> None:
-        """Mirror browse transparency widgets into current_settings (persist on OK)."""
-        bts = merge_browse_transparency_settings(self.current_settings.get("browse_transparency_settings"))
-        self.current_settings["browse_transparency_settings"] = bts
-
     def _on_browse_transparency_widget_changed(self, *_args) -> None:
         if not hasattr(self, "theme_preset_combo"):
             return
@@ -5705,13 +5700,6 @@ class SettingsDialog(QDialog):
         from imagegen_plugins.hf_model_ids import FLUX1_DEV
         return getattr(self, "_lora_model_key", FLUX1_DEV)
 
-    def _current_lora_host_id(self) -> str:
-        """Legacy alias; prefer _current_lora_model_key."""
-        from imagegen_plugins.lora_model_registry import host_id_for_lora_model
-
-        host = host_id_for_lora_model(self._current_lora_model_key())
-        return host or "flux1_t2i"
-
     def _update_lora_available_in_text(self) -> None:
         if not hasattr(self, "_lora_available_in_label"):
             return
@@ -5823,31 +5811,6 @@ class SettingsDialog(QDialog):
         imagegen["lora_catalog"] = lc
         cfg["imagegen"] = imagegen
         return cfg
-
-    def _persist_lora_catalog_state(
-        self,
-        *,
-        model_id: Optional[str] = None,
-        include_enabled: bool = False,
-        hidden_ids: Optional[list] = None,
-        enabled_ids: Optional[list] = None,
-    ) -> None:
-        """Update in-memory LoRA draft for one base model (persist on OK / tab leave)."""
-        mid = model_id or self._current_lora_model_key()
-        if not hasattr(self, "_lora_draft_by_model"):
-            self._lora_draft_by_model = {}
-        slice_ = self._lora_draft_slice(mid)
-        if hidden_ids is not None:
-            slice_["hidden_ids"] = []
-        elif mid == getattr(self, "_lora_model_key", None) or mid == self._current_lora_model_key():
-            slice_["hidden_ids"] = []
-        if include_enabled:
-            slice_["enabled_ids"] = (
-                enabled_ids
-                if enabled_ids is not None
-                else self._get_lora_enabled_ids_from_widgets()
-            )
-        self._lora_draft_by_model[mid] = slice_
 
     def _flush_lora_tab_to_disk(self) -> bool:
         """Write per-model LoRA drafts to settings.json when they changed."""
@@ -8119,10 +8082,6 @@ class SettingsDialog(QDialog):
         if hasattr(self, "tab_widget") and self.tab_widget:
             self.tab_widget.refresh_theme_styles()
 
-    def apply_dark_theme(self):
-        """Backward compatibility wrapper for old call sites."""
-        self.apply_theme()
-
     def showEvent(self, event):
         """Handle show events to update button state"""
         super().showEvent(event)
@@ -8513,54 +8472,6 @@ Total Requests:
                     f"An error occurred while clearing the thumbnail cache:\n\n{str(e)}"
                 ) 
 
-    
-    def _get_image_recognition_cache_size(self) -> Optional[int]:
-        """Get total size of image recognition cache files in bytes.
-        Returns None if cache is not loaded/available."""
-        try:
-            from config import get_config
-            config = get_config()
-            cache_dir = config.image_recognition_cache_dir
-            
-            # Check if cache directory exists
-            if not cache_dir.exists():
-                return None  # Cache directory doesn't exist
-            
-            # Sum up sizes of ALL cache files in the directory and subdirectories
-            # This includes .npz cache files in cnn_features_*/ and clip_features_*/ subdirectories
-            # and index .json files in the root cache directory
-            total_size = 0
-            cache_files_found = False
-            
-            # Check index files (JSON format)
-            for cache_file in cache_dir.iterdir():
-                if cache_file.is_file() and cache_file.name.endswith('.json'):
-                    # Count index files (cnn_index_*.json and clip_index_*.json)
-                    if cache_file.name.startswith('cnn_index_') or cache_file.name.startswith('clip_index_'):
-                        try:
-                            total_size += cache_file.stat().st_size
-                            cache_files_found = True
-                        except Exception:
-                            pass  # Skip files that can't be stat'd
-            
-            # Check subdirectories for .npz cache files
-            for subdir in cache_dir.iterdir():
-                if subdir.is_dir() and (subdir.name.startswith('cnn_features_') or subdir.name.startswith('clip_features_')):
-                    for cache_file in subdir.iterdir():
-                        if cache_file.is_file() and cache_file.name.endswith('.npz'):
-                            try:
-                                total_size += cache_file.stat().st_size
-                                cache_files_found = True
-                            except Exception:
-                                pass  # Skip files that can't be stat'd
-            
-            # If no cache files found, return None to indicate cache not loaded
-            if not cache_files_found:
-                return None
-            
-            return total_size
-        except Exception:
-            return None  # Return None on error to indicate cache not available
     
     def clear_image_recognition_cache(self):
         """Clear image recognition (CNN/CLIP) feature cache"""

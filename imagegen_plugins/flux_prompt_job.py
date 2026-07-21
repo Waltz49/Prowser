@@ -224,10 +224,6 @@ def attach_flux_prompt_ai_job_to_values(
     return True
 
 
-def prompt_required_for_generate(owner: Any, values: Dict[str, Any]) -> bool:
-    """False when Job AI can run with empty prompt (pass-image preflight passes)."""
-    return not allow_empty_prompt_for_flux_ai_job(owner, force=False)
-
 
 def allow_empty_prompt_for_flux_ai_job(
     owner: Any, *, force: bool = False

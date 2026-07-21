@@ -80,19 +80,6 @@ class ChatImageStore:
     def session_dir(self) -> str:
         return self._session_dir
 
-    def reset_session(self) -> None:
-        """Clear chat images for the current storage mode and start fresh."""
-        if self._persistent:
-            try:
-                if os.path.isdir(self._session_dir):
-                    shutil.rmtree(self._session_dir, ignore_errors=True)
-            except OSError:
-                pass
-            reset_image_store_session(self, persistent=True)
-            return
-        cleanup_all_chat_storage()
-        reset_image_store_session(self, persistent=False)
-
     def store_images(
         self,
         source_paths: list[str],

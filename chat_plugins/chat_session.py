@@ -39,11 +39,6 @@ class ChatSession:
     def append(self, message: ChatMessage) -> None:
         self.messages.append(message)
 
-    def message_at(self, index: int) -> ChatMessage | None:
-        if 0 <= index < len(self.messages):
-            return self.messages[index]
-        return None
-
     def index_of(self, message_id: str) -> int:
         for idx, msg in enumerate(self.messages):
             if msg.message_id == message_id:
@@ -54,13 +49,6 @@ class ChatSession:
         if 0 <= index < len(self.messages):
             return self.messages.pop(index)
         return None
-
-    def truncate_after(self, index: int) -> None:
-        """Keep messages through *index* inclusive."""
-        if index < 0:
-            self.messages.clear()
-            return
-        self.messages = self.messages[: index + 1]
 
     def last_user_index(self) -> int:
         for idx in range(len(self.messages) - 1, -1, -1):

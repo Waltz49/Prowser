@@ -541,27 +541,6 @@ def get_gps_coords_from_path(image_path: str) -> Optional[Tuple[float, float]]:
         return None
 
 
-def exif_orientation_to_rotation(orientation: int) -> Tuple[float, bool]:
-    """Convert EXIF orientation value to rotation degrees and mirror flag.
-
-    Args:
-        orientation: EXIF orientation value (1-8)
-
-    Returns:
-        Tuple of (rotation_degrees, mirrored)
-    """
-    orientation_map = {
-        1: (0, False),
-        2: (0, True),
-        3: (180, False),
-        4: (180, True),
-        5: (270, True),
-        6: (270, False),
-        7: (90, True),
-        8: (90, False),
-    }
-    return orientation_map.get(orientation, (0, False))
-
 
 def format_supports_exif(save_format: str) -> bool:
     """Return True if the given PIL save format supports EXIF."""

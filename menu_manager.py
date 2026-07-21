@@ -1586,20 +1586,6 @@ class MenuManager:
             f"Image-generation dialog settings were reset.{reopen}",
         )
 
-    def _debug_download_sample_flux_loras(self):
-        """Image > Download LoRAs — bash script with hf download commands."""
-        from imagegen_plugins.debug_download_script_dialog import (
-            run_flux_lora_download_script_dialog,
-        )
-
-        run_flux_lora_download_script_dialog(self.main_window)
-
-    def _debug_download_flux_models(self):
-        """Image > Manage models — pick a plugin model to install or delete."""
-        from imagegen_plugins.debug_download_models_dialog import run_download_models_dialog
-
-        run_download_models_dialog(self.main_window)
-
     def _debug_save_canvas_available(self, main_window) -> bool:
         """Whether Save Canvas can run (no grab — safe for menu aboutToShow)."""
         mode = getattr(main_window, "current_view_mode", None)
@@ -2240,14 +2226,6 @@ class MenuManager:
         except RuntimeError:
             pass  # C++ object may be deleted (macOS native menu bar)
     
-    def apply_dark_theme(self):
-        """Apply dark theme to match the web version
-        
-        Note: Theme is now applied globally via QApplication.setStyleSheet() in prowser.py.
-        This method is kept for backward compatibility but does nothing.
-        """
-        # Theme is applied globally, no action needed
-        pass
     from typing import List, Dict, Any
 
     def query_menu_keys(self) -> List[Dict[str, Any]]:

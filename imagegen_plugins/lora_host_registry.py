@@ -76,10 +76,6 @@ LORA_HOST_ORDER: Tuple[str, ...] = (
 )
 
 
-def get_lora_host(host_id: str) -> LoraHost | None:
-    return LORA_HOSTS.get(host_id)
-
-
 def lora_host_for_pipeline(pipeline_id: str) -> str | None:
     for host in LORA_HOSTS.values():
         if pipeline_id in host.pipeline_ids:

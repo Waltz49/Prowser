@@ -21,12 +21,6 @@ def extract_exif_orientation(image_path: str) -> Optional[int]:
     return get_exif_orientation_from_path(image_path)
 
 
-def exif_orientation_to_rotation(orientation: int) -> Tuple[float, bool]:
-    """Convert EXIF orientation value to rotation degrees and mirror flag. Delegates to exif_utils."""
-    from exif.exif_utils import exif_orientation_to_rotation as _orientation_to_rotation
-    return _orientation_to_rotation(orientation)
-
-
 def extract_gps_from_exif(image_path: str) -> Optional[Tuple[float, float]]:
     """Extract GPS coordinates from EXIF data. Delegates to exif_utils."""
     from exif.exif_utils import get_gps_coords_from_path

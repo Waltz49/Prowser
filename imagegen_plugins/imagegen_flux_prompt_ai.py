@@ -226,10 +226,6 @@ class ImageGenFluxPromptAi:
         self._dot_timer.setInterval(400)
         self._dot_timer.timeout.connect(self._on_dot_tick)
 
-    def make_action_buttons(self) -> list[QPushButton]:
-        """Legacy side-column hook; controls live in the system-prompt toolbar."""
-        return []
-
     def _reset_stale_ai_widgets(self) -> None:
         if self._ai_btn is not None and not _flux_prompt_widget_alive(self._ai_btn):
             self._ai_btn = None
@@ -376,12 +372,6 @@ class ImageGenFluxPromptAi:
         if not self.ai_controls_active(owner):
             return False
         return self._job_cb.isChecked()
-
-    def attach_job_ai_meta_to_values(self, owner: Any, values: dict) -> bool:
-        return attach_flux_prompt_ai_job_to_values(owner, values, force=False)
-
-    def attach_job_ai_meta_for_queue(self, owner: Any, values: dict) -> bool:
-        return attach_flux_prompt_ai_job_to_values(owner, values, force=True)
 
     def _pass_image_checked(self) -> bool:
         from imagegen_plugins.flux_prompt_job import pass_image_checked_for_owner

@@ -286,37 +286,3 @@ def face_mean_distance(known_encodings: List[List[float]], unknown_encoding: Lis
         return None
 
 
-def get_first_encoding_from_path(image_path: str) -> Optional[List[float]]:
-    """Convenience: get the first face encoding from an image file, or None."""
-    encodings = encode_faces_from_path(image_path)
-    return encodings[0] if encodings else None
-
-
-def get_largest_face_encoding_from_path(image_path: str) -> Optional[List[float]]:
-    """
-    Detect faces and return the 128-D encoding for the largest face by bounding-box area.
-    Same load/resize/model path as encode_faces_from_path. Returns None if none or on error.
-    """
-    lib = _get_lib()
-    if lib is None:
-        return None
-    try:
-        image = _load_image_with_exif_correction(image_path)
-        if image is None:
-            return None
-        image, _ = _maybe_resize_for_detection(image)
-        locations = lib.face_locations(image)
-        if not locations:
-            return None
-
-        def _area(loc):
-            top, right, bottom, left = loc
-            return (right - left) * (bottom - top)
-
-        best = max(locations, key=_area)
-        encodings = lib.face_encodings(image, known_face_locations=[best], model="large")
-        if not encodings:
-            return None
-        return list(encodings[0])
-    except Exception:
-        return None

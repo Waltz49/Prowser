@@ -132,31 +132,10 @@ class ViewModeManager:
             return
         self.open_browse_view(self.main_window.highlight_index)
     
-    def _ensure_fullscreen_focus(self):
-        """Ensure proper focus in fullscreen mode"""
-        if self.main_window.current_view_mode == 'browse':
-            if hasattr(self.main_window, 'image_container'):
-                self.main_window.image_container.setFocus()
-    
     def enter_macos_space_mode(self):
         """Enter macOS Space display mode."""
         self.main_window.enter_macos_space_mode()
 
-    def enter_windowed_mode(self):
-        """Enter windowed display mode."""
-        self.main_window.enter_windowed_mode()
-
-    def toggle_macos_display_mode(self):
-        """Toggle macOS Space vs windowed display mode."""
-        self.main_window.toggle_macos_display_mode()
-
-    def toggle_maximized(self):
-        """Toggle maximized window"""
-        if self.main_window.isMaximized():
-            self.main_window.showNormal()
-        else:
-            self.main_window.showMaximized()
-    
     def toggle_actual_size(self):
         """Toggle actual size display mode"""
         if hasattr(self.main_window, 'browse_view_handler') and self.main_window.browse_view_handler:

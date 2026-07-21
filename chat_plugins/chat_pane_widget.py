@@ -425,9 +425,6 @@ class ChatPaneWidget(QWidget):
             self._scroll.show()
             self._prompt_input.show()
 
-    def prompt_text_edit(self):
-        return self._prompt_input.text_edit()
-
     def ensure_input_focus_policy(self) -> None:
         """Keep chat text fields typable on click but out of the Tab focus chain."""
         _apply_chat_text_field_focus_policies(self)

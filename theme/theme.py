@@ -1344,41 +1344,6 @@ class ThemeStylesMixin:
             }}
         """
 
-    def file_tree_filter_mode_button_stylesheet(self, size: int) -> str:
-        t = self
-        s = size
-        icon_c = "#1a1a1a" if self.theme_id == "light" else "#ffffff"
-        btn_bg = t._file_tree_control_surface_hex()
-        btn_hover = t._file_tree_control_surface_hover_hex()
-        return f"""
-            QPushButton {{
-                background-color: {btn_bg};
-                color: {icon_c};
-                border-width: 1px;
-                border-style: solid;
-                border-color: {t.file_tree_filter_btn_border_hex};
-                border-radius: 0px;
-                min-width: {s}px;
-                max-width: {s}px;
-                min-height: {s}px;
-                max-height: {s}px;
-                padding: 0px;
-            }}
-            QPushButton:checked {{
-                background-color: {btn_bg};
-                border-color: {t.file_tree_filter_btn_border_hex};
-            }}
-            QPushButton:hover {{
-                background-color: {btn_hover};
-            }}
-            QPushButton:checked:hover {{
-                background-color: {btn_hover};
-            }}
-        """
-
-    def file_tree_filter_separator_stylesheet(self) -> str:
-        return f"QFrame {{ background-color: {self.file_tree_filter_sep_hex}; max-width: 1px; }}"
-
     def shortcuts_sidebar_widget_stylesheet(self) -> str:
         return f"QWidget {{ background-color: {self.sidebar_background_color_hex}; }}"
 

@@ -42,17 +42,6 @@ class LoraCheckStats:
     skipped_loras: int = 0
     skipped_model_probes: int = 0
 
-    def as_dict(self) -> Dict[str, int]:
-        return {
-            "loras_total": self.loras_total,
-            "probes_done": self.probes_done,
-            "probes_total": self.probes_total,
-            "supported_loras": self.supported_loras,
-            "removed_loras": self.removed_loras,
-            "skipped_loras": self.skipped_loras,
-            "skipped_model_probes": self.skipped_model_probes,
-        }
-
 
 def count_local_lora_probes(entries: List[FluxLoraEntry]) -> int:
     """Probe count for progress UI (installed base models only)."""

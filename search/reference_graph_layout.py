@@ -138,35 +138,6 @@ class ReferenceGraphLayoutResult:
     layers: Dict[str, int] = field(default_factory=dict)  # normpath -> layer index
 
 
-def _assign_layers(
-    graph: ReferenceGraph,
-) -> Tuple[Dict[str, int], Dict[int, List[str]]]:
-    """Assign nodes to layers via longest-path rank (sources at top, products below)."""
-    norm_nodes = [_norm_path(p) for p in graph.nodes]
-    node_set = set(norm_nodes)
-    layers: Dict[str, int] = {n: 0 for n in norm_nodes}
-
-    for _ in range(len(norm_nodes) + 1):
-        changed = False
-        for source, target in graph.edges:
-            sn, tn = _norm_path(source), _norm_path(target)
-            if sn not in node_set or tn not in node_set or sn == tn:
-                continue
-            new_layer = layers[sn] + 1
-            if new_layer > layers[tn]:
-                layers[tn] = new_layer
-                changed = True
-        if not changed:
-            break
-
-    by_layer: Dict[int, List[str]] = {}
-    for n, layer in layers.items():
-        by_layer.setdefault(layer, []).append(n)
-    for layer_nodes in by_layer.values():
-        layer_nodes.sort(key=lambda n: graph.path_order.get(n, 0))
-
-    return layers, by_layer
-
 
 def _assign_layers_from_focus(
     graph: ReferenceGraph,
@@ -316,76 +287,7 @@ def _scatter_positions_in_layer(
     return out
 
 
-def _rect_blocks_segment(
-    rect: QRect, x1: float, y1: float, x2: float, y2: float, pad: int = 4
-) -> bool:
-    """True if axis-aligned segment intersects *rect* (horizontal or vertical only)."""
-    r = rect.adjusted(-pad, -pad, pad, pad)
-    if abs(y1 - y2) < 0.5:
-        y = y1
-        xa, xb = (x1, x2) if x1 <= x2 else (x2, x1)
-        if r.top() <= y <= r.bottom():
-            return not (xb < r.left() or xa > r.right())
-    if abs(x1 - x2) < 0.5:
-        x = x1
-        ya, yb = (y1, y2) if y1 <= y2 else (y2, y1)
-        if r.left() <= x <= r.right():
-            return not (yb < r.top() or ya > r.bottom())
-    return False
 
-
-def _gutter_x_clear_of_nodes(
-    gutter_y: float,
-    x1: float,
-    x2: float,
-    node_rects: Dict[str, QRect],
-    layer_of_path: Dict[str, int],
-    src_layer: int,
-    tgt_layer: int,
-) -> bool:
-    """Horizontal segment at gutter_y from x1 to x2 must not cross node rows between layers."""
-    xa, xb = (x1, x2) if x1 <= x2 else (x2, x1)
-    for path, rect in node_rects.items():
-        layer = layer_of_path.get(path, -1)
-        if layer < src_layer or layer > tgt_layer:
-            continue
-        if _rect_blocks_segment(rect, xa, gutter_y, xb, gutter_y):
-            return False
-    return True
-
-
-def _pick_gutter_lane_x(
-    x_start: float,
-    x_end: float,
-    gutter_y: float,
-    lane_index: int,
-    lane_count: int,
-    node_rects: Dict[str, QRect],
-    layer_of_path: Dict[str, int],
-    src_layer: int,
-    tgt_layer: int,
-    content_left: float,
-    content_right: float,
-) -> float:
-    """Pick horizontal x in gutter that avoids crossing thumbnails."""
-    base = (x_start + x_end) / 2.0
-    spread = 18.0 * max(1, lane_count - 1)
-    offsets = [0.0]
-    for i in range(1, max(lane_count, 2)):
-        offsets.extend([i * 18.0, -i * 18.0])
-    order = sorted(range(len(offsets)), key=lambda i: abs(offsets[i]))
-    for idx in order:
-        if lane_count <= len(order) and idx != lane_index:
-            continue
-        x_lane = base + offsets[idx % len(offsets)]
-        x_lane = max(content_left + 8, min(content_right - 8, x_lane))
-        if _gutter_x_clear_of_nodes(
-            gutter_y, x_start, x_lane, node_rects, layer_of_path, src_layer, tgt_layer
-        ) and _gutter_x_clear_of_nodes(
-            gutter_y, x_lane, x_end, node_rects, layer_of_path, src_layer, tgt_layer
-        ):
-            return x_lane
-    return base
 
 
 def _gutter_ys_between(
@@ -413,56 +315,7 @@ def _gutter_ys_between(
     return ys, downward
 
 
-def _channel_x_for_lane(
-    lane_index: int,
-    lane_count: int,
-    content_left: float,
-    content_width: float,
-) -> float:
-    """Dedicated vertical channel x so edges do not stack on the node column."""
-    n = max(1, lane_count)
-    frac = (lane_index + 1) / (n + 1)
-    return content_left + frac * content_width
 
-
-def _vertical_segment_clear(
-    x: float,
-    y_min: float,
-    y_max: float,
-    node_rects: Dict[str, QRect],
-    pad: int = 6,
-) -> bool:
-    ya, yb = (y_min, y_max) if y_min <= y_max else (y_max, y_min)
-    for rect in node_rects.values():
-        r = rect.adjusted(-pad, -pad, pad, pad)
-        if r.left() <= x <= r.right() and not (yb < r.top() or ya > r.bottom()):
-            return False
-    return True
-
-
-def _pick_channel_x(
-    lane_index: int,
-    lane_count: int,
-    content_left: float,
-    content_width: float,
-    gutter_ys: List[float],
-    node_rects: Dict[str, QRect],
-) -> float:
-    """Staggered channel x that keeps the vertical spine out of thumbnails."""
-    if not gutter_ys:
-        return _channel_x_for_lane(lane_index, lane_count, content_left, content_width)
-    y_min, y_max = min(gutter_ys), max(gutter_ys)
-    base = _channel_x_for_lane(lane_index, lane_count, content_left, content_width)
-    spread = max(24.0, content_width / max(8, lane_count + 2))
-    candidates = [base]
-    for i in range(1, max(lane_count, 3)):
-        candidates.extend([base + i * spread, base - i * spread])
-    margin = 12.0
-    for cx in candidates:
-        cx = max(content_left + margin, min(content_left + content_width - margin, cx))
-        if _vertical_segment_clear(cx, y_min, y_max, node_rects):
-            return cx
-    return base
 
 
 def _edge_sides(src_rect: QRect, tgt_rect: QRect) -> Tuple[str, str]:

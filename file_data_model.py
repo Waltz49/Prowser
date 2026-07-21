@@ -59,10 +59,6 @@ class FileDataModel(QObject):
         # Listeners for updates (for tree view synchronization, etc.)
         self._update_listeners: List[Callable] = []
 
-    def add_update_listener(self, callback: Callable) -> None:
-        """Register a callback to be notified when model data changes"""
-        self._update_listeners.append(callback)
-    
     def get_displayed_images(self) -> List[str]:
         """Get current displayed images list (thread-safe)"""
         with QMutexLocker(self._mutex):

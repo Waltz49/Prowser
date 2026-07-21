@@ -48,7 +48,6 @@ import thumbnails.thumbnail_constants as tc
 from path_exclusions import _get_excluded_paths, _is_excluded_path, prune_walk_dirs
 from theme.theme_service import get_active_theme
 from utils import (
-    entry_debug,
     file_string,
     folder_basename_for_display,
     get_file_extension,
@@ -2498,9 +2497,6 @@ class CustomFileSystemFilter(QSortFilterProxyModel):
         self.has_images_cache[cache_key] = found
         self._pending_deep_checks.discard(cache_key)
 
-    def invalidate_expanded_dirs_cache(self) -> None:
-        self._expanded_dirs_cache = None
-
     def _expanded_dirs_for_priority(self) -> Set[str]:
         # Never call get_expanded_directories() during filterAcceptsRow (rowCount re-enters filter).
         if self._in_filter_accept_row:
@@ -4706,22 +4702,6 @@ class FileTreeHandler(QObject):
         Structured for future configurability (e.g. config setting)."""
         # Future: settings.get('collapse_fallback_directory', None) -> expand if None
         return os.path.expanduser("~")
-
-    def go_to_home_directory(self) -> None:
-        # Collapse all and expand to user directory (same behavior as cmd-enter/cmd-return)
-        # The collapse_all() method will handle expansion, highlighting, and opening
-        self.collapse_all()
-
-    def go_to_parent_directory(self) -> None:
-        if hasattr(self.main_window, 'current_directory') and self.main_window.current_directory:
-            parent_dir = os.path.dirname(self.main_window.current_directory)
-            if parent_dir != self.main_window.current_directory:
-                self.update_root_directory(parent_dir)
-                try:
-                    self.main_window.directory_stack_history_handler.save_current_state("file_tree_handler.go_to_parent_directory", delay=0.0)
-                except Exception:
-                    pass
-                self.main_window.load_directory(parent_dir, external_load=True)
 
     def _expand_root_to_home(self) -> None:
         try:

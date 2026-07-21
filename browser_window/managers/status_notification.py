@@ -75,10 +75,6 @@ class NotificationBubble(QWidget):
         QTimer.singleShot(0, self._fade_anim.start)
         self._hide_timer.start(duration)
 
-    def is_still_displayed(self) -> bool:
-        """True if visible and not in fade-out (still the active toast)."""
-        return self.isVisible() and not self._hiding
-
     def start_fade_out(self):
         if self._hiding:
             return
@@ -289,44 +285,6 @@ class StatusNotification(QWidget):
         except ValueError:
             return
         bubble.start_fade_out()
-
-    def _remove_bubble_immediately(self, bubble, idx):
-        """Remove bubble without fade. Items above move down to fill gap; items below never move."""
-        removed_h = bubble.height() + (BUBBLE_GAP if idx < len(self._bubbles) - 1 else 0)
-        self._bubbles.pop(idx)
-        bubble.close()
-        bubble.deleteLater()
-
-        if not self._bubbles:
-            return
-
-        _, base_y = self._get_screen_origin()
-
-        # Bubbles below stay put. Animate bubbles above removed one down.
-        to_animate = self._bubbles[:idx]
-        if to_animate:
-            if self._pos_anim_group:
-                self._pos_anim_group.stop()
-                self._pos_anim_group = None
-            group = QParallelAnimationGroup(self)
-            for b in to_animate:
-                anim = QPropertyAnimation(b, b"pos")
-                anim.setDuration(SLIDE_DURATION_MS)
-                anim.setEasingCurve(QEasingCurve.OutCubic)
-                target_y = b.y() + removed_h
-                anim.setStartValue(b.pos())
-                anim.setEndValue(QPoint(b.x(), target_y))
-                group.addAnimation(anim)
-
-            def after_slide():
-                self._pos_anim_group = None
-                self._layout_all_bubbles()
-
-            group.finished.connect(after_slide)
-            self._pos_anim_group = group
-            group.start(QPropertyAnimation.DeleteWhenStopped)
-        else:
-            self._layout_all_bubbles()
 
     def _on_bubble_dismissed(self, bubble):
         """Fade-out completed; remove bubble and animate only items above it down. Items below stay put."""

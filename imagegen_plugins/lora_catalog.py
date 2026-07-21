@@ -8,9 +8,7 @@ from pathlib import Path
 from typing import Any, Dict, FrozenSet, List, Optional, Tuple, TYPE_CHECKING
 
 from imagegen_plugins.lora_catalog_settings import (
-    all_hidden_lora_ids,
     apply_entry_overrides,
-    enabled_lora_ids_for_host,
     enabled_lora_ids_for_model,
     entry_overrides_from_lc,
     lora_catalog_from_settings,
@@ -56,7 +54,6 @@ _MODEL_SIZE_TAG_BY_KEY: Dict[str, str] = {
 from imagegen_plugins.lora_host_registry import (
     HOST_FLUX2_KLEIN,
     LORA_HOST_ORDER,
-    get_lora_host,
     lora_hosts_for_settings,
 )
 
@@ -192,11 +189,6 @@ def is_lora_installed(
     return False
 
 
-def installed_lora_ids(settings: Optional[Dict[str, Any]] = None) -> FrozenSet[str]:
-    return frozenset(
-        lid for lid in merged_lora_catalog(settings) if is_lora_installed(lid, settings)
-    )
-
 
 def lora_model_support(settings: Optional[Dict[str, Any]] = None) -> Dict[str, Tuple[str, ...]]:
     if settings is None:
@@ -256,14 +248,6 @@ def lora_probe_prompt(entry: FluxLoraEntry, *, fallback: str = "test") -> str:
     return f"{trigger}, {fallback}"
 
 
-def format_lora_model_support_suffix(supported_models: Tuple[str, ...]) -> str:
-    if not supported_models:
-        return ""
-    labels = [m for m in LORA_PROBE_MODEL_ORDER if m in supported_models]
-    if not labels:
-        return ""
-    return f" ({', '.join(labels)})"
-
 
 def lora_probe_passed_for_model(
     lora_id: str,
@@ -293,25 +277,11 @@ def lora_probe_passed_for_model(
     return any(m in passed for m in klein_lora_model_aliases(model_key))
 
 
-def lora_settings_display_name(
-    entry: FluxLoraEntry,
-    settings: Optional[Dict[str, Any]] = None,
-    *,
-    model_key: str = "",
-) -> str:
-    """Settings grid label (no probe-model suffix; model is chosen in the page combo)."""
-    _ = settings
-    return lora_choice_label(entry, model_key=model_key)
-
 
 def probe_models_for_lora_entry(entry: FluxLoraEntry) -> Tuple[str, ...]:
     """Probe keys for Check LoRAs (full hf_model_id per base model)."""
     return lora_models_for_entry(entry)
 
-
-def deleted_lora_ids(settings: Optional[Dict[str, Any]] = None) -> FrozenSet[str]:
-    """All hidden LoRA ids (any host). Back-compat name."""
-    return all_hidden_lora_ids(settings)
 
 
 def catalog_entries_for_model(
@@ -341,15 +311,6 @@ def catalog_entries_for_settings(
     )
     return tuple(e for e in entries if e.mflux_compatible is not False)
 
-
-def enabled_lora_ids(
-    settings: Optional[Dict[str, Any]] = None,
-    host_id: Optional[str] = None,
-) -> Tuple[str, ...]:
-    if host_id:
-        return enabled_lora_ids_for_host(host_id, settings)
-    # Legacy: union across flux1_t2i only for flat callers.
-    return enabled_lora_ids_for_host("flux1_t2i", settings)
 
 
 def lora_visible_for_run(
@@ -427,36 +388,11 @@ def lora_choices_for_pipeline(
     return tuple(choices)
 
 
-def resolve_plugin_base_model(hf_model_id: str, pipeline_id: str) -> str:
-    """Deprecated: use lora_host_id on plugins. Kept for legacy callers."""
-    hf = (hf_model_id or "").strip()
-    if pipeline_id in MFLUX_LORA_FILL_PIPELINES or FLUX1_FILL_DEV in hf:
-        return FLUX1_FILL_DEV
-    if FLUX1_SCHNELL in hf.lower() or hf == FLUX1_SCHNELL:
-        return FLUX1_SCHNELL
-    return FLUX1_DEV
-
 
 def lora_entry_min_steps(lora_id: str, settings: Optional[Dict[str, Any]] = None) -> Optional[int]:
     entry = get_lora_entry(lora_id, settings)
     return entry.min_steps if entry is not None else None
 
-
-def manual_download_help(lora_id: str, settings: Optional[Dict[str, Any]] = None) -> str:
-    entry = get_lora_entry(lora_id, settings)
-    if entry is None:
-        return "Unknown LoRA."
-    if entry.local_path:
-        return f"Local LoRA ({lora_id}): {entry.local_path}"
-    dest = catalog_cache_path(entry)
-    if dest is None:
-        return "Unknown LoRA."
-    return (
-        f"Manual download ({lora_id}):\n"
-        f"  URL: https://huggingface.co/{entry.repo_id}/resolve/main/{entry.filename}\n"
-        f"  Save to: {dest}\n"
-        f"Or: hf download {entry.repo_id} {entry.filename} --local-dir {dest.parent}"
-    )
 
 
 def sample_lora_download_entries() -> Tuple[FluxLoraEntry, ...]:

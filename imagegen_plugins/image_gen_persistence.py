@@ -173,31 +173,6 @@ def load_lora_stack_for_plugin(function: str, plugin_id: str) -> List[str]:
     return _coerce_lora_stack_list(raw_stack)
 
 
-def save_lora_stack_for_plugin(
-    function: str,
-    plugin_id: str,
-    stack: List[str],
-) -> None:
-    plugin_id = _normalize_plugin_id(plugin_id)
-    cleaned = _coerce_lora_stack_list(stack)
-
-    def mutate(imagegen: dict) -> None:
-        dialogs = imagegen.get(_DIALOGS_KEY)
-        if not isinstance(dialogs, dict):
-            dialogs = {}
-            imagegen[_DIALOGS_KEY] = dialogs
-        fn_entry = dialogs.get(function)
-        if not isinstance(fn_entry, dict):
-            fn_entry = {}
-            dialogs[function] = fn_entry
-        stacks = fn_entry.get(_LORA_STACKS_KEY)
-        if not isinstance(stacks, dict):
-            stacks = {}
-            fn_entry[_LORA_STACKS_KEY] = stacks
-        stacks[plugin_id] = cleaned
-
-    _mutate_imagegen_settings(mutate)
-
 
 def _merge_prompt_from_shared(
     shared: Dict[str, Any], per_plugin: Dict[str, Any]
@@ -374,38 +349,6 @@ def switch_plugin_persisted_settings(
     return load_plugin_dialog_settings(function, incoming_plugin_id)
 
 
-def save_dialog_settings(
-    function: str,
-    values: Dict[str, Any],
-    *,
-    active_plugin_id: Optional[str] = None,
-) -> None:
-    """Persist function-level dialog values (legacy flat store).
-
-    When ``active_plugin_id`` is set, delegates to
-    :func:`save_plugin_dialog_settings` so per-plugin fields (including LoRA)
-    are stored under ``imagegen.models`` and ``lora_stacks``.
-    """
-    if active_plugin_id is not None:
-        save_plugin_dialog_settings(
-            function,
-            active_plugin_id,
-            values,
-            active_plugin_id=active_plugin_id,
-        )
-        return
-
-    values = _sanitize_dialog_values(values)
-
-    def mutate(imagegen: dict) -> None:
-        dialogs = imagegen.get(_DIALOGS_KEY)
-        if not isinstance(dialogs, dict):
-            dialogs = {}
-            imagegen[_DIALOGS_KEY] = dialogs
-        dialogs[function] = values
-
-    _mutate_imagegen_settings(mutate)
-
 
 def save_dialog_sessions_batch(
     sessions: Dict[str, Tuple[Dict[str, Any], Optional[str]]],
@@ -481,20 +424,6 @@ def load_model_settings(plugin_id: str) -> Dict[str, Any]:
         saved = dict(models.get("flux_fill_infil") or {})
     return saved
 
-
-def save_model_settings(plugin_id: str, values: Dict[str, Any]) -> None:
-    """Per-plugin dialog field values — prefer :func:`save_plugin_dialog_settings`."""
-    plugin_id = _normalize_plugin_id(plugin_id)
-    values = _sanitize_dialog_values(values)
-
-    def mutate(imagegen: dict) -> None:
-        models = imagegen.get(_LEGACY_MODELS_KEY)
-        if not isinstance(models, dict):
-            models = {}
-            imagegen[_LEGACY_MODELS_KEY] = models
-        models[plugin_id] = values
-
-    _mutate_imagegen_settings(mutate)
 
 
 def load_imagegen_dialog_geometry_hex() -> Optional[str]:
@@ -821,46 +750,11 @@ def load_job_queue_records() -> list:
     return out
 
 
-def load_infill_paint_dialog_geometry_hex() -> Optional[str]:
-    """Deprecated alias — infill paint shares dialog_geometry with other image-gen dialogs."""
-    return load_imagegen_dialog_geometry_hex()
 
 
-def save_infill_paint_dialog_geometry_hex(geom_hex: str) -> None:
-    """Deprecated alias — infill paint shares dialog_geometry with other image-gen dialogs."""
-    save_imagegen_dialog_geometry_hex(geom_hex)
 
 
-def load_lora_catalog_enabled_ids(host_id: str = "flux1_t2i") -> list:
-    from imagegen_plugins.lora_catalog_settings import enabled_lora_ids_for_host
 
-    return list(enabled_lora_ids_for_host(host_id))
-
-
-def load_lora_catalog_hidden_ids(host_id: str) -> list:
-    from imagegen_plugins.lora_catalog_settings import hidden_lora_ids_for_host
-
-    return sorted(hidden_lora_ids_for_host(host_id))
-
-
-def load_lora_catalog_deleted_ids() -> list:
-    """All hidden LoRA ids (any host). Back-compat name."""
-    from imagegen_plugins.lora_catalog import deleted_lora_ids
-
-    return sorted(deleted_lora_ids(get_config().load_settings()))
-
-
-def save_lora_catalog_enabled_ids(enabled_ids: list, *, host_id: str = "flux1_t2i") -> None:
-    save_lora_catalog_state(host_id=host_id, enabled_ids=enabled_ids)
-
-
-def load_lora_catalog_model_support() -> dict:
-    from imagegen_plugins.lora_catalog import lora_model_support
-
-    return {
-        lid: list(models)
-        for lid, models in lora_model_support(get_config().load_settings()).items()
-    }
 
 
 def save_lora_catalog_state(
@@ -1111,26 +1005,6 @@ def update_lora_entry_metadata(
 
     _mutate_imagegen_settings(mutate)
 
-
-def discard_tentative_user_lora(entry) -> None:
-    """Remove a user entry from settings if import failed before registration completed."""
-    from imagegen_plugins.lora_catalog_settings import migrate_lora_catalog
-    from imagegen_plugins.lora_user_entries import USER_ENTRIES_KEY, is_user_lora_id
-
-    if entry is None or not is_user_lora_id(getattr(entry, "lora_id", "")):
-        return
-
-    def mutate(imagegen: dict) -> None:
-        lc = migrate_lora_catalog(dict(imagegen.get("lora_catalog") or {}))
-        raw = dict(lc.get(USER_ENTRIES_KEY) or {})
-        raw.pop(entry.lora_id, None)
-        lc[USER_ENTRIES_KEY] = raw
-        ms = dict(lc.get("model_support") or {})
-        ms.pop(entry.lora_id, None)
-        lc["model_support"] = ms
-        imagegen["lora_catalog"] = lc
-
-    _mutate_imagegen_settings(mutate)
 
 
 def remove_user_lora(lora_id: str) -> None:

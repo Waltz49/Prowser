@@ -115,16 +115,6 @@ def resolve_say_exit_command() -> list[str]:
     return []
 
 
-def resolve_say_exit_script() -> str:
-    """Backward-compatible: return script path when target is a file, else ``\"\"``."""
-    argv = resolve_say_exit_command()
-    if not argv:
-        return ""
-    kind, target = _command_target(argv)
-    if kind == "script":
-        return target
-    return ""
-
 
 def say_exit_argv(text: str) -> list[str]:
     """Build argv for the configured say-exit command."""

@@ -320,64 +320,6 @@ class AppleScriptUndoManager:
             logger.error(f"System trash fallback: Exception: {e}")
             return False
     
-    def test_connection(self) -> bool:
-        """Test if AppleScript can communicate with Finder"""
-        if not self.is_available:
-            logger.warning("AppleScript not available")
-            return False
-        
-        logger.debug("AppleScript undo: Testing connection to Finder...")
-        
-        try:
-            script = '''
-            tell application "Finder"
-                log "AppleScript: Testing connection to Finder"
-                return "OK"
-            end tell
-            '''
-            
-            result = run_osascript(script, timeout=10)
-            
-            success = result.returncode == 0 and result.stdout.strip() == "OK"
-            logger.debug(f"AppleScript undo: Connection test result: {success}")
-            
-            if not success:
-                logger.debug(f"AppleScript undo: Connection test failed - return code: {result.returncode}")
-                if result.stderr:
-                    logger.debug(f"AppleScript undo: Connection test stderr: {result.stderr.strip()}")
-            
-            return success
-        except Exception as e:
-            logger.error(f"AppleScript undo: Exception during connection test: {e}")
-            return False
-
-def test_applescript_undo():
-    """Test the AppleScript undo functionality"""
-    logger.info("Testing AppleScript undo functionality...")
-    
-    manager = AppleScriptUndoManager()
-    
-    if not manager.is_available:
-        logger.error("AppleScript not available on this platform")
-        return
-    
-    # Test connection
-    if manager.test_connection():
-        logger.info("✓ AppleScript connection to Finder: SUCCESS")
-    else:
-        logger.error("✗ AppleScript connection to Finder: FAILED")
-        return
-    
-    # Test with a dummy file (won't actually restore anything)
-    logger.info("Testing with dummy file path...")
-    test_path = "/tmp/test_image.jpg"
-    result = manager.restore_file_from_trash(test_path)
-    
-    if result:
-        logger.info("✓ AppleScript undo test: SUCCESS")
-    else:
-        logger.info("✗ AppleScript undo test: FAILED (expected for non-existent file)")
-
 def _import_appkit_modules():
     """Lazily import AppKit modules when needed"""
     global _NSWorkspace, _NSUndoManager, _NSObject, _NSWorkspaceRecycleOperation
@@ -2456,65 +2398,6 @@ class FileOperationsManager:
         from file_ops.duplicate_hash import compute_file_md5
         return compute_file_md5(file_path)
 
-    def _get_cnn_feature_if_cached(self, path: str, skip_mtime_check: bool = False) -> Optional['torch.Tensor']:
-        """
-        Get CNN feature from cache if available, without extracting.
-        Returns None if not cached.
-        """
-        mw = self.main_window
-        if not hasattr(mw, 'cnn_image_similarity_sorter') or not mw.cnn_image_similarity_sorter:
-            return None
-        cnn_sorter = mw.cnn_image_similarity_sorter
-        # Check in-memory cache first
-        if hasattr(cnn_sorter, '_feature_cache') and path in cnn_sorter._feature_cache:
-            feat, cached_mtime, cached_size = cnn_sorter._feature_cache[path]
-            try:
-                stat = os.stat(path)
-                if skip_mtime_check or (cached_mtime == stat.st_mtime and cached_size == stat.st_size):
-                    return feat
-            except (OSError, IOError):
-                return None
-        # Check disk cache via FeatureCacheManager
-        if cnn_sorter.feature_cache:
-            try:
-                stat = os.stat(path)
-                cached_feat = cnn_sorter.feature_cache.get_cnn_feature(
-                    path, stat.st_mtime, stat.st_size, device='cpu'
-                )
-                return cached_feat
-            except (OSError, IOError):
-                return None
-        return None
-    def _get_clip_feature_if_cached(self, path: str, skip_mtime_check: bool = False) -> Optional['torch.Tensor']:
-        """
-        Get CLIP feature from cache if available, without extracting.
-        Returns None if not cached.
-        """
-        mw = self.main_window
-        if not hasattr(mw, 'cnn_image_similarity_sorter') or not mw.cnn_image_similarity_sorter:
-            return None
-        cnn_sorter = mw.cnn_image_similarity_sorter
-        # Check in-memory cache first
-        if hasattr(cnn_sorter, '_clip_feature_cache') and path in cnn_sorter._clip_feature_cache:
-            feat, cached_mtime, cached_size = cnn_sorter._clip_feature_cache[path]
-            try:
-                stat = os.stat(path)
-                if skip_mtime_check or (cached_mtime == stat.st_mtime and cached_size == stat.st_size):
-                    return feat
-            except (OSError, IOError):
-                return None
-        # Check disk cache via FeatureCacheManager
-        if cnn_sorter.feature_cache:
-            try:
-                stat = os.stat(path)
-                cached_feat = cnn_sorter.feature_cache.get_clip_feature(
-                    path, stat.st_mtime, stat.st_size, device='cpu'
-                )
-                return cached_feat
-            except (OSError, IOError):
-                return None
-        return None
-    
     def _get_cnn_feature_with_metadata(self, path: str, skip_mtime_check: bool = False):
         """Get CNN feature with cached mtime/size metadata"""
         from PySide6.QtCore import QMutexLocker
@@ -6546,45 +6429,6 @@ class FileOperationsManager:
         else:
             if mw.status_notification:
                 mw.status_notification.show_file_operation_message("No undo operations available")
-
-    def _fallback_undo_from_deletion_operations(self):
-        """Fallback undo using deletion operations stack when undo manager fails"""
-        mw = self.main_window
-        import inspect
-        print(f"{RED}DEBUG {RESET}: {RED}_fallback_undo_from_deletion_operations{RESET} called by {GREEN}{inspect.stack()[1].function}{RESET}: Entering")
-        if not hasattr(mw, 'deletion_operations') or not mw.deletion_operations:
-            if mw.status_notification:
-                mw.status_notification.show_file_operation_message("No undo operations available")
-            return
-
-        # Use the existing deletion operations logic
-        last_operation = mw.deletion_operations.pop()
-
-        if len(last_operation) == 1:
-            # Single file operation
-            file_info = last_operation[0]
-
-            # Try standard restore first
-            success = self.restore_file_from_trash_(file_info['path'], file_info.get('original_position'), show_status=False)
-
-            # If standard restore succeeds, update the UI
-            if success:
-                # Update the UI to reflect the restored file
-                self._handle_successful_restore(file_info['path'], file_info.get('original_position'))
-            # If standard restore fails, try AppleScript fallback
-            elif not success:
-                try:
-                    applescript_manager = AppleScriptUndoManager()
-                    if applescript_manager.is_available:
-                        success = applescript_manager.restore_file_from_trash(file_info['path'], file_info.get('original_position'))
-                        if success:
-                            # Update the UI to reflect the restored file
-                            self._handle_successful_restore(file_info['path'], file_info.get('original_position'))
-                except Exception:
-                    pass
-        else:
-            # Multiple file operation
-            self.restore_multiple_files_from_trash_(last_operation)
 
     def undo_move_operation(self, moved_files_info: List[dict]) -> None:
         """Undo move operation by moving files back to their original locations"""

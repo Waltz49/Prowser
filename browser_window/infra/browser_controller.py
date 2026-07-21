@@ -59,5 +59,3 @@ class BrowserController:
     def set_current_directory(self, directory: Optional[str], notify: bool = True) -> None:
         self.model.set_current_directory(directory, notify=notify)
 
-    def set_view_mode(self, mode: str, notify: bool = True) -> None:
-        self.model.set_current_view_mode(mode, notify=notify)

@@ -63,7 +63,6 @@ from imagegen_plugins.model_task_status_info import (
     cooldown_skip_icon_html,
     format_caption_status_html,
     format_image_generation_queue_status_html,
-    format_image_generation_status_html,
     freeze_status_html_generation_elapsed,
     refresh_expand_task_status_html_for_display,
     remove_elapsed_row,
@@ -240,9 +239,6 @@ class ImageGenController(QObject):
 
     def has_pending_work(self) -> bool:
         return bool(self._queue) or self.is_running()
-
-    def is_queue_empty(self) -> bool:
-        return not self._queue
 
     @property
     def active_queue_job_id(self) -> str:
@@ -869,55 +865,6 @@ class ImageGenController(QObject):
             return self._copy_cycle_values
         return self._pending_values
 
-    def get_task_status_info_html(self) -> str:
-        html = self._task_status_info_html
-        in_cooldown = self._is_in_copy_cooldown()
-        elapsed, estimate = self._snapshot_live_timing(in_cooldown=in_cooldown)
-        if (
-            self._task_reference_paths
-            or self._expand_source_path
-            or self._expand_base_path
-        ):
-            show_elapsed = bool(self._expand_source_path or self._expand_base_path)
-            expand_elapsed = None
-            expand_estimate = None
-            if show_elapsed:
-                if elapsed is not None:
-                    expand_elapsed = elapsed
-                    expand_estimate = estimate
-                else:
-                    expand_elapsed = self._wall_clock_elapsed_seconds(
-                        in_cooldown=in_cooldown
-                    )
-            html, self._task_reference_paths = refresh_expand_task_status_html_for_display(
-                html,
-                elapsed_seconds=expand_elapsed,
-                estimate_seconds=expand_estimate,
-                source_path=self._expand_source_path,
-                base_path=self._expand_base_path,
-                reference_paths=self._task_reference_paths,
-            )
-        if in_cooldown:
-            html = apply_cooldown_to_status_html(
-                html,
-                self._cooldown_seconds_remaining(),
-                skip_icon_html=cooldown_skip_icon_html(),
-            )
-        if self._step_progress_start_time is not None and self._live_step_total > 0:
-            display_elapsed = elapsed
-            if display_elapsed is None:
-                display_elapsed = self._wall_clock_elapsed_seconds(
-                    in_cooldown=in_cooldown
-                )
-            html = update_status_html_steps_progress(
-                html,
-                self._live_step,
-                self._live_step_total,
-                elapsed_seconds=display_elapsed,
-                estimate_seconds=estimate,
-            )
-        return html
-
     def _live_generation_elapsed_seconds(self) -> Optional[float]:
         start = self._step_progress_start_time
         if start is None:
@@ -1209,32 +1156,6 @@ class ImageGenController(QObject):
         save_job_queue_records(self._job_queue_records_for_persist())
         self._exit_queue_persisted = True
         self._queue_persist_suppressed = True
-
-    def _fold_active_job_into_queue(self) -> None:
-        """Legacy in-memory fold; persistence uses _job_queue_records_for_persist()."""
-        plugin = self._active_plugin
-        if plugin is None or not self._active_queue_job_id:
-            return
-        if any(job.job_id == self._active_queue_job_id for job in self._queue):
-            return
-        remaining = max(1, self._copies_total - self._copies_done)
-        values = dict(self._pending_values)
-        values["copies"] = remaining
-        from imagegen_plugins.flux_prompt_job import effective_job_prompt_for_tooltip
-
-        job = restore_queued_generate_job(
-            job_id=self._active_queue_job_id,
-            plugin=plugin,
-            plugin_id=plugin.plugin_id,
-            function=plugin.function,
-            values=values,
-            copies_total=remaining,
-            full_prompt=effective_job_prompt_for_tooltip(values),
-        )
-        job.thumbnail_paths = list(self._active_thumbnail_paths) or list(
-            job.thumbnail_paths
-        )
-        self._queue.insert(0, job)
 
     def series_remaining_after_for_row(self, row: int) -> int:
         """Pending images after the current one (active) or after the first (queued)."""
@@ -1549,15 +1470,6 @@ class ImageGenController(QObject):
         if not associated:
             return False
         return os.path.normpath(path) in associated
-
-    def is_viewing_output_in_copy_cooldown(self, path: str) -> bool:
-        if not path:
-            return False
-        return (
-            self._is_in_copy_cooldown()
-            and self._copy_batch_active
-            and self.viewing_path_matches_active_generation(path)
-        )
 
     def snapshot_generation_timing_for_info_panel(
         self,

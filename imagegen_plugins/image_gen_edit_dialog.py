@@ -44,15 +44,11 @@ from imagegen_plugins.image_gen_dialog import (
     image_gen_preview_workarea_fill,
     apply_import_extras_from_image_path,
     load_import_prompt_from_path,
-    configure_image_gen_side_checkbox,
     create_image_gen_side_button_column,
     finalize_image_gen_side_button_column,
-    insert_image_gen_side_column_widget_before_stretch,
-    mount_pass_image_to_ai_checkbox,
     pass_image_to_ai_checked,
     repopulate_image_gen_prompt_import_row,
     repopulate_image_gen_side_buttons,
-    wrap_image_gen_side_checkbox,
     validate_copies_require_random_seed,
     wrap_image_gen_controls_with_side_buttons,
 )
@@ -288,10 +284,6 @@ def active_image_paths_for_edit(main_window) -> list[str]:
                     paths.append(os.path.abspath(image_path))
     return paths
 
-
-def active_image_path_for_edit(main_window) -> Optional[str]:
-    paths = active_image_paths_for_edit(main_window)
-    return paths[0] if paths else None
 
 
 class _SourceImagePreview(QLabel):
@@ -1280,11 +1272,6 @@ class ImageGenEditDialog(ImageGenDimensionAspectMixin, QDialog):
 
         connect_panel_field_widgets(self, self.state_changed.emit)
 
-    def _clear_field_rows(self) -> None:
-        if self._param_panel is not None:
-            self._param_panel.clear(keep_outer=IMAGE_GEN_PERSISTENT_OUTER_FIELD_COUNT)
-            self._widgets.clear()
-
     def _populate_field_rows(self) -> None:
         if self._fields_panel is None or self.plugin is None:
             return
@@ -1364,11 +1351,6 @@ class ImageGenEditDialog(ImageGenDimensionAspectMixin, QDialog):
         refresh_dialog_mflux_lora_combo(self)
         sync_image_gen_generate_enabled(self, panel=self)
 
-    def _wrap(self, layout: QHBoxLayout) -> QWidget:
-        w = QWidget()
-        w.setLayout(layout)
-        return w
-
     def _import_prompt_text_from_source(self) -> bool:
         """Load prompt text from EXIF; return True on success."""
         if not self.source_path:
@@ -1432,18 +1414,6 @@ class ImageGenEditDialog(ImageGenDimensionAspectMixin, QDialog):
         if spec.kind == "text":
             widget.setPlainText(text)
 
-    def _mount_pass_image_to_ai_checkbox(self) -> None:
-        mount_pass_image_to_ai_checkbox(self)
-
-    def _use_custom_size_checked(self) -> bool:
-        entry = self._widgets.get("use_custom_size")
-        if entry is None:
-            return False
-        widget, _, spec = entry
-        if spec.kind == "bool":
-            return widget.isChecked()
-        return False
-
     def _repopulate_side_buttons(self) -> None:
         repopulate_image_gen_prompt_import_row(
             self, self._build_prompt_action_buttons()
@@ -1461,11 +1431,6 @@ class ImageGenEditDialog(ImageGenDimensionAspectMixin, QDialog):
         apply_edit_import_all_button_tooltip(import_all_btn, include_prompt=False)
         buttons.append(import_all_btn)
         return buttons
-
-    def _populate_prompt_side_buttons(self, btn_col: QVBoxLayout) -> None:
-        for button in self._build_prompt_action_buttons():
-            btn_col.addWidget(button, 0, Qt.AlignmentFlag.AlignTop)
-        finalize_image_gen_side_button_column(btn_col)
 
     def _ensure_flux_prompt_ai(self) -> ImageGenFluxPromptAi:
         if self._flux_prompt_ai is None:

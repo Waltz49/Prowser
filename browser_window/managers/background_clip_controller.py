@@ -822,15 +822,6 @@ class BackgroundClipController(QObject):
         """Get current status (now from in-memory cache updated via socket)"""
         return self.current_status if self.current_status.get("last_update", 0) > 0 else None
     
-    def set_foreground_busy(self, busy: bool):
-        """Set foreground busy flag via socket (event-driven)"""
-        if not self.is_process_running():
-            return
-        
-        # Send pause/resume command with busy flag
-        # We don't need to read current state - just send the command
-        self._send_control_command("pause" if busy else "resume", foreground_busy=busy)
-    
     def update_debug_mode(self):
         """Update debug_mode via socket when setting changes (event-driven)"""
         if not self.is_process_running():

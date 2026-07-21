@@ -298,20 +298,6 @@ def model_state(
     }
 
 
-def host_state(
-    settings: Optional[Dict[str, Any]] = None,
-    host_id: str = "",
-) -> Dict[str, List[str]]:
-    lc = lora_catalog_from_settings(settings)
-    by_host = lc.get(_BY_HOST_KEY) or {}
-    slice_ = by_host.get(host_id)
-    if not isinstance(slice_, dict):
-        return _empty_slice()
-    return {
-        "enabled_ids": list(slice_.get("enabled_ids") or []),
-        "hidden_ids": list(slice_.get("hidden_ids") or []),
-    }
-
 
 def hidden_lora_ids_for_model(
     model_key: str,
@@ -334,36 +320,5 @@ def enabled_lora_ids_for_model(
     )
 
 
-def hidden_lora_ids_for_host(
-    host_id: str,
-    settings: Optional[Dict[str, Any]] = None,
-) -> FrozenSet[str]:
-    return frozenset(host_state(settings, host_id)["hidden_ids"])
 
 
-def enabled_lora_ids_for_host(
-    host_id: str,
-    settings: Optional[Dict[str, Any]] = None,
-) -> Tuple[str, ...]:
-    """Legacy host union (settings grid should use per-model APIs)."""
-    st = host_state(settings, host_id)
-    hidden = frozenset(st["hidden_ids"])
-    raw = st["enabled_ids"]
-    if raw:
-        return tuple(x for x in raw if x in LORA_CATALOG and x not in hidden)
-    defaults = DEFAULT_ENABLED_LORA_IDS_BY_HOST.get(host_id, ())
-    return tuple(x for x in defaults if x in LORA_CATALOG and x not in hidden)
-
-
-def all_hidden_lora_ids(settings: Optional[Dict[str, Any]] = None) -> FrozenSet[str]:
-    lc = lora_catalog_from_settings(settings)
-    catalog = _catalog_for_lc(lc)
-    by_model = lc.get(_BY_MODEL_KEY) or {}
-    out: set[str] = set()
-    for model_key in LORA_SETTINGS_MODEL_ORDER:
-        slice_ = by_model.get(model_key)
-        if isinstance(slice_, dict):
-            for lid in slice_.get("hidden_ids") or []:
-                if str(lid) in catalog:
-                    out.add(str(lid))
-    return frozenset(out)

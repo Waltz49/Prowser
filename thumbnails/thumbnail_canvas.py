@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from typing import Dict, List, Optional, Set, Tuple
 
 # Local imports
-from utils import entry_debug, entry_debug_wrapper, normalize_path_for_display, show_styled_warning, is_inside_photos_library
+from utils import entry_debug_wrapper, normalize_path_for_display, show_styled_warning, is_inside_photos_library
 import thumbnails.thumbnail_constants as tc
 from theme.theme_base import asset_path
 

@@ -1457,30 +1457,3 @@ class SortingManager:
         if hasattr(self.main_window, 'menu_manager') and self.main_window.menu_manager:
             self.main_window.menu_manager.update_sort_menu_checkmarks()
     
-    def reset_to_original_order(self):
-        """Reset to original order (date sort)"""
-        if self.main_window.current_view_mode == 'slideshow2':
-            self.main_window.slideshow2_manager.stop_slideshow2()
-        if self.main_window.current_view_mode == 'slideshow3':
-            self.main_window.slideshow3_manager.stop_slideshow3()
-
-        displayed = self.main_window.get_displayed_images()
-        if not displayed:
-            return
-        
-        # Set sort mode to DATE
-        self.main_window.current_sort_mode = SortMode.DATE
-        self.main_window.is_reversed = False
-        
-        # Save settings
-        self.save_sorting_settings()
-        
-        # Apply the sort to current images
-        self.apply_current_sort()
-        
-        # Update UI
-        self.main_window.update_status_bar_sections()
-        self.update_sort_menu_checkmarks()
-        
-        # Show status message
-        self.main_window.status_notification.show_message("Sort mode set to Date (Newest first)")

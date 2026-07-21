@@ -733,10 +733,6 @@ class CombinedSidebarWidget(QWidget):
     def is_chat_covering_panes(self) -> bool:
         return bool(self.chat_covers_panes)
 
-    def enter_chat_cover(self) -> None:
-        """Show chat only at full sidebar height (logical tree/preview unchanged)."""
-        self._enter_chat_cover()
-
     def set_chat_covers_panes(self, covers: bool) -> None:
         if covers:
             self._enter_chat_cover()

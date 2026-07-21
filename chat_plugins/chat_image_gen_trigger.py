@@ -39,10 +39,6 @@ def user_message_has_source_command(text: str) -> bool:
     return bool(_SOURCE_COMMAND_RE.search(text or ""))
 
 
-def user_message_has_image_command(text: str) -> bool:
-    """Backward-compatible alias for create-command detection."""
-    return user_message_has_create_command(text)
-
 
 def classify_user_message_image_gen_command(
     text: str,

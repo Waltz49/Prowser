@@ -560,7 +560,7 @@ class Slideshow2Manager:
             self.image_label.setPixmap(scaled_pixmap)
             
             # Center the image label
-            self._center_image_label()
+            self.window.browse_view_handler.center_image_label()
             
             self.log_slideshow2(f'Reloaded fresh image at default size: {scaled_pixmap.size()} (original: {pixmap.size()})')
             

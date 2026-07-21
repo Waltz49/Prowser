@@ -179,28 +179,6 @@ class SelectionManager:
             return [self.main_window.displayed_images[self.main_window.highlight_index]]
         return []
     
-    def get_selected_indices(self) -> List[int]:
-        """Get list of image indices for selected thumbnails (for compatibility/display purposes)"""
-        return list(self._get_selected_indices_for_display())
-    
-    def ensure_multi_mode(self):
-        """Ensure multi-select mode is active (delegates to main window)."""
-        if hasattr(self.main_window, "ensure_multi_mode"):
-            self.main_window.ensure_multi_mode()
-    
-    def _toggle_index(self, idx: int):
-        """Toggle selection of thumbnail at index"""
-        if not (0 <= idx < len(self.main_window.displayed_images)):
-            return
-        
-        file_path = self.main_window.displayed_images[idx]
-        if file_path in self.main_window.selected_files:
-            self.main_window.selected_files.remove(file_path)
-        else:
-            self.main_window.selected_files.add(file_path)
-        
-        self.main_window._emit_selection_changed()
-    
     def _compute_next_index(self, current_index: int, axis: str, step_sign: int) -> int:
         """Compute next index for navigation"""
         return self.main_window.navigation_manager._compute_next_index(current_index, axis, step_sign)

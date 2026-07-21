@@ -181,9 +181,6 @@ class ExpandPlacementCanvas(QWidget):
             new_w, new_h, aspect, max_w, max_h
         )
 
-    def canvas_size(self) -> Tuple[int, int]:
-        return self._canvas_w, self._canvas_h
-
     def set_source_path(self, source_path: str) -> None:
         """Load a new source image and reset placement to the default fit."""
         self._source_path = source_path
@@ -296,18 +293,6 @@ class ExpandPlacementCanvas(QWidget):
         self._placement_y = max(
             0, min(self._placement_y, self._canvas_h - self._placement_h)
         )
-
-    def _clamp_placement_fit_canvas(self) -> None:
-        """Clamp size to canvas preserving placement aspect, then position."""
-        aspect = self._placement_w / max(1, self._placement_h)
-        self._placement_w, self._placement_h = self._clamp_aspect_size(
-            self._placement_w,
-            self._placement_h,
-            aspect,
-            self._canvas_w,
-            self._canvas_h,
-        )
-        self._clamp_placement_position()
 
     def _update_canvas_geometry(self) -> None:
         margin = 20

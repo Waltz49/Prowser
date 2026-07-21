@@ -232,7 +232,6 @@ from utils import (
     convert_file_url_to_path,
     validate_image_file,
     resolve_path,
-    validate_path_exists,
     directory_has_images
 )
 

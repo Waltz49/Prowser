@@ -43,7 +43,7 @@ class EventBus(QObject):
     def subscribe(self, event_type: str, callback: Callable) -> int:
         """
         Subscribe to an event type.
-        Returns an unsubscribe token that can be passed to unsubscribe().
+        Returns a subscription token for bookkeeping.
         """
         if event_type not in self._subscribers:
             self._subscribers[event_type] = []
@@ -52,17 +52,6 @@ class EventBus(QObject):
         self._next_token += 1
         self._tokens[token] = (event_type, callback)
         return token
-
-    def unsubscribe(self, token: int) -> None:
-        """Unsubscribe using the token returned from subscribe()."""
-        if token not in self._tokens:
-            return
-        event_type, callback = self._tokens.pop(token)
-        if event_type in self._subscribers:
-            try:
-                self._subscribers[event_type].remove(callback)
-            except ValueError:
-                pass
 
     def emit(self, event_type: str, payload: Any = None) -> None:
         """

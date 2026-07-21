@@ -16,27 +16,6 @@ from cache.image_cache import get_cache_manager
 from utils import is_inside_photos_library_resources_or_scopes, wrap_progress_dialog_label_elision
 from files.file_tree_handler import _get_excluded_paths, _is_excluded_path
 
-def _is_in_app_cache_directory(path: str) -> bool:
-    """
-    Check if a path is within the application's cache directory.
-    
-    Args:
-        path: Path to check
-        
-    Returns:
-        True if the path is within the app's cache directory, False otherwise
-    """
-    try:
-        from config import get_config
-        config = get_config()
-        app_cache_dir = str(config.cache_dir)
-        abs_path = os.path.abspath(path)
-        abs_cache_dir = os.path.abspath(app_cache_dir)
-        # Check if the path starts with the cache directory
-        return abs_path.startswith(abs_cache_dir + os.sep) or abs_path == abs_cache_dir
-    except Exception:
-        return False
-
 def get_search_depth_from_config() -> int:
     """
     Helper to fetch search_depth setting from the config. Defaults to 4 if not set.

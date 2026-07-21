@@ -184,10 +184,6 @@ class ThumbnailDisplayManager:
         # Start loading thumbnails in the background
         self.main_window.start_background_thumbnail_loading_if_needed()
     
-    def _start_throttled_thumbnail_loading(self, images_to_process):
-        """Delegate to main window BackgroundImageLoader queue."""
-        self.main_window._start_throttled_thumbnail_loading(images_to_process)
-    
     def populate_indices_arrays(self):
         """Populate the image indices arrays for navigation"""
         if self.main_window.displayed_images:
@@ -382,33 +378,6 @@ class ThumbnailDisplayManager:
             # Force thumbnail loading via cache manager with high priority
             self.main_window.cache_manager.get_thumbnail_async(file_path, self.main_window.current_thumbnail_size, priority=5)
     
-    def get_image_info(self, image_path: str) -> tuple[str, int, int]:
-        """Get image dimensions and file size"""
-        try:
-            from exif.exif_image_loader import get_image_dimensions_fast_metadata
-            dimensions = get_image_dimensions_fast_metadata(image_path)
-            if dimensions and len(dimensions) == 2:
-                width, height = dimensions
-                return (image_path, width, height)
-        except Exception:
-            pass
-        return (image_path, 0, 0)
-    
-    def get_widget_count(self) -> int:
-        """Get the number of widgets in the thumbnail container"""
-        if hasattr(self.main_window, 'thumbnail_container') and self.main_window.thumbnail_container:
-            return len(self.main_window.thumbnail_container.canvas.thumbnails) if hasattr(self.main_window.thumbnail_container.canvas, 'thumbnails') else 0
-        return 0
-    
-    def find_thumbnail_index_by_path(self, path):
-        """Find thumbnail index by file path"""
-        if not self.main_window.displayed_images:
-            return None
-        try:
-            return self.main_window.displayed_images.index(path)
-        except ValueError:
-            return None
-
     def reorder_thumbnail_layout(self):
         """Reorder thumbnails without regenerating"""
         if hasattr(self.main_window, 'thumbnail_container') and self.main_window.thumbnail_container:

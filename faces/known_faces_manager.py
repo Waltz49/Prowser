@@ -92,28 +92,6 @@ def add_subject(name: str) -> Optional[str]:
     return sid
 
 
-def remove_subject(subject_id: str) -> bool:
-    """Remove subject by id. Returns True if found and removed."""
-    subjects = load()
-    new_list = [s for s in subjects if s.get("id") != subject_id]
-    if len(new_list) == len(subjects):
-        return False
-    save(new_list)
-    return True
-
-
-def update_name(subject_id: str, new_name: str) -> bool:
-    """Update subject name. Returns False if duplicate name or not found."""
-    name_clean = (new_name or "").strip()
-    if not name_clean or name_exists(name_clean, exclude_id=subject_id):
-        return False
-    subjects = load()
-    for s in subjects:
-        if s.get("id") == subject_id:
-            s["name"] = name_clean
-            save(subjects)
-            return True
-    return False
 
 
 def add_sample(subject_id: str, image_path: str, embedding: List[float]) -> bool:

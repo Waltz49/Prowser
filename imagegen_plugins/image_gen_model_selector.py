@@ -146,16 +146,6 @@ def plugin_supports_lora(plugin: Optional[ImageGenModelPlugin]) -> bool:
     return plugin is not None and bool(getattr(plugin, "lora_host_id", None))
 
 
-def plugin_has_lora_choices(plugin: Optional[ImageGenModelPlugin]) -> bool:
-    """True when the plugin has at least one selectable LoRA (besides None)."""
-    if not plugin_supports_lora(plugin):
-        return False
-    from config import get_config
-    from imagegen_plugins.lora_catalog import lora_choices_for_plugin
-
-    choices = lora_choices_for_plugin(plugin, get_config().load_settings())
-    return len(choices) > 1
-
 
 def populate_image_gen_lora_combo(
     combo: QComboBox,
@@ -400,30 +390,6 @@ def resolve_initial_plugin(
         return by_id[saved_id]
     return installed[0]
 
-
-def values_after_plugin_switch(
-    current: Dict[str, Any],
-    new_plugin: ImageGenModelPlugin,
-) -> Dict[str, Any]:
-    """
-    Drop model-specific keys from dialog values when the user picks another plugin.
-
-    Ensures field_specs and the LoRA pulldown target the new base model (e.g. Klein 4B vs 9B).
-    """
-    out = dict(current)
-    for key in (
-        "mflux_lora",
-        "mflux_lora_stack",
-        "mflux_lora_paths",
-        "mflux_lora_scales",
-        "sd15_lora_paths",
-        "sd15_lora_scales",
-        "hf_model_id",
-    ):
-        out.pop(key, None)
-    if new_plugin.hf_model_id:
-        out["hf_model_id"] = new_plugin.hf_model_id
-    return out
 
 
 def sync_image_gen_lora_field(dialog: Any) -> None:

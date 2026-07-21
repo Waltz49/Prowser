@@ -33,7 +33,6 @@ from thumbnails.thumbnail_constants import BASE_MARGIN
 from event_bus import THUMBNAIL_CLICKED
 from utils import (
     entry_debug_wrapper,
-    entry_debug,
     normalize_path_for_display,
     should_preserve_window_focus,
 )
@@ -1577,38 +1576,6 @@ class ViewManager:
         layout.addWidget(self.main_window.list_view_container)
         self.main_window.stacked_widget.addWidget(list_view_widget)
     
-    def _on_list_item_clicked(self, row: int, column: int):
-        """Handle single click on list item - no longer used with canvas view"""
-        # Clicks are handled by the canvas itself now
-        pass
-    
-    def _on_list_item_double_clicked(self, item: QTableWidgetItem):
-        """Handle double-click on list item - no longer used with canvas view"""
-        # Double-clicks are handled by the canvas itself now
-        pass
-    
-    def _open_browse_from_list(self, row: int):
-        """Open browse view for the image at the given row"""
-        if not hasattr(self.main_window, 'displayed_images') or not self.main_window.displayed_images:
-            return
-        
-        if row < 0 or row >= len(self.main_window.displayed_images):
-            return
-        
-        image_path = self.main_window.displayed_images[row]
-        
-        # Find the index in displayed_images
-        try:
-            index = self.main_window.displayed_images.index(image_path)
-        except ValueError:
-            index = row
-        
-        # Store that we're coming from list view
-        self.main_window._return_to_list_view = True
-        
-        # Open browse view
-        self.open_browse_view(index)
-    
     def _format_permissions(self, file_path: str, file_stat=None) -> str:
         """Format file permissions in rwxrwxrwx format"""
         try:
@@ -1685,16 +1652,6 @@ class ViewManager:
             return "0x0"
         except Exception:
             return "0x0"
-    
-    def _on_list_header_clicked(self, column: int):
-        """Handle column header click for sorting - no longer used with canvas view"""
-        # Header clicks are handled by the canvas itself now
-        pass
-    
-    def _update_list_header_sort_indicators(self):
-        """Update column header labels to show sort indicators - no longer used with canvas view"""
-        # Headers are drawn by the canvas itself now
-        pass
     
     def update_list_view(self):
         """Update the list view with current displayed images"""
@@ -1831,19 +1788,6 @@ class ViewManager:
             self.main_window.list_view_container.connect_cache_manager_signals()
         QTimer.singleShot(200, lambda: self.main_window.list_view_container.canvas._load_visible_thumbnails())
     
-    def _on_list_scroll_changed(self):
-        """Handle scroll events to load thumbnails for newly visible rows"""
-        if not hasattr(self.main_window, 'list_view_table') or not self.main_window.list_view_table:
-            return
-        
-        if getattr(self.main_window, 'current_view_mode', None) != 'list':
-            return
-        
-        # Debounce scroll events
-        if hasattr(self.main_window, '_list_view_thumbnail_timer'):
-            self.main_window._list_view_thumbnail_timer.stop()
-            self.main_window._list_view_thumbnail_timer.start(150)  # 150ms debounce
-    
     def _load_visible_thumbnails(self):
         """Trigger thumbnail loading for currently visible rows using existing thumbnail loading system"""
         if not hasattr(self.main_window, 'list_view_table') or not self.main_window.list_view_table:
@@ -1891,207 +1835,6 @@ class ViewManager:
                 # Use the existing async loading system - it will use cached thumbnails
                 self.main_window.cache_manager.get_thumbnail_async(image_path, current_thumb_size, priority=1)
     
-    def _on_list_thumbnail_loaded(self, image_path: str, pixmap: QPixmap, size: int):
-        """Handle thumbnail loaded signal - update list view table item"""
-        if not hasattr(self.main_window, 'list_view_table') or not self.main_window.list_view_table:
-            return
-        
-        if getattr(self.main_window, 'current_view_mode', None) != 'list':
-            return
-        
-        if not pixmap or pixmap.isNull():
-            return
-        
-        # Find the row for this image path
-        if not hasattr(self.main_window, 'displayed_images') or not self.main_window.displayed_images:
-            return
-        
-        try:
-            row = self.main_window.displayed_images.index(image_path)
-        except ValueError:
-            return  # Image not in current displayed list
-        
-        # Update the thumbnail item
-        item = self.main_window.list_view_table.item(row, 0)
-        if item:
-            # Resize thumbnail to 64x64 for list view (regardless of original size)
-            thumbnail_size = 64
-            if pixmap.width() != thumbnail_size or pixmap.height() != thumbnail_size:
-                scaled_pixmap = pixmap.scaled(
-                    thumbnail_size, thumbnail_size,
-                    Qt.KeepAspectRatio,
-                    Qt.SmoothTransformation
-                )
-            else:
-                scaled_pixmap = pixmap
-            
-            item.setData(Qt.DecorationRole, scaled_pixmap)
-    
-    def _page_down_list_view(self):
-        """Page down in list view - scroll down by one viewport height"""
-        if not hasattr(self.main_window, 'list_view_table') or not self.main_window.list_view_table:
-            return
-        
-        table = self.main_window.list_view_table
-        if table.rowCount() == 0:
-            return
-        
-        # Get current selected row
-        selected_rows = table.selectedIndexes()
-        current_row = selected_rows[0].row() if selected_rows else 0
-        
-        # Use QTableWidget's built-in page down behavior by scrolling the viewport
-        # Get the visible rect to determine how many rows are visible
-        viewport = table.viewport()
-        visible_rect = viewport.visibleRegion().boundingRect() if hasattr(viewport, 'visibleRegion') else viewport.rect()
-        
-        # Get first and last visible rows
-        first_visible = table.rowAt(visible_rect.top())
-        last_visible = table.rowAt(visible_rect.bottom())
-        
-        if first_visible < 0:
-            first_visible = 0
-        if last_visible < 0:
-            last_visible = table.rowCount() - 1
-        
-        # Calculate rows per page (number of visible rows)
-        rows_per_page = max(1, last_visible - first_visible + 1)
-        
-        # Calculate new row (move down by one page from current selection)
-        new_row = min(table.rowCount() - 1, current_row + rows_per_page)
-        
-        # Select and scroll to new row
-        table.selectRow(new_row)
-        table.scrollToItem(
-            table.item(new_row, 0),
-            QAbstractItemView.EnsureVisible
-        )
-        
-        # Update current image path if needed
-        if hasattr(self.main_window, 'displayed_images') and self.main_window.displayed_images:
-            if 0 <= new_row < len(self.main_window.displayed_images):
-                image_path = self.main_window.displayed_images[new_row]
-                if hasattr(self.main_window, '_set_current_image_path_with_sync'):
-                    self.main_window._set_current_image_path_with_sync(image_path)
-                else:
-                    self.main_window.current_image_path = image_path
-    
-    def _sync_list_selection_after_key_navigation(self):
-        """Sync list view selection after keyboard navigation (arrow keys)"""
-        if not hasattr(self.main_window, 'list_view_table') or not self.main_window.list_view_table:
-            return
-        
-        if getattr(self.main_window, 'current_view_mode', None) != 'list':
-            return
-        
-        # Get current row from the table
-        current_row = self.main_window.list_view_table.currentRow()
-        if current_row >= 0:
-            self._sync_list_selection_to_current_image(current_row)
-    
-    def _sync_list_selection_to_current_image_from_path(self):
-        """Sync list view selection to current image path (for left/right navigation)"""
-        if not hasattr(self.main_window, 'list_view_table') or not self.main_window.list_view_table:
-            return
-        
-        if getattr(self.main_window, 'current_view_mode', None) != 'list':
-            return
-        
-        # Get current image path from main window
-        if not hasattr(self.main_window, 'current_image_path') or not self.main_window.current_image_path:
-            return
-        
-        # Find the row index of the current image
-        if not hasattr(self.main_window, 'displayed_images') or not self.main_window.displayed_images:
-            return
-        
-        try:
-            current_image_path = self.main_window.current_image_path
-            row_index = self.main_window.displayed_images.index(current_image_path)
-            
-            # Select the row and scroll to it
-            if 0 <= row_index < self.main_window.list_view_table.rowCount():
-                self.main_window.list_view_table.selectRow(row_index)
-                self.main_window.list_view_table.scrollToItem(
-                    self.main_window.list_view_table.item(row_index, 0),
-                    QAbstractItemView.EnsureVisible
-                )
-                # Sync selection to update metadata, tree, and preview
-                self._sync_list_selection_to_current_image(row_index)
-        except (ValueError, AttributeError):
-            # Image not found in displayed_images - ignore
-            pass
-    
-    def _sync_list_selection_to_current_image(self, row: int):
-        """Sync list view selection to current image path"""
-        if not hasattr(self.main_window, 'displayed_images') or not self.main_window.displayed_images:
-            return
-        
-        if 0 <= row < len(self.main_window.displayed_images):
-            image_path = self.main_window.displayed_images[row]
-            # Set current image by path - this will sync metadata, tree, and preview
-            if hasattr(self.main_window, 'set_current_image_by_path'):
-                self.main_window.set_current_image_by_path(image_path)
-                # Update Information sidebar, preview, and tree (same as thumbnail view)
-                if hasattr(self.main_window, 'update_filename_for_new_image'):
-                    self.main_window.update_filename_for_new_image()
-                # Update preview widget if visible
-                if hasattr(self.main_window, 'update_preview_if_visible'):
-                    self.main_window.update_preview_if_visible()
-                # Update tree highlighting
-                if (hasattr(self.main_window, 'file_tree_handler') and 
-                    self.main_window.file_tree_handler.is_tree_initialized()):
-                    self.main_window.file_tree_handler.highlight_current_file()
-    
-    def _page_up_list_view(self):
-        """Page up in list view - scroll up by one viewport height"""
-        if not hasattr(self.main_window, 'list_view_table') or not self.main_window.list_view_table:
-            return
-        
-        table = self.main_window.list_view_table
-        if table.rowCount() == 0:
-            return
-        
-        # Get current selected row
-        selected_rows = table.selectedIndexes()
-        current_row = selected_rows[0].row() if selected_rows else 0
-        
-        # Use QTableWidget's built-in page up behavior by scrolling the viewport
-        # Get the visible rect to determine how many rows are visible
-        viewport = table.viewport()
-        visible_rect = viewport.visibleRegion().boundingRect() if hasattr(viewport, 'visibleRegion') else viewport.rect()
-        
-        # Get first and last visible rows
-        first_visible = table.rowAt(visible_rect.top())
-        last_visible = table.rowAt(visible_rect.bottom())
-        
-        if first_visible < 0:
-            first_visible = 0
-        if last_visible < 0:
-            last_visible = table.rowCount() - 1
-        
-        # Calculate rows per page (number of visible rows)
-        rows_per_page = max(1, last_visible - first_visible + 1)
-        
-        # Calculate new row (move up by one page from current selection)
-        new_row = max(0, current_row - rows_per_page)
-        
-        # Select and scroll to new row
-        table.selectRow(new_row)
-        table.scrollToItem(
-            table.item(new_row, 0),
-            QAbstractItemView.EnsureVisible
-        )
-        
-        # Update current image path if needed
-        if hasattr(self.main_window, 'displayed_images') and self.main_window.displayed_images:
-            if 0 <= new_row < len(self.main_window.displayed_images):
-                image_path = self.main_window.displayed_images[new_row]
-                if hasattr(self.main_window, '_set_current_image_path_with_sync'):
-                    self.main_window._set_current_image_path_with_sync(image_path)
-                else:
-                    self.main_window.current_image_path = image_path
-
     def open_browse_view(self, index: int):
         # print(f"view_manager.py: ***** open_browse_view: index is {index}")
         """Open image in browse view mode"""

@@ -24,33 +24,3 @@ def normalize_assistant_message_image_paths(paths: list[str]) -> list[str]:
     return out
 
 
-def expand_edit_source_paths_from_user_images(user_image_paths: list[str]) -> list[str]:
-    """Import Rest equivalent: prefer original source paths plus EXIF references."""
-    if not user_image_paths:
-        return []
-    try:
-        from imagegen_plugins.image_gen_edit_dialog import (
-            MAX_EDIT_SOURCE_IMAGES,
-            _merge_imported_edit_source_paths,
-        )
-        from search.reference_graph import valid_exif_reference_paths_for_image
-    except ImportError:
-        return [
-            os.path.abspath(p)
-            for p in user_image_paths
-            if p and os.path.isfile(p)
-        ][:4]
-
-    merged: list[str] = []
-    for path in user_image_paths:
-        if not path or not os.path.isfile(path):
-            continue
-        refs = valid_exif_reference_paths_for_image(
-            path, max_count=MAX_EDIT_SOURCE_IMAGES
-        )
-        merged = _merge_imported_edit_source_paths(
-            merged, refs, max_total=MAX_EDIT_SOURCE_IMAGES
-        )
-        if len(merged) >= MAX_EDIT_SOURCE_IMAGES:
-            break
-    return merged[:MAX_EDIT_SOURCE_IMAGES]

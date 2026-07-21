@@ -134,23 +134,6 @@ def effective_last_function(main_window=None) -> str:
     return load_last_function()
 
 
-def get_active_plugin_for_function(
-    main_window,
-    function: str,
-    plugins: List[ImageGenModelPlugin],
-) -> Optional[ImageGenModelPlugin]:
-    by_fn = getattr(main_window, "imagegen_active_plugin_by_function", None)
-    if isinstance(by_fn, dict):
-        plugin_id = by_fn.get(function)
-        if isinstance(plugin_id, str):
-            plugin = _plugins_by_id(plugins).get(_normalize_plugin_id(plugin_id))
-            if plugin is not None:
-                return plugin
-    plugin_id = load_active_plugin_id_for_function(function, plugins)
-    if plugin_id:
-        return _plugins_by_id(plugins).get(plugin_id)
-    return None
-
 
 def set_active_plugin_for_function(
     main_window,

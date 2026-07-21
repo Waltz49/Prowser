@@ -1151,10 +1151,6 @@ class ThumbnailKeyboardHandler(BaseKeyboardHandler):
             return True
         return False
 
-    def _handle_f_key(self, event: QKeyEvent, context_data: Dict[str, Any]) -> bool:
-        self.main_window.open_current_browse_view()
-        return True
-
     def _handle_escape(self, event: QKeyEvent, context_data: Dict[str, Any]) -> bool:
         # Explicitly accept the event before potentially blocking operations
         event.accept()
@@ -1922,10 +1918,6 @@ class BrowseViewKeyboardHandler(BaseKeyboardHandler):
         event.accept()
         return True
 
-    def _handle_a_key(self, event: QKeyEvent, context_data: Dict[str, Any]) -> bool:
-        self.main_window.toggle_actual_size()
-        return True
-
     # Panning handlers (cmd-arrow keys pan the image when zoomed)
     def _handle_cmd_left(self, event: QKeyEvent, context_data: Dict[str, Any]) -> bool:
         """Handle Cmd+Left for panning left"""
@@ -2017,12 +2009,6 @@ class BrowseViewKeyboardHandler(BaseKeyboardHandler):
         self.main_window.close_browse_view()
         return True
 
-    def _handle_f12(self, event: QKeyEvent, context_data: Dict[str, Any]) -> bool:
-        if not event.modifiers():
-            self.main_window.toggle_maximized()
-            return True
-        return False
-
     def _handle_shift_r(self, event: QKeyEvent, context_data: Dict[str, Any]) -> bool:
         self.main_window.reset_image_transformations()
         return True
@@ -2041,12 +2027,6 @@ class BrowseViewKeyboardHandler(BaseKeyboardHandler):
     def _handle_ctrl_i_filename_overlay(self, event: QKeyEvent, context_data: Dict[str, Any]) -> bool:
         # Toggle filename overlay - Cmd+I key in browse mode
         # In browse mode, this toggles the simple filename overlay (filename/number)
-        self.main_window.number_overlay_visible = not self.main_window.number_overlay_visible
-        self.main_window.update_number_overlay()
-        return True
-
-    def _handle_ctrl_shift_i(self, event: QKeyEvent, context_data: Dict[str, Any]) -> bool:
-        # Toggle number overlay visibility
         self.main_window.number_overlay_visible = not self.main_window.number_overlay_visible
         self.main_window.update_number_overlay()
         return True

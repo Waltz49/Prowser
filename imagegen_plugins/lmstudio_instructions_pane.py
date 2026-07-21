@@ -112,10 +112,6 @@ def apply_lmstudio_instructions_button_style(
         button.setStyleSheet(lmstudio_instructions_button_stylesheet())
 
 
-def create_lmstudio_instructions_icon() -> QIcon:
-    """Theme-aware AI icon for the instructions toggle button."""
-    return create_ai_info_icons()[0]
-
 
 class _ClickableCollapseLabel(QLabel):
     clicked = Signal()

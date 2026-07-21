@@ -41,12 +41,6 @@ class ConfigurationSyncManager:
 
         set_current_image_path_for_window(self.main_window, path, sync)
 
-    def _set_current_directory_with_sync(self, directory: Optional[str], sync: bool = True):
-        """Delegate to window_sync (FileDataModel is source of truth)."""
-        from window_sync import set_current_directory_for_window
-
-        set_current_directory_for_window(self.main_window, directory, sync)
-    
     def _on_displayed_images_changed(self, images: List[str]):
         """Handle displayed_images change from FileDataModel - sync tree view"""
         try:
@@ -64,11 +58,6 @@ class ConfigurationSyncManager:
     def _on_directory_changed(self, directory: str):
         """Handle directory change from FileDataModel - tree sync via FileTreeHandler subscription to DIRECTORY_CHANGED"""
         pass
-    
-    def on_settings_changed(self, new_settings):
-        """Handle settings changes and update UI accordingly"""
-        # Delegate to main window method
-        self.main_window.on_settings_changed(new_settings)
     
     def refresh_from_configuration(self, configuration: dict, from_api: bool = False):
         """Unified method to refresh the browser from a JSON configuration"""

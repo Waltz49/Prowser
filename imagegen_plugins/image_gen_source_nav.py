@@ -100,26 +100,6 @@ def _nav_index_at_path(
     return displayed, displayed.index(path)
 
 
-def _current_nav_index(
-    main_window, *, fallback_path: Optional[str] = None
-) -> Optional[tuple[list[str], int]]:
-    if main_window is None:
-        return None
-    displayed = main_window.get_displayed_images()
-    if not displayed:
-        return None
-    current = main_window.get_current_image_path()
-    if not current or current not in displayed:
-        if fallback_path and fallback_path in displayed:
-            current = fallback_path
-        else:
-            return None
-    try:
-        idx = displayed.index(current)
-    except ValueError:
-        idx = 0
-    return displayed, idx
-
 
 def _adjacent_displayed_path(
     displayed: list[str], idx: int, delta: int, *, wrap: bool
@@ -175,88 +155,7 @@ def navigate_source_image_at(
     return _adjacent_displayed_path(displayed, idx, delta, wrap=wrap)
 
 
-def can_navigate_source_prev(
-    main_window, *, fallback_path: Optional[str] = None
-) -> bool:
-    """True when show_previous_image would change the active image."""
-    res = _current_nav_index(main_window, fallback_path=fallback_path)
-    if not res:
-        return False
-    displayed, idx = res
-    if len(displayed) <= 1:
-        return False
-    wrap = bool(getattr(main_window, "wrap_around", True))
-    return idx > 0 or wrap
 
-
-def can_navigate_source_next(
-    main_window, *, fallback_path: Optional[str] = None
-) -> bool:
-    """True when show_next_image would change the active image."""
-    res = _current_nav_index(main_window, fallback_path=fallback_path)
-    if not res:
-        return False
-    displayed, idx = res
-    if len(displayed) <= 1:
-        return False
-    wrap = bool(getattr(main_window, "wrap_around", True))
-    return idx < len(displayed) - 1 or wrap
-
-
-def navigate_source_image(
-    main_window, delta: int, *, fallback_path: Optional[str] = None
-) -> Optional[str]:
-    """Move active image like keyboard arrows; returns new path or None."""
-    if main_window is None:
-        return None
-    if delta < 0:
-        if not can_navigate_source_prev(main_window, fallback_path=fallback_path):
-            return None
-    elif not can_navigate_source_next(main_window, fallback_path=fallback_path):
-        return None
-
-    if (
-        fallback_path
-        and fallback_path in (main_window.get_displayed_images() or [])
-        and main_window.get_current_image_path() != fallback_path
-    ):
-        main_window.set_current_image_by_path(fallback_path)
-        if main_window.current_view_mode == "thumbnail":
-            main_window.highlight_image()
-
-    if main_window.current_view_mode == "thumbnail":
-        if getattr(main_window, "selected_files", None):
-            main_window.clear_selection()
-        main_window.range_anchor_index = None
-        res = _current_nav_index(main_window, fallback_path=fallback_path)
-        if not res:
-            return None
-        displayed, idx = res
-        wrap = bool(getattr(main_window, "wrap_around", True))
-        if delta < 0:
-            if idx > 0:
-                next_idx = idx - 1
-            elif wrap:
-                next_idx = len(displayed) - 1
-            else:
-                next_idx = idx
-        else:
-            if idx < len(displayed) - 1:
-                next_idx = idx + 1
-            elif wrap:
-                next_idx = 0
-            else:
-                next_idx = idx
-        next_path = displayed[next_idx]
-        main_window.set_current_image_by_path(next_path)
-        main_window.highlight_image()
-        return next_path
-
-    if delta < 0:
-        main_window.show_previous_image()
-    else:
-        main_window.show_next_image()
-    return main_window.get_current_image_path()
 
 
 def _arrow_button_stylesheet() -> str:

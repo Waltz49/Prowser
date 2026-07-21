@@ -669,59 +669,6 @@ class FeatureCacheManager:
             except Exception:
                 pass
     
-    def _replace_index_file_with_lock(self, index_file: Path, index_data: dict):
-        """
-        Replace index file with new data using file locking to prevent conflicts.
-        Unlike _save_index_file_with_lock, this REPLACES the entire index rather than merging.
-        
-        Args:
-            index_file: Path to index file
-            index_data: Dictionary to save (replaces entire index)
-        """
-        lock_file = index_file.with_suffix('.lock')
-        
-        try:
-            # Create lock file if it doesn't exist
-            lock_file.touch(exist_ok=True)
-            
-            with open(lock_file, 'r+') as lock_fd:
-                # Acquire exclusive lock
-                fcntl.flock(lock_fd.fileno(), fcntl.LOCK_EX)
-                
-                try:
-                    # Write new index atomically (replacing old one)
-                    temp_dir = tempfile.mkdtemp(prefix=f"{index_file.stem}_index_replace_")
-                    temp_file = Path(temp_dir) / "index.json"
-                    
-                    try:
-                        with open(temp_file, 'w', encoding='utf-8') as f:
-                            json.dump(index_data, f, indent=2)
-                        
-                        temp_file.replace(index_file)
-                    finally:
-                        shutil.rmtree(temp_dir, ignore_errors=True)
-                
-                finally:
-                    # Release lock
-                    fcntl.flock(lock_fd.fileno(), fcntl.LOCK_UN)
-        
-        except Exception as e:
-            print(f"Error replacing index file with lock {index_file}: {e}")
-            import traceback
-            traceback.print_exc()
-            # Fallback to non-locked write if locking fails
-            try:
-                temp_dir = tempfile.mkdtemp(prefix=f"{index_file.stem}_index_replace_")
-                temp_file = Path(temp_dir) / "index.json"
-                try:
-                    with open(temp_file, 'w', encoding='utf-8') as f:
-                        json.dump(index_data, f, indent=2)
-                    temp_file.replace(index_file)
-                finally:
-                    shutil.rmtree(temp_dir, ignore_errors=True)
-            except Exception:
-                pass
-    
     def get_cnn_feature(self, path: str, mtime: float, size: int, device: str = 'cpu') -> Optional['torch.Tensor']:
         """Get CNN feature from cache if available and valid"""
         import torch

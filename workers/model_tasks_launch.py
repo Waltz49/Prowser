@@ -37,9 +37,6 @@ def _omit_testing_argv_flags(argv: list[str]) -> list[str]:
     return out
 
 
-def model_tasks_worker_script_path() -> str:
-    return os.path.join(os.path.dirname(os.path.abspath(__file__)), "model_tasks_worker.py")
-
 
 def model_tasks_worker_program_and_args() -> tuple[str, list[str]]:
     if getattr(sys, "frozen", False):

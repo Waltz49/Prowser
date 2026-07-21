@@ -148,9 +148,6 @@ class InfillPaintSettingsDialog(ImageGenDialog):
                 if ok_btn is not None:
                     ok_btn.setText("Done")
 
-    def _needs_prompt_side_column(self) -> bool:
-        return False
-
     def _show_import_button(self) -> bool:
         return bool(self._source_path)
 

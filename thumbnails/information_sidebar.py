@@ -336,11 +336,6 @@ class InformationSidebar(QWidget):
         if self.info_text_edit:
             self.info_text_edit.hide()
 
-    def clear_info(self):
-        """Clear the info text edit content"""
-        if self.info_text_edit:
-            self.info_text_edit.clear()
-
     def minimumSizeHint(self) -> QSize:
         header_h = 30
         if self.information_header is not None:
@@ -395,63 +390,9 @@ class InformationSidebar(QWidget):
     )
     _REF_FILEDATE_TOLERANCE_S = 1.0
 
-    @staticmethod
-    def _parse_reference_entries_from_lines(lines: List[str], start: int) -> List[Tuple[str, Optional[float]]]:
-        """Parse (label, optional_mtime) from References body lines; skip legacy MD5 lines."""
-        entries: List[Tuple[str, Optional[float]]] = []
-        i = start
-        while i < len(lines):
-            label = lines[i].strip()
-            if not label:
-                i += 1
-                continue
-            if InformationSidebar._REF_SECTION_STOP.match(label):
-                break
-            if InformationSidebar._LEGACY_REF_MD5_LINE.fullmatch(label):
-                i += 1
-                continue
-            expected_mtime: Optional[float] = None
-            if i + 1 < len(lines):
-                nxt = lines[i + 1].strip()
-                if InformationSidebar._LEGACY_REF_MD5_LINE.fullmatch(nxt):
-                    entries.append((label, None))
-                    i += 2
-                    continue
-                if InformationSidebar._REF_FILEDATE_LINE.fullmatch(nxt):
-                    try:
-                        expected_mtime = float(nxt)
-                    except ValueError:
-                        expected_mtime = None
-                    entries.append((label, expected_mtime))
-                    i += 2
-                    continue
-            entries.append((label, None))
-            i += 1
-        return entries
-
-    @staticmethod
-    def _parse_reference_entries_from_text(text: str) -> List[Tuple[str, Optional[float]]]:
-        """Parse References block in EXIF user comment."""
-        if not text:
-            return []
-        lines = text.splitlines()
-        for i, line in enumerate(lines):
-            if line.strip().lower() == "references:":
-                return InformationSidebar._parse_reference_entries_from_lines(lines, i + 1)
-        return []
-
     def _get_reference_entries_for_path(self, image_path: str) -> List[Tuple[str, Optional[float]]]:
         """Read reference entries from EXIF description on *image_path*."""
         return get_reference_entries_for_path(image_path)
-
-    def _resolve_reference_entries_map(
-        self,
-        image_dir: str,
-        current_path: str,
-        entries: List[Tuple[str, Optional[float]]],
-    ) -> Tuple[Dict[str, str], bool]:
-        """Map reference label (lower) -> resolved file path (filedate match when stored)."""
-        return resolve_reference_entries_map(image_dir, current_path, entries)
 
     def _collect_reference_chain_paths(
         self, image_dir: str, root_path: str, entries: List[Tuple[str, Optional[float]]]

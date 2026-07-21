@@ -135,7 +135,3 @@ class MarkdownDialog(QDialog):
         self.content_area.setMarkdown(markdown_content)
 
 
-def show_markdown_dialog(title, markdown_content, parent=None):
-    """Convenience function to show a markdown dialog"""
-    dialog = MarkdownDialog(title, markdown_content, parent)
-    dialog.exec()

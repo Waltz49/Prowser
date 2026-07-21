@@ -50,9 +50,6 @@ def note_image_model_loaded(payload: Dict[str, Any]) -> None:
     touch_image_model_activity()
 
 
-def image_model_is_retained() -> bool:
-    return _image_model_retained
-
 
 def release_all_mflux_sessions(*, reason: str = "explicit") -> None:
     """Drop retained MFLUX sessions (call before gc / switching to caption)."""

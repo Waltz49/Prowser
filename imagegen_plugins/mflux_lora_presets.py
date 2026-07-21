@@ -23,7 +23,6 @@ from imagegen_plugins.lora_catalog import (
     lora_choices_for_pipeline,
     lora_entry_min_steps,
     lora_weights_file_is_valid,
-    manual_download_help,
 )
 from imagegen_plugins.lora_host_registry import HOST_FLUX1_T2I, HOST_SD15, lora_host_for_pipeline
 
@@ -42,28 +41,6 @@ LORA_UNSUPPORTED_PRESET_ID = "__lora_unsupported__"
 LORA_UNSUPPORTED_LABEL = "not supported with this model"
 
 
-def lora_choice_ids() -> Tuple[str, ...]:
-    return tuple(c[1] for c in MFLUX_LORA_UI_CHOICES)
-
-
-def repopulate_mflux_lora_combo(
-    combo: "QComboBox",
-    *,
-    plugin: Any = None,
-    pipeline_id: str = "",
-    plugin_hf_model_id: str = "",
-    current_preset_id: Any = None,
-) -> None:
-    """Rebuild LoRA pulldown items from settings (enabled + installed for plugin host)."""
-    from imagegen_plugins.image_gen_model_selector import populate_image_gen_lora_combo
-
-    populate_image_gen_lora_combo(
-        combo,
-        plugin,
-        pipeline_id=pipeline_id,
-        plugin_hf_model_id=plugin_hf_model_id,
-        current_preset_id=current_preset_id,
-    )
 
 
 def coerce_lora_preset_id(preset_id: Any) -> str:
@@ -497,16 +474,13 @@ __all__ = [
     "effective_steps_for_lora",
     "effective_lora_ids_from_values",
     "effective_steps_for_lora_stack",
-    "lora_choice_ids",
     "lora_choices_for_plugin",
     "lora_choices_for_pipeline",
     "lora_display_names_for_stack",
     "lora_name_for_exif_from_values",
     "lora_preset_min_steps",
     "lora_stack_min_steps",
-    "manual_download_help",
     "normalize_lora_stack_from_values",
-    "repopulate_mflux_lora_combo",
     "resolve_lora_path",
     "strip_lora_payload_keys_for_host",
     "MFLUX_LORA_PAYLOAD_KEYS",

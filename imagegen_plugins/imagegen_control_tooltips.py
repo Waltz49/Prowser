@@ -167,16 +167,10 @@ _EDIT_IMPORT_ALL_SETTINGS_TOOLTIP = (
 )
 
 
-def apply_import_button_tooltip(import_btn: QPushButton) -> None:
-    import_btn.setToolTip(_DIM_HELPER_TOOLTIPS["import"])
-
 
 def apply_edit_import_text_button_tooltip(import_btn: QPushButton) -> None:
     import_btn.setToolTip(_EDIT_IMPORT_TEXT_TOOLTIP)
 
-
-def apply_edit_import_size_button_tooltip(import_btn: QPushButton) -> None:
-    import_btn.setToolTip(_EDIT_IMPORT_SIZE_TOOLTIP)
 
 
 def apply_edit_import_all_button_tooltip(

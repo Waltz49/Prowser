@@ -158,11 +158,6 @@ class SidebarManager:
             return cs.is_chat_visible()
         return False
     
-    def toggle_preview_fit_mode(self):
-        """Toggle preview fit mode"""
-        if hasattr(self.main_window, 'preview_widget'):
-            self.main_window.preview_widget.toggle_fit_mode()
-    
     def update_preview_if_visible(self):
         """Update preview widget if it's visible"""
         if hasattr(self.main_window, 'preview_widget') and self.main_window.preview_widget.isVisible():
@@ -173,13 +168,6 @@ class SidebarManager:
         if hasattr(self.main_window, 'file_tree_handler') and self.main_window.file_tree_handler:
             self.main_window.file_tree_handler.ensure_tree_initialized()
     
-    def _synchronize_tree_with_current_state(self):
-        """Synchronize tree view with current state"""
-        if hasattr(self.main_window, 'file_tree_handler') and self.main_window.file_tree_handler:
-            if self.main_window.file_tree_handler.is_tree_initialized():
-                self.main_window.file_tree_handler.highlight_current_directory()
-                self.main_window.file_tree_handler.highlight_current_file()
-    
     def focus_tree(self):
         """Focus the file tree"""
         if hasattr(self.main_window, 'tree_container'):
@@ -189,27 +177,6 @@ class SidebarManager:
         """Focus the canvas"""
         if hasattr(self.main_window, 'thumbnail_container'):
             self.main_window.thumbnail_container.setFocus()
-    
-    def _set_initial_focus(self):
-        """Set initial focus"""
-        self.focus_canvas()
-    
-    def setup_file_tree_callbacks(self):
-        """Setup callbacks for file tree interactions"""
-        if hasattr(self.main_window, 'file_tree_handler') and self.main_window.file_tree_handler:
-            self.main_window.file_tree_handler.setup_callbacks()
-    
-    def on_directory_selected(self, directory_path: str):
-        """Handle directory selection from tree"""
-        self.main_window.open_directory(directory_path)
-    
-    def on_file_selected(self, file_path: str):
-        """Handle file selection from tree"""
-        self.main_window.open_specific_file(file_path)
-    
-    def on_file_double_clicked(self, file_path: str):
-        """Handle file double-click from tree"""
-        self.main_window.open_specific_file(file_path)
     
     def toggle_rename_status(self):
         """Toggle rename status checking"""

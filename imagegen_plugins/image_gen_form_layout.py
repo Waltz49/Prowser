@@ -569,26 +569,6 @@ def _column_layout_height(groups: List[QWidget], *, spacing: int) -> int:
     return total + spacing * (visible - 1)
 
 
-def split_groups_for_balanced_columns(
-    groups: List[QWidget], *, spacing: int
-) -> int:
-    """Return split index k: col1 = groups[:k], col2 = groups[k:].
-
-    Move bottom items to col2 until col2 would exceed col1 height.
-    """
-    n = len(groups)
-    if n <= 1:
-        return n
-    k = n
-    while k > 1:
-        k -= 1
-        if _column_layout_height(groups[k:], spacing=spacing) > _column_layout_height(
-            groups[:k], spacing=spacing
-        ):
-            k += 1
-            break
-    return k
-
 
 IMAGE_GEN_FLOW_ROLE_SEED = "seed"
 IMAGE_GEN_FLOW_ROLE_STEPS_QUANT = "steps_quant"
@@ -2008,9 +1988,6 @@ class ImageGenFieldsPanel:
             if widget is not None:
                 widget.deleteLater()
 
-    def add_group(self, group: QWidget) -> None:
-        self._append_control_group(group)
-
     def add_prompt_field(
         self,
         label_text: str,
@@ -2142,20 +2119,6 @@ class ImageGenFieldsPanel:
         else:
             col.insertWidget(idx + 1, host, 0)
 
-    def replace_prompt_editor_widget(self, new_widget: QWidget) -> None:
-        """Replace the bordered prompt editor area with new_widget (e.g. splitter)."""
-        if self._prompt_group is None:
-            return
-        col = self._prompt_group.layout()
-        if col is None or col.count() < 2:
-            return
-        item = col.itemAt(1)
-        old = item.widget() if item is not None else None
-        if old is not None:
-            col.removeWidget(old)
-            old.setParent(None)
-        col.addWidget(new_widget, 0)
-
     def add_labeled_field(
         self,
         label_text: Optional[str],
@@ -2220,20 +2183,6 @@ class ImageGenFieldsPanel:
             self._append_checkbox_group(group)
         return group
 
-    def add_columns(
-        self,
-        columns: List[Tuple[str, QWidget]],
-    ) -> None:
-        row = QWidget(self._controls_host)
-        row_layout = QHBoxLayout(row)
-        row_layout.setContentsMargins(0, 0, 0, 0)
-        row_layout.setSpacing(IMAGE_GEN_COLUMN_ROW_SPACING)
-        for label_text, control in columns:
-            row_layout.addWidget(
-                _build_image_gen_column_cell(row, label_text, control), 1
-            )
-        self.add_group(row)
-
     def add_half_column_row(
         self,
         columns: List[Optional[Tuple[str, QWidget]]],
@@ -2253,13 +2202,6 @@ class ImageGenFieldsPanel:
         group.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
         _set_image_gen_flow_role(group, flow_role)
         self._append_control_group(group)
-
-    def add_checkbox_row(self, checkboxes: List[QWidget]) -> None:
-        for checkbox in checkboxes:
-            checkbox.setSizePolicy(
-                QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed
-            )
-            self._append_checkbox_group(checkbox)
 
 
 def mount_image_gen_fields_in_scroll(

@@ -290,38 +290,6 @@ def scrub_stale_entries() -> int:
         return len(paths_to_remove)
 
 
-def remove_face_cache_entries(paths: List[str]) -> int:
-    """
-    Remove index rows and data files for the given image paths.
-    Single persist if any entry was removed. Thread-safe.
-    Returns the number of entries removed.
-    """
-    if not paths:
-        return 0
-    removed = 0
-    with _lock:
-        index = _get_index()
-        if not isinstance(index, dict):
-            return 0
-        for raw in paths:
-            try:
-                key = _path_key(raw)
-            except (OSError, ValueError):
-                key = raw
-            if key not in index:
-                continue
-            index.pop(key, None)
-            dp = _data_path(raw)
-            try:
-                if dp.exists():
-                    dp.unlink()
-            except OSError:
-                pass
-            removed += 1
-        if removed:
-            _persist_index(index)
-    return removed
-
 
 def _mtime_matches_index(st_mtime: float, index_mtime) -> bool:
     """True if on-disk mtime matches index (exact or within tolerance for JSON/fs float noise)."""

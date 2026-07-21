@@ -140,7 +140,6 @@ from browser_window.managers.thumbnail_context_menu import ThumbnailContextMenuH
 from browser_window.managers.ui_layout_manager import UILayoutManager
 from utils import (
     file_string,
-    handle_filter_pattern_mismatch,
     is_macos_space_mode,
     is_root_or_system_volume,
     normalize_path_for_display,
@@ -183,13 +182,6 @@ class ImageBrowserWindow(QMainWindow):
 
     # Temporary trash directory - user-specific to avoid conflicts
     TMP_TRASHES_DIR = f"/tmp/trashes-{os.getenv('USER', 'unknown')}"
-
-    @staticmethod
-    def get_button_style() -> str:
-        """Returns the standard button style string for all QPushButton widgets.
-        Delegates to centralized function in utils.py for consistency."""
-        from utils import get_button_style as utils_get_button_style
-        return utils_get_button_style()
 
     # Property accessors delegating to FileDataModel (single source of truth)
     @property
@@ -908,10 +900,6 @@ class ImageBrowserWindow(QMainWindow):
     def _check_and_refresh_if_changed(self):
         """Check if directory files changed and only refresh if necessary - prevents unnecessary flashing"""
         return self.refresh_manager._check_and_refresh_if_changed()
-    
-    def _efficient_refresh_with_changes(self, current_files, displayed_set):
-        """Efficiently refresh directory when files changed - only updates what's necessary"""
-        return self.refresh_manager._efficient_refresh_with_changes(current_files, displayed_set)
 
     def efficient_directory_refresh(self):
         """Efficiently refresh directory by detecting added/removed files and making minimal incremental changes"""
@@ -1177,10 +1165,6 @@ class ImageBrowserWindow(QMainWindow):
         """Drain message queue and process each message. Called by QTimer on main thread."""
         self.configuration_sync_manager.poll_message_queue()
 
-    def _handle_configuration(self, configuration: dict):
-        """Handle JSON configuration messages received from the named pipe"""
-        self.configuration_sync_manager._handle_configuration(configuration)
-
     def _get_current_directory_files(self):
         """Get current image files in directory efficiently"""
         return self.directory_loader._get_current_directory_files()
@@ -1191,94 +1175,6 @@ class ImageBrowserWindow(QMainWindow):
 
     def handle_application_quit(self):
         """Handle application quit to ensure proper cleanup"""
-    
-    def cleanup_worker_thread(self, worker_attr_name, delete_after=True):
-        """Common method to cleanup any worker thread (non-blocking)
-        
-        Args:
-            worker_attr_name: Name of the worker attribute
-            delete_after: Whether to call deleteLater() on the worker
-        """
-        # Check if worker exists and hasn't been cleaned up already
-        if not hasattr(self, worker_attr_name):
-            return  # Already cleaned up
-        
-        worker = getattr(self, worker_attr_name)
-        if not worker:
-            # Clear the reference if it's None
-            delattr(self, worker_attr_name)
-            return
-        
-        # Check if this is a valid QThread object before proceeding
-        try:
-            # Test if the object is still valid by checking if it's a QThread
-            if not hasattr(worker, 'isRunning'):
-                # Object is not a valid QThread, just remove the reference
-                delattr(self, worker_attr_name)
-                return
-        except Exception:
-            # Object is corrupted, just remove the reference
-            delattr(self, worker_attr_name)
-            return
-        
-        try:
-            # Stop the worker gracefully (non-blocking)
-            if hasattr(worker, 'stop'):
-                worker.stop()
-            elif hasattr(worker, 'cancel'):
-                worker.cancel()
-            
-            # Use QTimer for non-blocking cleanup instead of blocking wait()
-            def check_and_cleanup():
-                try:
-                    if not hasattr(self, worker_attr_name):
-                        return
-                    worker = getattr(self, worker_attr_name)
-                    if not worker:
-                        if hasattr(self, worker_attr_name):
-                            delattr(self, worker_attr_name)
-                        return
-                    
-                    if worker.isRunning():
-                        # Still running, try to terminate
-                        try:
-                            worker.terminate()
-                        except Exception:
-                            pass
-                        # Check again after a short delay
-                        QTimer.singleShot(100, check_and_cleanup)
-                    else:
-                        # Worker stopped, cleanup
-                        if delete_after:
-                            try:
-                                worker.deleteLater()
-                            except Exception:
-                                pass
-                        # Clear the reference
-                        if hasattr(self, worker_attr_name):
-                            delattr(self, worker_attr_name)
-                except Exception as e:
-                    # Log error but don't fail
-                    print(f"Error in cleanup check: {e}")
-                    # Even if cleanup fails, try to remove the reference
-                    try:
-                        if hasattr(self, worker_attr_name):
-                            delattr(self, worker_attr_name)
-                    except Exception:
-                        pass
-            
-            # Start non-blocking cleanup check
-            QTimer.singleShot(50, check_and_cleanup)
-            
-        except Exception as e:
-            # Log error but don't fail
-            print(f"Error cleaning up worker thread: {e}")
-            # Even if cleanup fails, try to remove the reference
-            try:
-                if hasattr(self, worker_attr_name):
-                    delattr(self, worker_attr_name)
-            except Exception:
-                pass
     
     
     def ensure_cleanup_before_exit(self):
@@ -2299,10 +2195,6 @@ class ImageBrowserWindow(QMainWindow):
         """Toggle rename status checking"""
         return self.sidebar_manager.toggle_rename_status()
     
-    def update_rename_status_for_directory(self, directory: str):
-        """Update rename status for a specific directory and refresh its checkmark without rebuilding tree."""
-        return self.sidebar_manager.update_rename_status_for_directory(directory)
-
     def schedule_rename_status_check_after_rename(self, *directories):
         """Schedule naming-consistency tree check after rename(s) complete (debounced)."""
         return self.sidebar_manager.schedule_rename_status_check_after_rename(*directories)
@@ -2361,13 +2253,6 @@ class ImageBrowserWindow(QMainWindow):
             # Give focus to canvas so keyboard events work
             if getattr(self, 'list_view_container', None):
                 QTimer.singleShot(100, lambda: self.list_view_container.canvas.setFocus())
-
-    def show_jobs_pane(self) -> bool:
-        """Show the jobs pane in the right combined sidebar (idempotent)."""
-        if hasattr(self, "right_sidebar"):
-            self.right_sidebar.set_jobs_visible(True)
-            return self.right_sidebar.is_jobs_visible()
-        return False
 
     def toggle_jobs(self):
         """Toggle the jobs pane in the right combined sidebar."""
@@ -3430,12 +3315,6 @@ class ImageBrowserWindow(QMainWindow):
 
         set_current_image_path_for_window(self, path, sync)
 
-    def _set_current_directory_with_sync(self, directory: Optional[str], sync: bool = True):
-        """Set current_directory and optionally sync with FileDataModel."""
-        from window_sync import set_current_directory_for_window
-
-        set_current_directory_for_window(self, directory, sync)
-    
     def _on_displayed_images_changed(self, images: List[str]):
         """Handle displayed_images change from FileDataModel - update main_window and sync tree view"""
         self.displayed_images = images
@@ -3483,10 +3362,6 @@ class ImageBrowserWindow(QMainWindow):
     def _on_directory_changed(self, directory: str):
         """Handle directory change from FileDataModel - sync tree view"""
         return self.configuration_sync_manager._on_directory_changed(directory)
-
-    def apply_dark_theme(self):
-        """Backward compatibility: delegates to refresh_theme_styles."""
-        self.refresh_theme_styles()
 
     def refresh_thumbnail_theme_styles(self):
         """Repaint thumbnail grid after thumbnail-only palette changes (no global QSS)."""
@@ -5135,16 +5010,6 @@ class ImageBrowserWindow(QMainWindow):
         """Clear all selected thumbnails"""
         return self.selection_manager.clear_selection()
 
-    def _get_selected_indices_for_display(self) -> set:
-        """Convert selected_files to indices for visual display only"""
-        indices = set()
-        if not self.displayed_images:
-            return indices
-        for i, image_path in enumerate(self.displayed_images):
-            if image_path in self.selected_files:
-                indices.add(i)
-        return indices
-
     def _emit_selection_changed(self, highlight_index: Optional[int] = None):
         """Emit SELECTION_CHANGED event - subscribers (SelectionManager, MenuManager) react."""
         if hasattr(self, 'selection_model') and self.selection_model:
@@ -5160,10 +5025,6 @@ class ImageBrowserWindow(QMainWindow):
             from event_bus import DELETED_PLACEHOLDERS_CHANGED
             self.event_bus.emit(DELETED_PLACEHOLDERS_CHANGED, None)
 
-    def update_canvas_selection(self):
-        """Centralized method to update canvas selection state"""
-        return self.selection_manager.update_canvas_selection()
- 
     def select_thumbnail(self, index: int, add_to_selection: bool = False):
         """Optimized selection logic for thumbnails."""
         if not (0 <= index < len(self.displayed_images)):
@@ -5230,10 +5091,6 @@ class ImageBrowserWindow(QMainWindow):
             QTimer.singleShot(300, self.sequential_refresh_after_browse) 
 
 
-
-    def _ensure_fullscreen_focus(self):
-        """Ensure proper focus for browse keyboard event handling"""
-        self.browse_view_handler.ensure_browse_view_focus()
 
     def open_current_browse_view(self):
         """Open the currently highlighted image in browse, or selected images as a group"""
@@ -6524,20 +6381,6 @@ class ImageBrowserWindow(QMainWindow):
         """Compute next index for grid navigation."""
         return self.navigation_manager.compute_next_index(current_index, axis, step_sign)
 
-    def _toggle_index(self, idx: int):
-        """Toggle selection state of an index."""
-        if not (0 <= idx < len(self.displayed_images)):
-            return
-        file_path = self.displayed_images[idx]
-        if file_path in self.selected_files:
-            self.selected_files.remove(file_path)
-        else:
-            self.selected_files.add(file_path)
-        
-        # multi_select_mode is now automatically derived from selected_files
-        
-        self._emit_selection_changed()
-
     def ensure_multi_mode(self):
         """Ensure multi-select mode is active."""
         # multi_select_mode is now a property, so we just need to ensure we have selections
@@ -6561,13 +6404,6 @@ class ImageBrowserWindow(QMainWindow):
             self.enter_windowed_mode()
         else:
             self.enter_macos_space_mode()
-
-    def toggle_maximized(self):
-        """Toggle maximized mode"""
-        if self.isMaximized():
-            self.showNormal()
-        else:
-            self.showMaximized()
 
     def open_map_for_current_image(self):
         """Open map application with GPS location from current image's EXIF data"""
@@ -8053,35 +7889,6 @@ class ImageBrowserWindow(QMainWindow):
             self.thumbnail_container.scroll_to_highlighted()
             return
 
-    def _calculate_grid_dimensions_for_size(self, thumbnail_size: int, num_images: int) -> tuple:
-        """Calculate grid dimensions for a given thumbnail size and number of images"""
-        if num_images == 0:
-            return 1, 1
-        
-        # Get effective display size
-        display_size = self.get_effective_display_size()
-        available_width = display_size.width()
-        available_height = display_size.height()
-        
-        if available_width <= 0 or available_height <= 0:
-            return 1, 1
-        
-        # Account for scrollbar width
-        scrollbar_width = self.get_scrollbar_width()
-        available_width -= scrollbar_width
-        
-        # Account for canvas margins
-        available_width -= (BASE_MARGIN * 2)
-        
-        # Calculate cell size
-        cell_size = thumbnail_size + BORDER_SPACE + THUMBNAIL_SPACING
-        
-        # Calculate columns and rows
-        columns = max(1, available_width // cell_size)
-        rows = max(1, (num_images + columns - 1) // columns)  # Ceiling division
-        
-        return columns, rows
-
     def show_key_popup(self, msg: str):
         """Show key popup"""
         self.key_popup_label.setText(msg)
@@ -8762,18 +8569,6 @@ class ImageBrowserWindow(QMainWindow):
         return self.refresh_manager.sequential_refresh_after_browse()
 
     # @safe_refresh_wrapper
-    def _sequential_refresh_after_browse_impl(self):
-        """Implementation of the sequential refresh after browse."""
-        # If settings changed while in browse mode, do a full refresh
-        if getattr(self, '_settings_changed_in_browse', False):
-            self._settings_changed_in_browse = False
-            self.refresh_directory(force=True)
-            return
-        
-        # Use the existing efficient refresh method which is designed to be smooth
-        # This will detect new files and update the display efficiently without flashing
-        self.efficient_directory_refresh()
-        
     def refresh_directory(self, force=False):
         """
         Request directory refresh via event bus. RefreshManager subscribes and performs the refresh.
@@ -10187,10 +9982,6 @@ class ImageBrowserWindow(QMainWindow):
 
 
 
-    def _center_image_label(self):
-        """Center the image label in the container"""
-        self.browse_view_handler.center_image_label()
-
     def _convert_cursor_to_image_coordinates(self, cursor_pos: QPointF) -> QPointF:
         """
         Convert cursor position from main window coordinates to coordinates relative to the image content.
@@ -10570,27 +10361,6 @@ class ImageBrowserWindow(QMainWindow):
     #     self.releaseMouse()
     #     event.accept()
 
-    def _start_internal_drag(self):
-        """Start internal drag with MIME data compatible with container."""
-        # Prepare MIME
-        mime = QMimeData()
-        # Determine selection context from main window if available
-        main_window = self.parent()
-        while main_window and not hasattr(main_window, 'multi_select_mode'):
-            main_window = main_window.parent()
-        
-        mime.setData('application/x-imagebrowser-path', self.image_path.encode('utf-8'))
-        # Execute drag
-        drag = QDrag(self)
-        drag.setMimeData(mime)
-        try:
-            if self.pixmap and not self.pixmap.isNull():
-                drag.setPixmap(self.pixmap.scaled(64, 64, Qt.KeepAspectRatio, Qt.SmoothTransformation))
-                drag.setHotSpot(QPoint(32, 32))
-        except Exception:
-            pass
-        drag.exec(Qt.MoveAction)
-    
     
     def eventFilter(self, obj, event):
         """Event filter to catch keyboard events when main window has NoFocus, and F2 for thumbnail rename"""

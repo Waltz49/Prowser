@@ -73,5 +73,3 @@ def create_ai_info_icons(size_px: int = AI_INFO_ICON_DISPLAY_PX) -> tuple[QIcon,
     return normal, highlighted
 
 
-def create_ai_info_icon(size_px: int = AI_INFO_ICON_DISPLAY_PX) -> QIcon:
-    return create_ai_info_icons(size_px)[0]

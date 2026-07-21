@@ -51,17 +51,6 @@ def fit_edit_output_dims(
     return w, h
 
 
-def compute_fit_placed_size(
-    image: Image.Image,
-    target_width: int,
-    target_height: int,
-) -> Tuple[int, int]:
-    """Size of source after fit-to-canvas at 100% (before explicit placement)."""
-    scale_factor = min(target_width / image.width, target_height / image.height)
-    new_width = max(128, int(image.width * scale_factor))
-    new_height = max(128, int(image.height * scale_factor))
-    return new_width, new_height
-
 
 def prepare_image_and_mask_at_rect(
     image: Image.Image,

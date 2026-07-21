@@ -13,11 +13,6 @@ from imagegen_plugins.image_gen_registry import ImageGenModelPlugin
 _discovered_plugins: Optional[List[ImageGenModelPlugin]] = None
 
 
-def invalidate_discovered_plugins() -> None:
-    """Clear cached plugin list (e.g. after registering new models in dev)."""
-    global _discovered_plugins
-    _discovered_plugins = None
-
 
 def discover_plugins() -> List[ImageGenModelPlugin]:
     """Return registered model plugins.

@@ -63,10 +63,3 @@ def set_current_image_path_for_window(
             pass
 
 
-def set_current_directory_for_window(
-    main_window: "ImageBrowserWindow", directory: Optional[str], sync: bool = True
-) -> None:
-    if getattr(main_window, "file_data_model", None):
-        set_current_directory(main_window.file_data_model, directory, sync=sync)
-    elif not sync:
-        main_window.current_directory = directory

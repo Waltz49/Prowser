@@ -170,12 +170,6 @@ def release_generate_lock():
         _generate_lock.release()
 
 
-def queue_generate_operation(func, *args, **kwargs):
-    """Queue a generate operation for later execution."""
-    _generate_queue.append((func, args, kwargs))
-    if len(_generate_queue) == 1:
-        QTimer.singleShot(0, process_generate_queue)
-
 
 def process_generate_queue():
     """Process queued generate operations."""
@@ -199,17 +193,3 @@ def process_generate_queue():
         QTimer.singleShot(0, process_generate_queue)
 
 
-def safe_generate_wrapper(func):
-    """
-    Decorator to make generate operations thread-safe.
-    If a generate operation is already in progress, the operation is queued.
-    """
-    def wrapper(*args, **kwargs):
-        if acquire_generate_lock():
-            try:
-                return func(*args, **kwargs)
-            finally:
-                release_generate_lock()
-        queue_generate_operation(func, *args, **kwargs)
-        return None
-    return wrapper

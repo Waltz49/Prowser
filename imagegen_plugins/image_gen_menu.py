@@ -483,15 +483,6 @@ def _dialog_initial_prompt_from_user_comment(
     return initial_prompt_from_usercomment(user_comment)
 
 
-def open_imagegen_prompt_dialog(
-    main_window, *, user_comment: Optional[str] = None
-) -> None:
-    """Open the last-used function dialog (⌥/), optionally primed."""
-    start_active_imagegen_generation(
-        main_window,
-        initial_prompt=_dialog_initial_prompt_from_user_comment(user_comment),
-    )
-
 
 def open_imagegen_create_from_text_dialog(
     main_window, *, user_comment: Optional[str] = None, auto_generate: bool = False

@@ -209,12 +209,3 @@ class EventHandler:
         delay = 100 if len(self.main_window.displayed_images) <= 100 else 300
         self.main_window._resize_timer.start(delay)
     
-    def connect_scroll_signals(self):
-        """Connect scroll signals"""
-        if hasattr(self.main_window, 'scroll_area') and self.main_window.scroll_area:
-            self.main_window.scroll_area.verticalScrollBar().valueChanged.connect(self.main_window.on_scroll_changed)
-    
-    def on_scroll_changed(self, value):
-        """Handle scroll change events"""
-        # Delegate to main window method
-        self.main_window.on_scroll_changed(value)

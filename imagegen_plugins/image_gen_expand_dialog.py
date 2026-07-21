@@ -34,7 +34,6 @@ from imagegen_plugins.image_gen_dialog import (
     create_image_gen_side_button_column,
     finalize_image_gen_side_button_column,
     load_import_prompt_from_path,
-    mount_pass_image_to_ai_checkbox,
     pass_image_to_ai_checked,
     repopulate_image_gen_prompt_import_row,
     repopulate_image_gen_side_buttons,
@@ -372,11 +371,6 @@ class ImageGenExpandDialog(ImageGenDimensionAspectMixin, QDialog):
             return
         self._canvas.set_canvas_placement(px, py, pw, ph)
 
-    def _clear_field_rows(self) -> None:
-        if self._param_panel is not None:
-            self._param_panel.clear(keep_outer=IMAGE_GEN_PERSISTENT_OUTER_FIELD_COUNT)
-            self._widgets.clear()
-
     def _populate_field_rows(self) -> None:
         if self._fields_panel is None or self.plugin is None:
             return
@@ -485,11 +479,6 @@ class ImageGenExpandDialog(ImageGenDimensionAspectMixin, QDialog):
             int(values.get("height", 1024)),
         )
 
-    def _wrap(self, layout: QHBoxLayout) -> QWidget:
-        w = QWidget()
-        w.setLayout(layout)
-        return w
-
     def _main_window(self):
         from imagegen_plugins.image_gen_source_nav import resolve_image_gen_main_window
 
@@ -514,14 +503,6 @@ class ImageGenExpandDialog(ImageGenDimensionAspectMixin, QDialog):
         apply_edit_import_all_button_tooltip(import_all_btn)
         buttons.append(import_all_btn)
         return buttons or None
-
-    def _populate_prompt_side_buttons(self, btn_col: QVBoxLayout) -> None:
-        buttons = self._build_prompt_action_buttons()
-        if not buttons:
-            return
-        for button in buttons:
-            btn_col.addWidget(button, 0, Qt.AlignmentFlag.AlignTop)
-        finalize_image_gen_side_button_column(btn_col)
 
     def _show_import_button(self) -> bool:
         mw = self._main_window()

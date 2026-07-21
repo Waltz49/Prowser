@@ -58,12 +58,6 @@ def _get_follow_symlinks() -> bool:
         return False
 
 
-def _is_enabled_root_symlink(path: str, enabled_root_dirs: Set[str]) -> bool:
-    normalized = os.path.normpath(path)
-    if not os.path.islink(normalized):
-        return False
-    return normalized in enabled_root_dirs
-
 
 def _filter_walk_symlink_dirs(
     root: str,

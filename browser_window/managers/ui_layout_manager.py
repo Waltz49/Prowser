@@ -267,13 +267,6 @@ class UILayoutManager:
         finally:
             QTimer.singleShot(10, lambda: setattr(mw, '_suppress_splitter_moved', False))
 
-    def force_resize_event(self):
-        """Force a resize event to trigger layout updates"""
-        # Create a fake resize event to trigger the resizeEvent handler
-        current_size = self.main_window.size()
-        fake_event = QResizeEvent(current_size, current_size)
-        self.main_window.resizeEvent(fake_event)
-    
     def _calculate_max_sidebar_width(self):
         """Calculate the maximum sidebar width to allow one column of thumbnails, accounting for right sidebar"""
         if not hasattr(self.main_window, 'current_thumbnail_size') or not hasattr(self.main_window, 'thumbnail_container'):
@@ -299,53 +292,6 @@ class UILayoutManager:
         return max(max_width, 200)
     
 
-    def _get_thumbnail_cell_width(self):
-        """Get current thumbnail cell width including borders and spacing"""
-        try:
-            from thumbnails.thumbnail_constants import BORDER_SPACE, THUMBNAIL_SPACING
-            
-            # Get current thumbnail size from canvas or main window
-            thumbnail_size = 0
-            if hasattr(self.main_window, 'thumbnail_container') and hasattr(self.main_window.thumbnail_container, 'canvas'):
-                canvas = self.main_window.thumbnail_container.canvas
-                if hasattr(canvas, 'thumbnail_size'):
-                    thumbnail_size = canvas.thumbnail_size
-            elif hasattr(self.main_window, 'current_thumbnail_size'):
-                thumbnail_size = self.main_window.current_thumbnail_size
-            
-            if thumbnail_size > 0:
-                # Cell width = thumbnail_size + border_space + spacing
-                return thumbnail_size + BORDER_SPACE + THUMBNAIL_SPACING
-            
-            # Fallback: use a reasonable default
-            return 200  # Approximate cell width for medium thumbnails
-        except Exception:
-            return 200  # Fallback on error
-    
-    def _on_sidebar_resized(self):
-        """Handle sidebar resize events - debounced to avoid excessive recalculations"""
-        # Get current sidebar width
-        if hasattr(self.main_window, 'combined_sidebar'):
-            current_width = self.main_window.combined_sidebar.width()
-        else:
-            current_width = getattr(self.main_window, 'sidebar_width', 0)
-        
-        # Get current thumbnail cell width (including borders and spacing)
-        cell_width = self._get_thumbnail_cell_width()
-        
-        # Check if change since last refresh exceeds thumbnail cell width
-        if self._last_sidebar_width is not None and cell_width > 0:
-            width_change = abs(current_width - self._last_sidebar_width)
-            if width_change >= cell_width:
-                # Significant change - force immediate recalculation
-                self._sidebar_resize_timer.stop()
-                self._on_sidebar_resize_debounced()
-                return
-        
-        # Small change - use debounce timer
-        self._sidebar_resize_timer.stop()
-        self._sidebar_resize_timer.start(150)  # 150ms debounce delay
-    
     def _on_sidebar_resize_debounced(self):
         """Handle debounced sidebar resize events"""
         # Update canvas layout when sidebar is resized
@@ -401,29 +347,9 @@ class UILayoutManager:
         delay = 100 if len(self.main_window.displayed_images) <= 100 else 300
         self.main_window._resize_timer.start(delay)
     
-    def get_physical_screen_size(self):
-        """Get the physical screen size"""
-        return self.main_window.screen().size()
-    
     def get_effective_display_size(self):
         """Get the effective display size accounting for window decorations"""
         return self.main_window.main_content_widget.size()
-    
-    def get_scrollbar_width(self):
-        """Get the width of the scrollbar"""
-        if hasattr(self.main_window, 'scroll_area') and self.main_window.scroll_area:
-            scrollbar = self.main_window.scroll_area.verticalScrollBar()
-            if scrollbar.isVisible():
-                return scrollbar.width()
-        return 0
-    
-    def get_actual_grid_info(self):
-        """Get actual grid information from canvas"""
-        if hasattr(self.main_window, 'thumbnail_container') and self.main_window.thumbnail_container:
-            canvas = self.main_window.thumbnail_container.canvas
-            if hasattr(canvas, 'get_grid_info'):
-                return canvas.get_grid_info()
-        return None
     
     def calculate_page_scroll_info(self):
         """Calculate page scroll information"""

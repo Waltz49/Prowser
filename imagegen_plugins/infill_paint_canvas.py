@@ -187,12 +187,6 @@ class InfillPaintCanvas(QWidget):
             return
         self._load_source(source_path)
 
-    def source_size(self) -> Tuple[int, int]:
-        return self._image_w, self._image_h
-
-    def brush_radius(self) -> int:
-        return self._brush_radius
-
     def set_brush_radius(self, radius: int) -> None:
         self._brush_radius = max(BRUSH_MIN, min(BRUSH_MAX, int(radius)))
         self.update()

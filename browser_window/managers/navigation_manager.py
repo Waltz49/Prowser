@@ -293,10 +293,6 @@ class NavigationManager:
         """Get list of selected file paths"""
         return self.main_window.selection_manager.get_selected_files()
 
-    def get_selected_indices(self) -> List[int]:
-        """Get list of selected indices (for compatibility/display purposes)"""
-        return self.main_window.get_selected_indices()
-
     def clear_selection(self):
         """Clear current selection"""
         self.main_window.selected_files.clear()

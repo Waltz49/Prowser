@@ -220,21 +220,3 @@ class ChatLmStudioService(QObject):
         self._worker.request_cancel()
 
 
-def run_chat_worker(
-    messages: list[ChatMessage],
-    *,
-    on_chunk,
-    on_finished,
-    on_error,
-    on_thread_finished=None,
-    system_prompt: str = "",
-) -> bool:
-    """Submit a chat stream to the shared LM Studio service."""
-    del on_thread_finished  # legacy kwarg; service thread is never torn down per request
-    return ChatLmStudioService.instance().submit(
-        messages,
-        on_chunk=on_chunk,
-        on_finished=on_finished,
-        on_error=on_error,
-        system_prompt=system_prompt,
-    )

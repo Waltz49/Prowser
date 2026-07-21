@@ -337,9 +337,6 @@ def apply_view_chrome_splitter_theme(splitter) -> None:
     splitter.setStyleSheet(t.chrome_splitter_stylesheet())
 
 
-def get_theme(theme_id: str) -> Optional[ThemeType]:
-    return THEMES.get((theme_id or "dark").lower())
-
 
 def normalize_theme_id(theme_id: str) -> str:
     tid = (theme_id or "dark").lower()

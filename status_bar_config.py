@@ -109,14 +109,6 @@ class FilterEntryWidget(QWidget):
         """Get the current pattern text"""
         return self.text_input.text().strip()
     
-    def _get_focus_colors(self):
-        """Get focus colors matching application standard"""
-        from thumbnails.thumbnail_constants import CURRENT_IMAGE_BACKGROUND_COLOR, CURRENT_IMAGE_BORDER_COLOR
-        focus_bg = qtcolor_to_hex(CURRENT_IMAGE_BACKGROUND_COLOR)
-        focus_border = qtcolor_to_hex(CURRENT_IMAGE_BORDER_COLOR)
-        focus_text = BUTTON_FOCUS_TEXT_HEX
-        return focus_bg, focus_border, focus_text
-    
     def set_validation_state(self, is_valid: bool, error_message: str = ""):
         """Set the validation state and error message"""
         self.is_valid = is_valid
@@ -195,14 +187,6 @@ class FilterEntryWidget(QWidget):
 
 class FilterDialog(QDialog):
     """Dialog for editing filter patterns"""
-    
-    def _get_focus_colors(self):
-        """Get focus colors matching application standard"""
-        from thumbnails.thumbnail_constants import CURRENT_IMAGE_BACKGROUND_COLOR, CURRENT_IMAGE_BORDER_COLOR
-        focus_bg = qtcolor_to_hex(CURRENT_IMAGE_BACKGROUND_COLOR)
-        focus_border = qtcolor_to_hex(CURRENT_IMAGE_BORDER_COLOR)
-        focus_text = BUTTON_FOCUS_TEXT_HEX
-        return focus_bg, focus_border, focus_text
     
     def __init__(self, filters: List[str], parent=None, current_filter: Optional[str] = None):
         super().__init__(parent)
@@ -511,9 +495,6 @@ def _task_info_browser_stylesheet(*, job_queue_cell: bool = False) -> str:
         }}
     """
 
-
-def _status_bar_task_info_label_stylesheet() -> str:
-    return _task_info_browser_stylesheet(job_queue_cell=False)
 
 
 def configure_task_info_text_browser(
@@ -2023,14 +2004,6 @@ class StatusBarManager:
         self.status_bar.removeWidget(indicator)
         indicator.hide()
         indicator.deleteLater()
-
-    def show_imagegen_running_indicator(self) -> None:
-        """Deprecated: use show_model_task_indicator('generate')."""
-        self.show_model_task_indicator("generate")
-
-    def hide_imagegen_running_indicator(self) -> None:
-        """Deprecated: use hide_model_task_indicator()."""
-        self.hide_model_task_indicator()
 
     def update_status_bar_sections(self, main_window):
         """Update all status bar sections with current data from main window.

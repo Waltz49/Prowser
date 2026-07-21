@@ -66,32 +66,7 @@ def _truncate(text: str, limit: int = PROMPT_DISPLAY_MAX_LEN) -> str:
     return text[:limit] + "…"
 
 
-def parse_queue_status_title(html_text: str) -> str:
-    """Centered title from a job queue / status HTML table (may include '(Running)')."""
-    match = _QUEUE_TITLE_ROW_RE.search(html_text or "")
-    if not match:
-        return ""
-    return html.unescape(match.group(1).strip())
 
-
-def parse_queue_status_elapsed(html_text: str) -> str:
-    """Elapsed / estimate text from queue status HTML, or empty when absent."""
-    text = html_text or ""
-    steps_match = _STEPS_ROW_RE.search(text)
-    if steps_match:
-        timing_match = _STEPS_TIMING_SUFFIX_RE.search(steps_match.group(2))
-        if timing_match:
-            raw = re.sub(r"<[^>]+>", "", timing_match.group(1))
-            return html.unescape(raw).strip()
-    match = _QUEUE_ELAPSED_ROW_RE.search(text)
-    if not match:
-        return ""
-    raw = re.sub(r"<[^>]+>", "", match.group(1))
-    return html.unescape(raw).strip()
-
-
-def elide_prompt_for_sidebar(prompt: str, *, max_len: int = 48) -> str:
-    return _truncate(prompt, max_len)
 
 
 def full_prompt_tooltip_text(full_prompt: str) -> str:
@@ -121,12 +96,6 @@ def _table_row_prompt(label: str, value: str) -> str:
         f'<td style="{pad}">{_escape(value)}</td></tr>'
     )
 
-
-def _table_row_html_value(label: str, value_html: str) -> str:
-    return (
-        f"<tr><td><b>{_escape(label)}</b></td>"
-        f"<td>{value_html}</td></tr>"
-    )
 
 
 _QUEUE_FIELD_SEP = "\u00A0" * 3
@@ -235,46 +204,6 @@ def _task_menu_title_for_pipeline(pipeline_id: str) -> str:
     return "Generate an image from text"
 
 
-def _append_table_rows(html_text: str, rows: list[str]) -> str:
-    if not rows or "</table>" not in html_text:
-        return html_text
-    return html_text.replace("</table>", "".join(rows) + "</table>", 1)
-
-
-def _generation_status_table_rows(
-    fields: dict[str, str],
-    *,
-    steps_value: str | None = None,
-) -> list[str]:
-    """Model / size / steps / … / prompt rows — same order as the status-bar menu."""
-    rows: list[str] = []
-    if fields.get("model"):
-        rows.append(_table_row("Model:", fields["model"]))
-    if fields.get("lora"):
-        rows.append(_table_row("LoRA:", fields["lora"]))
-    quant = fields.get("quant")
-    quant_on_size = False
-    if fields.get("size"):
-        if quant:
-            rows.append(
-                _table_row_primary_plus_inline(
-                    "Size:", fields["size"], [(_QUANT_STATUS_LABEL, quant)]
-                )
-            )
-            quant_on_size = True
-        else:
-            rows.append(_table_row("Size:", fields["size"]))
-    steps_display = steps_value if steps_value is not None else fields.get("steps", "")
-    if steps_display:
-        rows.append(_table_row("Steps:", steps_display))
-    if quant and not quant_on_size:
-        rows.append(_table_row(_QUANT_STATUS_LABEL, quant))
-    if fields.get("prompt"):
-        rows.append(_table_row_prompt(fields["prompt_label"], fields["prompt"]))
-    if fields.get("neg"):
-        rows.append(_table_row("Neg:", fields["neg"]))
-    return rows
-
 
 # Jobs-pane active-job strip (pixel widths — Qt rich text ignores CSS %).
 _INFO_PANEL_ACTIVE_JOB_CELL_H_PAD = 8  # 4px left + 4px right (matches job-queue browser pad)
@@ -376,12 +305,6 @@ def _queue_table_row(label: str, value: str) -> str:
         f"<td>{_queue_value_html(value)}</td></tr>"
     )
 
-
-def _queue_table_row_html_value(label: str, value_html: str) -> str:
-    return (
-        f"<tr>{_information_panel_nowrap_td(_INFO_PANEL_LABEL_W, _queue_label_html(label))}"
-        f"<td>{value_html}</td></tr>"
-    )
 
 
 def _queue_table_row_prompt(label: str, value: str) -> str:
@@ -973,18 +896,6 @@ def _collect_generation_status_fields(
     return fields
 
 
-def format_image_generation_status_html(
-    plugin: ImageGenModelPlugin,
-    values: Dict[str, Any],
-    payload: Optional[Dict[str, Any]] = None,
-) -> str:
-    """Rich-text block for the status-bar task menu (image generation)."""
-    pipeline_id = plugin.pipeline_id
-    fields = _collect_generation_status_fields(plugin, values, payload)
-    rows = _generation_status_table_rows(fields)
-    return _table_html(rows, title=_task_menu_title_for_pipeline(pipeline_id))
-
-
 def format_image_generation_queue_status_html(
     plugin: ImageGenModelPlugin,
     values: Dict[str, Any],
@@ -1109,19 +1020,6 @@ def _format_duration(seconds: float) -> str:
     return f"{minutes}:{secs:02d}"
 
 
-def _format_elapsed_cell_value(
-    elapsed_seconds: float,
-    estimate_seconds: float | None = None,
-) -> str:
-    """Elapsed row cell: duration, optional estimate after a breaking space."""
-    value = _format_duration(elapsed_seconds)
-    if estimate_seconds is not None and estimate_seconds > 0:
-        value += (
-            f" Time:{_LABEL_VALUE_NBSP}"
-            f"{_format_duration(estimate_seconds)}"
-        )
-    return value
-
 
 _STEPS_QUANT_SUFFIX_RE = re.compile(
     rf"((?:\u00A0){{2,}}(?:<b>{re.escape(_QUANT_STATUS_LABEL)}</b>"
@@ -1222,22 +1120,6 @@ def update_status_html_steps_progress(
         return _EXPAND_ELAPSED_ROW_RE.sub("", updated, count=1)
     return _EXPAND_ELAPSED_ROW_RE.sub("", html_text, count=1)
 
-
-def _set_elapsed_row(html_text: str, elapsed_cell: str) -> str:
-    """Legacy: replace a standalone Elapsed row (prefer inline Steps timing)."""
-    if not html_text:
-        return html_text
-    row_html = f"<tr><td><b>Elapsed:</b></td><td>{elapsed_cell}</td></tr>"
-    updated, count = _EXPAND_ELAPSED_ROW_RE.subn(
-        lambda m: f"{m.group(1)}{elapsed_cell}{m.group(3)}",
-        html_text,
-        count=1,
-    )
-    if count:
-        return updated
-    if "</table>" in html_text:
-        return html_text.replace("</table>", row_html + "</table>", 1)
-    return html_text
 
 
 def remove_elapsed_row(html_text: str) -> str:
@@ -1429,8 +1311,3 @@ def format_caption_status_html(user_prompt_override: Optional[str] = None) -> st
     return _table_html(rows, title="Text Generation")
 
 
-def format_caption_queue_status_html(
-    user_prompt_override: Optional[str] = None,
-) -> str:
-    """Compact job-queue block for AI caption jobs."""
-    return format_caption_status_html(user_prompt_override)

@@ -95,19 +95,6 @@ PERCENT_SCALE_MAX = 200
 PERCENT_SCALE_DEFAULT = 100
 
 
-def _read_dpi_from_pil(img: Image.Image) -> Optional[int]:
-    d = img.info.get("dpi") if img.info else None
-    if not d:
-        return None
-    try:
-        if isinstance(d, tuple) and len(d) >= 2:
-            return int(round((float(d[0]) + float(d[1])) / 2.0))
-        if isinstance(d, tuple) and len(d) == 1:
-            return int(round(float(d[0])))
-        return int(round(float(d)))
-    except (TypeError, ValueError):
-        return None
-
 
 def _compute_target_size(
     orig_w: int,

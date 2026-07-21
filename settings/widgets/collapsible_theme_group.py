@@ -133,9 +133,6 @@ class CollapsibleThemeGroup(QWidget):
         root.addWidget(self._group_box)
         self._apply_expanded_state()
 
-    def state_key(self) -> str:
-        return self._state_key
-
     def content_layout(self) -> QVBoxLayout:
         return self._content_layout
 

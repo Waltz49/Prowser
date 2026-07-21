@@ -99,9 +99,6 @@ def set_perf_debug(enabled: bool) -> None:
     _perf_debug = bool(enabled)
 
 
-def perf_debug_enabled() -> bool:
-    return _perf_debug
-
 
 def perf_log(message: str) -> None:
     if _perf_debug:

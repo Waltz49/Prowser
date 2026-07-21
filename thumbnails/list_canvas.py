@@ -495,60 +495,6 @@ class ListCanvas(QWidget):
         
         return col_x
     
-    def _paint_header(self, painter: QPainter):
-        """Paint the column headers"""
-        header_y = CANVAS_TOP_MARGIN
-        header_height = LIST_HEADER_HEIGHT
-        
-        # Get canvas width for calculating name column width
-        canvas_width = self.width()
-        if canvas_width <= 0:
-            canvas_width = self.get_viewport_width()
-        if canvas_width <= 0:
-            canvas_width = 1200  # Fallback
-        header_width = max(100, canvas_width - (BASE_MARGIN * 2))
-        
-        # Calculate column positions using shared method - pass width for name column calculation
-        col_x = self._calculate_column_positions(row_width=header_width)
-        
-        # Draw header background
-        header_rect = QRect(BASE_MARGIN, header_y, header_width, header_height)
-        painter.fillRect(header_rect, QColor(50, 50, 50))
-        
-        # Draw header text - use white color
-        painter.setPen(QColor(255, 255, 255))  # White text for header
-        font = QFont("Arial", 13)
-        font.setBold(True)
-        painter.setFont(font)
-        
-        headers = [
-            ('thumbnail', 'X'),
-            ('permissions', 'Perm'),
-            ('date', 'Date'),
-            ('size', 'Size'),
-            ('dimensions', 'Dimensions'),
-            ('name', 'Name')
-        ]
-        
-        for col_key, header_text in headers:
-            x_pos = col_x[col_key]
-            if col_key == 'name':
-                col_width = col_x.get('name_width', header_width - (x_pos - BASE_MARGIN))
-                align = Qt.AlignLeft | Qt.AlignVCenter  # Name column left-aligned
-            else:
-                col_width = self.column_widths[col_key]
-                align = Qt.AlignCenter | Qt.AlignVCenter  # All other columns centered
-            
-            if col_width > 0:
-                header_text_rect = QRect(x_pos, header_y, col_width, header_height)
-                painter.drawText(header_text_rect, align, header_text)
-                
-                # Draw vertical separator line after this column (except after name column)
-                if col_key != 'name':
-                    line_x = x_pos + col_width
-                    painter.setPen(self._delineation_pen())
-                    painter.drawLine(line_x, header_y, line_x, header_y + header_height)
-    
     def _paint_row(self, painter: QPainter, row_item: ListRowItem):
         """Paint a single list row"""
         if not row_item.rect or not row_item.rect.isValid():
@@ -744,30 +690,6 @@ class ListCanvas(QWidget):
         painter.drawLine(x2, y1, x1, y2)
         painter.restore()
 
-    def _draw_padlock_overlay(self, painter: QPainter, rect: QRect):
-        """Draw padlock icon overlay"""
-        # Try to load padlock image
-        padlock_path = asset_path("padlock.png")
-        if os.path.exists(padlock_path):
-            padlock_pixmap = QPixmap(padlock_path)
-            if not padlock_pixmap.isNull():
-                icon_size = 16
-                scaled = padlock_pixmap.scaled(icon_size, icon_size, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-                painter.drawPixmap(rect.right() - icon_size - 2, rect.top() + 2, scaled)
-                return
-        
-        # Fallback: draw simple padlock
-        padlock_color = QColor(255, 215, 0)
-        painter.setPen(QPen(padlock_color, 2))
-        painter.setBrush(QBrush(padlock_color))
-        icon_size = 16
-        x = rect.right() - icon_size - 2
-        y = rect.top() + 2
-        # Draw simple padlock shape
-        painter.drawRoundedRect(x, y + 4, icon_size * 0.6, icon_size * 0.7, 2, 2)
-        painter.setBrush(QBrush())
-        painter.drawArc(x, y, icon_size * 0.5, icon_size * 0.3, 0, 180 * 16)
-    
     def _get_row_at_position(self, pos: QPoint) -> Optional[int]:
         """Get the row index at the given position"""
         for row_item in self.rows:

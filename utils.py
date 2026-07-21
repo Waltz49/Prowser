@@ -161,61 +161,6 @@ def _usleep_ms(milliseconds):
         QThread.currentThread().msleep(int(milliseconds))
 
 
-def entry_debug(dump_stack=False):
-    stack = inspect.stack()
-    # stack[0] is entry_debug, stack[1] is the caller, stack[2] is the caller's caller
-    caller_func = stack[1].function if len(stack) > 1 else "<unknown>"
-    caller_lineno = stack[1].lineno if len(stack) > 1 else "?"
-    caller_caller_func = stack[2].function if len(stack) > 2 else "<unknown>"
-    caller_caller_lineno = stack[2].lineno if len(stack) > 2 else "?"
-    print(f"DEBUG Traceback: Entered {RED}{caller_func}{RESET} called by {GREEN}{caller_caller_func}{RESET} line {caller_caller_lineno}")
-    if dump_stack:
-        stack_lines = traceback.format_stack()
-        for line in stack_lines[:-4]:
-            print(line.replace(" File ",f"File {YELLOW}").replace(" line ",f"{RESET} line "), end='')
-        with open("/tmp/exception.txt", "a") as f:
-            f.write(f"DEBUG Traceback: Entered {caller_func} line {caller_lineno} (called by {caller_caller_func} line {caller_caller_lineno})\n")
-            for line in stack_lines[:-4]:
-                f.write(line)
-
-def mutex_debug(mutex_name, action="LOCK"):
-    """Log mutex entry/exit with caller information"""
-    stack = inspect.stack()
-    # stack[0] is mutex_debug, stack[1] is the caller (where mutex is used)
-    caller_frame = stack[1] if len(stack) > 1 else None
-    if caller_frame:
-        caller_func = caller_frame.function
-        caller_lineno = caller_frame.lineno
-        caller_filename = os.path.basename(caller_frame.filename)
-        module_name = os.path.basename(caller_filename).replace('.py', '')
-        
-        # Suppress logging for frequent queue polling in worker threads to reduce noise
-        # Only log when there's actual work or when it's not a polling operation
-        if (caller_func == "run" and module_name == "image_cache" and 
-            mutex_name == "queue_mutex" and caller_lineno in [95, 99]):
-            # This is frequent queue polling - only log if queue has items or on errors
-            # We'll check the queue state by looking at the code context
-            # For now, suppress all queue polling logs to reduce noise
-            return
-        
-        # Get caller's caller for context
-        caller_caller_frame = stack[2] if len(stack) > 2 else None
-        if caller_caller_frame:
-            caller_caller_func = caller_caller_frame.function
-            caller_caller_lineno = caller_caller_frame.lineno
-            caller_caller_filename = os.path.basename(caller_caller_frame.filename)
-            msg = f"MUTEX {action}: {mutex_name} | Module: {module_name} | Function: {caller_func} (line {caller_lineno}) | Called by: {caller_caller_func} in {caller_caller_filename} (line {caller_caller_lineno})"
-        else:
-            msg = f"MUTEX {action}: {mutex_name} | Module: {module_name} | Function: {caller_func} (line {caller_lineno})"
-        print(msg)
-        with open("/tmp/exception.txt", "a") as f:
-            f.write(f"{msg}\n")
-    else:
-        msg = f"MUTEX {action}: {mutex_name} | <unknown caller>"
-        print(msg)
-        with open("/tmp/exception.txt", "a") as f:
-            f.write(f"{msg}\n")
-    
 # Decorator to print debug info when entering a function, including line numbers
 def entry_debug_wrapper(func=None, *, dump_stack=False,showParms=False,printval=None):
     def decorator(inner_func):
@@ -1473,24 +1418,6 @@ def show_styled_ok_cancel(parent, title, text, default_cancel=True):
     return msg_box.result_data["button"]
 
 
-def is_drag_out_of_photos_library(source_path: str, target_directory: str) -> bool:
-    """
-    Check if a drag operation is moving files OUT of a Photos Library to a non-Photos Library location.
-    This is the only allowed operation - dragging items out of Photos Libraries.
-    
-    Args:
-        source_path: Source file path
-        target_directory: Target directory path
-        
-    Returns:
-        True if source is in Photos Library and target is NOT in Photos Library, False otherwise
-    """
-    source_in_library = is_inside_photos_library(source_path)
-    target_in_library = is_inside_photos_library(target_directory)
-    
-    # Allow if source is in Photos Library but target is not
-    return source_in_library and not target_in_library
-
 def is_root_or_system_volume(directory_path: str) -> bool:
     """
     Check if a directory is either the root directory (/) or a system volume.
@@ -1703,16 +1630,6 @@ def resolve_path(path: str, must_exist: bool = False) -> Optional[str]:
     return path
 
 
-def validate_path_exists(path: str) -> bool:
-    """Check if a path exists"""
-    if not path:
-        return False
-    try:
-        return os.path.exists(path)
-    except Exception:
-        return False
-
-
 def normalize_path_for_display(path: str) -> str:
     """
     Convert full path to ~ format for display (UI, clipboard, messages).
@@ -1884,12 +1801,3 @@ def path_matches_active_filter(main_window, file_path: str) -> bool:
         return True
     filename = os.path.basename(file_path)
     return fnmatch.fnmatch(filename.lower(), match_pattern.lower())
-
-
-def handle_filter_pattern_mismatch(main_window, displayed_images: List[str], non_matching_images: List[str],
-                                   recursive: bool):
-    """Exclude images that do not match the active filter pattern."""
-    if not non_matching_images:
-        return displayed_images
-    non_matching_set = set(non_matching_images)
-    return [img for img in displayed_images if img not in non_matching_set]

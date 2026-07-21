@@ -513,32 +513,3 @@ def maybe_wrap_plain_text_edit_with_voice_mic(
     return VoiceMicTextEditWrapper(edit)
 
 
-def attach_voice_mic_to_plain_text_edit(
-    edit: QPlainTextEdit,
-    *,
-    parent: QWidget | None = None,
-) -> Optional[VoiceMicButton]:
-    """Attach a mic button overlay to an existing text edit (in-place parent)."""
-    if not is_whisper_voice_input_available():
-        return None
-    host = parent or edit
-    mic = VoiceMicButton(edit, edit if host is edit else host)
-    mic.show()
-
-    def position() -> None:
-        _position_voice_mic(edit, mic)
-
-    class _PosFilter(QObject):
-        def eventFilter(self, obj, event) -> bool:
-            if event.type() in (QEvent.Type.Resize, QEvent.Type.Show):
-                position()
-            return False
-
-    filt = _PosFilter(edit)
-    edit.installEventFilter(filt)
-    if host is not edit:
-        host.installEventFilter(filt)
-    edit._voice_mic_position_filter = filt  # type: ignore[attr-defined]
-    edit._voice_mic_button = mic  # type: ignore[attr-defined]
-    position()
-    return mic

@@ -189,11 +189,6 @@ def validate_copies_require_random_seed(parent, values: Dict[str, Any]) -> bool:
     return True
 
 
-def import_option_held() -> bool:
-    """Option (macOS) / Alt — prefer :func:`connect_import_button_with_option_modifier`."""
-    mods = QApplication.keyboardModifiers()
-    return bool(mods & Qt.KeyboardModifier.AltModifier)
-
 
 def connect_import_button_with_option_modifier(
     import_btn: QPushButton,
@@ -626,38 +621,7 @@ def finalize_image_gen_side_button_column(col: QVBoxLayout) -> None:
     col.addStretch(1)
 
 
-def insert_image_gen_side_column_widget_before_stretch(
-    col: QVBoxLayout,
-    widget: QWidget,
-) -> None:
-    """Insert a widget at the bottom of the side column, above the stretch."""
-    stretch_idx = col.count() - 1
-    if stretch_idx >= 0 and col.itemAt(stretch_idx).spacerItem() is not None:
-        col.insertWidget(stretch_idx, widget, 0, Qt.AlignmentFlag.AlignTop)
-    else:
-        col.addWidget(widget, 0, Qt.AlignmentFlag.AlignTop)
 
-
-def configure_image_gen_side_checkbox(checkbox: QCheckBox) -> None:
-    checkbox.setObjectName("imageGenSideActionCheckbox")
-    checkbox.setSizePolicy(
-        QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Minimum
-    )
-    fm = checkbox.fontMetrics()
-    checkbox.setMinimumHeight(fm.height() + 4)
-
-
-def wrap_image_gen_side_checkbox(checkbox: QCheckBox) -> QWidget:
-    """Side-column checkbox with bottom inset so labels are not clipped."""
-    host = QWidget()
-    host.setObjectName("imageGenSideCheckboxWrap")
-    lay = QVBoxLayout(host)
-    lay.setContentsMargins(0, 0, 0, IMAGE_GEN_FIELD_BORDER_PAD)
-    lay.setSpacing(0)
-    lay.addWidget(checkbox)
-    host.setFixedWidth(IMAGE_GEN_SIDE_BUTTON_WIDTH)
-    host.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Minimum)
-    return host
 
 
 def pass_image_to_ai_checked(owner: Any) -> bool:
@@ -666,43 +630,6 @@ def pass_image_to_ai_checked(owner: Any) -> bool:
         return cb.isChecked()
     return load_pass_image_to_ai_with_prompt()
 
-
-def mount_pass_image_to_ai_checkbox(
-    owner: Any,
-    *,
-    image_noun: str = "source image",
-) -> None:
-    owner._pass_image_to_ai_cb = None
-    if not is_lmstudio_sdk_installed():
-        return
-    col = getattr(owner, "_side_btn_col", None)
-    if col is None:
-        return
-    cb = QCheckBox("Pass image to Prompt Generator")
-    cb.setObjectName("imageGenPassImageToAiCheckbox")
-    cb.setToolTip(
-        f"Include the {image_noun} when refining the prompt with AI "
-        "(requires a vision-capable model in LM Studio)."
-    )
-    cb.setChecked(load_pass_image_to_ai_with_prompt())
-
-    def _on_toggled(checked: bool) -> None:
-        try:
-            save_pass_image_to_ai_with_prompt(bool(checked))
-        except Exception:
-            pass
-        if getattr(owner, "_panel_mode", False) and hasattr(owner, "state_changed"):
-            owner.state_changed.emit()
-
-    cb.toggled.connect(_on_toggled)
-    configure_image_gen_side_checkbox(cb)
-    insert_image_gen_side_column_widget_before_stretch(
-        col, wrap_image_gen_side_checkbox(cb)
-    )
-    owner._pass_image_to_ai_cb = cb
-    host = getattr(owner, "_side_btn_host", None)
-    if host is not None:
-        host.updateGeometry()
 
 
 def reset_image_gen_side_button_column_owner(owner: Any) -> None:
@@ -838,24 +765,6 @@ def next_aspect_locked_dims(
         probe += direction * step
     return current_w, current_h
 
-
-def pair_dims_with_aspect_lock(
-    changed: str,
-    value: int,
-    ratio: float,
-    *,
-    w_bounds: tuple[int, int],
-    h_bounds: tuple[int, int],
-    step: int,
-) -> tuple[int, int]:
-    """Width/height pair that keeps aspect ratio and stays within per-axis bounds."""
-    if changed == "width":
-        return _aspect_pair_from_width(
-            value, ratio, w_bounds=w_bounds, h_bounds=h_bounds, step=step
-        )
-    return _aspect_pair_from_height(
-        value, ratio, w_bounds=w_bounds, h_bounds=h_bounds, step=step
-    )
 
 
 class ImageGenDimensionAspectMixin:
@@ -1004,17 +913,6 @@ class ImageGenDimensionAspectMixin:
         if width is None or height is None or height <= 0:
             return
         self._aspect_ratio = width / height
-
-    def _paired_dims_for_aspect(self, changed_key: str, value: int) -> tuple[int, int]:
-        step = self._dim_align_step()
-        return pair_dims_with_aspect_lock(
-            changed_key,
-            value,
-            self._aspect_ratio,
-            w_bounds=self._spin_slider_limits("width"),
-            h_bounds=self._spin_slider_limits("height"),
-            step=step,
-        )
 
     def _spin_slider_limits(self, key: str) -> tuple[int, int]:
         entry = self._widgets.get(key)
@@ -1430,16 +1328,6 @@ class ImageGenPreviewSplitter(QSplitter):
         self.blockSignals(False)
 
 
-def configure_image_gen_form_layout(form: QFormLayout) -> None:
-    """Legacy no-op; fields use :class:`ImageGenFieldsPanel` instead."""
-    form.setVerticalSpacing(IMAGE_GEN_FORM_ROW_SPACING)
-    form.setFormAlignment(
-        Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop
-    )
-    form.setLabelAlignment(
-        Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop
-    )
-
 
 def apply_image_gen_dialog_shell(
     dlg: QDialog,
@@ -1696,12 +1584,6 @@ class ImageGenDialog(ImageGenDimensionAspectMixin, QDialog):
             else:
                 layout.addWidget(buttons)
 
-    def _clear_field_rows(self) -> None:
-        if self._param_panel is not None:
-            self._param_panel.clear(keep_outer=IMAGE_GEN_PERSISTENT_OUTER_FIELD_COUNT)
-            self._widgets.clear()
-        self._lora_steps_floor_widget = None
-
     def _populate_field_rows(self) -> None:
         if self._fields_panel is None or self.plugin is None:
             return
@@ -1802,11 +1684,6 @@ class ImageGenDialog(ImageGenDimensionAspectMixin, QDialog):
             self, panel=self, plugin_installed=self._selected_plugin_installed()
         )
 
-    def _wrap(self, layout: QHBoxLayout) -> QWidget:
-        w = QWidget()
-        w.setLayout(layout)
-        return w
-
     def refresh_mflux_lora_combo(self) -> None:
         """Refresh LoRA pulldown after Settings → LoRA catalog changes."""
         sync_image_gen_lora_field(self)
@@ -1894,15 +1771,6 @@ class ImageGenDialog(ImageGenDimensionAspectMixin, QDialog):
         apply_edit_import_all_button_tooltip(import_all_btn)
         buttons.append(import_all_btn)
         return buttons or None
-
-    def _populate_prompt_side_buttons(self, btn_col: QVBoxLayout) -> None:
-        """Legacy side column hook; prompt actions are inline under the prompt field."""
-        buttons = self._build_prompt_action_buttons()
-        if not buttons:
-            return
-        for button in buttons:
-            btn_col.addWidget(button, 0, Qt.AlignmentFlag.AlignTop)
-        finalize_image_gen_side_button_column(btn_col)
 
     def _show_import_button(self) -> bool:
         if self._function != FUNCTION_CREATE:
