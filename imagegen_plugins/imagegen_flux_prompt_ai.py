@@ -9,6 +9,7 @@ from typing import Any, Callable, Optional
 from PySide6.QtCore import QTimer, Qt
 from PySide6.QtWidgets import (
     QCheckBox,
+    QFrame,
     QPlainTextEdit,
     QPushButton,
     QSizePolicy,
@@ -343,6 +344,10 @@ class ImageGenFluxPromptAi:
         layout.setSpacing(IMAGE_GEN_CHECKBOX_ROW_SPACING)
         layout.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
         layout.addWidget(self._pass_image_cb, 0)
+        sep = QFrame(col)
+        sep.setFrameShape(QFrame.Shape.HLine)
+        # sep.setFrameShadow(QFrame.Shadow.Sunken)
+        layout.addWidget(sep)
         layout.addWidget(self._job_cb, 0)
 
         self._toolbar = col

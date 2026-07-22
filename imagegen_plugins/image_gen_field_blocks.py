@@ -255,7 +255,7 @@ def klein_edit_copies_group(
             ),
             FieldSpec(
                 key="series_refinement",
-                label="Refinement",
+                label="Job: Include Image Refinement (Pass result as next image)",
                 kind="bool",
                 default=bool(values.get("series_refinement", False)),
             ),

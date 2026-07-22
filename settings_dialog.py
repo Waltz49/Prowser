@@ -6138,13 +6138,13 @@ class SettingsDialog(QDialog):
                 row_layout.addWidget(
                     install_btn, 0, Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignRight
                 )
-            row_layout.addWidget(
-                edit_btn, 0, Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignRight
-            )
             if del_btn is not None:
                 row_layout.addWidget(
                     del_btn, 0, Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignRight
                 )
+            row_layout.addWidget(
+                edit_btn, 0, Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignRight
+            )
             row_layout.addWidget(
                 cb, 0, Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignRight
             )
@@ -6156,9 +6156,9 @@ class SettingsDialog(QDialog):
             row_widgets = [desc_w]
             if install_btn is not None:
                 row_widgets.append(install_btn)
-            row_widgets.append(edit_btn)
             if del_btn is not None:
                 row_widgets.append(del_btn)
+            row_widgets.append(edit_btn)
             row_widgets.append(cb)
             self._lora_row_widgets[entry.lora_id] = tuple(row_widgets)
             row_count += 1
