@@ -1786,7 +1786,7 @@ class SettingsDialog(QDialog):
                 self.browse_image_history_save_after_slider.setValue(6)
                 self.browse_image_history_save_after_slider.blockSignals(False)
                 self._update_browse_image_history_save_after_label()
-            self.show_extensions_checkbox.setChecked(False)
+            self.show_extensions_checkbox.setChecked(True)
             self._set_dialog_overlay_settings(False, False, dialog_edited=True)
             # General Settings
             self.debug_checkbox.setChecked(False)
@@ -1986,7 +1986,7 @@ class SettingsDialog(QDialog):
                 self.browse_image_history_save_after_slider.setValue(6)
                 self.browse_image_history_save_after_slider.blockSignals(False)
                 self._update_browse_image_history_save_after_label()
-            self.show_extensions_checkbox.setChecked(False)
+            self.show_extensions_checkbox.setChecked(True)
             self._set_dialog_overlay_settings(False, False, dialog_edited=True)
             # General Settings
             self.debug_checkbox.setChecked(False)
@@ -6559,10 +6559,10 @@ class SettingsDialog(QDialog):
                 self.original_settings['allow_quick_mass_rename'] = allow_quick_mass_rename
                 
                 # Set show extensions setting
-                show_extensions = getattr(parent_window, 'show_extensions', False)
+                show_extensions = getattr(parent_window, 'show_extensions', True)
                 if not hasattr(parent_window, 'show_extensions'):
                     # Fallback to config if not set on window
-                    show_extensions = self.original_settings.get('show_extensions', False)
+                    show_extensions = self.original_settings.get('show_extensions', True)
                 self.show_extensions_checkbox.setChecked(show_extensions)
                 self.original_settings['show_extensions'] = show_extensions
                 
@@ -6798,7 +6798,7 @@ class SettingsDialog(QDialog):
                 self.original_settings['allow_quick_mass_rename'] = allow_quick_mass_rename
                 
                 # Set show extensions setting
-                show_extensions = settings.get('show_extensions', False)
+                show_extensions = settings.get('show_extensions', True)
                 self.show_extensions_checkbox.setChecked(show_extensions)
                 self.original_settings['show_extensions'] = show_extensions
                 

@@ -108,6 +108,8 @@ These links appear in the information pane when a user comment is present.
 | **F5** | Thumbnail or browse view | Show reference graph for the **active** image (same EXIF reference data; shows a dialog if none is found). |
 | click | **Copy** link | Copy the prompt text (truncated before generation metadata). |
 | **{opt}+click** | **Copy** link | Copy the **full** raw user comment. |
+| click | Section header (▶ / ▼) | Expand or collapse that section. |
+| **{opt}+click** | Section header (▶ / ▼) | Expand or collapse **all** sections at once. |
 
 #
 

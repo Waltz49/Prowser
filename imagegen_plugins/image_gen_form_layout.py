@@ -50,7 +50,7 @@ IMAGE_GEN_PERSISTENT_OUTER_FIELD_COUNT = 2
 IMAGE_GEN_FIELD_BORDER_PAD = 4
 IMAGE_GEN_PROMPT_STYLE_PADDING_V = 10  # 5px top + 5px bottom in dialog stylesheet
 IMAGE_GEN_PROMPT_STYLE_BORDER_V = 2  # 1px top + 1px bottom border
-IMAGE_GEN_SEED_SPIN_MAX_WIDTH = 118
+IMAGE_GEN_SEED_SPIN_CHAR_COUNT = 11
 IMAGE_GEN_PROMPT_MIN_LINE_COUNT = 4
 IMAGE_GEN_PROMPT_MAX_LINE_COUNT = 22
 
@@ -717,6 +717,12 @@ def configure_image_gen_int_slider_spin(spin: StepSpinBox) -> None:
     """Fixed-width spin sized for six digit characters."""
     spin.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
     spin.setFixedWidth(spin.char_width())
+
+
+def configure_image_gen_seed_spin(spin: StepSpinBox) -> None:
+    """Fixed-width seed spin sized for eleven digit characters."""
+    spin.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+    spin.setFixedWidth(spin.char_width(IMAGE_GEN_SEED_SPIN_CHAR_COUNT))
 
 
 def image_gen_field_reset_trash_stylesheet(

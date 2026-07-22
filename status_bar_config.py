@@ -1063,6 +1063,11 @@ class ClickableImageGenIndicatorLabel(QLabel):
                     "Cooling down between image generations"
                 )
             )
+        elif task_kind == "cleanup":
+            self.setText("🟣")
+            self.setToolTip(
+                self._task_tooltip("Releasing GPU memory before the next job")
+            )
         else:
             self.setText("🔴")
             self.setToolTip(

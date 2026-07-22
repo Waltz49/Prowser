@@ -208,6 +208,7 @@ class LmStudioInstructionsPane:
         self._action_col: Optional[QWidget] = None
         self._action_layout: Optional[QVBoxLayout] = None
         self._copy_btn: Optional[QPushButton] = None
+        self._clear_btn: Optional[QPushButton] = None
         self._mic_btn: Optional[QPushButton] = None
         self._collapse_arrow: Optional[_ClickableCollapseLabel] = None
         self._collapse_title: Optional[_ClickableCollapseLabel] = None
@@ -300,12 +301,14 @@ class LmStudioInstructionsPane:
                 0,
                 Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
             )
+            clear_btn = create_image_gen_prompt_clear_button(
+                edit,
+                label_row,
+                object_name="imageGenSystemPromptClearBtn",
+            )
+            self._clear_btn = clear_btn
             label_row_layout.addWidget(
-                create_image_gen_prompt_clear_button(
-                    edit,
-                    label_row,
-                    object_name="imageGenSystemPromptClearBtn",
-                ),
+                clear_btn,
                 0,
                 Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
             )
@@ -442,6 +445,20 @@ class LmStudioInstructionsPane:
                 child.deleteLater()
         layout.addWidget(toolbar, 0)
 
+    def _ai_services_available(self) -> bool:
+        if not self._image_gen_styled:
+            return True
+        from imagegen_plugins.lmstudio_caption import is_lmstudio_services_available
+
+        return is_lmstudio_services_available()
+
+    def _system_prompt_input_shown(self) -> bool:
+        if not self._visible:
+            return False
+        if not self._ai_services_available():
+            return False
+        return self._editor_expanded
+
     def _apply_editor_expanded_state(self) -> None:
         if not self._image_gen_styled:
             return
@@ -449,8 +466,11 @@ class LmStudioInstructionsPane:
             self._collapse_arrow.setText(
                 _EXPANDED_ARROW if self._editor_expanded else _COLLAPSED_ARROW
             )
+        input_shown = self._system_prompt_input_shown()
         if self._body_widget is not None:
-            self._body_widget.setVisible(self._editor_expanded)
+            self._body_widget.setVisible(input_shown)
+        if self._clear_btn is not None:
+            self._clear_btn.setVisible(input_shown)
 
     def _toggle_editor_expanded(self) -> None:
         self.set_editor_expanded(not self._editor_expanded)
@@ -471,10 +491,18 @@ class LmStudioInstructionsPane:
         if self._widget is not None:
             self._widget.setVisible(vis)
         if not vis:
+            if self._clear_btn is not None:
+                self._clear_btn.setVisible(False)
             return
         if self._toolbar_host is not None:
-            self._toolbar_host.setVisible(True)
+            self._toolbar_host.setVisible(self._ai_services_available())
         self._apply_editor_expanded_state()
+
+    def sync_image_gen_content_visibility(self) -> None:
+        """Refresh toolbar/input/clear visibility after LM Studio availability changes."""
+        if not self._image_gen_styled:
+            return
+        self._apply_content_visibility()
 
     def _sync_toggle_location(self) -> None:
         if not self._image_gen_styled or self._toggle_btn is None:

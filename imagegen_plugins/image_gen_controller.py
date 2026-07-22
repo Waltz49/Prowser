@@ -182,9 +182,70 @@ class ImageGenController(QObject):
         self._queue_persist_timer = QTimer(self)
         self._queue_persist_timer.setSingleShot(True)
         self._queue_persist_timer.timeout.connect(self._persist_job_queue_now)
+        self._gpu_cleanup_active = False
         self._restore_persisted_job_queue()
 
+    _GPU_CLEANUP_POLL_MS = 2000
+    _GPU_CLEANUP_MAX_ATTEMPTS = 30
+
+    def _release_main_process_gpu_memory(self) -> None:
+        """Return Metal pool memory in the UI process after the worker exits."""
+        try:
+            from imagegen_plugins.mflux_model_session import release_mlx_metal_cache
+
+            release_mlx_metal_cache()
+        except Exception:
+            pass
+        try:
+            import gc
+
+            gc.collect()
+            import torch
+
+            if (
+                getattr(torch.backends, "mps", None) is not None
+                and torch.backends.mps.is_available()
+            ):
+                torch.mps.empty_cache()
+        except Exception:
+            pass
+
+    def _set_gpu_cleanup_status(self, active: bool) -> None:
+        if active == self._gpu_cleanup_active:
+            if active:
+                self.task_status_info_changed.emit()
+            return
+        self._gpu_cleanup_active = active
+        if active:
+            self._task_status_info_html = (
+                "<span>Releasing GPU memory before the next job…</span>"
+            )
+            self._update_status_bar_indicator("cleanup")
+        elif not self.is_running():
+            self._task_status_info_html = ""
+            self._update_status_bar_indicator(None)
+        self.task_status_info_changed.emit()
+        self._emit_jobs_pane_title_changed()
+
+    def _abort_queued_job_start(self) -> None:
+        """Reset controller state after a queued job failed to start."""
+        self._set_gpu_cleanup_status(False)
+        self._active_queue_job_id = ""
+        self._active_thumbnail_paths = []
+        self._reset_generation_state()
+        self._sync_cancel_menu()
+        self.queue_changed.emit()
+
+    def _pop_queued_job(self, job_id: str) -> None:
+        if not self._queue or self._queue[0].job_id != job_id:
+            return
+        self._queue.pop(0)
+        self.queue_changed.emit()
+        self._schedule_persist_job_queue()
+
     def is_running(self) -> bool:
+        if self._gpu_cleanup_active:
+            return True
         if self._copy_batch_active and not self._copy_batch_cancelled:
             return True
         timer = self._cooldown_timer
@@ -316,7 +377,7 @@ class ImageGenController(QObject):
         if self._hold_job_queue and self._generation_pipeline_idle():
             return self.enqueue_generation(plugin, values)
 
-        return self._start_generation_now(plugin, values)
+        return self._start_generation_now(plugin, values) is not False
 
     def _imagegen_submit_owner(self) -> Any | None:
         """Open image-gen dialog or active unified panel (for flux AI UI gating)."""
@@ -534,7 +595,8 @@ class ImageGenController(QObject):
         job_id: str | None = None,
         status_html: str | None = None,
         thumbnail_paths: list[str] | None = None,
-    ) -> bool:
+        from_queue: bool = False,
+    ) -> bool | None:
         copies = self._normalize_copies(values.get("copies", 1))
         values = dict(values)
         values["copies"] = copies
@@ -566,8 +628,18 @@ class ImageGenController(QObject):
         self.queue_changed.emit()
         self.task_status_info_changed.emit()
         if self._pending_job_needs_ai_stage():
-            return self._begin_job_ai_stage()
-        return self._launch_generation_job()
+            result = self._begin_job_ai_stage()
+            if result is False and from_queue:
+                self._abort_queued_job_start()
+            return result
+        result = self._launch_generation_job(
+            manage_batch_on_failure=not from_queue,
+            from_queue=from_queue,
+            queue_job_id=self._active_queue_job_id if from_queue else None,
+        )
+        if result is False and from_queue:
+            self._abort_queued_job_start()
+        return result
 
     def _pending_job_needs_ai_stage(self) -> bool:
         from imagegen_plugins.flux_prompt_job import has_flux_prompt_ai_job
@@ -615,7 +687,7 @@ class ImageGenController(QObject):
         meta = flux_prompt_ai_job_meta(self._pending_values)
         plugin = self._active_plugin
         if meta is None or plugin is None:
-            return self._launch_generation_job()
+            return self._launch_generation_job() is not False
 
         self._job_ai_stage_active = True
         self._active_job_with_ai = True
@@ -688,14 +760,15 @@ class ImageGenController(QObject):
         if self._active_plugin is None:
             self._finish_copy_batch()
             return
-        if not self._launch_generation_job():
+        result = self._launch_generation_job()
+        if result is False:
             self._finish_copy_batch()
 
     def _start_next_copy_cycle(self) -> bool:
         """Run AI prompt refinement (when configured) then the next generation copy."""
         if self._pending_job_needs_ai_stage():
             return self._begin_job_ai_stage()
-        return self._launch_generation_job()
+        return self._launch_generation_job() is not False
 
     def _fail_job_ai_stage(self, error_message: str) -> None:
         self._job_ai_stage_active = False
@@ -710,13 +783,51 @@ class ImageGenController(QObject):
                 error_message[:4000],
             )
         self.generation_finished.emit(False, "", error_message)
-        self._finish_copy_batch(cancelled=True)
+        cancelled = error_message == "Cancelled"
+        self._finish_copy_batch(cancelled=cancelled)
 
-    def _launch_generation_job(self) -> bool:
+    def _launch_generation_job(
+        self,
+        *,
+        _worker_wait_attempts: int = 0,
+        manage_batch_on_failure: bool = True,
+        from_queue: bool = False,
+        queue_job_id: str | None = None,
+    ) -> bool | None:
         plugin = self._active_plugin
         values = self._pending_values
         if plugin is None:
             return False
+
+        if self._tasks.worker_needs_cleanup():
+            if _worker_wait_attempts < self._GPU_CLEANUP_MAX_ATTEMPTS:
+                self._set_gpu_cleanup_status(True)
+                QTimer.singleShot(
+                    self._GPU_CLEANUP_POLL_MS,
+                    lambda: self._launch_generation_job(
+                        _worker_wait_attempts=_worker_wait_attempts + 1,
+                        manage_batch_on_failure=manage_batch_on_failure,
+                        from_queue=from_queue,
+                        queue_job_id=queue_job_id,
+                    ),
+                )
+                return None
+            self._tasks.force_terminate_worker()
+            self._release_main_process_gpu_memory()
+            if self._tasks.worker_needs_cleanup():
+                self._set_gpu_cleanup_status(False)
+                show_styled_critical(
+                    self.main_window,
+                    "Generation failed",
+                    "The previous model is still releasing GPU memory. "
+                    "Wait a moment and try again.",
+                )
+                if manage_batch_on_failure:
+                    self._finish_copy_batch()
+                return False
+
+        self._set_gpu_cleanup_status(False)
+        self._release_main_process_gpu_memory()
 
         output_path = next_imagegen_path(ext=".png")
         try:
@@ -751,7 +862,8 @@ class ImageGenController(QObject):
                         "Paint a mask and generate again, or re-export from Pixelmator Pro.\n\n"
                         f"{preview}",
                     )
-                    self._finish_copy_batch()
+                    if manage_batch_on_failure:
+                        self._finish_copy_batch()
                     return False
             if get_pipeline(plugin.pipeline_id).requires_source_image:
                 worker_source_paths = source_paths_for_generation_exif(payload)
@@ -803,7 +915,8 @@ class ImageGenController(QObject):
                 "Generation failed",
                 str(e),
             )
-            self._finish_copy_batch()
+            if manage_batch_on_failure:
+                self._finish_copy_batch()
             return False
 
         self._output_path = output_path
@@ -834,13 +947,31 @@ class ImageGenController(QObject):
 
         self._snapshot_copy_cycle_for_exif(plugin)
         if not self._tasks.start_generate_job(payload):
+            if self._tasks.worker_needs_cleanup():
+                if _worker_wait_attempts < self._GPU_CLEANUP_MAX_ATTEMPTS:
+                    self._set_gpu_cleanup_status(True)
+                    QTimer.singleShot(
+                        self._GPU_CLEANUP_POLL_MS,
+                        lambda: self._launch_generation_job(
+                            _worker_wait_attempts=_worker_wait_attempts + 1,
+                            manage_batch_on_failure=manage_batch_on_failure,
+                            from_queue=from_queue,
+                            queue_job_id=queue_job_id,
+                        ),
+                    )
+                    return None
+                self._tasks.force_terminate_worker()
+                self._release_main_process_gpu_memory()
             show_styled_critical(
                 self.main_window,
                 "Generation failed",
                 "Could not start the model worker process.",
             )
-            self._finish_copy_batch()
+            if manage_batch_on_failure:
+                self._finish_copy_batch()
             return False
+        if from_queue and queue_job_id:
+            self._pop_queued_job(queue_job_id)
         return True
 
     def _snapshot_copy_cycle_for_exif(self, plugin: ImageGenModelPlugin) -> None:
@@ -1614,6 +1745,7 @@ class ImageGenController(QObject):
         timer = self._cooldown_timer
         if timer is not None and timer.isActive():
             self._stop_copy_cooldown_timer()
+            self._tasks.cancel_task()
             self._finish_copy_batch(cancelled=True)
             return
         self._tasks.cancel_task()
@@ -2569,6 +2701,7 @@ class ImageGenController(QObject):
     def _finish_copy_batch(self, *, cancelled: bool = False) -> None:
         from imagegen_plugins.flux_prompt_job import clear_flux_prompt_ai_job
 
+        self._set_gpu_cleanup_status(False)
         self._stop_copy_cooldown_timer()
         clear_flux_prompt_ai_job(self._pending_values)
         if cancelled:
@@ -2624,16 +2757,25 @@ class ImageGenController(QObject):
                 "Edit or remove it to continue.",
             )
             return
-        job = self._queue.pop(0)
-        self.queue_changed.emit()
-        self._schedule_persist_job_queue()
-        self._start_generation_now(
+        result = self._start_generation_now(
             job.plugin,
             job.values,
             job_id=job.job_id,
             status_html=job.status_html,
             thumbnail_paths=job.thumbnail_paths,
+            from_queue=True,
         )
+        if result is None:
+            return
+        if result is False:
+            show_styled_critical(
+                self.main_window,
+                "Job queue",
+                "Could not start the next queued job.",
+            )
+            return
+        if self._queue and self._queue[0].job_id == job.job_id:
+            self._pop_queued_job(job.job_id)
 
     def _reset_generation_state(self) -> None:
         self._stop_copy_cooldown_timer()
@@ -2661,7 +2803,7 @@ class ImageGenController(QObject):
         mgr = getattr(self.main_window, "status_bar_manager", None)
         if mgr is None:
             return
-        if task_kind in ("generate", "caption", "cooldown"):
+        if task_kind in ("generate", "caption", "cooldown", "cleanup"):
             mgr.show_model_task_indicator(task_kind)
         else:
             mgr.hide_model_task_indicator()

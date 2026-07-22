@@ -33,9 +33,9 @@ from imagegen_plugins.image_gen_form_layout import (
     IMAGE_GEN_FLOW_ROLE_SEED,
     IMAGE_GEN_FLOW_ROLE_STEPS_QUANT,
     IMAGE_GEN_HALF_COLUMN_SLIDER_TRACK_WIDTH,
-    IMAGE_GEN_SEED_SPIN_MAX_WIDTH,
     ImageGenFieldsPanel,
     configure_image_gen_int_slider_spin,
+    configure_image_gen_seed_spin,
     configure_image_gen_slider_track,
     create_image_gen_field_reset_button,
     create_image_gen_prompt_edit,
@@ -336,8 +336,7 @@ def widget_for_field_spec(
         spin.setMinimum(0)
         spin.setMaximum(2**31 - 1)
         spin.setValue(int(spec.default or 0))
-        spin.setMaximumWidth(IMAGE_GEN_SEED_SPIN_MAX_WIDTH)
-        spin.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        configure_image_gen_seed_spin(spin)
         return spin, None
 
     label = QLabel(str(spec.default))

@@ -19,6 +19,10 @@ from workers.model_tasks_launch import (
     use_inline_model_tasks_worker,
 )
 
+_WORKER_SHUTDOWN_GRACE_MS = 2000
+_WORKER_SHUTDOWN_FORCE_WAIT_MS = 3000
+_WORKER_CLEANUP_MAX_WAIT_MS = 10000
+
 
 class FrozenModelTasksWorkerBridge(QObject):
     """Qt signal bridge; worker runs on a plain Python thread (not QThread)."""
@@ -135,6 +139,12 @@ class ModelTasksController(QObject):
             return False
         return proc.state() != QProcess.ProcessState.NotRunning
 
+    def worker_needs_cleanup(self) -> bool:
+        """True when a worker exists but is not ready (e.g. MLX still stopping after cancel)."""
+        if self._worker_ready:
+            return False
+        return self._is_worker_alive()
+
     def start_generate_job(self, payload: Dict[str, Any]) -> bool:
         if self.is_running():
             return False
@@ -197,7 +207,7 @@ class ModelTasksController(QObject):
         kind = self._active_kind
         self._cancelling = True
         try:
-            self._terminate_worker()
+            self._terminate_worker(blocking=False)
             self._finish_job(kind, False, "Cancelled")
         finally:
             self._cancelling = False
@@ -216,7 +226,11 @@ class ModelTasksController(QObject):
     def _ensure_worker(self) -> bool:
         if self._is_worker_alive() and self._worker_ready:
             return True
-        self._terminate_worker()
+        self._terminate_worker(
+            blocking=True, max_wait_ms=_WORKER_SHUTDOWN_GRACE_MS
+        )
+        if self._is_worker_alive():
+            return False
         self._worker_session_id += 1
         session = self._worker_session_id
         if self._use_inline_worker():
@@ -471,30 +485,67 @@ class ModelTasksController(QObject):
         self._worker_ready = False
         self._finish_job(kind, False, err)
 
-    def _terminate_worker(self) -> None:
+    def force_terminate_worker(self) -> None:
+        """Stop a worker that did not exit after a graceful shutdown request."""
         thread = self._inline_thread
-        if thread is not None and thread.isRunning():
-            try:
-                thread.send_command_json('{"command":"shutdown"}')
-                thread.wait(5000)
-            except Exception:
-                pass
+        if thread is not None:
             if thread.isRunning():
-                thread.request_stop()
-                thread.wait(3000)
-        self._inline_thread = None
+                try:
+                    thread.request_stop()
+                except Exception:
+                    pass
+                thread.wait(_WORKER_SHUTDOWN_FORCE_WAIT_MS)
+            if not thread.isRunning():
+                self._inline_thread = None
+
+        proc = self._process
+        if proc is not None and proc.state() != QProcess.ProcessState.NotRunning:
+            proc.kill()
+            proc.waitForFinished(_WORKER_SHUTDOWN_FORCE_WAIT_MS)
+        self._process = None
+        self._worker_ready = False
+        self._stdout_buffer = ""
+        self._stderr_buffer = []
+        self._pending_command = None
+
+    def _terminate_worker(
+        self, *, blocking: bool = True, max_wait_ms: int | None = None
+    ) -> None:
+        grace_ms = (
+            max_wait_ms if max_wait_ms is not None else _WORKER_SHUTDOWN_GRACE_MS
+        )
+        thread = self._inline_thread
+        if thread is not None:
+            if thread.isRunning():
+                try:
+                    thread.send_command_json('{"command":"shutdown"}')
+                except Exception:
+                    pass
+                if blocking:
+                    thread.wait(grace_ms)
+                if thread.isRunning():
+                    try:
+                        thread.request_stop()
+                    except Exception:
+                        pass
+                    if blocking:
+                        thread.wait(_WORKER_SHUTDOWN_FORCE_WAIT_MS)
+            if not thread.isRunning():
+                self._inline_thread = None
 
         proc = self._process
         if proc is not None and proc.state() != QProcess.ProcessState.NotRunning:
             try:
                 proc.write(b'{"command":"shutdown"}\n')
                 proc.closeWriteChannel()
-                proc.waitForFinished(2000)
+                if blocking:
+                    proc.waitForFinished(grace_ms)
             except Exception:
                 pass
             if proc.state() != QProcess.ProcessState.NotRunning:
                 proc.kill()
-                proc.waitForFinished(3000)
+                if blocking:
+                    proc.waitForFinished(_WORKER_SHUTDOWN_FORCE_WAIT_MS)
         self._process = None
         self._worker_ready = False
         self._stdout_buffer = ""
@@ -504,8 +555,11 @@ class ModelTasksController(QObject):
     def cleanup(self) -> None:
         if self.is_running():
             self.cancel_task()
-        else:
-            self._terminate_worker()
+        self._terminate_worker(
+            blocking=True, max_wait_ms=_WORKER_CLEANUP_MAX_WAIT_MS
+        )
+        if self._is_worker_alive():
+            self.force_terminate_worker()
 
     def pop_worker_result(self) -> Optional[Dict[str, Any]]:
         result = getattr(self, "_worker_result", None)

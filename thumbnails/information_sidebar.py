@@ -107,7 +107,7 @@ class InformationSidebar(QWidget):
         self._action_nav_bar: InformationActionNavBar | None = None
         self._metadata_refresh_timer: QTimer | None = None
         self._show_menu_bar = bool(
-            main_window.config.load_settings().get("information_show_menu_bar", False)
+            main_window.config.load_settings().get("information_show_menu_bar", True)
         )
         self.setup_ui()
 
@@ -381,7 +381,10 @@ class InformationSidebar(QWidget):
             f"{ALT_SYMBOL}+click: Show only this image and its direct references "
         ),
     }
-    _INFO_COLLAPSE_TOOLTIP = "Click to expand or collapse this section"
+    _INFO_COLLAPSE_TOOLTIP = (
+        "Click to expand or collapse this section.\n"
+        f"{ALT_SYMBOL}+click to expand or collapse all sections."
+    )
 
     _LEGACY_REF_MD5_LINE = re.compile(r"^[0-9a-fA-F]{32}$")
     _REF_FILEDATE_LINE = re.compile(r"^\d+(?:\.\d+)?$")
@@ -533,6 +536,27 @@ class InformationSidebar(QWidget):
         except Exception:
             pass
 
+    def _set_all_info_sections_expanded(self, expanded: bool) -> None:
+        """Expand or collapse every persisted information pane section at once."""
+        if self._info_section_expanded_cache is None:
+            self._info_section_expanded_cache = self._load_info_section_expanded()
+        expanded = bool(expanded)
+        changed = False
+        for key in _DEFAULT_INFO_SECTION_EXPANDED:
+            if self._info_section_expanded_cache.get(key) is not expanded:
+                self._info_section_expanded_cache[key] = expanded
+                changed = True
+        if not changed:
+            return
+        try:
+            if hasattr(self.main_window, 'config'):
+                self.main_window.config.update_setting(
+                    'information_section_expanded',
+                    dict(self._info_section_expanded_cache),
+                )
+        except Exception:
+            pass
+
     @staticmethod
     def _info_section_key_from_h4_title(title: str) -> Optional[str]:
         return _INFO_H4_SECTION_KEY_BY_TITLE.get(unescape(title).strip().lower())
@@ -642,10 +666,20 @@ class InformationSidebar(QWidget):
         if url.scheme() == 'infocollapse':
             section_key = url.host() or ''
             if section_key:
-                self._set_info_section_expanded(
-                    section_key,
-                    not self._info_section_expanded(section_key),
+                from PySide6.QtWidgets import QApplication
+
+                option_held = bool(
+                    QApplication.keyboardModifiers() & Qt.KeyboardModifier.AltModifier
                 )
+                if option_held:
+                    self._set_all_info_sections_expanded(
+                        not self._info_section_expanded(section_key)
+                    )
+                else:
+                    self._set_info_section_expanded(
+                        section_key,
+                        not self._info_section_expanded(section_key),
+                    )
                 self._rebuild_overlay_from_cache(
                     hovered_anchor=getattr(self, '_hovered_anchor', None)
                 )

@@ -51,6 +51,16 @@ def note_image_model_loaded(payload: Dict[str, Any]) -> None:
 
 
 
+def release_mlx_metal_cache() -> None:
+    """Return MLX Metal pool memory so PyTorch MPS can allocate on the same GPU."""
+    try:
+        import mlx.core as mx
+
+        mx.clear_cache()
+    except Exception:
+        pass
+
+
 def release_all_mflux_sessions(*, reason: str = "explicit") -> None:
     """Drop retained MFLUX sessions (call before gc / switching to caption)."""
     global _LOADED_PIPELINE_ID, _LOADED_MODEL_KEY, _image_model_retained, _last_image_activity
@@ -65,6 +75,8 @@ def release_all_mflux_sessions(*, reason: str = "explicit") -> None:
     _LOADED_MODEL_KEY = None
     _image_model_retained = False
     _last_image_activity = None
+    gc.collect()
+    release_mlx_metal_cache()
 
 
 def prepare_image_model_for_payload(payload: Dict[str, Any]) -> None:

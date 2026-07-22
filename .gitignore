@@ -15,13 +15,14 @@ venv_image_browser/
 venv_pyinstaller/
 source_preblessed/
 
-# Build artifacts
+# Build and test artifacts
 build/
 dist/
 Prowser.iconset/
 *.spec
 pyinstaller_dependencies.py
 pyinstaller_directives.json
+nerb/
 
 # Local media (app assets are whitelisted below)
 *.backup

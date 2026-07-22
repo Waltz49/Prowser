@@ -253,6 +253,7 @@ def remount_flux_prompt_system_splitter(owner: Any) -> None:
         return
     panel.mount_system_prompt_below_image_prompt(pane.widget())
     _load_flux_prompt_system_prompt_into_pane(pane)
+    pane.sync_image_gen_content_visibility()
     if not _flux_lmstudio_ui_entry_allowed(pane):
         _hide_flux_system_prompt_toggle(owner)
         return

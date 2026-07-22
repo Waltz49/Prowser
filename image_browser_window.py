@@ -446,7 +446,7 @@ class ImageBrowserWindow(QMainWindow):
         self.drag_drop_auto_date_change = settings.get('drag_drop_auto_date_change', False)
         self.allow_thumbnail_locking = settings.get('allow_thumbnail_locking', False)
         self.allow_quick_mass_rename = settings.get('allow_quick_mass_rename', False)
-        self.show_extensions = settings.get('show_extensions', False)
+        self.show_extensions = settings.get('show_extensions', True)
         self.show_image_size = settings.get('show_image_size', False)
         filtered_tree_setting = settings.get('filtered_tree', 'images')
         # Convert boolean to string for backward compatibility

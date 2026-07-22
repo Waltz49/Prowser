@@ -428,7 +428,7 @@ class ImageBrowserConfig:
             'right_sidebar_width': 300,  # Default width for right sidebar (info panel)
             'right_sidebar_visible': True,  # Derived from information/shortcuts/jobs; all open by default except chat
             'information_sidebar_visible': True,  # Default to showing Information widget (I key)
-            'information_show_menu_bar': False,  # File Information pane action toolbar
+            'information_show_menu_bar': True,  # File Information pane action toolbar
             'shortcuts_sidebar_visible': True,  # Default to showing Shortcuts within right_sidebar (O key)
             'shortcuts_sidebar_scroll_position': 0,  # Vertical scroll position for Shortcuts widget
             'shortcuts_splitter_sizes': [150, 250, 120],  # [shortcuts, information, jobs] heights for right sidebar splitter
@@ -506,8 +506,8 @@ class ImageBrowserConfig:
             # Allow quick mass rename: enable Quick Mass Rename function (default: False)
             'allow_quick_mass_rename': False,
             
-            # Show extensions in thumbnail name overlays (default: False)
-            'show_extensions': False,
+            # Show extensions in thumbnail name overlays (default: True)
+            'show_extensions': True,
             
             # Show image size (width x height) in thumbnail overlays (default: False, independent of filename display)
             'show_image_size': False,
