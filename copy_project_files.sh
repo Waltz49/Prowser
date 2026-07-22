@@ -44,8 +44,10 @@ FEATURE_PACKAGES=(
     faces
     workers
     files
+    file_ops
     thumbnails
     settings
+    widgets
     imagegen_plugins
     chat_plugins
     pyinstaller_hooks
@@ -216,6 +218,12 @@ list_reachable_root_py() {
     "$python_cmd" "$SCRIPT_DIR/list_runtime_assets.py" --reachable-root-py
 }
 
+list_reachable_packages() {
+    local python_cmd
+    python_cmd="$(resolve_python_cmd)"
+    "$python_cmd" "$SCRIPT_DIR/list_runtime_assets.py" --reachable-packages
+}
+
 verify_copy() {
     print_info "Verifying copied project..."
     local missing=0
@@ -249,6 +257,15 @@ verify_copy() {
             missing=1
         fi
     done < <(list_reachable_root_py)
+
+    local pkg_name
+    while IFS= read -r pkg_name; do
+        [ -n "$pkg_name" ] || continue
+        if [ ! -d "$TARGET_DIR/$pkg_name" ]; then
+            print_error "Missing runtime package (reachable from prowser.py): $pkg_name/"
+            missing=1
+        fi
+    done < <(list_reachable_packages)
 
     if [ "$missing" -ne 0 ]; then
         return 1

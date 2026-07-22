@@ -2395,9 +2395,9 @@ class StatusBarManager:
             # If specific_files_mode is enabled, show just the count of displayed images
             displayed_files = len(main_window.displayed_images)
             if getattr(main_window, "reference_graph_active", False):
-                label = f"{background_indicator}Reference graph: {displayed_files} files{multiple_dirs_indicator}"
+                label = f"{background_indicator}Reference graph: {displayed_files} files (Specific){multiple_dirs_indicator}"
             else:
-                label = f"{background_indicator}{displayed_files} files{multiple_dirs_indicator}"
+                label = f"{background_indicator}{displayed_files} files (Specific){multiple_dirs_indicator}"
             file_count_widget.setText(label)
             return
         # Get total files in directory (cached to avoid expensive scan on every scroll)
@@ -2416,7 +2416,7 @@ class StatusBarManager:
             displayed_files = len(main_window.displayed_images) 
             
             if total_files > 0:
-                label = f"{background_indicator}{displayed_files}\u00A0of\u00A0{total_files}\u00A0files{multiple_dirs_indicator}"
+                label = f"{background_indicator}{displayed_files} files (Directory){multiple_dirs_indicator}"
                 file_count_widget.setText(label)
             else:
                 label = f"{background_indicator}No files"

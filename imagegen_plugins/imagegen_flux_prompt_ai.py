@@ -231,6 +231,12 @@ class ImageGenFluxPromptAi:
             self._ai_btn = None
             self._undo_btn = None
 
+    def _hide_import_row_buttons(self) -> None:
+        """Keep detached Gen Prompt / Undo off the dialog surface when not in the import row."""
+        for btn in (self._ai_btn, self._undo_btn):
+            if _flux_prompt_widget_alive(btn):
+                btn.hide()
+
     def detach_import_row_buttons(self) -> None:
         """Reparent Gen Prompt / Undo so import-row rebuild does not delete them."""
         self._reset_stale_ai_widgets()
@@ -238,6 +244,7 @@ class ImageGenFluxPromptAi:
             if not _flux_prompt_widget_alive(btn):
                 continue
             btn.setParent(self._dialog)
+        self._hide_import_row_buttons()
 
     def _ensure_ai_widgets(
         self,
@@ -258,6 +265,7 @@ class ImageGenFluxPromptAi:
         configure_flux_prompt_toolbar_button(self._ai_btn)
         apply_flux_prompt_primary_button_width(self._ai_btn)
         self._ai_btn.clicked.connect(self._on_primary_ai_clicked)
+        self._ai_btn.hide()
 
         self._pass_image_cb = QCheckBox(
             "Pass image to Prompt Generator", self._dialog
@@ -307,11 +315,14 @@ class ImageGenFluxPromptAi:
         ):
             return []
         if not self.ai_controls_active(owner):
+            self._hide_import_row_buttons()
             return []
         buttons: list[QPushButton] = []
         if _flux_prompt_widget_alive(self._ai_btn):
+            self._ai_btn.show()
             buttons.append(self._ai_btn)
         if _flux_prompt_widget_alive(self._undo_btn):
+            self._update_action_buttons()
             buttons.append(self._undo_btn)
         return buttons
 

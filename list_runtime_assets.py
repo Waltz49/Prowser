@@ -36,8 +36,10 @@ _APP_PACKAGES = frozenset(
         "faces",
         "workers",
         "files",
+        "file_ops",
         "thumbnails",
         "settings",
+        "widgets",
         "imagegen_plugins",
         "chat_plugins",
     }
@@ -175,6 +177,16 @@ def reachable_root_py_filenames() -> list[str]:
     )
 
 
+def reachable_top_level_packages() -> list[str]:
+    """Top-level package dirs for modules reachable from prowser.py."""
+    pkgs: set[str] = set()
+    for path in _reachable_py_files_from_prowser():
+        rel = path.relative_to(_REPO_ROOT)
+        if len(rel.parts) > 1:
+            pkgs.add(rel.parts[0])
+    return sorted(pkgs)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -188,6 +200,11 @@ def main() -> int:
         help="Print root-level .py filenames reachable from prowser.py (one per line).",
     )
     parser.add_argument(
+        "--reachable-packages",
+        action="store_true",
+        help="Print top-level package dirs reachable from prowser.py (one per line).",
+    )
+    parser.add_argument(
         "--format",
         choices=("paths", "pyinstaller"),
         default="paths",
@@ -196,6 +213,10 @@ def main() -> int:
     args = parser.parse_args()
     if args.reachable_root_py:
         for name in reachable_root_py_filenames():
+            print(name)
+        return 0
+    if args.reachable_packages:
+        for name in reachable_top_level_packages():
             print(name)
         return 0
     names = collect_runtime_asset_names(from_prowser=args.from_prowser)

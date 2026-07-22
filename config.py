@@ -410,7 +410,7 @@ class ImageBrowserConfig:
             'background_clip_extract_faces': False,  # When background CLIP is enabled, also extract and cache face encodings
             
             # UI settings
-            'ui_theme': 'user',  # 'dark', 'light', 'user', or 'system' — global Qt stylesheet and synced palette
+            'ui_theme': 'dark',  # 'dark', 'light', 'user', or 'system' — global Qt stylesheet and synced palette
             # Custom colors for User preset (hex strings; keys match theme_service.USER_THEME_COLOR_KEYS)
             'user_theme_colors': default_user_theme_colors(),
             # Custom colors when ui_theme == 'dark' (defaults match built-in dark palette)
@@ -421,15 +421,15 @@ class ImageBrowserConfig:
             'file_tree_show_toolbar': True,  # File tree pane action toolbar
             'status_bar_visible': True,  # Default to showing status bar
             'thumbnail_filename_visible': False,  # Default to hiding thumbnail filenames
-            'preview_visible': False,  # Default to hiding preview panel
-            'chat_visible': True,  # Default to showing chat pane when chat UI is enabled
-            'jobs_visible': False,  # Default to hiding jobs pane in right combined sidebar
+            'preview_visible': True,  # Default to showing preview panel
+            'chat_visible': False,  # Default to hiding chat pane
+            'jobs_visible': True,  # Default to showing jobs pane in right combined sidebar
             'sidebar_width': 300,  # Default width for combined sidebar (tree + preview)
             'right_sidebar_width': 300,  # Default width for right sidebar (info panel)
-            'right_sidebar_visible': False,  # Default to hiding right sidebar (legacy; derived from information/shortcuts)
-            'information_sidebar_visible': False,  # Default to hiding Information widget (I key)
+            'right_sidebar_visible': True,  # Derived from information/shortcuts/jobs; all open by default except chat
+            'information_sidebar_visible': True,  # Default to showing Information widget (I key)
             'information_show_menu_bar': False,  # File Information pane action toolbar
-            'shortcuts_sidebar_visible': False,  # Default to hiding Shortcuts within right_sidebar (O key)
+            'shortcuts_sidebar_visible': True,  # Default to showing Shortcuts within right_sidebar (O key)
             'shortcuts_sidebar_scroll_position': 0,  # Vertical scroll position for Shortcuts widget
             'shortcuts_splitter_sizes': [150, 250, 120],  # [shortcuts, information, jobs] heights for right sidebar splitter
             # Collapsed (False) / expanded (True) for information pane EXIF section headers

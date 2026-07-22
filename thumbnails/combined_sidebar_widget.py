@@ -712,19 +712,35 @@ class CombinedSidebarWidget(QWidget):
             # Ensure the preview widget is visible
             self.preview_widget.show()
             
+    def is_tree_displayed(self) -> bool:
+        """True when the tree pane is actually shown (not hidden under chat cover)."""
+        return self._display_pane_visibility()[0]
+
+    def is_preview_displayed(self) -> bool:
+        """True when the preview pane is actually shown (not hidden under chat cover)."""
+        return self._display_pane_visibility()[1]
+
+    def toggle_tree_visibility(self) -> None:
+        """Toggle tree visibility using on-screen display state (chat cover counts as hidden)."""
+        if self.is_tree_displayed():
+            self.set_tree_visible(False)
+        else:
+            self.set_tree_visible(True)
+
+    def toggle_preview_visibility(self) -> None:
+        """Toggle preview visibility using on-screen display state (chat cover counts as hidden)."""
+        if self.is_preview_displayed():
+            self.set_preview_visible(False)
+        else:
+            self.set_preview_visible(True)
+
     def _toggle_tree(self):
         """Toggle tree visibility"""
-        if self.chat_covers_panes:
-            self.set_tree_visible(True)
-        else:
-            self.set_tree_visible(not self.tree_visible)
+        self.toggle_tree_visibility()
 
     def _toggle_preview(self):
         """Toggle preview visibility"""
-        if self.chat_covers_panes:
-            self.set_preview_visible(True)
-        else:
-            self.set_preview_visible(not self.preview_visible)
+        self.toggle_preview_visibility()
 
     def _toggle_chat(self):
         """Toggle chat visibility (also triggered by F9)"""

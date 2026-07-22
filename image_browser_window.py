@@ -2281,7 +2281,7 @@ class ImageBrowserWindow(QMainWindow):
         if hasattr(self, 'sidebar_manager'):
             return self.sidebar_manager.toggle_preview()
         if hasattr(self, 'combined_sidebar'):
-            self.combined_sidebar.set_preview_visible(not self.combined_sidebar.is_preview_visible())
+            self.combined_sidebar.toggle_preview_visibility()
             return self.combined_sidebar.is_preview_visible()
         else:
             # Fallback to old behavior if combined sidebar not available
@@ -9058,7 +9058,17 @@ class ImageBrowserWindow(QMainWindow):
     ):
         """Reveal only the sidebar containing the requested pane (after F4 hide)."""
         layout = dict(self._chrome_saved_layout or self._capture_chrome_layout())
-        if layout_key and not layout.get(layout_key, is_visible_fn()):
+        if layout_key == 'left_tree_visible':
+            layout['left_tree_visible'] = True
+            layout['left_chat_visible'] = False
+            layout['left_chat_covers_panes'] = False
+            self._chrome_saved_layout = layout
+        elif layout_key == 'left_preview_visible':
+            layout['left_preview_visible'] = True
+            layout['left_chat_visible'] = False
+            layout['left_chat_covers_panes'] = False
+            self._chrome_saved_layout = layout
+        elif layout_key and not layout.get(layout_key, is_visible_fn()):
             layout[layout_key] = True
             self._chrome_saved_layout = layout
 
@@ -9139,6 +9149,14 @@ class ImageBrowserWindow(QMainWindow):
         """Toggle a pane, or reveal only its sidebar when chrome was hidden via F4."""
         if self._should_reveal_sidebar_only(side):
             return self._show_sidebar_pane_only(side, layout_key, is_visible_fn, set_visible_fn)
+        cs = getattr(self, 'combined_sidebar', None)
+        if cs is not None:
+            if layout_key == 'left_tree_visible':
+                cs.toggle_tree_visibility()
+                return cs.is_tree_visible()
+            if layout_key == 'left_preview_visible':
+                cs.toggle_preview_visibility()
+                return cs.is_preview_visible()
         set_visible_fn(not is_visible_fn())
         return is_visible_fn()
 

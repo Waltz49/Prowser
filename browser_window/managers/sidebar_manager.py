@@ -52,22 +52,26 @@ class SidebarManager:
         else:
             callback()
 
-    def _leave_browse_then_toggle_pane(self, is_visible_fn, set_visible_fn):
+    def _leave_browse_then_toggle_pane(self, is_displayed_fn, set_visible_fn, toggle_fn=None):
         """Exit browse then reveal a pane; outside browse, toggle normally.
 
         In browse mode the combined sidebar is hidden but pane visibility flags stay
         set. A naive toggle after close_browse_view would hide a pane that was already
         visible before browse (e.g. F9 with chat + tree showing).
+
+        is_displayed_fn reflects on-screen visibility (chat cover counts as hidden).
         """
         was_browse = getattr(self.main_window, "current_view_mode", None) == "browse"
-        was_visible = is_visible_fn()
+        was_displayed = is_displayed_fn()
 
         def callback():
             if was_browse:
-                if not was_visible:
+                if not was_displayed:
                     set_visible_fn(True)
+            elif toggle_fn is not None:
+                toggle_fn()
             else:
-                set_visible_fn(not is_visible_fn())
+                set_visible_fn(not is_displayed_fn())
 
         self._leave_browse_then(callback)
     
@@ -79,7 +83,11 @@ class SidebarManager:
                 return self.main_window._toggle_pane_with_chrome_restore(
                     cs.is_tree_visible, cs.set_tree_visible, 'left_tree_visible', 'left'
                 )
-            self._leave_browse_then_toggle_pane(cs.is_tree_visible, cs.set_tree_visible)
+            self._leave_browse_then_toggle_pane(
+                cs.is_tree_displayed,
+                cs.set_tree_visible,
+                cs.toggle_tree_visibility,
+            )
             return cs.is_tree_visible()
         def do_toggle():
             self.main_window.view_manager.toggle_file_tree()
@@ -94,7 +102,11 @@ class SidebarManager:
                 return self.main_window._toggle_pane_with_chrome_restore(
                     cs.is_preview_visible, cs.set_preview_visible, 'left_preview_visible', 'left'
                 )
-            self._leave_browse_then_toggle_pane(cs.is_preview_visible, cs.set_preview_visible)
+            self._leave_browse_then_toggle_pane(
+                cs.is_preview_displayed,
+                cs.set_preview_visible,
+                cs.toggle_preview_visibility,
+            )
             return cs.is_preview_visible()
         else:
             # Fallback to old behavior if combined sidebar not available
