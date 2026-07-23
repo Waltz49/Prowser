@@ -20,7 +20,9 @@ from thumbnails.thumbnail_constants import (
     BUTTON_BG_HOVER_HEX, BUTTON_TEXT_HOVER_HEX, BUTTON_BORDER_HOVER_HEX,
     BUTTON_BG_PRESSED_HEX, BUTTON_FOCUS_TEXT_HEX, CURRENT_IMAGE_BORDER_COLOR_HEX,
     TEXT_DISABLED_HEX,
+    CMD_SYMBOL, ENTER_SYMBOL,
 )
+from chat_plugins.chat_ui_common import install_cmd_enter_accept
 from config import get_config
 from exif.exif_utils import truncate_usercomment_before_prompt, usercomment_text_for_clipboard
 from theme.theme_service import get_active_theme
@@ -380,12 +382,17 @@ class EditExifUserCommentDialog(QDialog):
         cancel_btn.clicked.connect(self.reject)
         btn_row.addWidget(cancel_btn)
 
-        save_btn = QPushButton("Save")
+        save_btn = QPushButton(f"Save ({CMD_SYMBOL}{ENTER_SYMBOL})")
         save_btn.setDefault(True)
         save_btn.clicked.connect(self.accept)
         btn_row.addWidget(save_btn)
 
         main_layout.addLayout(btn_row)
+
+        cmd_enter_widgets = [self.text_edit]
+        if self.instructions_edit is not None:
+            cmd_enter_widgets.append(self.instructions_edit)
+        install_cmd_enter_accept(self, *cmd_enter_widgets)
 
         # Config for geometry persistence (use parent's config when available for profile consistency)
         self._config = parent.config if (parent and hasattr(parent, 'config')) else get_config()
