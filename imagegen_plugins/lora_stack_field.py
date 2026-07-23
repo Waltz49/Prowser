@@ -6,13 +6,17 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional, Tuple
 
 from PySide6.QtCore import QPoint, Qt, Signal
-from PySide6.QtGui import QKeyEvent
+from PySide6.QtGui import QDoubleValidator, QFontMetrics, QKeyEvent
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QFrame,
+    QGridLayout,
+    QLabel,
+    QLineEdit,
     QScrollArea,
     QSizePolicy,
+    QStyle,
     QVBoxLayout,
     QWidget,
 )
@@ -34,8 +38,26 @@ from imagegen_plugins.mflux_lora_presets import (
 from theme.theme_service import get_active_theme
 
 _POPUP_MAX_VISIBLE_ROWS = 10
-_ROW_HEIGHT_ESTIMATE = 26
+_ROW_HEIGHT_ESTIMATE = 28
+_HEADER_ROW_HEIGHT = 22
 _POPUP_PADDING = 8
+_POPUP_MIN_WIDTH = 280
+_POPUP_WIDTH_SLACK = 16
+_WEIGHT_COL_WIDTH = 52
+_SCALE_MIN = 0.1
+_SCALE_MAX = 2.0
+
+
+def _format_scale(value: float) -> str:
+    return f"{float(value):g}"
+
+
+def _parse_scale_text(text: str, *, fallback: float) -> float:
+    try:
+        value = float(str(text).strip())
+    except (TypeError, ValueError):
+        return fallback
+    return max(_SCALE_MIN, min(_SCALE_MAX, value))
 
 
 def lora_stack_summary_text(
@@ -77,15 +99,19 @@ class LoraSelectionPopup(QFrame):
         self._scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self._scroll.setFrameShape(QFrame.Shape.NoFrame)
         self._checks_host = QWidget()
-        self._checks_layout = QVBoxLayout(self._checks_host)
-        self._checks_layout.setContentsMargins(
+        self._grid = QGridLayout(self._checks_host)
+        self._grid.setContentsMargins(
             _POPUP_PADDING, _POPUP_PADDING, _POPUP_PADDING, _POPUP_PADDING
         )
-        self._checks_layout.setSpacing(4)
+        self._grid.setHorizontalSpacing(8)
+        self._grid.setVerticalSpacing(4)
+        self._grid.setColumnStretch(1, 1)
         self._scroll.setWidget(self._checks_host)
         root.addWidget(self._scroll, 1)
 
-        self._checkboxes: List[Tuple[str, QCheckBox]] = []
+        self._rows: List[Tuple[str, QCheckBox, QLineEdit]] = []
+        self._fallback_scales: Dict[str, float] = {}
+        self._preferred_width = _POPUP_MIN_WIDTH
         self._committed = False
 
     def _apply_theme(self) -> None:
@@ -107,6 +133,23 @@ class LoraSelectionPopup(QFrame):
             f"QFrame#imageGenLoraSelectionPopup QCheckBox {{"
             f" color: {text};"
             f"}}"
+            f"QFrame#imageGenLoraSelectionPopup QLabel#loraPopupHeader {{"
+            f" color: {text};"
+            f" font-size: 11px;"
+            f"}}"
+            f"QFrame#imageGenLoraSelectionPopup QLineEdit#loraPopupWeightEdit {{"
+            f" background-color: {bg};"
+            f" color: {text};"
+            f" border: 1px solid {border};"
+            f" border-radius: 3px;"
+            f" padding: 2px 4px;"
+            f"}}"
+            f"QFrame#imageGenLoraSelectionPopup QLineEdit#loraPopupWeightEdit:disabled {{"
+            f" background-color: {bg};"
+            f" color: {text};"
+            f" border: 1px solid transparent;"
+            f" opacity: 0.45;"
+            f"}}"
         )
 
     def keyPressEvent(self, event: QKeyEvent) -> None:
@@ -124,12 +167,36 @@ class LoraSelectionPopup(QFrame):
         super().hideEvent(event)
 
     def _clear_checks(self) -> None:
-        while self._checks_layout.count():
-            item = self._checks_layout.takeAt(0)
+        while self._grid.count():
+            item = self._grid.takeAt(0)
             w = item.widget()
             if w is not None:
                 w.deleteLater()
-        self._checkboxes.clear()
+        self._rows.clear()
+        self._fallback_scales.clear()
+
+    def _add_header_row(self) -> None:
+        name_hdr = QLabel("LoRA", self._checks_host)
+        name_hdr.setObjectName("loraPopupHeader")
+        weight_hdr = QLabel("Wt", self._checks_host)
+        weight_hdr.setObjectName("loraPopupHeader")
+        weight_hdr.setAlignment(
+            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+        )
+        self._grid.addWidget(name_hdr, 0, 0, 1, 2)
+        self._grid.addWidget(weight_hdr, 0, 2)
+
+    def _wire_weight_row(
+        self,
+        preset_id: str,
+        cb: QCheckBox,
+        weight_edit: QLineEdit,
+    ) -> None:
+        def _on_toggled(checked: bool) -> None:
+            weight_edit.setEnabled(checked)
+
+        cb.toggled.connect(_on_toggled)
+        _on_toggled(cb.isChecked())
 
     def set_choices(
         self,
@@ -137,32 +204,113 @@ class LoraSelectionPopup(QFrame):
         selected_ids: List[str],
     ) -> None:
         """choices: (label, preset_id); excludes 'none'."""
+        from imagegen_plugins.lora_catalog import get_lora_entry
+
         self._clear_checks()
+        self._add_header_row()
         selected = set(selected_ids)
+        validator = QDoubleValidator(_SCALE_MIN, _SCALE_MAX, 2, self)
+        validator.setNotation(QDoubleValidator.Notation.StandardNotation)
+        row = 1
         for label, preset_id in choices:
             if preset_id == "none":
                 continue
+            entry = get_lora_entry(preset_id)
+            scale = float(entry.scale) if entry is not None else 1.0
+            self._fallback_scales[preset_id] = scale
+
             cb = QCheckBox(str(label), self._checks_host)
             cb.setChecked(preset_id in selected)
-            self._checks_layout.addWidget(cb)
-            self._checkboxes.append((preset_id, cb))
-        row_count = max(1, len(self._checkboxes))
-        visible_rows = min(row_count, _POPUP_MAX_VISIBLE_ROWS)
-        scroll_h = visible_rows * _ROW_HEIGHT_ESTIMATE + _POPUP_PADDING * 2
+            weight_edit = QLineEdit(_format_scale(scale), self._checks_host)
+            weight_edit.setObjectName("loraPopupWeightEdit")
+            weight_edit.setFixedWidth(_WEIGHT_COL_WIDTH)
+            weight_edit.setAlignment(
+                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+            )
+            weight_edit.setValidator(validator)
+            weight_edit.setToolTip("LoRA weight (0.1–2.0)")
+            self._wire_weight_row(preset_id, cb, weight_edit)
+
+            self._grid.addWidget(cb, row, 0, 1, 2)
+            self._grid.addWidget(weight_edit, row, 2)
+            self._rows.append((preset_id, cb, weight_edit))
+            row += 1
+
+        data_rows = max(1, len(self._rows))
+        visible_data_rows = min(data_rows, _POPUP_MAX_VISIBLE_ROWS)
+        scroll_h = (
+            _HEADER_ROW_HEIGHT
+            + visible_data_rows * _ROW_HEIGHT_ESTIMATE
+            + _POPUP_PADDING * 2
+        )
         self._scroll.setFixedHeight(scroll_h)
+        self._preferred_width = self._measure_popup_width()
+        self._checks_host.setMinimumWidth(self._preferred_width - 2)
+
+    def _measure_popup_width(self) -> int:
+        fm = QFontMetrics(self.font())
+        label_w = fm.horizontalAdvance("LoRA")
+        for _preset_id, cb, weight_edit in self._rows:
+            label_w = max(label_w, fm.horizontalAdvance(cb.text()))
+            label_w = max(label_w, weight_edit.sizeHint().width())
+
+        style = self.style()
+        indicator = 18
+        if style is not None:
+            indicator = style.pixelMetric(
+                QStyle.PixelMetric.PM_IndicatorWidth,
+                None,
+                self,
+            )
+        margins = self._grid.contentsMargins()
+        width = (
+            margins.left()
+            + margins.right()
+            + 2  # frame border
+            + indicator
+            + 8  # checkbox gap
+            + label_w
+            + self._grid.horizontalSpacing()
+            + _WEIGHT_COL_WIDTH
+            + _POPUP_WIDTH_SLACK
+        )
+        return max(_POPUP_MIN_WIDTH, width)
 
     def _selected_ids(self) -> List[str]:
         out: List[str] = []
-        for preset_id, cb in self._checkboxes:
+        for preset_id, cb, _weight_edit in self._rows:
             if cb.isChecked():
                 out.append(preset_id)
         return out
 
+    def scales_by_id(self) -> Dict[str, float]:
+        return {
+            preset_id: _parse_scale_text(
+                weight_edit.text(),
+                fallback=self._fallback_scales.get(preset_id, 1.0),
+            )
+            for preset_id, _cb, weight_edit in self._rows
+        }
+
     def show_below(self, anchor: QWidget) -> None:
         self._committed = False
         self.adjustSize()
+        width = max(
+            anchor.width(),
+            getattr(self, "_preferred_width", _POPUP_MIN_WIDTH),
+        )
+        screen = anchor.screen()
+        if screen is not None:
+            avail = screen.availableGeometry()
+            width = min(width, avail.width() - 16)
+        width = max(width, _POPUP_MIN_WIDTH)
+        self.setFixedWidth(width)
         global_pos = anchor.mapToGlobal(QPoint(0, anchor.height()))
-        self.setFixedWidth(max(anchor.width(), 280))
+        if screen is not None:
+            avail = screen.availableGeometry()
+            right_edge = global_pos.x() + width
+            if right_edge > avail.right() - 8:
+                global_pos.setX(max(avail.left() + 8, avail.right() - 8 - width))
         self.move(global_pos)
         self.show()
         self.raise_()
@@ -312,7 +460,7 @@ class LoraStackField(QWidget):
             self._update_summary_text()
             tip = (
                 "Select one or more LoRAs (experimental stacking). "
-                "Click to open the list; click outside to apply, Esc to cancel."
+                "Edit weights in the popup; click outside to apply, Esc to cancel."
             )
             self.summary_combo.setToolTip(tip)
             return
@@ -349,9 +497,34 @@ class LoraStackField(QWidget):
         self._popup.show_below(self.summary_combo)
 
     def _on_popup_accepted(self, ids: List[str]) -> None:
+        if self._popup is not None:
+            self._persist_scale_changes(self._popup.scales_by_id())
         self._selected_ids = list(ids)
         self._update_summary_text()
         self.stack_changed.emit()
 
     def _on_popup_rejected(self) -> None:
         pass
+
+    def _persist_scale_changes(self, scales: Dict[str, float]) -> None:
+        from config import get_config
+        from imagegen_plugins.image_gen_persistence import update_lora_entry_metadata
+        from imagegen_plugins.lora_catalog import get_lora_entry
+
+        settings = get_config().load_settings()
+        for lora_id, new_scale in scales.items():
+            entry = get_lora_entry(lora_id, settings)
+            if entry is None:
+                continue
+            if abs(float(entry.scale) - new_scale) < 1e-6:
+                continue
+            try:
+                update_lora_entry_metadata(
+                    lora_id,
+                    display_name=entry.display_name,
+                    trigger_word=entry.trigger_word,
+                    scale=new_scale,
+                    comment=entry.comment,
+                )
+            except Exception:
+                pass

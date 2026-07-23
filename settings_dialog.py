@@ -946,23 +946,23 @@ class SettingsDialog(QDialog):
         self._show_faces_settings_tab = faces_ui_enabled()
         self._show_captioning_settings_tab = lmstudio_ui_enabled()
         self._show_lora_settings_tab = imagegen_ui_enabled()
-        # Add tabs to widget in alphabetical order (column first)
+        # Add tabs to widget (sidebar order)
         self.tab_widget.addTab(self.app_settings_tab, "General", "⚙️")
         self.tab_widget.addTab(self.favorites_tab, "Favorites", "❤️")
         self.tab_widget.addTab(self.directories_tab, "Directories", "📂")
         self.tab_widget.addTab(self.extensions_tab, "File Types", "🏞️")
         self.tab_widget.addTab(self.move_destinations_tab, "Destinations", "⤵️")
         self.tab_widget.addTab(self.exclude_destinations_tab, "Excludes", "🚫")
+        self.tab_widget.addTab(self.theme_settings_tab, "Theme", "🎨")
+        self.tab_widget.addTab(self.map_settings_tab, "Maps and Editor", "📱")
+        self.tab_widget.addTab(self.slideshow_settings_tab, "Slideshow", "💥")
+        self.tab_widget.addTab(self.similarity_settings_tab, "Search Models", "🔍")
         if self._show_faces_settings_tab:
             self.tab_widget.addTab(self.faces_tab, "Face Recognition", "🧑🏼‍🦱")
         if self._show_captioning_settings_tab:
             self.tab_widget.addTab(self.captioning_settings_tab, "Captioning", "📝")
         if self._show_lora_settings_tab:
             self.tab_widget.addTab(self.lora_settings_tab, "LoRA", "🎭")
-        self.tab_widget.addTab(self.map_settings_tab, "Maps and Editor", "📱")
-        self.tab_widget.addTab(self.slideshow_settings_tab, "Slideshow", "💥")
-        self.tab_widget.addTab(self.similarity_settings_tab, "Search Models", "🔍")
-        self.tab_widget.addTab(self.theme_settings_tab, "Theme", "🎨")
         self.tab_widget.addTab(self.cache_management_tab, "Caches", "💾")
         
         # Connect tab change signal to resize dialog
