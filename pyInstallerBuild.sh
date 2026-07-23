@@ -94,6 +94,7 @@ WHISPER_MODEL_SCRIPT="$SCRIPT_DIR/pyinstaller_whisper_models.py"
 # Add this near the top with other configuration variables
 CONFIRM_BUILD=false  # Set to false to skip confirmations
 MIN_BUILD=false     # Set via --min: omit imagegen, LM Studio SDK, and audio packages
+DIRECT_SPEC=false   # Set via --spec: write spec directly, skip pyinstaller CLI generation
 
 # Add this function to handle user preferences
 check_build_confirmation() {
@@ -689,17 +690,18 @@ EOF
     print_success "Entitlements file created"
 }
 
-# Customize the spec file for better macOS integration
+# Write the final macOS spec file (optionally without a pyinstaller CLI base spec).
 customize_spec_file() {
     print_status "Customizing spec file for macOS..."
     
-    if [ ! -f "$SPEC_FILE" ]; then
+    if [ -f "$SPEC_FILE" ]; then
+        cp "$SPEC_FILE" "${SPEC_FILE}.backup"
+    elif [ "$DIRECT_SPEC" = "true" ]; then
+        print_status "Writing new spec file directly (no pyinstaller CLI base spec)"
+    else
         print_error "Spec file not found. Run PyInstaller first."
-        exit 1
+        return 1
     fi
-    
-    # Create a backup
-    cp "$SPEC_FILE" "${SPEC_FILE}.backup"
     
     # Absolute paths and imagegen hiddenimports for the spec file
     IMAGEGEN_PATHS=$(python "$SCRIPT_DIR/pyinstaller_imagegen_paths.py")
@@ -738,7 +740,7 @@ customize_spec_file() {
     RUNTIME_ASSET_DATAS=$("$PYTHON_CMD" "$SCRIPT_DIR/list_runtime_assets.py" --format pyinstaller)
     if [ -z "$RUNTIME_ASSET_DATAS" ]; then
         print_error "list_runtime_assets.py produced no asset datas entries"
-        exit 1
+        return 1
     fi
     print_status "Bundling $(echo "$RUNTIME_ASSET_DATAS" | wc -l | tr -d ' ') runtime asset(s)"
 
@@ -761,7 +763,7 @@ customize_spec_file() {
         WHISPER_MODEL_DATAS=$("$PYTHON_CMD" "$WHISPER_MODEL_SCRIPT" --format pyinstaller)
         if [ -z "$WHISPER_MODEL_DATAS" ]; then
             print_error "pyinstaller_whisper_models.py produced no whisper model datas entries"
-            exit 1
+            return 1
         fi
         print_status "Bundling whisper model (faster-whisper-tiny.en only)"
     fi
@@ -897,6 +899,25 @@ $LS_ENVIRONMENT_BLOCK
 EOF
     
     print_success "Spec file customized for macOS with simplified structure"
+    return 0
+}
+
+# Generate spec via direct write (--spec) or pyinstaller CLI, with fallback.
+prepare_spec_file() {
+    if [ "$DIRECT_SPEC" = "true" ]; then
+        print_status "Direct spec mode (--spec): skipping pyinstaller CLI spec generation"
+        if customize_spec_file && [ -s "$SPEC_FILE" ] && grep -q '^a = Analysis' "$SPEC_FILE" 2>/dev/null; then
+            print_success "Spec file written directly"
+            return 0
+        fi
+        print_warning "Direct spec write failed or produced an invalid spec; falling back to pyinstaller CLI"
+    fi
+
+    create_spec_file
+    customize_spec_file || {
+        print_error "Failed to customize spec file"
+        exit 1
+    }
 }
 
 # Build the app
@@ -1211,6 +1232,9 @@ main() {
     if [ "$MIN_BUILD" = "true" ]; then
         echo "Minimal build (--min): browse + similarity/CLIP; no imagegen, faces, or audio"
     fi
+    if [ "$DIRECT_SPEC" = "true" ]; then
+        echo "Direct spec (--spec): write spec without pyinstaller CLI (fallback to CLI on failure)"
+    fi
     echo "==============================================================="
     echo
     
@@ -1238,11 +1262,14 @@ main() {
         echo "  --keep, -k                Keep temporary build files (default: delete them)"
         echo "  --min, -m                 Minimal bundle: browse + similarity/CLIP only"
         echo "                            (omits imagegen, faces, LM Studio, voice/audio)"
+        echo "  --spec, -s                Write spec directly (skip pyinstaller CLI generation;"
+        echo "                            falls back to CLI generation if direct write fails)"
         echo "  --help, -h                Show this help message"
         echo ""
         echo "Examples:"
         echo "  $0                    # Full build and install (deletes temp files)"
         echo "  $0 --reuse            # Reuse venv if present, keep build artifacts (faster rebuilds)"
+        echo "  $0 --reuse --spec     # Fast rebuild: reuse venv and write spec directly"
         echo "  $0 --min              # Minimal app bundle (browse + CLIP; no imagegen/faces/audio)"
         echo "  $0 --keep             # Full build and install (keeps temp files)"
         echo "  $0 --fix-entitlements # Fix entitlements for existing app"
@@ -1273,8 +1300,7 @@ main() {
     else
         download_whisper_model
     fi
-    create_spec_file
-    customize_spec_file
+    prepare_spec_file
     build_app
     verify_build
     install_to_applications
@@ -1329,6 +1355,7 @@ for arg in "$@"; do
         --reuse|-r) REUSE_VENV=true; KEEP_FILES=true ;;
         --keep|-k)  KEEP_FILES=true ;;
         --min|-m)   MIN_BUILD=true ;;
+        --spec|-s)  DIRECT_SPEC=true ;;
     esac
 done
 if [ "$MIN_BUILD" = "true" ]; then
