@@ -1556,7 +1556,7 @@ class MenuManager:
             )
 
     def _debug_check_loras(self):
-        """Tools > Debug > Check LoRAs — probe MFLUX compatibility per FLUX model."""
+        """Tools > Debug > Check LoRAs — probe on-disk LoRAs; enable where they pass."""
         from imagegen_plugins.lora_check_dialog import run_check_loras_dialog
 
         run_check_loras_dialog(self.main_window)

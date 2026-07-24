@@ -13,6 +13,7 @@ from PySide6.QtGui import QPainter, QColor, QFont, QPen, QFontMetrics
 from PySide6.QtWidgets import QWidget, QLabel, QVBoxLayout
 from status_bar_config import StatusBarManager
 from thumbnails.thumbnail_constants import TEXT_COLOR, TEXT_COLOR_HEX
+from utils import notification_bubble_label_stylesheet
 
 BUBBLE_GAP = 6
 SLIDE_DURATION_MS = 1500
@@ -42,14 +43,9 @@ class NotificationBubble(QWidget):
         self.label = QLabel()
         self.label.setAlignment(Qt.AlignCenter)
         self.label.setWordWrap(False)
-        self.label.setStyleSheet(f"""
-            QLabel {{
-                font-size: 12pt; background-color: #cacaca;
-                border: 1px solid #4a4a4a; color: #2a2a2a;
-                padding: 7px 10px; border-radius: 5px;
-                max-width: {MAX_BUBBLE_WIDTH}px;
-            }}
-        """)
+        self.label.setStyleSheet(
+            notification_bubble_label_stylesheet(max_width_px=MAX_BUBBLE_WIDTH)
+        )
         layout.addWidget(self.label)
         self.label.setText(message)
         self.adjustSize()

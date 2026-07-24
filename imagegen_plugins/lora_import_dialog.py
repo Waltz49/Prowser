@@ -34,6 +34,8 @@ from imagegen_plugins.lora_user_entries import (
 )
 from utils import (
     display_to_path,
+    get_button_style,
+    get_dialog_shell_stylesheet,
     normalize_path_for_display,
     show_styled_information,
     show_styled_warning,
@@ -266,6 +268,11 @@ class LoraEntryDialog(QDialog):
         self.setWindowTitle("Edit LoRA" if is_edit else "Add Downloaded LoRA")
         self.setWindowModality(Qt.WindowModality.WindowModal)
         self.resize(580, 340 if is_edit else 320)
+        self.setStyleSheet(
+            get_dialog_shell_stylesheet()
+            + get_button_style()
+            + "QPushButton#loraImportBrowseButton { min-width: 96px; padding: 4px 10px; }"
+        )
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(16, 14, 16, 14)
@@ -296,9 +303,6 @@ class LoraEntryDialog(QDialog):
         self._browse_btn.setObjectName("loraImportBrowseButton")
         self._browse_btn.setFixedWidth(96)
         _pin_row_height(self._browse_btn, width_policy=QSizePolicy.Policy.Fixed)
-        self._browse_btn.setStyleSheet(
-            "QPushButton#loraImportBrowseButton { min-width: 96px; padding: 4px 10px; }"
-        )
         self._browse_btn.clicked.connect(self._browse)
         path_row = QHBoxLayout()
         path_row.setContentsMargins(0, 0, 0, 0)

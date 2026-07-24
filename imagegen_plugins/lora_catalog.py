@@ -170,23 +170,37 @@ def lora_weights_file_is_valid(path: Path) -> bool:
         return False
 
 
+def local_lora_weights_path(
+    lora_id: str,
+    settings: Optional[Dict[str, Any]] = None,
+) -> Optional[Path]:
+    """Return on-disk weights path when present and valid; never downloads."""
+    entry = get_lora_entry(lora_id, settings)
+    if entry is None:
+        return None
+    path = catalog_cache_path(entry)
+    if path is None:
+        return None
+    if lora_weights_file_is_valid(path):
+        try:
+            return path.expanduser().resolve()
+        except OSError:
+            return path.expanduser()
+    if entry.local_path:
+        alt = _ALT_CACHE / "paper-cutout" / path.name
+        if lora_weights_file_is_valid(alt):
+            try:
+                return alt.resolve()
+            except OSError:
+                return alt
+    return None
+
+
 def is_lora_installed(
     lora_id: str,
     settings: Optional[Dict[str, Any]] = None,
 ) -> bool:
-    entry = get_lora_entry(lora_id, settings)
-    if entry is None:
-        return False
-    path = catalog_cache_path(entry)
-    if path is None:
-        return False
-    if lora_weights_file_is_valid(path):
-        return True
-    if entry.local_path:
-        alt = _ALT_CACHE / "paper-cutout" / path.name
-        if lora_weights_file_is_valid(alt):
-            return True
-    return False
+    return local_lora_weights_path(lora_id, settings) is not None
 
 
 

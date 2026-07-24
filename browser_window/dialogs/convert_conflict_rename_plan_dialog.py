@@ -28,6 +28,7 @@ from utils import (
     create_dialog_thumbnail_label,
     file_string,
     get_button_style,
+    get_dialog_shell_stylesheet,
     show_styled_information,
 )
 
@@ -135,63 +136,20 @@ class ConvertConflictRenamePlanDialog(QDialog):
         bg_color = th.dialog_background_hex
         text_color = th.dialog_text_color_hex
         border_color = th.border_default_hex
-        focus_border = th.current_image_border_color_hex
         button_bg_default = th.button_bg_default_hex
-        button_text_default = th.button_text_default_hex
-        button_border_default = th.button_border_default_hex
-        button_bg_hover = th.button_bg_hover_hex
-        button_text_hover = th.button_text_hover_hex
-        button_border_hover = th.button_border_hover_hex
-        button_bg_pressed = th.button_bg_pressed_hex
-        button_focus_text = th.button_focus_text_hex
-        text_disabled = th.text_disabled_hex
-        widget_bg_disabled = th.widget_bg_disabled_hex
-        dialog_background = th.dialog_background_hex
 
         self.setWindowTitle("Rename Suggestions")
         self.setMinimumWidth(900)
         self.setMinimumHeight(420)
         self.setModal(False)
 
-        self.setStyleSheet(f"""
-            QDialog, QDialog QWidget {{
-                background-color: {bg_color};
-                color: {text_color};
-            }}
+        self.setStyleSheet(
+            get_dialog_shell_stylesheet()
+            + get_button_style()
+            + f"""
             QLabel {{
                 font-size: 13px;
                 color: {text_color};
-            }}
-            QPushButton {{
-                background-color: {button_bg_default};
-                color: {button_text_default};
-                border: 1px solid {button_border_default};
-                border-radius: 5px;
-                padding: 6px 18px;
-                min-width: 100px;
-                font-size: 13px;
-                font-family: 'Arial Narrow', Arial;
-                letter-spacing: 0.5px;
-            }}
-            QPushButton:focus {{
-                background-color: {bg_color};
-                color: {button_focus_text};
-                border: 1px solid {focus_border};
-                outline: none;
-            }}
-            QPushButton:hover {{
-                background-color: {button_bg_hover};
-                color: {button_text_hover};
-                border: 1px solid {button_border_hover};
-            }}
-            QPushButton:pressed {{
-                background-color: {button_bg_pressed};
-                color: {button_focus_text};
-            }}
-            QPushButton:disabled {{
-                color: {text_disabled};
-                background-color: {widget_bg_disabled};
-                border-color: {dialog_background};
             }}
             QTableWidget {{
                 background-color: {button_bg_default};
@@ -208,7 +166,8 @@ class ConvertConflictRenamePlanDialog(QDialog):
                 padding: 4px 8px;
                 font-size: 12px;
             }}
-        """)
+            """
+        )
 
         layout = QVBoxLayout(self)
         layout.setSpacing(12)

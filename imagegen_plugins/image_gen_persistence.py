@@ -782,6 +782,27 @@ def save_lora_catalog_state(
             imagegen["lora_catalog"] = lc
         lc = migrate_lora_catalog(lc)
         catalog = merged_lora_catalog({"imagegen": {"lora_catalog": lc}})
+
+        # Apply model_support before by_model so enable filters see new probe results.
+        if model_support is not None:
+            prev_ms = lc.get("model_support")
+            cleaned: dict = {}
+            if isinstance(prev_ms, dict):
+                cleaned = {
+                    str(k): list(v)
+                    for k, v in prev_ms.items()
+                    if str(k) in catalog and isinstance(v, (list, tuple))
+                }
+            allowed = set(LORA_PROBE_MODEL_ORDER)
+            for lid, models in model_support.items():
+                lid_s = str(lid)
+                if lid_s not in catalog:
+                    continue
+                if not isinstance(models, (list, tuple)):
+                    continue
+                cleaned[lid_s] = [str(m) for m in models if str(m) in allowed]
+            lc["model_support"] = cleaned
+
         ms = lc.get("model_support") if isinstance(lc.get("model_support"), dict) else {}
 
         if by_host is not None:
@@ -890,25 +911,6 @@ def save_lora_catalog_state(
                     if str(x) in catalog
                 }
             )
-
-        if model_support is not None:
-            prev_ms = lc.get("model_support")
-            cleaned: dict = {}
-            if isinstance(prev_ms, dict):
-                cleaned = {
-                    str(k): list(v)
-                    for k, v in prev_ms.items()
-                    if str(k) in catalog and isinstance(v, (list, tuple))
-                }
-            allowed = set(LORA_PROBE_MODEL_ORDER)
-            for lid, models in model_support.items():
-                lid_s = str(lid)
-                if lid_s not in catalog:
-                    continue
-                if not isinstance(models, (list, tuple)):
-                    continue
-                cleaned[lid_s] = [str(m) for m in models if str(m) in allowed]
-            lc["model_support"] = cleaned
 
         imagegen["lora_catalog"] = lc
 

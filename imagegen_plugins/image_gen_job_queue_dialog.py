@@ -32,11 +32,11 @@ from imagegen_plugins.job_queue_common import (  # noqa: F401
     job_queue_edit_row,
     open_reference_thumbnail_paths,
 )
-from theme.theme_service import get_active_theme
 from thumbnails.combined_sidebar_widget import HeaderWidget
 from utils import (
     _center_styled_dialog_on_screen,
     ensure_dialog_fits_screen,
+    get_dialog_shell_stylesheet,
     save_dialog_geometry_hex,
 )
 
@@ -59,15 +59,7 @@ class ImageGenJobQueueDialog(QDialog):
         self._sync_dialog_width_limits()
         self.setMinimumHeight(120)
 
-        t = get_active_theme()
-        self.setStyleSheet(
-            f"""
-            QDialog {{
-                background-color: {t.dialog_background_hex};
-                color: {t.dialog_text_color_hex};
-            }}
-            """
-        )
+        self.setStyleSheet(get_dialog_shell_stylesheet())
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(

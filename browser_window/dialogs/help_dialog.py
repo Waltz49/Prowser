@@ -653,9 +653,9 @@ class HelpDialog:
         dialog.setWindowTitle("Key Bindings Help")
         dialog.setModal(True)
         dialog.setSizeGripEnabled(True)  # Allows resizing
-        from utils import get_dialog_shell_stylesheet
+        from utils import get_button_style, get_dialog_shell_stylesheet
 
-        dialog.setStyleSheet(get_dialog_shell_stylesheet())
+        dialog.setStyleSheet(get_dialog_shell_stylesheet() + get_button_style())
         
         # Create layout
         layout = QVBoxLayout(dialog)

@@ -5722,8 +5722,8 @@ class SettingsDialog(QDialog):
             return
         text = (
             f"LoRAs listed here are valid for {model.display_name} only. "
-            "Only LoRAs that passed Check LoRAs for this model are listed (run Tools → Debug → "
-            "Check LoRAs if the list is empty). Enable and Install adapters for the generation menu. "
+            "Tools → Debug → Check LoRAs probes on-disk LoRA weights against installed models "
+            "and enables passers here (unless Hidden). Install adapters for the generation menu. "
             "The app does not change your selected base model when you pick a LoRA."
         )
         self._lora_intro_label.setText(text)
@@ -6063,19 +6063,14 @@ class SettingsDialog(QDialog):
                 font.setBold(True)
                 name_lbl.setFont(font)
 
-            status_parts = [entry.lora_id]
-            if entry.repo_id:
-                status_parts.append(entry.repo_id)
-            if entry.mflux_compatible is True:
-                status_parts.append("MFLUX verified")
-            elif entry.mflux_compatible is None:
-                status_parts.append("untested")
             from imagegen_plugins.lora_user_entries import is_user_lora_id
 
+            # Imported/user LoRAs are always on disk; only curated catalog rows need install state.
             if is_user_lora_id(entry.lora_id):
-                status_parts.append("imported")
-            status_parts.append("installed" if installed else "not installed")
-            status_lbl = QLabel(" · ".join(status_parts))
+                status_text = "imported"
+            else:
+                status_text = "installed" if installed else "not installed"
+            status_lbl = QLabel(status_text)
             status_lbl.setStyleSheet(f"color: {TEXT_DISABLED_HEX}; font-size: 11px;")
             status_lbl.setWordWrap(True)
 

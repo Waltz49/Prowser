@@ -13,6 +13,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from utils import notification_bubble_label_stylesheet
+
 _VISIBLE_MS = 5000
 _FADE_MS = 1000
 _GAP_MM = 2.0
@@ -52,18 +54,7 @@ class ImageGenSubmitNotice:
 
     def _style_label(self) -> None:
         # Match NotificationBubble in status_notification.py
-        self._label.setStyleSheet(
-            """
-            QLabel {
-                font-size: 12pt;
-                background-color: #cacaca;
-                border: 1px solid #4a4a4a;
-                color: #2a2a2a;
-                padding: 7px 10px;
-                border-radius: 5px;
-            }
-            """
-        )
+        self._label.setStyleSheet(notification_bubble_label_stylesheet())
 
     def _gap_px(self) -> int:
         return max(4, int(round(_GAP_MM / 25.4 * self._host.logicalDpiY())))

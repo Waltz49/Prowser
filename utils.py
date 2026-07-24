@@ -302,6 +302,30 @@ def get_dialog_shell_stylesheet() -> str:
     )
 
 
+def notification_bubble_label_stylesheet(*, max_width_px: int | None = None) -> str:
+    """Shared chrome for floating status/submit toast labels (theme-aware)."""
+    from theme.theme_service import get_active_theme
+
+    th = get_active_theme()
+    if th.theme_id == "light":
+        bg, border, fg = "#cacaca", "#4a4a4a", "#2a2a2a"
+    else:
+        bg = th.button_bg_default_hex
+        border = th.border_default_hex
+        fg = th.button_text_default_hex
+    max_w = f"\n                max-width: {int(max_width_px)}px;" if max_width_px else ""
+    return f"""
+            QLabel {{
+                font-size: 12pt;
+                background-color: {bg};
+                border: 1px solid {border};
+                color: {fg};
+                padding: 7px 10px;
+                border-radius: 5px;{max_w}
+            }}
+        """
+
+
 def get_button_style() -> str:
     """
     Returns the standard button style string for all QPushButton widgets.

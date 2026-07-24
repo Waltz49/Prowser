@@ -17,43 +17,72 @@ from imagegen_plugins.hf_model_ids import (
     FLUX2_KLEIN_9B,
     FLUX2_KLEIN_9B_KV,
     SCENEWORKS_FLUX2_KLEIN_9B_KV_MLX,
+    lora_model_display_name,
 )
 from imagegen_plugins.lora_catalog import (
     FluxLoraEntry,
-    catalog_entries_for_settings,
+    catalog_entries_sorted,
+    local_lora_weights_path,
+    lora_choice_label,
     lora_model_support,
     lora_probe_prompt,
     probe_models_for_lora_entry,
 )
+from imagegen_plugins.lora_catalog_settings import model_state
+from imagegen_plugins.lora_host_registry import HOST_SD15
 from imagegen_plugins.lora_model_registry import lora_probe_model_is_local
-from imagegen_plugins.lora_host_registry import (
-    HOST_FLUX2_KLEIN,
-    lora_hosts_for_settings,
+
+# Models probe_lora_on_model can exercise (MFLUX paths).
+_PROBEABLE_MODEL_KEYS = frozenset(
+    {
+        FLUX1_SCHNELL,
+        FLUX1_DEV,
+        FLUX1_FILL_DEV,
+        FLUX2_KLEIN_4B,
+        FLUX2_KLEIN_9B,
+        FLUX2_KLEIN_9B_KV,
+        SCENEWORKS_FLUX2_KLEIN_9B_KV_MLX,
+    }
 )
 
 
 @dataclass
 class LoraCheckStats:
     loras_total: int = 0
+    loras_done: int = 0
+    lora_index: int = 0  # 1-based current LoRA among those being probed
+    models_total: int = 0  # unique installed probeable models in plan
+    models_for_lora: int = 0
+    model_index_for_lora: int = 0  # 1-based within current LoRA
     probes_done: int = 0
     probes_total: int = 0
+    probe_current: int = 0  # 1-based in-flight / just-finished probe
     supported_loras: int = 0
     removed_loras: int = 0
     skipped_loras: int = 0
+    skipped_not_on_disk: int = 0
     skipped_model_probes: int = 0
+    newly_enabled_count: int = 0
+    newly_supported_count: int = 0
+    failed_probe_count: int = 0
+    skipped_hidden_count: int = 0
+    last_result: str = ""  # pass | fail | skip | ""
 
 
-def count_local_lora_probes(entries: List[FluxLoraEntry]) -> int:
-    """Probe count for progress UI (installed base models only)."""
-    return sum(
-        sum(1 for m in probe_models_for_lora_entry(e) if lora_probe_model_is_local(m))
-        for e in entries
-    )
+@dataclass
+class LoraCheckChange:
+    kind: str  # newly_supported | lost_support | newly_enabled | skipped_hidden | failed | skipped_not_on_disk
+    lora_id: str
+    lora_label: str
+    model_key: str = ""
+    model_label: str = ""
 
 
 @dataclass
 class LoraCheckResult:
     model_support: Dict[str, List[str]] = field(default_factory=dict)
+    by_model: Dict[str, Dict[str, List[str]]] = field(default_factory=dict)
+    changes: List[LoraCheckChange] = field(default_factory=list)
     hidden_by_host: Dict[str, List[str]] = field(default_factory=dict)
     stats: LoraCheckStats = field(default_factory=LoraCheckStats)
     cancelled: bool = False
@@ -65,6 +94,62 @@ class LoraCheckResult:
         for ids in self.hidden_by_host.values():
             out.extend(ids)
         return sorted(set(out))
+
+
+def _probeable_local_models(entry: FluxLoraEntry) -> List[str]:
+    return [
+        m
+        for m in probe_models_for_lora_entry(entry)
+        if m in _PROBEABLE_MODEL_KEYS and lora_probe_model_is_local(m)
+    ]
+
+
+def count_local_lora_probes(entries: List[FluxLoraEntry]) -> int:
+    """Probe count for progress UI (installed, probeable base models only)."""
+    return sum(len(_probeable_local_models(e)) for e in entries)
+
+
+def plan_disk_lora_probes(
+    settings: Optional[Dict[str, Any]],
+) -> Tuple[List[FluxLoraEntry], List[Tuple[FluxLoraEntry, List[str]]], LoraCheckStats]:
+    """
+    Catalog entries with on-disk weights and at least one local probeable model.
+    Returns (all_catalog_candidates, probe_plan, initial_stats).
+    """
+    stats = LoraCheckStats()
+    candidates: List[FluxLoraEntry] = []
+    for entry in catalog_entries_sorted(settings):
+        if entry.mflux_compatible is False:
+            continue
+        if entry.host_id == HOST_SD15:
+            continue
+        candidates.append(entry)
+
+    plan: List[Tuple[FluxLoraEntry, List[str]]] = []
+    models_seen: set[str] = set()
+    for entry in candidates:
+        path = local_lora_weights_path(entry.lora_id, settings)
+        if path is None:
+            stats.skipped_not_on_disk += 1
+            continue
+        local_models = _probeable_local_models(entry)
+        family = [
+            m
+            for m in probe_models_for_lora_entry(entry)
+            if m in _PROBEABLE_MODEL_KEYS
+        ]
+        missing = [m for m in family if not lora_probe_model_is_local(m)]
+        stats.skipped_model_probes += len(missing)
+        if not local_models:
+            stats.skipped_loras += 1
+            continue
+        plan.append((entry, local_models))
+        models_seen.update(local_models)
+
+    stats.loras_total = len(plan)
+    stats.models_total = len(models_seen)
+    stats.probes_total = sum(len(models) for _, models in plan)
+    return candidates, plan, stats
 
 
 def is_lora_incompatibility_error(exc: BaseException) -> bool:
@@ -354,84 +439,88 @@ def run_lora_compatibility_check(
     cancel_check: Callable[[], bool],
 ) -> LoraCheckResult:
     """
-    Test visible catalog LoRAs per model family.
+    Probe on-disk catalog LoRAs against installed models in each LoRA's family.
+    Does not download missing weights. Enables passers (unless hidden).
     progress_callback(probe_index, probe_total, phase, lora_id, model_key, stats)
-    phase is 'download' | 'probe'.
+    phase is 'scan' | 'probe'.
     """
-    from imagegen_plugins.mflux_lora_presets import resolve_lora_path
-
     result = LoraCheckResult()
-    stats = result.stats
-    model_support: Dict[str, List[str]] = {}
-    hidden_by_host: Dict[str, List[str]] = {}
-    probe_idx = 0
     previous_support = lora_model_support(settings)
+    model_support: Dict[str, List[str]] = {}
+    # Accumulated enables per model (start from current settings; merge new).
+    by_model_enabled: Dict[str, List[str]] = {}
+    by_model_hidden: Dict[str, List[str]] = {}
 
-    all_entries: List[Tuple[str, FluxLoraEntry]] = []
-    for host in lora_hosts_for_settings():
-        for entry in catalog_entries_for_settings(settings, host.host_id):
-            all_entries.append((host.host_id, entry))
+    progress_callback(0, 1, "scan", "", "", LoraCheckStats())
+    _candidates, plan, stats = plan_disk_lora_probes(settings)
+    result.stats = stats
 
-    stats.loras_total = len(all_entries)
-    stats.probes_total = count_local_lora_probes([e for _, e in all_entries])
+    for entry, _models in plan:
+        for model_key in _models:
+            if model_key not in by_model_enabled:
+                st = model_state(settings, model_key)
+                by_model_enabled[model_key] = list(st.get("enabled_ids") or [])
+                by_model_hidden[model_key] = list(st.get("hidden_ids") or [])
 
-    for host_id, entry in all_entries:
+    for lid, skipped_entry in (
+        (e.lora_id, e)
+        for e in _candidates
+        if local_lora_weights_path(e.lora_id, settings) is None
+        and e.host_id != HOST_SD15
+        and e.mflux_compatible is not False
+    ):
+        result.changes.append(
+            LoraCheckChange(
+                kind="skipped_not_on_disk",
+                lora_id=lid,
+                lora_label=lora_choice_label(skipped_entry),
+            )
+        )
+
+    progress_callback(0, max(1, stats.probes_total), "scan", "", "", stats)
+    if not plan:
+        result.model_support = model_support
+        result.stats = stats
+        return result
+
+    probe_idx = 0
+    for lora_i, (entry, local_models) in enumerate(plan, start=1):
         if cancel_check():
             result.cancelled = True
             break
+
         lora_id = entry.lora_id
-        models = probe_models_for_lora_entry(entry)
-        if not models:
+        lora_label = lora_choice_label(entry)
+        path = local_lora_weights_path(lora_id, settings)
+        if path is None:
             stats.skipped_loras += 1
+            stats.loras_done = lora_i
             continue
 
+        lora_path = str(path)
         prev_models = set(previous_support.get(lora_id, ()))
-        local_models = [m for m in models if lora_probe_model_is_local(m)]
-        missing_models = [m for m in models if not lora_probe_model_is_local(m)]
-        supported: List[str] = [
-            m for m in missing_models if m in prev_models
+        family = [
+            m
+            for m in probe_models_for_lora_entry(entry)
+            if m in _PROBEABLE_MODEL_KEYS
         ]
+        missing_models = [m for m in family if not lora_probe_model_is_local(m)]
+        # Keep prior compatibility for base models not installed this run.
+        supported: List[str] = [m for m in missing_models if m in prev_models]
 
-        for model_key in missing_models:
-            stats.skipped_model_probes += 1
-            print(
-                f"[Check LoRAs] skipping missing base model {model_key!r} "
-                f"for {lora_id!r} (preserving prior compatibility if any)"
-            )
+        stats.lora_index = lora_i
+        stats.models_for_lora = len(local_models)
+        stats.model_index_for_lora = 0
+        stats.last_result = ""
 
-        if not local_models:
-            model_support[lora_id] = supported
-            required = probe_models_for_lora_entry(entry)
-            if entry.host_id == HOST_FLUX2_KLEIN:
-                passed = bool(required) and all(m in supported for m in required)
-            else:
-                passed = bool(supported)
-            if passed:
-                stats.supported_loras += 1
-            else:
-                stats.removed_loras += 1
-            continue
-
-        progress_callback(
-            probe_idx,
-            stats.probes_total,
-            "download",
-            lora_id,
-            "",
-            stats,
-        )
-        try:
-            lora_path = resolve_lora_path(lora_id)
-        except Exception:
-            stats.skipped_loras += 1
-            if supported:
-                model_support[lora_id] = supported
-            continue
-
-        for model_key in local_models:
+        for model_i, model_key in enumerate(local_models, start=1):
             if cancel_check():
                 result.cancelled = True
                 break
+
+            stats.model_index_for_lora = model_i
+            stats.probe_current = probe_idx + 1
+            stats.last_result = ""
             progress_callback(
                 probe_idx,
                 stats.probes_total,
@@ -439,6 +528,12 @@ def run_lora_compatibility_check(
                 lora_id,
                 model_key,
                 stats,
+            )
+            print(
+                f"[Check LoRAs] LoRA {lora_i}/{stats.loras_total} "
+                f"«{lora_label}» · model {model_i}/{len(local_models)} "
+                f"{lora_model_display_name(model_key)} "
+                f"(probe {stats.probe_current}/{stats.probes_total})"
             )
             try:
                 ok = probe_lora_on_model(
@@ -448,30 +543,106 @@ def run_lora_compatibility_check(
                     cancel_check,
                     entry=entry,
                 )
-            except Exception:
+            except Exception as e:
+                print(f"[Check LoRAs] probe error {lora_id!r} on {model_key!r}: {e}")
                 ok = False
-            if ok and model_key not in supported:
-                supported.append(model_key)
+
+            model_label = lora_model_display_name(model_key)
+            was_supported = model_key in prev_models
+            if ok:
+                stats.last_result = "pass"
+                if model_key not in supported:
+                    supported.append(model_key)
+                if not was_supported:
+                    stats.newly_supported_count += 1
+                    result.changes.append(
+                        LoraCheckChange(
+                            kind="newly_supported",
+                            lora_id=lora_id,
+                            lora_label=lora_label,
+                            model_key=model_key,
+                            model_label=model_label,
+                        )
+                    )
+                hidden = set(by_model_hidden.get(model_key, ()))
+                enabled = by_model_enabled.setdefault(model_key, [])
+                if lora_id in hidden:
+                    stats.skipped_hidden_count += 1
+                    result.changes.append(
+                        LoraCheckChange(
+                            kind="skipped_hidden",
+                            lora_id=lora_id,
+                            lora_label=lora_label,
+                            model_key=model_key,
+                            model_label=model_label,
+                        )
+                    )
+                elif lora_id not in enabled:
+                    enabled.append(lora_id)
+                    stats.newly_enabled_count += 1
+                    result.changes.append(
+                        LoraCheckChange(
+                            kind="newly_enabled",
+                            lora_id=lora_id,
+                            lora_label=lora_label,
+                            model_key=model_key,
+                            model_label=model_label,
+                        )
+                    )
+            else:
+                stats.last_result = "fail"
+                stats.failed_probe_count += 1
+                result.changes.append(
+                    LoraCheckChange(
+                        kind="failed",
+                        lora_id=lora_id,
+                        lora_label=lora_label,
+                        model_key=model_key,
+                        model_label=model_label,
+                    )
+                )
+                if was_supported:
+                    result.changes.append(
+                        LoraCheckChange(
+                            kind="lost_support",
+                            lora_id=lora_id,
+                            lora_label=lora_label,
+                            model_key=model_key,
+                            model_label=model_label,
+                        )
+                    )
+
             probe_idx += 1
             stats.probes_done = probe_idx
+            progress_callback(
+                probe_idx,
+                stats.probes_total,
+                "probe",
+                lora_id,
+                model_key,
+                stats,
+            )
             time.sleep(0)
 
         if result.cancelled:
+            # Persist partial support for probes completed on this LoRA.
+            model_support[lora_id] = supported
             break
 
         model_support[lora_id] = supported
-        required = probe_models_for_lora_entry(entry)
-        if entry.host_id == HOST_FLUX2_KLEIN:
-            passed = bool(required) and all(m in supported for m in required)
-        else:
-            # FLUX.1: keep if any listed base model accepts the LoRA.
-            passed = bool(supported)
-        if passed:
+        if supported:
             stats.supported_loras += 1
         else:
             stats.removed_loras += 1
+        stats.loras_done = lora_i
 
     result.model_support = model_support
-    result.hidden_by_host = hidden_by_host
+    result.by_model = {
+        mk: {
+            "enabled_ids": list(by_model_enabled.get(mk, [])),
+            "hidden_ids": list(by_model_hidden.get(mk, [])),
+        }
+        for mk in by_model_enabled
+    }
     result.stats = stats
     return result

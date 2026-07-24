@@ -30,6 +30,8 @@ from utils import (
     _dialog_thumbnail_border_color,
     create_titled_progress_dialog,
     ensure_dialog_fits_screen,
+    get_button_style,
+    get_dialog_shell_stylesheet,
     load_dialog_thumbnail,
     restore_dialog_geometry_hex,
     save_dialog_geometry_hex,
@@ -244,6 +246,7 @@ class FindReferencesDialog(QDialog):
         )
         self.setWindowTitle(f"References to {os.path.basename(target_path)}")
         self.setModal(True)
+        self.setStyleSheet(get_dialog_shell_stylesheet() + get_button_style())
         self._setup_ui(split)
         self.finished.connect(self._save_geometry)
 

@@ -98,6 +98,11 @@ class ActiveJobStripWidget(QWidget):
         self._layout_width_px = layout_width_px
         self._active_job_hovered_anchor: str | None = None
         self._live_timer: QTimer | None = None
+        self._cached_content_height = 0
+        self._resize_refresh_timer = QTimer(self)
+        self._resize_refresh_timer.setSingleShot(True)
+        self._resize_refresh_timer.setInterval(50)
+        self._resize_refresh_timer.timeout.connect(lambda: self.refresh(force=True))
         self._setup_ui()
         self._connect_controller()
 
@@ -208,6 +213,7 @@ class ActiveJobStripWidget(QWidget):
         if not force and self._imagegen_dialog_building_active():
             return
         if not self._controller.is_running():
+            self._cached_content_height = 0
             self.hide()
             return
         if not force and not self._controller.task_status_display_needs_refresh():
@@ -221,6 +227,7 @@ class ActiveJobStripWidget(QWidget):
             skip_hovered=hovered == "skipcooldown://",
         )
         if not cell_html:
+            self._cached_content_height = 0
             self.hide()
             return
         body_html = wrap_active_job_timing_table_html(
@@ -239,35 +246,26 @@ class ActiveJobStripWidget(QWidget):
             margins = layout.contentsMargins()
             margin_h = margins.top() + margins.bottom()
         self.setFixedHeight(self._frame.height() + margin_h)
+        self._cached_content_height = self.height()
         self.show()
         _disable_tab_focus(self)
 
     def content_height(self) -> int:
-        """Height when visible, or estimated height for compact layout."""
+        """Height when visible, or last measured height for compact layout."""
         if not self._controller.is_running():
             return 0
         if self.isVisible() and self.height() > 0:
-            return self.height()
-        frame_w, browser_w = self._layout_widths()
-        cell_html = build_active_job_timing_cell_html(
-            self._controller,
-            content_width_px=browser_w,
-        )
-        if not cell_html:
-            return 0
-        body_html = wrap_active_job_timing_table_html(
-            cell_html, content_width_px=browser_w
-        )
-        browser_h = _apply_active_job_strip_html(
-            self._browser,
-            body_html,
-            content_width=browser_w,
-        )
+            self._cached_content_height = self.height()
+            return self._cached_content_height
+        if self._cached_content_height > 0:
+            return self._cached_content_height
+        # Fallback before first refresh: chrome + one text line (no HTML rebuild).
         layout = self.layout()
-        if layout is None:
-            return browser_h + _ACTIVE_JOB_STRIP_FRAME_CHROME_V
-        margins = layout.contentsMargins()
-        return browser_h + _ACTIVE_JOB_STRIP_FRAME_CHROME_V + margins.top() + margins.bottom()
+        margin_h = 0
+        if layout is not None:
+            margins = layout.contentsMargins()
+            margin_h = margins.top() + margins.bottom()
+        return 28 + _ACTIVE_JOB_STRIP_FRAME_CHROME_V + margin_h
 
     def refresh_theme_styles(self) -> None:
         self._browser.setStyleSheet(_active_job_strip_browser_stylesheet())
@@ -277,7 +275,7 @@ class ActiveJobStripWidget(QWidget):
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
         if self._layout_width_px is None:
-            self.refresh(force=True)
+            self._resize_refresh_timer.start()
 
     def showEvent(self, event) -> None:
         super().showEvent(event)

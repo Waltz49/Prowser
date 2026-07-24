@@ -11,11 +11,12 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont
 
-from thumbnails.thumbnail_constants import (
-    DIALOG_TEXT_COLOR_HEX, BORDER_DEFAULT_HEX,
-)
 from theme.theme_service import get_active_theme
-from utils import get_button_style
+from utils import (
+    apply_standard_dialog_layout,
+    get_button_style,
+    get_dialog_shell_stylesheet,
+)
 
 
 class MarkdownDialog(QDialog):
@@ -72,13 +73,9 @@ class MarkdownDialog(QDialog):
     def setup_ui(self):
         """Setup the dialog UI"""
         th = get_active_theme()
-        self.setStyleSheet(
-            f"QDialog {{ background-color: {th.dialog_background_hex}; color: {th.dialog_text_color_hex}; }}\n"
-            + get_button_style()
-        )
+        self.setStyleSheet(get_dialog_shell_stylesheet() + get_button_style())
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(20, 20, 20, 20)
-        layout.setSpacing(15)
+        apply_standard_dialog_layout(layout)
 
         # Title
         title = QLabel(self.windowTitle())
@@ -101,8 +98,8 @@ class MarkdownDialog(QDialog):
         # Style the text area (background from dialog theme; read-only uses dialog background)
         self.content_area.setStyleSheet(f"""
             QTextEdit {{
-                color: {DIALOG_TEXT_COLOR_HEX};
-                border: 1px solid {BORDER_DEFAULT_HEX};
+                color: {th.dialog_text_color_hex};
+                border: 1px solid {th.border_default_hex};
                 border-radius: 4px;
                 padding: 10px;
             }}

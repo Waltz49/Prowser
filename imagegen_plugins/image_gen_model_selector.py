@@ -116,14 +116,13 @@ def configure_lora_combo(combo: QComboBox) -> None:
     combo.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
     combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToContents)
     combo.setMinimumContentsLength(20)
+    # Theme min-width lives on #imageGenDialog QComboBox#imageGenLoraCombo; keep size caps here.
+    combo.setMinimumWidth(280)
     combo.setMaximumWidth(4096)
-    combo.setStyleSheet(
-        "QComboBox#imageGenLoraCombo { min-width: 280px; max-width: 4096px; }"
-        "QComboBox#imageGenLoraCombo QAbstractItemView { min-width: 280px; }"
-    )
     view = combo.view()
     if view is not None:
         view.setTextElideMode(Qt.TextElideMode.ElideNone)
+        view.setMinimumWidth(280)
 
 
 def resolve_active_lora_model_key(widget: Optional[QWidget] = None) -> Optional[str]:

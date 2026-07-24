@@ -48,7 +48,7 @@ Contact: <a href="mailto:sillysotsoftware@yahoo.com">sillysotsoftware@yahoo.com<
 
 <h3>Credits</h3>
 <p>Prowser is distributed under the Business Source License 1.1 (source-available; converts to MIT on the Change Date). See the License section for details.</p>
-<p>All intellectual property included in this work is owned by the original authors and contributors. If any work remains uncredited, it is an ommission due to error.</p>
+<p>All intellectual property included in this work is owned by the original authors and contributors. If any work remains uncredited, it is an omission due to error.</p>
 
 
 <h2>Libraries &amp; frameworks</h2>
