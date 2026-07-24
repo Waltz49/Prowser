@@ -34,11 +34,13 @@ import time
 import traceback
 import re
 from collections import defaultdict
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Set, Tuple
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
+if TYPE_CHECKING:
+    import numpy as np
+
 # Third-party imports
-import numpy as np
 from PIL import Image
 from PySide6.QtCore import QEventLoop, Qt, QThread, QTimer, Signal
 from PySide6.QtWidgets import (
@@ -46,7 +48,6 @@ from PySide6.QtWidgets import (
     QGroupBox, QHBoxLayout, QLabel, QLineEdit, QMessageBox, QProgressDialog,
     QPushButton, QRadioButton, QSpinBox, QVBoxLayout, QWidget
 )
-import torch
 
 # Local imports
 from config import get_config
@@ -506,7 +507,20 @@ def _present_duplicate_groups_browse_view(
         mw.update_convert_conflict_auto_rename_button()
 
 
-def _pil_rgb_to_compare_array(pil_img: Image.Image) -> np.ndarray:
+_numpy_module = None
+
+
+def _numpy():
+    """Lazy-import numpy (only needed for find-similar image clustering)."""
+    global _numpy_module
+    if _numpy_module is None:
+        import numpy as np
+
+        _numpy_module = np
+    return _numpy_module
+
+
+def _pil_rgb_to_compare_array(pil_img: Image.Image) -> "np.ndarray":
     """RGB PIL image -> float32 (H, W, 3) in 0..1, resized to width SIMILAR_COMPARE_WIDTH."""
     pil_img = pil_img.convert("RGB")
     w, h = pil_img.size
@@ -515,12 +529,13 @@ def _pil_rgb_to_compare_array(pil_img: Image.Image) -> np.ndarray:
     new_w = SIMILAR_COMPARE_WIDTH
     new_h = max(1, int(round(h * (new_w / float(w)))))
     pil_img = pil_img.resize((new_w, new_h), SIMILAR_RESAMPLE)
+    np = _numpy()
     arr = np.asarray(pil_img, dtype=np.float32)
     arr /= 255.0
     return arr
 
 
-def _similar_compare_array_from_path(image_path: str) -> Optional[np.ndarray]:
+def _similar_compare_array_from_path(image_path: str) -> Optional["np.ndarray"]:
     pil_img = open_pil_with_exif_correction(image_path, ignore_exif=False)
     if pil_img is None:
         return None
@@ -543,22 +558,25 @@ def _oriented_dimensions_for_similarity(image_path: str) -> Optional[Tuple[int, 
         return None
 
 
-def _mean_color_cell(arr: np.ndarray) -> Tuple[int, int, int]:
+def _mean_color_cell(arr: "np.ndarray") -> Tuple[int, int, int]:
     """8×8×8 coarse RGB cell for spatial binning (values 0..7 per channel)."""
+    np = _numpy()
     m = np.clip(arr.mean(axis=(0, 1)), 0.0, 1.0)
     return (int(m[0] * 7.999), int(m[1] * 7.999), int(m[2] * 7.999))
 
 
-def _similar_compare_digest(arr: np.ndarray) -> bytes:
+def _similar_compare_digest(arr: "np.ndarray") -> bytes:
     """Stable digest of compare tensor for exact-match grouping (avoids pairwise MSE)."""
+    np = _numpy()
     a = np.ascontiguousarray(arr, dtype=np.float32)
     h = hashlib.blake2b(digest_size=16, usedforsecurity=False)
     h.update(memoryview(a))
     return h.digest()
 
 
-def _mse_mean_sq_diff(ai: np.ndarray, bj: np.ndarray, scratch: np.ndarray) -> float:
+def _mse_mean_sq_diff(ai: "np.ndarray", bj: "np.ndarray", scratch: "np.ndarray") -> float:
     """Mean squared difference; reuses scratch (same shape as ai, bj)."""
+    np = _numpy()
     np.subtract(ai, bj, out=scratch)
     np.square(scratch, out=scratch)
     return float(scratch.mean())
@@ -568,11 +586,11 @@ def _load_compare_arrays_for_paths(
     paths: List[str],
     cancel_check: Optional[Callable[[], bool]] = None,
     progress_tick: Optional[Callable[[], None]] = None,
-) -> Optional[List[Tuple[str, np.ndarray]]]:
+) -> Optional[List[Tuple[str, "np.ndarray"]]]:
     """Decode paths to compare arrays; parallel decode for large buckets. Returns None if cancelled."""
     n = len(paths)
     if n < SIMILAR_DECODE_PARALLEL_MIN:
-        loaded: List[Tuple[str, np.ndarray]] = []
+        loaded: List[Tuple[str, "np.ndarray"]] = []
         for bi, p in enumerate(paths):
             if bi % 24 == 0:
                 if cancel_check and cancel_check():
@@ -586,7 +604,7 @@ def _load_compare_arrays_for_paths(
 
     max_workers = min(SIMILAR_DECODE_MAX_WORKERS, max(1, os.cpu_count() or 4))
     chunk = max(2, n // (max_workers * 8))
-    arrays: List[Optional[np.ndarray]] = []
+    arrays: List[Optional["np.ndarray"]] = []
     cancelled_early = False
     try:
         executor = ThreadPoolExecutor(max_workers=max_workers)
@@ -675,6 +693,7 @@ def _cluster_paths_by_similarity_mse(
         for other in ids[1:]:
             union(head, other)
 
+    np = _numpy()
     scratch = np.empty_like(loaded[0][1], dtype=np.float32)
 
     thr = SIMILAR_IMAGE_MSE_THRESHOLD
@@ -2595,7 +2614,7 @@ class FileOperationsManager:
         return post_rename_data
     def _restore_features_via_md5(
         self,
-        pre_rename_data: Dict[str, Tuple[Optional[str], Optional['torch.Tensor'], Optional['torch.Tensor']]],
+        pre_rename_data: Dict[str, Tuple[Any, ...]],
         post_rename_data: Dict[str, str],
         rename_map: Dict[str, str],
         flush_progress_callback=None

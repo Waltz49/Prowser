@@ -324,24 +324,23 @@ class MenuManager:
         
         # Move menu
         self._setup_move_menu(menubar)
-        
-        # Image menu (optional imagegen plugins)
-        try:
-            from bundle_capabilities import imagegen_ui_enabled
 
-            if imagegen_ui_enabled():
-                from imagegen_plugins.image_gen_menu import setup_create_menu
+        # Image / Tools / Help menus — defer heavy imagegen imports until after first paint
+        def _setup_late_menus():
+            try:
+                from bundle_capabilities import imagegen_ui_enabled
 
-                setup_create_menu(menubar, self.main_window)
-        except ImportError:
-            pass
-        
-        # Tools menu
-        self._setup_tools_menu(menubar)
-        
-        # Help menu
-        self._setup_help_menu(menubar)
-        
+                if imagegen_ui_enabled():
+                    from imagegen_plugins.image_gen_menu import setup_create_menu
+
+                    setup_create_menu(menubar, self.main_window)
+            except ImportError:
+                pass
+            self._setup_tools_menu(menubar)
+            self._setup_help_menu(menubar)
+
+        QTimer.singleShot(0, _setup_late_menus)
+
         # Menu states and shortcut priming are deferred until after initial layout
         # (see schedule_startup_menu_shortcut_priming).
     

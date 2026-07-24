@@ -107,7 +107,6 @@ from qt_key_debug import log_key_event, set_popup_callback
 from browser_window.managers.refresh_manager import RefreshManager
 from browser_window.sidebar.right_sidebar_combined import RightSidebarCombinedWidget
 from browser_window.managers.selection_manager import SelectionManager
-from settings_dialog import SettingsDialog
 from browser_window.managers.sidebar_manager import SidebarManager
 from search.similarity_bootstrap import _import_cnn_modules
 from browser_window.managers.similarity_search_manager import SimilaritySearchManager
@@ -5450,6 +5449,8 @@ class ImageBrowserWindow(QMainWindow):
             self.settings_dialog = None
 
         if not self.settings_dialog:
+            from settings_dialog import SettingsDialog
+
             self.settings_dialog = SettingsDialog(self)
             self._wire_settings_dialog_signals()
         else:

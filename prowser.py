@@ -235,6 +235,30 @@ from utils import (
     directory_has_images
 )
 
+_startup_profile_enabled = os.environ.get("PROWSER_PROFILE_STARTUP", "").strip().lower() in (
+    "1",
+    "true",
+    "yes",
+)
+_startup_profile_origin = time.perf_counter()
+_startup_profile_prev = _startup_profile_origin
+
+
+def _startup_profile_mark(label: str) -> None:
+    global _startup_profile_prev
+    if not _startup_profile_enabled:
+        return
+    now = time.perf_counter()
+    print(
+        f"[startup] {label}: total={now - _startup_profile_origin:.3f}s "
+        f"step={now - _startup_profile_prev:.3f}s",
+        flush=True,
+    )
+    _startup_profile_prev = now
+
+
+_startup_profile_mark("after_heavy_imports")
+
 # Note: QtMacExtras was removed from PySide6 (it was PySide5 only)
 # QMacNativeEventFilter is no longer available in PySide6
 QMacNativeEventFilter = None
@@ -680,6 +704,9 @@ def main():
     
     # Parse command line arguments early to get profile directory
     args = parse_arguments()
+    global _startup_profile_enabled
+    if args.debug:
+        _startup_profile_enabled = True
 
     if args.env:
         from imagegen_plugins.ai_prompt_exit import print_ai_exit_env_report
@@ -825,6 +852,7 @@ def main():
     
     # Create the application first - before any QWidget operations
     app = QApplication(sys.argv)
+    _startup_profile_mark("after_QApplication")
     app.setApplicationName("Prowser")
     app.setApplicationDisplayName("Prowser")
     app.setApplicationVersion("0.9.0")
@@ -1211,6 +1239,7 @@ def main():
             debug_mode=args.debug,
             filter_pattern=window_filter
         )
+        _startup_profile_mark("after_ImageBrowserWindow")
         install_startup_activation(window)
         
         # Store global reference for cleanup
@@ -1333,6 +1362,7 @@ def main():
             print(f"\nWindow.show is starting with configuration: {CYAN}{configuration}{RESET}")
        
         window.show()
+        _startup_profile_mark("window_show")
         on_main_window_shown(window)
         
         # If --fullscreen was explicitly passed OR restoring from fullscreen state,
@@ -1515,12 +1545,17 @@ def main():
                     traceback.print_exc()
                     pass
                 finally:
+                    _startup_profile_mark("on_startup_refresh_complete")
                     on_startup_refresh_complete(window)
             
             QTimer.singleShot(100, delayed_refresh)
             # delayed_refresh()  # DGN This seems to be OK w/o the qtimer.singleShot(500, delayed_refresh)
         else:
-            QTimer.singleShot(0, lambda: on_startup_refresh_complete(window))
+            def _startup_refresh_complete_no_config():
+                _startup_profile_mark("on_startup_refresh_complete")
+                on_startup_refresh_complete(window)
+
+            QTimer.singleShot(0, _startup_refresh_complete_no_config)
         
         # Run the application
         result = app.exec()

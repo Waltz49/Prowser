@@ -7,7 +7,7 @@ import os
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 from PySide6.QtCore import QEvent, QObject, QTimer, Qt
-from PySide6.QtGui import QGuiApplication
+from PySide6.QtGui import QGuiApplication, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QDialog,
     QPlainTextEdit,
@@ -209,6 +209,9 @@ class ImageGenUnifiedDialog(QDialog):
 
         self._dismiss_filter = _UnifiedDismissFilter(self)
         self._attach_dismiss_filter()
+        dismiss_shortcut = QShortcut(QKeySequence(Qt.AltModifier | Qt.Key_Slash), self)
+        dismiss_shortcut.setContext(Qt.ShortcutContext.WindowShortcut)
+        dismiss_shortcut.activated.connect(self._on_close)
         install_source_nav_keyboard_shortcuts(self, None)
         install_image_gen_footer_keyboard_shortcuts(self)
         self.finished.connect(self._save_geometry)

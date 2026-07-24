@@ -739,6 +739,10 @@ def start_active_imagegen_generation(
     main_window, *, initial_prompt: Optional[str] = None
 ) -> None:
     """Run the dialog for the last-used Image menu function (⌥/)."""
+    existing = getattr(main_window, "_imagegen_function_dialog", None)
+    if isinstance(existing, ImageGenUnifiedDialog) and existing.isVisible():
+        existing._on_close()
+        return
     if not create_menu_plugins():
         return
     actions = getattr(main_window, "imagegen_function_actions", None) or {}
