@@ -359,6 +359,8 @@ class ImageGenController(QObject):
     def start_generation(
         self, plugin: ImageGenModelPlugin, values: Dict[str, Any]
     ) -> bool:
+        from imagegen_plugins.job_values_snapshot import snapshot_job_values_at_submit
+
         copies = self._normalize_copies(values.get("copies", 1))
         values = dict(values)
         values["copies"] = copies
@@ -370,6 +372,16 @@ class ImageGenController(QObject):
                 return False
             values["random_seed"] = True
             sync_random_seed_setting(self.main_window, True)
+
+        try:
+            values = snapshot_job_values_at_submit(plugin, values)
+        except Exception as e:
+            show_styled_critical(
+                self.main_window,
+                "Could not start job",
+                str(e),
+            )
+            return False
 
         if self.is_running():
             return self.enqueue_generation(plugin, values)
@@ -390,12 +402,27 @@ class ImageGenController(QObject):
     def enqueue_generation(
         self, plugin: ImageGenModelPlugin, values: Dict[str, Any]
     ) -> bool:
+        from imagegen_plugins.job_values_snapshot import (
+            job_values_snapshotted,
+            snapshot_job_values_at_submit,
+        )
+
         copies = self._normalize_copies(values.get("copies", 1))
         values = dict(values)
         values["copies"] = copies
         from imagegen_plugins.flux_prompt_job import strip_flux_prompt_ai_job_if_ui_inactive
 
         strip_flux_prompt_ai_job_if_ui_inactive(self._imagegen_submit_owner(), values)
+        if not job_values_snapshotted(values):
+            try:
+                values = snapshot_job_values_at_submit(plugin, values)
+            except Exception as e:
+                show_styled_critical(
+                    self.main_window,
+                    "Could not queue job",
+                    str(e),
+                )
+                return False
         try:
             job = make_queued_generate_job(
                 plugin, values, copies_total=copies
@@ -438,6 +465,8 @@ class ImageGenController(QObject):
         self, job_id: str, plugin: ImageGenModelPlugin, values: Dict[str, Any]
     ) -> bool:
         """Update settings for pending copies in the active batch (not the in-flight copy)."""
+        from imagegen_plugins.job_values_snapshot import snapshot_job_values_at_submit
+
         if not self.is_active_job_remaining_updatable(job_id):
             return False
         copies = self._normalize_copies(values.get("copies", 1))
@@ -452,6 +481,15 @@ class ImageGenController(QObject):
                 return False
             values["random_seed"] = True
             sync_random_seed_setting(self.main_window, True)
+        try:
+            values = snapshot_job_values_at_submit(plugin, values)
+        except Exception as e:
+            show_styled_critical(
+                self.main_window,
+                "Could not update job",
+                str(e),
+            )
+            return False
         self._active_plugin = plugin
         self._pending_values = values
         self._copies_total = copies
@@ -468,6 +506,7 @@ class ImageGenController(QObject):
     ) -> bool:
         """Update a pending queue entry in place (same job_id and position)."""
         from imagegen_plugins.flux_prompt_job import effective_job_prompt_for_tooltip
+        from imagegen_plugins.job_values_snapshot import snapshot_job_values_at_submit
 
         job = self._queued_job_by_id(job_id)
         if job is None:
@@ -480,6 +519,15 @@ class ImageGenController(QObject):
                 return False
             values["random_seed"] = True
             sync_random_seed_setting(self.main_window, True)
+        try:
+            values = snapshot_job_values_at_submit(plugin, values)
+        except Exception as e:
+            show_styled_critical(
+                self.main_window,
+                "Could not update queued job",
+                str(e),
+            )
+            return False
         job.plugin = plugin
         job.plugin_id = plugin.plugin_id
         job.function = plugin.function
@@ -696,7 +744,9 @@ class ImageGenController(QObject):
         system_prompt = str(meta.get("system_prompt") or "")
         user_prompt = str(meta.get("user_prompt") or "")
         image_paths = list(meta.get("image_paths") or [])
-        if image_paths:
+        from imagegen_plugins.job_values_snapshot import job_values_snapshotted
+
+        if image_paths and not job_values_snapshotted(self._pending_values):
             from imagegen_plugins.image_gen_naming import resolve_source_image_paths
 
             refreshed = [
@@ -839,11 +889,18 @@ class ImageGenController(QObject):
             self._expand_base_path = ""
             if plugin.pipeline_id == "mflux_fill_expand":
                 from imagegen_plugins.image_gen_dim_limits import effective_max_for_plugin
+                from imagegen_plugins.job_values_snapshot import job_values_snapshotted
 
                 expand_values = dict(values)
-                expand_values["max_generation_dimension"] = effective_max_for_plugin(
-                    plugin
-                )
+                max_side = effective_max_for_plugin(plugin)
+                if job_values_snapshotted(values):
+                    snap_max = values.get("max_generation_dimension")
+                    if snap_max is not None:
+                        try:
+                            max_side = int(snap_max)
+                        except (TypeError, ValueError):
+                            pass
+                expand_values["max_generation_dimension"] = max_side
                 base_path = prepare_and_save_expand_base(expand_values, output_path)
                 payload["prepared_fill_image_path"] = base_path
                 self._expand_base_path = base_path
@@ -940,10 +997,14 @@ class ImageGenController(QObject):
             self.task_status_info_changed.emit()
 
         from config import get_config
+        from imagegen_plugins.job_values_snapshot import job_values_snapshotted
 
-        payload["debug_mode"] = bool(
-            get_config().load_settings().get("debug_mode", False)
-        )
+        if job_values_snapshotted(values) and "debug_mode" in values:
+            payload["debug_mode"] = bool(values.get("debug_mode"))
+        else:
+            payload["debug_mode"] = bool(
+                get_config().load_settings().get("debug_mode", False)
+            )
 
         self._snapshot_copy_cycle_for_exif(plugin)
         if not self._tasks.start_generate_job(payload):

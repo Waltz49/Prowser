@@ -464,12 +464,23 @@ def resolve_steps_for_run(pipeline_id: str, values: Dict[str, Any]) -> int:
 
 def finalize_run_values(pipeline_id: str, values: Dict[str, Any]) -> Dict[str, Any]:
     """Dialog/saved settings aligned with what build_worker_payload will run."""
-    out = dict(values)
-    out["steps"] = resolve_steps_for_run(pipeline_id, out)
-    if get_pipeline(pipeline_id).supports_progressive_images:
-        from imagegen_plugins.image_gen_persistence import load_show_progressive_images
+    from imagegen_plugins.job_values_snapshot import job_values_snapshotted
 
-        out["show_progressive_images"] = load_show_progressive_images()
+    out = dict(values)
+    if job_values_snapshotted(out):
+        mode = get_pipeline(pipeline_id)
+        steps = int(out.get("steps", mode.steps_default))
+        steps = max(mode.steps_min, min(mode.steps_max, steps))
+        if pipeline_id in _MFLUX_PIPELINE_IDS:
+            steps = max(MFLUX_FLOW_MATCH_MIN_STEPS, steps)
+        out["steps"] = steps
+    else:
+        out["steps"] = resolve_steps_for_run(pipeline_id, out)
+    if get_pipeline(pipeline_id).supports_progressive_images:
+        if "show_progressive_images" not in out:
+            from imagegen_plugins.image_gen_persistence import load_show_progressive_images
+
+            out["show_progressive_images"] = load_show_progressive_images()
     return out
 
 

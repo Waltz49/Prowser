@@ -154,14 +154,23 @@ class ImageGenModelPlugin:
         apply_image_exit: bool = True,
     ) -> Dict[str, Any]:
         from imagegen_plugins.image_gen_dim_limits import effective_max_for_plugin
+        from imagegen_plugins.job_values_snapshot import job_values_snapshotted
 
         get_pipeline(self.pipeline_id)
+        effective_max = effective_max_for_plugin(self)
+        if job_values_snapshotted(values):
+            snap_max = values.get("max_generation_dimension")
+            if snap_max is not None:
+                try:
+                    effective_max = int(snap_max)
+                except (TypeError, ValueError):
+                    pass
         return build_worker_payload(
             self.pipeline_id,
             values,
             output_path,
             self.hf_model_id,
-            effective_max_side=effective_max_for_plugin(self),
+            effective_max_side=effective_max,
             apply_image_exit=apply_image_exit,
         )
 

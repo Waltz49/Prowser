@@ -488,18 +488,45 @@ def sync_image_gen_lora_field(dialog: Any) -> None:
     dialog._lora_combo = lora_field.summary_combo
 
 
+def _write_lora_scales_by_id(
+    out: Dict[str, Any], lora_field: Any, preset_ids: list[str]
+) -> None:
+    from imagegen_plugins.job_values_snapshot import LORA_SCALES_BY_ID_KEY
+
+    if not hasattr(lora_field, "scales_by_id"):
+        out.pop(LORA_SCALES_BY_ID_KEY, None)
+        return
+    all_scales = lora_field.scales_by_id()
+    scales = {
+        preset_id: all_scales[preset_id]
+        for preset_id in preset_ids
+        if preset_id in all_scales
+    }
+    if scales:
+        out[LORA_SCALES_BY_ID_KEY] = scales
+    else:
+        out.pop(LORA_SCALES_BY_ID_KEY, None)
+
+
 def collect_lora_field_values(out: Dict[str, Any], lora_field: Any) -> None:
     """Write the live LoRA control into dialog values (stack or single-select)."""
-    from imagegen_plugins.mflux_lora_presets import coerce_lora_preset_id
-
     if lora_field is None:
         return
     if lora_field.is_stack_mode():
-        out["mflux_lora_stack"] = lora_field.selected_ids()
+        ids = lora_field.selected_ids()
+        out["mflux_lora_stack"] = ids
+        _write_lora_scales_by_id(out, lora_field, ids)
         out.pop("mflux_lora", None)
         return
     ids = lora_field.selected_ids()
-    out["mflux_lora"] = ids[0] if ids else "none"
+    preset = ids[0] if ids else "none"
+    out["mflux_lora"] = preset
+    if preset != "none":
+        _write_lora_scales_by_id(out, lora_field, [preset])
+    else:
+        from imagegen_plugins.job_values_snapshot import LORA_SCALES_BY_ID_KEY
+
+        out.pop(LORA_SCALES_BY_ID_KEY, None)
     out.pop("mflux_lora_stack", None)
 
 

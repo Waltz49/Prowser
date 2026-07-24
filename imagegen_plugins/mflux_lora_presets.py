@@ -383,9 +383,40 @@ def apply_lora_to_mflux_payload(
     for_klein: bool = False,
 ) -> None:
     """Set mflux_lora_paths/scales when one or more presets are selected."""
+    from imagegen_plugins.job_values_snapshot import job_values_snapshotted
+
+    pipeline_id = str(merged.get("pipeline_id") or "").strip() or None
+    if job_values_snapshotted(dict(merged)):
+        snap_paths = merged.get("mflux_lora_paths")
+        snap_scales = merged.get("mflux_lora_scales")
+        if isinstance(snap_paths, list) and isinstance(snap_scales, list):
+            saved_paths = list(snap_paths)
+            saved_scales = list(snap_scales)
+            stack = effective_lora_ids_from_values(
+                merged,
+                pipeline_id=pipeline_id,
+                pop=True,
+            )
+            if not stack:
+                merged.pop("mflux_lora_paths", None)
+                merged.pop("mflux_lora_scales", None)
+                strip_lora_payload_keys_for_host(merged, host_id=HOST_FLUX1_T2I, pop=True)
+                return
+            if len(saved_paths) == len(saved_scales) == len(stack):
+                strip_lora_payload_keys_for_host(merged, host_id=HOST_FLUX1_T2I, pop=True)
+                merged["mflux_lora_paths"] = saved_paths
+                merged["mflux_lora_scales"] = saved_scales
+                if not for_fill and not for_klein:
+                    merged["steps"] = effective_steps_for_lora_stack(
+                        int(merged.get("steps") or 0),
+                        stack,
+                        for_fill=False,
+                    )
+                return
+
     stack = effective_lora_ids_from_values(
         merged,
-        pipeline_id=str(merged.get("pipeline_id") or "").strip() or None,
+        pipeline_id=pipeline_id,
         pop=True,
     )
     if not stack:

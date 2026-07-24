@@ -20,6 +20,26 @@ from imagegen_plugins.mflux_lora_presets import (
 
 def apply_lora_to_sd15_payload(merged: Dict[str, object]) -> None:
     """Set sd15_lora_paths/scales when a catalog LoRA is selected."""
+    from imagegen_plugins.job_values_snapshot import job_values_snapshotted
+
+    if job_values_snapshotted(dict(merged)):
+        snap_paths = merged.get("sd15_lora_paths")
+        snap_scales = merged.get("sd15_lora_scales")
+        if isinstance(snap_paths, list) and isinstance(snap_scales, list):
+            saved_paths = list(snap_paths)
+            saved_scales = list(snap_scales)
+            merged.pop("mflux_lora_stack", None)
+            strip_lora_payload_keys_for_host(merged, host_id=HOST_SD15, pop=True)
+            preset_id = _normalize_preset_id(merged.pop("mflux_lora", "none") or "none")
+            if preset_id == "none":
+                merged.pop("sd15_lora_paths", None)
+                merged.pop("sd15_lora_scales", None)
+                return
+            if len(saved_paths) == len(saved_scales) == 1:
+                merged["sd15_lora_paths"] = saved_paths
+                merged["sd15_lora_scales"] = saved_scales
+                return
+
     merged.pop("mflux_lora_stack", None)
     strip_lora_payload_keys_for_host(merged, host_id=HOST_SD15, pop=True)
     preset_id = _normalize_preset_id(merged.pop("mflux_lora", "none") or "none")

@@ -36,8 +36,22 @@ def prompt_with_lora_trigger_added(prompt: str, trigger: str) -> str:
 
 
 def _missing_lora_trigger_words(values: Dict[str, Any]) -> List[str]:
-    stack = effective_lora_ids_from_values(values, pop=False)
+    from imagegen_plugins.job_values_snapshot import (
+        LORA_TRIGGER_WORDS_KEY,
+        job_values_snapshotted,
+    )
+
     prompt = (values.get("prompt") or "").strip()
+    if job_values_snapshotted(values):
+        snap = values.get(LORA_TRIGGER_WORDS_KEY)
+        if isinstance(snap, list):
+            missing: List[str] = []
+            for item in snap:
+                trigger = str(item or "").strip()
+                if trigger and not prompt_contains_lora_trigger(prompt, trigger):
+                    missing.append(trigger)
+            return missing
+    stack = effective_lora_ids_from_values(values, pop=False)
     missing: List[str] = []
     for lora_id in stack:
         entry = get_lora_entry(lora_id)
