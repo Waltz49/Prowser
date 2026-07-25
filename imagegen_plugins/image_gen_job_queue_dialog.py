@@ -86,6 +86,7 @@ class ImageGenJobQueueDialog(QDialog):
         self._geometry_was_restored = False
         self._pending_initial_center = False
         self._restore_size_mode_pending = False
+        self._syncing_shell_geometry = False
         self._always_on_top = load_job_queue_always_on_top()
 
         self.setWindowTitle("Job Control")
@@ -345,32 +346,56 @@ class ImageGenJobQueueDialog(QDialog):
         self._apply_dialog_size_mode(next_mode)
 
     def _on_panel_geometry_changed(self) -> None:
-        if self._restore_size_mode_pending:
-            self._restore_size_mode_pending = False
-            mode = self._effective_restored_size_mode(load_job_queue_size_mode())
-            self._apply_dialog_size_mode(mode)
-        else:
-            self._sync_dialog_height_to_panel()
-        if not self._pending_initial_center:
+        if self._syncing_shell_geometry:
             return
-        self._pending_initial_center = False
-        if not self._geometry_was_restored:
-            _center_styled_dialog_on_screen(self, self.main_window)
+        self._syncing_shell_geometry = True
+        try:
+            if self._restore_size_mode_pending:
+                self._restore_size_mode_pending = False
+                mode = self._effective_restored_size_mode(load_job_queue_size_mode())
+                self._apply_dialog_size_mode(mode)
+            else:
+                self._sync_dialog_height_to_panel_impl()
+            if not self._pending_initial_center:
+                return
+            self._pending_initial_center = False
+            if not self._geometry_was_restored:
+                _center_styled_dialog_on_screen(self, self.main_window)
+        finally:
+            self._syncing_shell_geometry = False
 
     def _sync_dialog_height_to_panel(self) -> None:
+        if not self.isVisible() or self._syncing_shell_geometry:
+            return
+        self._syncing_shell_geometry = True
+        try:
+            self._sync_dialog_height_to_panel_impl()
+        finally:
+            self._syncing_shell_geometry = False
+
+    def _sync_dialog_height_to_panel_impl(self) -> None:
         if not self.isVisible():
             return
         mode = self._panel.queue_size_mode()
         shrink = self._panel.should_shrink_wrap_client()
-        if mode == QUEUE_SIZE_ALL and not shrink:
-            self._panel.prepare_size_measure()
         self._sync_shell_layout_for_mode(mode)
-        target = self._dialog_height_for_panel_mode(mode)
         if mode == QUEUE_SIZE_ALL and not shrink:
+            chrome = self._layout_chrome_height()
+            panel_h = self._panel.preferred_content_height()
+            max_panel = max(0, self._max_screen_client_height() - chrome)
+            panel_h = min(panel_h, max_panel)
+            target = max(self.minimumHeight(), chrome + panel_h)
             if self._heights_match(self.height(), target) or self.height() > target:
                 return
-        elif abs(target - self.height()) <= 1:
-            return
+            self._panel.prepare_size_measure()
+            self._sync_shell_layout_for_mode(mode)
+            target = self._dialog_height_for_panel_mode(mode)
+            if self._heights_match(self.height(), target) or self.height() > target:
+                return
+        else:
+            target = self._dialog_height_for_panel_mode(mode)
+            if abs(target - self.height()) <= 1:
+                return
         self._resize_anchored_bottom(target)
 
     def _schedule_refresh_table(self) -> None:
@@ -441,7 +466,6 @@ def open_imagegen_job_queue_dialog(main_window) -> None:
         main_window._imagegen_job_queue_dialog = dlg
     from utils import present_auxiliary_dialog
 
-    dlg._schedule_refresh_table()
     present_auxiliary_dialog(dlg)
 
 

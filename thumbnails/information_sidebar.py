@@ -72,6 +72,7 @@ _DEFAULT_INFO_SECTION_EXPANDED = {
     'description': True,
     'negative_prompt': True,
     'input_to_active_job': True,
+    'output_of_active_job': True,
 }
 _INFO_H4_SECTION_KEY_BY_TITLE = {
     'references': 'references',
@@ -1190,25 +1191,28 @@ class InformationSidebar(QWidget):
         )
         return int(doc_h) + extra
 
-    def _should_show_input_to_active_job_heading(self) -> bool:
+    def _active_job_relation_heading(self) -> str | None:
         try:
             from bundle_capabilities import imagegen_ui_enabled
 
             if not imagegen_ui_enabled():
-                return False
+                return None
         except ImportError:
             pass
         path = getattr(self.main_window, "current_image_path", None)
         if not path:
-            return False
+            return None
         try:
             from imagegen_plugins.image_gen_controller import get_imagegen_controller
 
-            return get_imagegen_controller(
-                self.main_window
-            ).viewing_path_matches_active_generation(path)
+            controller = get_imagegen_controller(self.main_window)
+            if not controller.viewing_path_matches_active_generation(path):
+                return None
+            if controller.viewing_path_is_active_generation_output(path):
+                return "Output of Active Job"
+            return "Input to Active Job"
         except ImportError:
-            return False
+            return None
 
     def _restore_info_scroll_position(self, scroll_pos: int) -> None:
         """Restore vertical scroll after HTML relayout."""
@@ -1264,7 +1268,7 @@ class InformationSidebar(QWidget):
             data.get("description"),
             data.get("speakable_plain_text"),
             hovered_anchor=hovered_anchor,
-            show_input_to_active_job_heading=self._should_show_input_to_active_job_heading(),
+            active_job_heading=self._active_job_relation_heading(),
         )
         if info_text:
             self.info_text_edit.blockSignals(True)
@@ -1311,7 +1315,7 @@ class InformationSidebar(QWidget):
         speakable_plain_text: str = None,
         hovered_anchor: str = None,
         *,
-        show_input_to_active_job_heading: bool = False,
+        active_job_heading: str | None = None,
     ) -> str:
         """Build HTML overlay from field-value pairs using table format.
 
@@ -1388,22 +1392,27 @@ class InformationSidebar(QWidget):
             html_parts.append('</table>')
 
         description_visible = True
-        if show_input_to_active_job_heading:
+        if active_job_heading:
             active_bdr = _th.current_image_border_color_hex
             active_bdr_w = max(1, int(getattr(_th, "current_image_border_width_index", 2)))
-            input_expanded = self._info_section_expanded('input_to_active_job')
-            description_visible = input_expanded
+            section_key = (
+                'output_of_active_job'
+                if active_job_heading == "Output of Active Job"
+                else 'input_to_active_job'
+            )
+            job_section_expanded = self._info_section_expanded(section_key)
+            description_visible = job_section_expanded
             html_parts.append(
                 f'<div style="margin-top: 12px; padding-top: 10px; padding-bottom: 4px; '
                 f'border-top: {active_bdr_w}px solid {active_bdr};">'
             )
             html_parts.append(
                 self._collapsible_header_html(
-                    'input_to_active_job',
-                    'Input to Active Job',
-                    input_expanded,
+                    section_key,
+                    active_job_heading,
+                    job_section_expanded,
                     font_size='12pt',
-                    margin_bottom='6px' if input_expanded else '2px',
+                    margin_bottom='6px' if job_section_expanded else '2px',
                     link_color=active_bdr,
                 )
             )
@@ -1641,7 +1650,7 @@ class InformationSidebar(QWidget):
                 description,
                 speakable_plain_text,
                 hovered_anchor=getattr(self, "_hovered_anchor", None),
-                show_input_to_active_job_heading=self._should_show_input_to_active_job_heading(),
+                active_job_heading=self._active_job_relation_heading(),
             )
 
         except Exception as e:

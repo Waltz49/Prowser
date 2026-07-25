@@ -970,7 +970,7 @@ class JobQueuePanelWidget(QWidget):
         if not self.isVisible() or not self._controller.is_running():
             if self._active_job_strip.isVisible():
                 self._active_job_strip.hide()
-            self._notify_fixed_geometry_if_needed()
+            self._notify_shell_geometry_changed()
             return
         self._active_job_strip.refresh(force=force)
 
@@ -1015,9 +1015,6 @@ class JobQueuePanelWidget(QWidget):
         finally:
             self._preparing_size_measure = False
 
-    def _notify_fixed_geometry_if_needed(self) -> None:
-        self._notify_shell_geometry_changed()
-
     def refresh_compact_geometry(self, strip_h: int | None = None) -> None:
         """Re-pin widget height to the strip (strip mode / sidebar compact)."""
         if not self.is_queue_compact():
@@ -1042,7 +1039,6 @@ class JobQueuePanelWidget(QWidget):
         )
         self.setFixedHeight(content_h)
         self.updateGeometry()
-        self._notify_fixed_geometry_if_needed()
 
     def _apply_panel_layout_stretch(self) -> None:
         layout = getattr(self, "_panel_layout", None)
@@ -1336,5 +1332,4 @@ class JobQueuePanelWidget(QWidget):
         self._update_header_status()
         self._refresh_active_job_strip(force=True)
         self._apply_queue_size_layout()
-        self._sync_fixed_panel_geometry()
         self._notify_shell_geometry_changed()

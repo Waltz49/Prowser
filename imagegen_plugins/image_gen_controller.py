@@ -1668,6 +1668,14 @@ class ImageGenController(QObject):
             return False
         return os.path.normpath(path) in associated
 
+    def viewing_path_is_active_generation_output(self, path: str) -> bool:
+        """True when *path* is the active job's output file."""
+        if not path or not self._output_path:
+            return False
+        if not self._active_generation_in_progress_or_cooldown():
+            return False
+        return os.path.normpath(path) == os.path.normpath(self._output_path)
+
     def snapshot_generation_timing_for_info_panel(
         self,
     ) -> tuple[Optional[float], Optional[float], Optional[int], Optional[int]]:

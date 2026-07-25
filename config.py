@@ -442,6 +442,7 @@ class ImageBrowserConfig:
                 'description': True,
                 'negative_prompt': True,
                 'input_to_active_job': True,
+                'output_of_active_job': True,
             },
             'list_view_row_height': 48,  # Default row height for list view (28-64px)
             

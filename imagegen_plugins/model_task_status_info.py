@@ -635,7 +635,10 @@ def generation_cancel_icon_html(*, hovered: bool = False) -> str:
 
 
 def active_job_timing_progress_row_count(controller) -> int:
-    """Stacked progress-bar rows in the active-job strip (excludes cooldown text row)."""
+    """Stacked progress-bar rows in the active-job strip (excludes cooldown text row).
+
+    Keep in sync with progress_rows built in format_information_generation_timing_cell_html.
+    """
     remaining = controller.copy_cooldown_seconds_remaining()
     series_progress = controller.snapshot_series_progress_for_active_job_strip()
     series_rows = 0
