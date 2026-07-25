@@ -6,9 +6,11 @@ from __future__ import annotations
 import os
 from typing import Callable
 
-from PySide6.QtCore import QEvent, Qt, QTimer, QSize, QPoint
-from PySide6.QtGui import QIcon
+from PySide6.QtCore import QEvent, QEventLoop, Qt, QTimer, QSize, QPoint, QObject
+from PySide6.QtGui import QIcon, QMouseEvent
 from PySide6.QtWidgets import (
+    QApplication,
+    QAbstractButton,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -44,7 +46,7 @@ from status_bar_config import (
 from theme.theme_base import job_pane_tools_icon_path
 from theme.theme_service import get_active_theme
 from browser_window.sidebar.sidebar_pane_chrome import apply_scroll_area_viewport_background
-from thumbnails.sidebar_pane_layout import MIN_JOBS_QUEUE_CONTENT_HEIGHT
+from thumbnails.sidebar_pane_layout import MIN_JOBS_QUEUE_CONTENT_HEIGHT, pane_fit_height_tolerance
 from utils import create_job_status_thumbnail_label
 
 _THUMB_SIZE = 55
@@ -54,12 +56,39 @@ _THUMB_GAP = 14
 MIN_JOBS_PANE_WIDTH = 250
 
 # Floating Job Control dialog minimum content width (px). Outer min = + 2× margin.
-MIN_JOBS_DIALOG_MIN_WIDTH = 180
+MIN_JOB_WIN_WIDTH = 210 # DGN hardcoded to current font sizes
+
+QUEUE_SIZE_ALL = "all"
+QUEUE_SIZE_ONE = "one"
+QUEUE_SIZE_STRIP = "strip"
+_QUEUE_SIZE_MODES = (QUEUE_SIZE_ALL, QUEUE_SIZE_ONE, QUEUE_SIZE_STRIP)
+
+_EMPTY_LABEL_FONT_PX = 12
+_EMPTY_LABEL_HEIGHT_LINES = 1.5
+
+
+def _empty_queue_label_stylesheet(text_hex: str) -> str:
+    return (
+        f"color: {text_hex}; font-size: {_EMPTY_LABEL_FONT_PX}px; "
+        "padding: 0px 8px; margin: 0px;"
+    )
+
+
+def empty_queue_label_height_px(label: QLabel) -> int:
+    """~1.5 line heights for the empty-queue message."""
+    fm = label.fontMetrics()
+    return int(fm.height() * _EMPTY_LABEL_HEIGHT_LINES)
+
+
+def _apply_empty_queue_label_style(label: QLabel, text_hex: str) -> None:
+    label.setStyleSheet(_empty_queue_label_stylesheet(text_hex))
+    h = empty_queue_label_height_px(label)
+    label.setFixedHeight(h)
 
 
 def job_control_dialog_outer_minimum_width(*, margin_px: int = 0) -> int:
     """Minimum outer width for the floating job control dialog."""
-    return MIN_JOBS_DIALOG_MIN_WIDTH + 2 * margin_px
+    return MIN_JOB_WIN_WIDTH + 2 * margin_px
 
 # When scroll viewport width exceeds this and a row has 1–2 reference images, show
 # them in a vertical column beside the text instead of below it.
@@ -76,7 +105,13 @@ def jobs_header_status_text(controller) -> str:
     return ""
 
 
-def show_jobs_tools_menu(main_window, controller, anchor: QPushButton) -> None:
+def show_jobs_tools_menu(
+    main_window,
+    controller,
+    anchor: QPushButton,
+    *,
+    job_queue_dialog=None,
+) -> None:
     menu = QMenu(anchor)
     t = get_active_theme()
     menu.setStyleSheet(t.status_bar_context_menu_stylesheet())
@@ -100,6 +135,17 @@ def show_jobs_tools_menu(main_window, controller, anchor: QPushButton) -> None:
     hold_action.triggered.connect(
         lambda checked: controller.set_hold_job_queue(bool(checked))
     )
+
+    if job_queue_dialog is not None and hasattr(
+        job_queue_dialog, "is_job_queue_always_on_top"
+    ):
+        menu.addSeparator()
+        top_action = menu.addAction("Always on Top")
+        top_action.setCheckable(True)
+        top_action.setChecked(job_queue_dialog.is_job_queue_always_on_top())
+        top_action.triggered.connect(
+            lambda checked: job_queue_dialog.set_job_queue_always_on_top(bool(checked))
+        )
 
     skip_copy_action = menu.addAction("Skip This Copy")
     skip_copy_action.setEnabled(controller.can_skip_active_series_copy())
@@ -541,11 +587,16 @@ class JobQueuePanelWidget(QWidget):
         self._refresh_table_timer: QTimer | None = None
         self._live_timer: QTimer | None = None
         self._resize_timer: QTimer | None = None
-        self._queue_compact = False
+        self._queue_size_mode = QUEUE_SIZE_ALL
         self._signal_connected = False
         self._live_refresh_paused = False
         self._header_getter: Callable[[], QWidget | None] | None = None
         self._on_compact_geometry_changed: Callable[[], None] | None = None
+        self._floating_window: QWidget | None = None
+        self._floating_drag_via_client_getter: Callable[[], bool] | None = None
+        self._floating_double_click_callback: Callable[[], None] | None = None
+        self._floating_drag_filter_targets: list[QWidget] = []
+        self._preparing_size_measure = False
         self._setup_ui()
         self._connect_controller()
 
@@ -557,6 +608,97 @@ class JobQueuePanelWidget(QWidget):
     ) -> None:
         self._on_compact_geometry_changed = callback
 
+    def configure_floating_window_move(
+        self,
+        window: QWidget | None,
+        *,
+        drag_via_client_getter: Callable[[], bool] | None = None,
+        double_click_callback: Callable[[], None] | None = None,
+    ) -> None:
+        """Drag the frameless dialog from client chrome when the title bar is hidden."""
+        self._floating_window = window
+        self._floating_drag_via_client_getter = drag_via_client_getter
+        self._floating_double_click_callback = double_click_callback
+        for widget in self._floating_drag_filter_targets:
+            widget.removeEventFilter(self)
+        self._floating_drag_filter_targets.clear()
+        if window is None:
+            return
+        targets = [self._active_job_strip, self._empty_label]
+        strip = self._active_job_strip
+        for attr in ("_frame", "_browser"):
+            child = getattr(strip, attr, None)
+            if child is not None:
+                targets.append(child)
+        browser = getattr(strip, "_browser", None)
+        if browser is not None and browser.viewport() is not None:
+            targets.append(browser.viewport())
+        for widget in targets:
+            widget.installEventFilter(self)
+            self._floating_drag_filter_targets.append(widget)
+
+    def _floating_client_drag_active(self) -> bool:
+        return (
+            self._floating_window is not None
+            and self._floating_drag_via_client_getter is not None
+            and self._floating_drag_via_client_getter()
+        )
+
+    def _mouse_event_hits_interactive_target(
+        self, event: QMouseEvent, watched: QObject
+    ) -> bool:
+        widget = watched if isinstance(watched, QWidget) else None
+        while widget is not None:
+            if isinstance(widget, QAbstractButton):
+                return True
+            if isinstance(widget, QTextBrowser):
+                vp = widget.viewport()
+                if vp is not None:
+                    local = vp.mapFromGlobal(event.globalPosition().toPoint())
+                    if widget.anchorAt(local):
+                        return True
+                return False
+            widget = widget.parentWidget()
+        return False
+
+    def _try_start_floating_client_drag(
+        self, event: QMouseEvent, watched: QObject | None = None
+    ) -> bool:
+        if not self._floating_client_drag_active():
+            return False
+        if event.button() != Qt.MouseButton.LeftButton:
+            return False
+        if watched is not None and self._mouse_event_hits_interactive_target(
+            event, watched
+        ):
+            return False
+        from utils import try_start_frameless_system_move
+
+        if try_start_frameless_system_move(
+            self._floating_window, event.globalPosition().toPoint()
+        ):
+            event.accept()
+            return True
+        return False
+
+    def _try_handle_floating_client_double_click(
+        self, event: QMouseEvent, watched: QObject | None = None
+    ) -> bool:
+        if not self._floating_client_drag_active():
+            return False
+        if event.button() != Qt.MouseButton.LeftButton:
+            return False
+        if watched is not None and self._mouse_event_hits_interactive_target(
+            event, watched
+        ):
+            return False
+        cb = self._floating_double_click_callback
+        if cb is None:
+            return False
+        cb()
+        event.accept()
+        return True
+
     def attach_header_tools(self) -> None:
         """Wire titlebar tools menu on the bound header (if any)."""
         header = self._jobs_header()
@@ -567,7 +709,16 @@ class JobQueuePanelWidget(QWidget):
         btn.setIconSize(QSize(14, 14))
         btn.setToolTip("Job queue tools")
         btn.clicked.connect(
-            lambda: show_jobs_tools_menu(self.main_window, self._controller, btn)
+            lambda: show_jobs_tools_menu(
+                self.main_window,
+                self._controller,
+                btn,
+                job_queue_dialog=(
+                    self.window()
+                    if hasattr(self.window(), "is_job_queue_always_on_top")
+                    else None
+                ),
+            )
         )
         if hasattr(header, "set_tools_button"):
             header.set_tools_button(btn)
@@ -579,6 +730,13 @@ class JobQueuePanelWidget(QWidget):
     def has_job_rows(self) -> bool:
         return bool(self._job_cards)
 
+    def has_active_generation(self) -> bool:
+        return self._controller.is_running()
+
+    def should_shrink_wrap_client(self) -> bool:
+        """True when client area should hug content (empty queue, no active strip)."""
+        return not self._job_cards and not self._controller.is_running()
+
     def is_queue_list_visible(self) -> bool:
         return self._scroll.isVisible()
 
@@ -586,7 +744,7 @@ class JobQueuePanelWidget(QWidget):
         return self._empty_label
 
     def empty_state_height_hint(self) -> int:
-        return self._empty_label.sizeHint().height()
+        return empty_queue_label_height_px(self._empty_label)
 
     def prepare_expand_layout(self) -> None:
         """Reflow cards and progress strip before sizing to fit content."""
@@ -607,11 +765,14 @@ class JobQueuePanelWidget(QWidget):
         self._empty_label = QLabel("No jobs in the queue.")
         self._empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         t = get_active_theme()
-        self._empty_label.setStyleSheet(
-            f"color: {t.sidebar_text_color_hex}; font-size: 12px; padding: 12px;"
+        _apply_empty_queue_label_style(
+            self._empty_label, t.sidebar_text_color_hex
         )
 
         self._active_job_strip = ActiveJobStripWidget(self.main_window, self)
+        self._active_job_strip.set_on_content_height_changed(
+            self._on_active_strip_content_height_changed
+        )
 
         self._scroll = QScrollArea()
         self._scroll.setWidgetResizable(True)
@@ -631,9 +792,10 @@ class JobQueuePanelWidget(QWidget):
         self._list_layout.addStretch(1)
 
         self._scroll.setWidget(self._list_host)
+        self._panel_layout = layout
         layout.addWidget(self._active_job_strip)
         layout.addWidget(self._empty_label)
-        layout.addWidget(self._scroll, 1)
+        layout.addWidget(self._scroll, 0)
         _disable_tab_focus(self)
 
     def _connect_controller(self) -> None:
@@ -695,8 +857,8 @@ class JobQueuePanelWidget(QWidget):
     def refresh_theme_styles(self) -> None:
         """Reapply theme colors to empty state and job cards."""
         t = get_active_theme()
-        self._empty_label.setStyleSheet(
-            f"color: {t.sidebar_text_color_hex}; font-size: 12px; padding: 12px;"
+        _apply_empty_queue_label_style(
+            self._empty_label, t.sidebar_text_color_hex
         )
         if hasattr(self, "_scroll"):
             self._scroll.setStyleSheet(t.sidebar_jobs_scroll_stylesheet())
@@ -710,7 +872,24 @@ class JobQueuePanelWidget(QWidget):
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
-        self._refresh_active_job_strip(force=True)
+        old = event.oldSize()
+        new = event.size()
+        # Avoid strip reflow feedback when the parent only tweaks height in ALL mode.
+        if (
+            self._queue_size_mode == QUEUE_SIZE_ALL
+            and old.width() == new.width()
+            and old.height() != new.height()
+        ):
+            return
+        if old.width() != new.width() or self._queue_size_mode != QUEUE_SIZE_ALL:
+            self._refresh_active_job_strip(force=True)
+
+    def sizeHint(self) -> QSize:
+        if self._queue_size_mode == QUEUE_SIZE_ALL:
+            w = self.width() if self.width() > 0 else -1
+            h = self.height() if self.height() > 0 else MIN_JOBS_QUEUE_CONTENT_HEIGHT
+            return QSize(w, h)
+        return super().sizeHint()
 
     def showEvent(self, event) -> None:
         super().showEvent(event)
@@ -725,7 +904,32 @@ class JobQueuePanelWidget(QWidget):
             self._live_timer.stop()
         super().hideEvent(event)
 
+    def mousePressEvent(self, event) -> None:
+        if isinstance(event, QMouseEvent) and self._try_start_floating_client_drag(
+            event, self
+        ):
+            return
+        super().mousePressEvent(event)
+
+    def mouseDoubleClickEvent(self, event) -> None:
+        if isinstance(event, QMouseEvent) and self._try_handle_floating_client_double_click(
+            event, self
+        ):
+            return
+        super().mouseDoubleClickEvent(event)
+
     def eventFilter(self, obj, event) -> bool:
+        if isinstance(event, QMouseEvent) and obj in self._floating_drag_filter_targets:
+            if (
+                event.type() == QEvent.Type.MouseButtonDblClick
+                and self._try_handle_floating_client_double_click(event, obj)
+            ):
+                return True
+            if (
+                event.type() == QEvent.Type.MouseButtonPress
+                and self._try_start_floating_client_drag(event, obj)
+            ):
+                return True
         if (
             hasattr(self, "_scroll")
             and obj is self._scroll.viewport()
@@ -740,7 +944,7 @@ class JobQueuePanelWidget(QWidget):
         if timer is None:
             timer = QTimer(self)
             timer.setSingleShot(True)
-            timer.timeout.connect(self._reflow_all)
+            timer.timeout.connect(self._reflow_all_and_notify)
             self._resize_timer = timer
         timer.start(50)
 
@@ -766,50 +970,136 @@ class JobQueuePanelWidget(QWidget):
         if not self.isVisible() or not self._controller.is_running():
             if self._active_job_strip.isVisible():
                 self._active_job_strip.hide()
+            self._notify_fixed_geometry_if_needed()
             return
         self._active_job_strip.refresh(force=force)
-        if self._queue_compact:
-            cb = self._on_compact_geometry_changed
-            if cb is not None:
-                cb()
+
+    def _on_active_strip_content_height_changed(self) -> None:
+        if self._queue_size_mode == QUEUE_SIZE_ONE:
+            self._apply_one_job_scroll_height()
+        self._sync_fixed_panel_geometry()
+        self._notify_shell_geometry_changed()
+
+    def queue_size_mode(self) -> str:
+        return self._queue_size_mode
+
+    def set_queue_size_mode(self, mode: str) -> None:
+        """all: every job row; one: active strip + first row; strip: progress strip only."""
+        if mode not in _QUEUE_SIZE_MODES:
+            mode = QUEUE_SIZE_ALL
+        if mode == self._queue_size_mode:
+            if mode != QUEUE_SIZE_ALL or self.should_shrink_wrap_client():
+                self._sync_fixed_panel_geometry()
+            return
+        self._queue_size_mode = mode
+        self._apply_queue_size_layout()
 
     def set_queue_compact(self, compact: bool) -> None:
-        """Minimized view: hide queue list so only the progress strip sizes the panel."""
-        compact = bool(compact)
-        if compact == self._queue_compact:
-            if compact:
-                self.refresh_compact_geometry()
-            return
-        self._queue_compact = compact
-        self._apply_queue_compact_layout()
+        """Sidebar compact toggle: strip-only vs show queue list."""
+        self.set_queue_size_mode(QUEUE_SIZE_STRIP if compact else QUEUE_SIZE_ALL)
 
     def is_queue_compact(self) -> bool:
-        return self._queue_compact
+        return self._queue_size_mode == QUEUE_SIZE_STRIP
+
+    def prepare_size_measure(self) -> None:
+        """Flush layout so fit-to-content height measurements are stable."""
+        if self._preparing_size_measure:
+            return
+        self._preparing_size_measure = True
+        try:
+            self._refresh_active_job_strip(force=True)
+            self._reflow_all()
+            app = QApplication.instance()
+            if app is not None:
+                app.processEvents(QEventLoop.ProcessEventsFlag.ExcludeUserInputEvents)
+        finally:
+            self._preparing_size_measure = False
+
+    def _notify_fixed_geometry_if_needed(self) -> None:
+        self._notify_shell_geometry_changed()
 
     def refresh_compact_geometry(self, strip_h: int | None = None) -> None:
-        """Re-pin widget height to the strip (compact mode only)."""
-        if not self._queue_compact:
+        """Re-pin widget height to the strip (strip mode / sidebar compact)."""
+        if not self.is_queue_compact():
             return
-        parent_driven = strip_h is not None
-        if strip_h is None:
-            strip_h = self.compact_content_height()
+        if strip_h is not None:
+            self.setSizePolicy(
+                QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
+            )
+            self.setFixedHeight(strip_h)
+            self.updateGeometry()
+            return
+        self._sync_fixed_panel_geometry()
+
+    def _sync_fixed_panel_geometry(self) -> None:
+        if self._queue_size_mode == QUEUE_SIZE_ALL and not self.should_shrink_wrap_client():
+            return
+        content_h = self.content_height_for_size_mode()
+        if self.height() == content_h:
+            return
         self.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
         )
-        self.setFixedHeight(strip_h)
+        self.setFixedHeight(content_h)
         self.updateGeometry()
-        if parent_driven:
-            return
-        cb = self._on_compact_geometry_changed
-        if cb is not None:
-            cb()
+        self._notify_fixed_geometry_if_needed()
 
-    def _apply_queue_compact_layout(self) -> None:
+    def _apply_panel_layout_stretch(self) -> None:
+        layout = getattr(self, "_panel_layout", None)
+        if layout is None:
+            return
+        shrink = self.should_shrink_wrap_client()
+        if self._queue_size_mode == QUEUE_SIZE_ALL and not shrink:
+            layout.setStretchFactor(self._scroll, 1)
+            self._scroll.setSizePolicy(
+                QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
+            )
+            self._scroll.setMinimumHeight(0)
+            self._scroll.setMaximumHeight(16777215)
+        else:
+            layout.setStretchFactor(self._scroll, 0)
+            self._scroll.setSizePolicy(
+                QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
+            )
+            self._scroll.setFixedHeight(0)
+            self._scroll.setMaximumHeight(0)
+
+    def _apply_one_job_scroll_height(self) -> None:
+        if not self._job_cards:
+            self._scroll.setFixedHeight(0)
+            return
+        margins = self._list_layout.contentsMargins()
+        card_h = self._job_cards[0].minimumHeight()
+        self._scroll.setFixedHeight(card_h + margins.top() + margins.bottom())
+
+    def _apply_queue_size_layout(self) -> None:
         has_rows = bool(self._job_cards)
-        if self._queue_compact:
+        mode = self._queue_size_mode
+        self._apply_panel_layout_stretch()
+
+        if mode == QUEUE_SIZE_STRIP:
             self._scroll.hide()
+            for card in self._job_cards:
+                card.hide()
+            if self._controller.is_running():
+                self._active_job_strip.refresh(force=True)
+                self._empty_label.hide()
+            else:
+                self._empty_label.setVisible(not has_rows)
+            self._sync_fixed_panel_geometry()
+        elif mode == QUEUE_SIZE_ONE:
             self._empty_label.setVisible(not has_rows)
-            self.refresh_compact_geometry()
+            self._scroll.setVisible(has_rows)
+            self._scroll.setVerticalScrollBarPolicy(
+                Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+            )
+            for idx, card in enumerate(self._job_cards):
+                card.setVisible(idx == 0)
+            if has_rows:
+                self._apply_one_job_scroll_height()
+            else:
+                self._scroll.setFixedHeight(0)
+            self._sync_fixed_panel_geometry()
         else:
             self.setMinimumHeight(0)
             self.setMaximumHeight(16777215)
@@ -817,29 +1107,88 @@ class JobQueuePanelWidget(QWidget):
                 QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
             )
             self._scroll.setMinimumHeight(0)
+            self._scroll.setMaximumHeight(16777215)
+            self._scroll.setVerticalScrollBarPolicy(
+                Qt.ScrollBarPolicy.ScrollBarAsNeeded
+            )
+            for card in self._job_cards:
+                card.show()
             self._empty_label.setVisible(not has_rows)
             self._scroll.setVisible(has_rows)
+            if self.should_shrink_wrap_client():
+                self._sync_fixed_panel_geometry()
         self.updateGeometry()
-        cb = self._on_compact_geometry_changed
-        if cb is not None:
-            cb()
+
+    def _active_strip_block_height(self) -> int:
+        if not self._controller.is_running():
+            return 0
+        if self._active_job_strip.isVisible() and self._active_job_strip.height() > 0:
+            return self._active_job_strip.height()
+        return self._active_job_strip.content_height()
+
+    def strip_only_content_height(self) -> int:
+        """Client height for strip-only view (progress container)."""
+        if self._controller.is_running():
+            self._active_job_strip.refresh(force=True)
+            if self._active_job_strip.isVisible():
+                h = self._active_job_strip.height()
+                if h > 0:
+                    return h
+        strip_h = self._active_job_strip.content_height()
+        if strip_h > 0:
+            return strip_h
+        if not self._job_cards:
+            return self.empty_state_height_hint()
+        return MIN_JOBS_QUEUE_CONTENT_HEIGHT
+
+    def _measure_first_job_card_height(self) -> int:
+        if not self._job_cards:
+            return 0
+        info_w = self._info_content_width()
+        width = self._viewport_width()
+        card = self._job_cards[0]
+        rows = self._controller.queue_snapshot()
+        row = rows[0] if rows else None
+        if card._last_info_html:
+            card.update_info_html(card._last_info_html, info_w, scroll_width=width)
+        elif row is not None:
+            card.update_info_html(
+                info_html_for_queue_row(
+                    self._controller, 0, row, for_sidebar=True
+                ),
+                info_w,
+                scroll_width=width,
+            )
+            if row.thumbnail_paths:
+                card._replace_refs(row.thumbnail_paths, info_w, scroll_width=width)
+        else:
+            card.reflow_refs(width)
+            return card.minimumHeight()
+        card.reflow_refs(width)
+        return card.minimumHeight()
+
+    def single_job_content_height(self) -> int:
+        """Client height for one job row (+ active strip when running)."""
+        total = self._active_strip_block_height()
+        if not self._job_cards:
+            return total + self.empty_state_height_hint()
+        margins = self._list_layout.contentsMargins()
+        return total + margins.top() + margins.bottom() + self._measure_first_job_card_height()
+
+    def content_height_for_size_mode(self, mode: str | None = None) -> int:
+        mode = mode or self._queue_size_mode
+        if mode == QUEUE_SIZE_STRIP:
+            return self.strip_only_content_height()
+        if mode == QUEUE_SIZE_ONE:
+            return self.single_job_content_height()
+        return self.preferred_content_height()
 
     def minimumSizeHint(self) -> QSize:
-        if self._queue_compact:
-            return QSize(0, self.compact_content_height())
-        h = 0
-        if (
-            hasattr(self, "_active_job_strip")
-            and self._active_job_strip.isVisible()
-        ):
-            h = self._active_job_strip.height()
-            if h <= 0:
-                h = self.compact_content_height()
-        elif self._empty_label.isVisible():
-            h = self._empty_label.sizeHint().height()
-        elif hasattr(self, "_scroll") and self._scroll.isVisible():
-            h = MIN_JOBS_QUEUE_CONTENT_HEIGHT
-        return QSize(0, h)
+        if self._queue_size_mode != QUEUE_SIZE_ALL:
+            return QSize(0, self.content_height_for_size_mode())
+        if self.should_shrink_wrap_client():
+            return QSize(0, self.empty_state_height_hint())
+        return QSize(0, MIN_JOBS_QUEUE_CONTENT_HEIGHT)
 
     def _refresh_active_row(self, *, force: bool = False) -> None:
         if not force and self._imagegen_dialog_building_active():
@@ -867,6 +1216,9 @@ class JobQueuePanelWidget(QWidget):
         )
         self._job_cards[0].reflow_refs(viewport_w)
         _disable_tab_focus(self._job_cards[0])
+        if self._queue_size_mode == QUEUE_SIZE_ONE:
+            self._apply_one_job_scroll_height()
+            self._sync_fixed_panel_geometry()
 
     def _clear_job_cards(self) -> None:
         while self._list_layout.count() > 1:
@@ -885,6 +1237,22 @@ class JobQueuePanelWidget(QWidget):
                     card._last_info_html, info_w, scroll_width=width
                 )
             card.reflow_refs(width)
+        if self._queue_size_mode == QUEUE_SIZE_ONE:
+            self._apply_one_job_scroll_height()
+            self._sync_fixed_panel_geometry()
+        elif self._queue_size_mode == QUEUE_SIZE_STRIP:
+            self._sync_fixed_panel_geometry()
+
+    def _reflow_all_and_notify(self) -> None:
+        self._reflow_all()
+        self._notify_shell_geometry_changed()
+
+    def _notify_shell_geometry_changed(self) -> None:
+        if self._preparing_size_measure:
+            return
+        cb = self._on_compact_geometry_changed
+        if cb is not None:
+            cb()
 
     def compact_content_height(self) -> int:
         """Client height for minimized view: active progress strip only."""
@@ -900,7 +1268,7 @@ class JobQueuePanelWidget(QWidget):
             strip_h = self._active_job_strip.height()
             total += strip_h if strip_h > 0 else self._active_job_strip.sizeHint().height()
         if not self._job_cards:
-            return total + self._empty_label.sizeHint().height()
+            return total + self.empty_state_height_hint()
         info_w = self._info_content_width()
         width = self._viewport_width()
         rows = self._controller.queue_snapshot()
@@ -937,9 +1305,6 @@ class JobQueuePanelWidget(QWidget):
 
     def refresh_table(self) -> None:
         rows = self._controller.queue_snapshot()
-        has_rows = bool(rows)
-        self._empty_label.setVisible(not has_rows and not self._queue_compact)
-        self._scroll.setVisible(has_rows and not self._queue_compact)
         self._clear_job_cards()
 
         info_w = self._info_content_width()
@@ -966,7 +1331,10 @@ class JobQueuePanelWidget(QWidget):
             self._job_cards.append(card)
             _disable_tab_focus(card)
 
-        self._schedule_reflow()
+        self._reflow_all()
         _disable_tab_focus(self)
         self._update_header_status()
         self._refresh_active_job_strip(force=True)
+        self._apply_queue_size_layout()
+        self._sync_fixed_panel_geometry()
+        self._notify_shell_geometry_changed()

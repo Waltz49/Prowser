@@ -41,11 +41,13 @@ class HeaderWidget(QFrame):
         *,
         omit_right_border: bool = False,
         omit_left_border: bool = False,
+        omit_top_border: bool = False,
     ):
         super().__init__(parent)
         self.title = title
         self.omit_right_border = omit_right_border
         self.omit_left_border = omit_left_border
+        self.omit_top_border = omit_top_border
         self.hide_button = None
         self.tools_button = None
         self._header_layout = None
@@ -61,6 +63,7 @@ class HeaderWidget(QFrame):
         self._pane_resize_press_global_y: float | None = None
         self._pane_resize_start_sizes: list[int] | None = None
         self._pane_resize_dragging = False
+        self._floating_window: QWidget | None = None
         self.setup_ui()
         
     def setup_ui(self):
@@ -163,18 +166,27 @@ class HeaderWidget(QFrame):
             if not self.omit_right_border
             else "border-right: none;"
         )
+        top = (
+            f"border-top: 1px solid {b};"
+            if not self.omit_top_border
+            else "border-top: none;"
+        )
         border_css = f"""
-                border-top: 1px solid {b};
+                {top}
                 {left}
                 {right}
                 border-bottom: 1px solid {b};
             """
         r = 3
-        if not self.omit_left_border and not self.omit_right_border:
+        if (
+            not self.omit_left_border
+            and not self.omit_right_border
+            and not self.omit_top_border
+        ):
             radius_css = f"border-radius: {r}px;"
         else:
-            tl = 0 if self.omit_left_border else r
-            tr = 0 if self.omit_right_border else r
+            tl = 0 if self.omit_left_border or self.omit_top_border else r
+            tr = 0 if self.omit_right_border or self.omit_top_border else r
             bl = 0 if self.omit_left_border else r
             br = 0 if self.omit_right_border else r
             radius_css = f"""
@@ -259,9 +271,25 @@ class HeaderWidget(QFrame):
                         return True
         return super().eventFilter(watched, event)
 
+    def configure_floating_window_move(self, window: QWidget | None) -> None:
+        """Drag this title bar to move a frameless top-level window."""
+        self._floating_window = window
+
     def mousePressEvent(self, event: QMouseEvent):
         """Defer single-click so double-click on the title bar is not swallowed."""
         self._handle_pane_resize_mouse_press(event)
+        if (
+            event.button() == Qt.MouseButton.LeftButton
+            and self._floating_window is not None
+            and not self._titlebar_click_excludes_chrome_buttons(event)
+        ):
+            from utils import try_start_frameless_system_move
+
+            if try_start_frameless_system_move(
+                self._floating_window, event.globalPosition().toPoint()
+            ):
+                event.accept()
+                return
         if event.button() == Qt.LeftButton and not self._titlebar_click_excludes_chrome_buttons(event):
             app = QApplication.instance()
             interval = app.doubleClickInterval() if app else 400

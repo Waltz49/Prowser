@@ -770,6 +770,99 @@ def present_auxiliary_dialog(dialog: QDialog) -> None:
     raise_dialog_without_space_hop(dialog)
 
 
+FRAMELESS_RESIZE_EDGE_MARGIN = 6
+
+
+def apply_macos_frameless_floating_dialog(
+    dialog: QDialog, *, always_on_top: bool = False
+) -> None:
+    """Remove native macOS title-bar chrome; client supplies its own header/controls."""
+    flags = Qt.WindowType.Dialog | Qt.WindowType.FramelessWindowHint
+    if always_on_top:
+        flags |= Qt.WindowType.WindowStaysOnTopHint
+    dialog.setWindowFlags(flags)
+
+
+def _frameless_resize_edge_flags(
+    widget: QWidget,
+    pos,
+    *,
+    margin: int = FRAMELESS_RESIZE_EDGE_MARGIN,
+) -> tuple[bool, bool, bool, bool]:
+    rect = widget.rect()
+    on_left = pos.x() <= margin
+    on_right = pos.x() >= rect.width() - margin
+    on_top = pos.y() <= margin
+    on_bottom = pos.y() >= rect.height() - margin
+    return on_left, on_right, on_top, on_bottom
+
+
+def frameless_resize_edge_at(
+    widget: QWidget,
+    pos,
+    *,
+    margin: int = FRAMELESS_RESIZE_EDGE_MARGIN,
+) -> Qt.Edge | None:
+    """Pick a resize edge for startSystemResize (corners map to one edge)."""
+    on_left, on_right, on_top, on_bottom = _frameless_resize_edge_flags(
+        widget, pos, margin=margin
+    )
+    if on_bottom:
+        return Qt.Edge.BottomEdge
+    if on_right:
+        return Qt.Edge.RightEdge
+    if on_top:
+        return Qt.Edge.TopEdge
+    if on_left:
+        return Qt.Edge.LeftEdge
+    return None
+
+
+def frameless_resize_cursor_for_pos(
+    widget: QWidget,
+    pos,
+    *,
+    margin: int = FRAMELESS_RESIZE_EDGE_MARGIN,
+) -> Qt.CursorShape | None:
+    on_left, on_right, on_top, on_bottom = _frameless_resize_edge_flags(
+        widget, pos, margin=margin
+    )
+    if (on_bottom and on_right) or (on_top and on_left):
+        return Qt.CursorShape.SizeFDiagCursor
+    if (on_bottom and on_left) or (on_top and on_right):
+        return Qt.CursorShape.SizeBDiagCursor
+    if on_left or on_right:
+        return Qt.CursorShape.SizeHorCursor
+    if on_top or on_bottom:
+        return Qt.CursorShape.SizeVerCursor
+    return None
+
+
+def try_start_frameless_system_resize(
+    widget: QWidget,
+    global_pos,
+    *,
+    margin: int = FRAMELESS_RESIZE_EDGE_MARGIN,
+) -> bool:
+    """Begin a native edge resize on a frameless top-level window."""
+    wh = widget.windowHandle()
+    if wh is None:
+        return False
+    local = widget.mapFromGlobal(global_pos)
+    edge = frameless_resize_edge_at(widget, local, margin=margin)
+    if edge is None:
+        return False
+    return bool(wh.startSystemResize(edge))
+
+
+def try_start_frameless_system_move(widget: QWidget, global_pos) -> bool:
+    """Begin a native window drag on a frameless top-level window."""
+    wh = widget.windowHandle()
+    if wh is None:
+        return False
+    return bool(wh.startSystemMove())
+
+
 def chat_pane_has_focus(
     main_window: Optional[QWidget],
     focus_widget: Optional[QWidget] = None,

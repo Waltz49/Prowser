@@ -3,8 +3,8 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QKeySequence, QShortcut
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QKeySequence, QShortcut, QCursor
 from PySide6.QtWidgets import (
     QDialog,
     QLabel,
@@ -13,11 +13,18 @@ from PySide6.QtWidgets import (
 )
 
 from imagegen_plugins.image_gen_persistence import (
+    load_job_queue_always_on_top,
     load_job_queue_geometry_hex,
+    load_job_queue_size_mode,
+    save_job_queue_always_on_top,
     save_job_queue_geometry_hex,
+    save_job_queue_size_mode,
 )
 from imagegen_plugins.job_queue_panel import (
     JobQueuePanelWidget,
+    QUEUE_SIZE_ALL,
+    QUEUE_SIZE_ONE,
+    QUEUE_SIZE_STRIP,
     job_control_dialog_outer_minimum_width,
 )
 # Re-export shared helpers for existing importers.
@@ -33,15 +40,40 @@ from imagegen_plugins.job_queue_common import (  # noqa: F401
     open_reference_thumbnail_paths,
 )
 from thumbnails.combined_sidebar_widget import HeaderWidget
+import thumbnails.thumbnail_constants as tc
+from theme.theme_service import get_active_theme
+from thumbnails.sidebar_pane_layout import MIN_JOBS_QUEUE_CONTENT_HEIGHT, pane_fit_height_tolerance
 from utils import (
     _center_styled_dialog_on_screen,
-    ensure_dialog_fits_screen,
-    get_dialog_shell_stylesheet,
+    apply_macos_frameless_floating_dialog,
+    frameless_resize_cursor_for_pos,
+    raise_dialog_without_space_hop,
     save_dialog_geometry_hex,
+    try_start_frameless_system_resize,
 )
 
-_DIALOG_MARGIN = 8
-_NEAR_MAX_HEIGHT_TOLERANCE = 20
+_DIALOG_BORDER_PX = 1
+_SCREEN_EDGE_MARGIN = 8
+_JOB_QUEUE_DIALOG_OBJECT_NAME = "jobQueueFloatingDialog"
+
+
+def _job_queue_floating_shell_stylesheet() -> str:
+    """1px sidebar-pane border; background matches jobs pane."""
+    th = get_active_theme()
+    border_hex = tc.SIDEBAR_HEADER_BORDER_HEX or th.sidebar_header_border_hex
+    bg_hex = th.sidebar_background_color_hex
+    text_hex = th.sidebar_text_color_hex
+    return f"""
+    #{_JOB_QUEUE_DIALOG_OBJECT_NAME} {{
+        background-color: {bg_hex};
+        border: {_DIALOG_BORDER_PX}px solid {border_hex};
+        border-radius: 3px;
+    }}
+    #{_JOB_QUEUE_DIALOG_OBJECT_NAME} QWidget {{
+        background-color: {bg_hex};
+        color: {text_hex};
+    }}
+    """
 
 
 class ImageGenJobQueueDialog(QDialog):
@@ -52,37 +84,54 @@ class ImageGenJobQueueDialog(QDialog):
         self.main_window = main_window
         self._geometry_restore_attempted = False
         self._geometry_was_restored = False
-        self._maximized_height: int | None = None
+        self._pending_initial_center = False
+        self._restore_size_mode_pending = False
+        self._always_on_top = load_job_queue_always_on_top()
 
         self.setWindowTitle("Job Control")
         self.setModal(False)
+        apply_macos_frameless_floating_dialog(self, always_on_top=self._always_on_top)
+        self.setMouseTracking(True)
         self._sync_dialog_width_limits()
-        self.setMinimumHeight(120)
 
-        self.setStyleSheet(get_dialog_shell_stylesheet())
+        self.setObjectName(_JOB_QUEUE_DIALOG_OBJECT_NAME)
+        self.setStyleSheet(_job_queue_floating_shell_stylesheet())
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(
-            _DIALOG_MARGIN, _DIALOG_MARGIN, _DIALOG_MARGIN, _DIALOG_MARGIN
+            _DIALOG_BORDER_PX,
+            _DIALOG_BORDER_PX,
+            _DIALOG_BORDER_PX,
+            _DIALOG_BORDER_PX,
         )
         layout.setSpacing(0)
+        self._shell_layout = layout
 
         self._header = HeaderWidget(
-            "Job Control", omit_left_border=True, omit_right_border=True
+            "Job Control",
+            omit_left_border=True,
+            omit_right_border=True,
+            omit_top_border=True,
         )
         self._header.hide_button.setText("×")
         self._header.hide_button.setToolTip("Close job control dialog")
         self._header.hide_button.clicked.connect(self.hide)
-        self._header.title_double_clicked.connect(self._toggle_maximize_or_compact)
+        self._header.title_double_clicked.connect(self._cycle_header_size)
+        self._header.configure_floating_window_move(self)
         layout.addWidget(self._header)
 
         self._panel = JobQueuePanelWidget(main_window, self)
         self._panel.set_header_getter(lambda: self._header)
-        self._panel.set_on_compact_geometry_changed(self._sync_dialog_height_to_panel)
+        self._panel.set_on_compact_geometry_changed(self._on_panel_geometry_changed)
+        self._panel.configure_floating_window_move(
+            self,
+            drag_via_client_getter=lambda: not self._header.isVisible(),
+            double_click_callback=self._cycle_header_size,
+        )
         self._panel.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
         )
-        layout.addWidget(self._panel, 1)
+        layout.addWidget(self._panel, 0)
 
         self._panel.attach_header_tools()
 
@@ -104,24 +153,71 @@ class ImageGenJobQueueDialog(QDialog):
         dismiss_shortcut.setContext(Qt.ShortcutContext.WindowShortcut)
         dismiss_shortcut.activated.connect(self.hide)
 
+    def is_job_queue_always_on_top(self) -> bool:
+        return self._always_on_top
+
+    def set_job_queue_always_on_top(self, enabled: bool) -> None:
+        enabled = bool(enabled)
+        if enabled == self._always_on_top:
+            return
+        self._always_on_top = enabled
+        save_job_queue_always_on_top(enabled)
+        was_visible = self.isVisible()
+        apply_macos_frameless_floating_dialog(self, always_on_top=enabled)
+        if was_visible:
+            self.show()
+            raise_dialog_without_space_hop(self)
+
     def _is_empty_queue_state(self) -> bool:
         return not self._panel.is_queue_list_visible() and not self._panel.has_job_rows()
 
     def _sync_dialog_width_limits(self) -> None:
         self.setMinimumWidth(
-            job_control_dialog_outer_minimum_width(margin_px=_DIALOG_MARGIN)
+            job_control_dialog_outer_minimum_width(
+                margin_px=_DIALOG_BORDER_PX * 2
+            )
         )
 
-    def _schedule_refresh_table(self) -> None:
-        self._panel.schedule_refresh()
-
     def _layout_chrome_height(self) -> int:
-        layout = self.layout()
-        margins = layout.contentsMargins() if layout is not None else None
-        margin_h = 0
-        if margins is not None:
-            margin_h = margins.top() + margins.bottom()
-        return self._header.height() + margin_h
+        layout = self._shell_layout
+        margins = layout.contentsMargins()
+        header_h = self._header.height() if self._header.isVisible() else 0
+        return margins.top() + header_h + margins.bottom()
+
+    def _titlebar_hidden_for_mode(self, mode: str) -> bool:
+        """Strip-only view with live progress hides the dialog title bar."""
+        return mode == QUEUE_SIZE_STRIP and self._panel.has_active_generation()
+
+    def _sync_titlebar_visibility(self, mode: str) -> None:
+        self._header.setVisible(not self._titlebar_hidden_for_mode(mode))
+
+    def _sync_shell_layout_for_mode(self, mode: str) -> None:
+        self._sync_titlebar_visibility(mode)
+        layout = self._shell_layout
+        shrink = self._panel.should_shrink_wrap_client()
+        fixed_height = mode != QUEUE_SIZE_ALL or shrink
+        layout.setStretchFactor(self._panel, 0)
+        if fixed_height:
+            if mode == QUEUE_SIZE_ALL and shrink:
+                panel_h = self._panel.empty_state_height_hint()
+            else:
+                panel_h = self._panel.content_height_for_size_mode(mode)
+            self._panel.setSizePolicy(
+                QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
+            )
+            self._panel.setFixedHeight(panel_h)
+            self._panel.setMaximumHeight(panel_h)
+            self.setMinimumHeight(max(48, self._layout_chrome_height() + panel_h))
+        else:
+            self._panel.setMinimumHeight(0)
+            self._panel.setMaximumHeight(16777215)
+            self._panel.setSizePolicy(
+                QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
+            )
+            layout.setStretchFactor(self._panel, 1)
+            self.setMinimumHeight(
+                max(48, self._layout_chrome_height() + MIN_JOBS_QUEUE_CONTENT_HEIGHT)
+            )
 
     def _max_screen_client_height(self) -> int:
         from utils import _resolve_screen_for_styled_dialog
@@ -130,46 +226,155 @@ class ImageGenJobQueueDialog(QDialog):
         if screen is None:
             return self.height()
         ag = screen.availableGeometry()
-        return max(self.minimumHeight(), ag.height() - 2 * _DIALOG_MARGIN)
+        return max(self.minimumHeight(), ag.height() - 2 * _SCREEN_EDGE_MARGIN)
 
-    def _content_height_for_mode(self, *, compact: bool) -> int:
-        if compact:
-            panel_h = self._panel.compact_content_height()
-            if panel_h <= 0 and not self._panel.has_job_rows():
+    def _dialog_height_for_panel_mode(self, mode: str) -> int:
+        chrome = self._layout_chrome_height()
+        if mode == QUEUE_SIZE_ALL:
+            if self._panel.should_shrink_wrap_client():
                 panel_h = self._panel.empty_state_height_hint()
+            else:
+                panel_h = self._panel.preferred_content_height()
+                max_panel = max(0, self._max_screen_client_height() - chrome)
+                panel_h = min(panel_h, max_panel)
         else:
-            panel_h = self._panel.preferred_content_height()
-        return self._layout_chrome_height() + panel_h
+            panel_h = self._panel.content_height_for_size_mode(mode)
+        return max(self.minimumHeight(), chrome + panel_h)
+
+    def _resize_anchored_bottom(self, target_height: int) -> None:
+        """Resize while keeping the window bottom edge fixed (clamp to screen)."""
+        from utils import _resolve_screen_for_styled_dialog
+
+        geo = self.geometry()
+        width = geo.width()
+        # Use exclusive bottom (y + height); QRect.bottom() is inclusive and drifts -1 each resize.
+        bottom_y = geo.y() + geo.height()
+        target_height = max(self.minimumHeight(), target_height)
+        new_y = bottom_y - target_height
+
+        screen = _resolve_screen_for_styled_dialog(self.main_window)
+        if screen is not None:
+            ag = screen.availableGeometry()
+            max_bottom_y = ag.bottom() + 1 - _SCREEN_EDGE_MARGIN
+            min_top = ag.top() + _SCREEN_EDGE_MARGIN
+            if bottom_y > max_bottom_y:
+                bottom_y = max_bottom_y
+                new_y = bottom_y - target_height
+            if new_y < min_top:
+                new_y = min_top
+                target_height = min(target_height, bottom_y - new_y)
+
+        if new_y == geo.y() and target_height == geo.height():
+            return
+
+        self.setGeometry(geo.x(), new_y, width, target_height)
+
+    def _effective_restored_size_mode(self, saved: str) -> str:
+        if saved not in (QUEUE_SIZE_ALL, QUEUE_SIZE_ONE, QUEUE_SIZE_STRIP):
+            return QUEUE_SIZE_ALL
+        has_jobs = self._panel.has_job_rows()
+        has_active = self._panel.has_active_generation()
+        if not has_jobs and not has_active:
+            return QUEUE_SIZE_ALL
+        if saved == QUEUE_SIZE_STRIP and not has_active:
+            return QUEUE_SIZE_ALL
+        if saved == QUEUE_SIZE_ONE and not has_jobs:
+            return QUEUE_SIZE_STRIP if has_active else QUEUE_SIZE_ALL
+        return saved
+
+    def _persist_size_mode(self) -> None:
+        try:
+            save_job_queue_size_mode(self._panel.queue_size_mode())
+        except Exception:
+            pass
+
+    def _apply_dialog_size_mode(self, mode: str) -> None:
+        if mode == QUEUE_SIZE_ALL:
+            self._panel.prepare_expand_layout()
+        self._panel.set_queue_size_mode(mode)
+        self._sync_shell_layout_for_mode(mode)
+
+        prev_height = -1
+        target_height = self.minimumHeight()
+        for _ in range(4):
+            self._panel.prepare_size_measure()
+            self._sync_shell_layout_for_mode(mode)
+            target_height = self._dialog_height_for_panel_mode(mode)
+            if prev_height >= 0 and abs(target_height - prev_height) <= 1:
+                break
+            prev_height = target_height
+
+        self._resize_anchored_bottom(target_height)
+        self._persist_size_mode()
+
+    def _heights_match(self, a: int, b: int) -> bool:
+        ref = max(a, b, 1)
+        return abs(a - b) <= pane_fit_height_tolerance(ref)
+
+    def _resolve_next_cycle_mode(self, current: str) -> str:
+        """Advance fit cycle; skip steps that would not change dialog height."""
+        has_jobs = self._panel.has_job_rows()
+        has_active = self._panel.has_active_generation()
+
+        if not has_jobs and not has_active:
+            return QUEUE_SIZE_ALL
+
+        if current == QUEUE_SIZE_STRIP:
+            return QUEUE_SIZE_ALL
+        if current == QUEUE_SIZE_ONE:
+            return QUEUE_SIZE_STRIP if has_active else QUEUE_SIZE_ALL
+
+        self._panel.prepare_size_measure()
+        current_h = self.height()
+        if not has_jobs:
+            return QUEUE_SIZE_STRIP if has_active else QUEUE_SIZE_ALL
+
+        one_h = self._dialog_height_for_panel_mode(QUEUE_SIZE_ONE)
+        if self._heights_match(current_h, one_h):
+            return QUEUE_SIZE_STRIP if has_active else QUEUE_SIZE_ALL
+        return QUEUE_SIZE_ONE
+
+    def _cycle_header_size(self) -> None:
+        if not self._panel.has_job_rows() and not self._panel.has_active_generation():
+            if self._panel.queue_size_mode() != QUEUE_SIZE_ALL:
+                self._apply_dialog_size_mode(QUEUE_SIZE_ALL)
+            return
+        next_mode = self._resolve_next_cycle_mode(self._panel.queue_size_mode())
+        if next_mode == self._panel.queue_size_mode():
+            return
+        self._apply_dialog_size_mode(next_mode)
+
+    def _on_panel_geometry_changed(self) -> None:
+        if self._restore_size_mode_pending:
+            self._restore_size_mode_pending = False
+            mode = self._effective_restored_size_mode(load_job_queue_size_mode())
+            self._apply_dialog_size_mode(mode)
+        else:
+            self._sync_dialog_height_to_panel()
+        if not self._pending_initial_center:
+            return
+        self._pending_initial_center = False
+        if not self._geometry_was_restored:
+            _center_styled_dialog_on_screen(self, self.main_window)
 
     def _sync_dialog_height_to_panel(self) -> None:
         if not self.isVisible():
             return
-        target = self._content_height_for_mode(
-            compact=self._panel.is_queue_compact()
-        )
-        target = max(self.minimumHeight(), target)
-        self.resize(self.width(), target)
-        ensure_dialog_fits_screen(self, self.main_window, margin=_DIALOG_MARGIN)
-
-    def _is_near_maximized_height(self) -> bool:
-        max_h = self._maximized_height
-        if max_h is None:
-            max_h = self._max_screen_client_height()
-        return abs(self.height() - max_h) <= _NEAR_MAX_HEIGHT_TOLERANCE
-
-    def _toggle_maximize_or_compact(self) -> None:
-        if self._is_near_maximized_height():
-            self._panel.set_queue_compact(True)
-            self._sync_dialog_height_to_panel()
+        mode = self._panel.queue_size_mode()
+        shrink = self._panel.should_shrink_wrap_client()
+        if mode == QUEUE_SIZE_ALL and not shrink:
+            self._panel.prepare_size_measure()
+        self._sync_shell_layout_for_mode(mode)
+        target = self._dialog_height_for_panel_mode(mode)
+        if mode == QUEUE_SIZE_ALL and not shrink:
+            if self._heights_match(self.height(), target) or self.height() > target:
+                return
+        elif abs(target - self.height()) <= 1:
             return
-        self._panel.set_queue_compact(False)
-        self._panel.prepare_expand_layout()
-        needed = self._content_height_for_mode(compact=False)
-        max_h = self._max_screen_client_height()
-        self._maximized_height = max_h
-        target = min(needed, max_h)
-        self.resize(self.width(), max(self.minimumHeight(), target))
-        ensure_dialog_fits_screen(self, self.main_window, margin=_DIALOG_MARGIN)
+        self._resize_anchored_bottom(target)
+
+    def _schedule_refresh_table(self) -> None:
+        self._panel.schedule_refresh()
 
     def _save_geometry(self) -> None:
         try:
@@ -177,12 +382,29 @@ class ImageGenJobQueueDialog(QDialog):
         except Exception:
             pass
 
+    def _update_frameless_resize_cursor(self, pos) -> None:
+        cursor = frameless_resize_cursor_for_pos(self, pos)
+        if cursor is None:
+            self.unsetCursor()
+        else:
+            self.setCursor(QCursor(cursor))
+
     def mousePressEvent(self, event) -> None:
-        if event.button() == Qt.MouseButton.LeftButton and self._is_empty_queue_state():
-            self.hide()
-            event.accept()
-            return
+        if event.button() == Qt.MouseButton.LeftButton:
+            if try_start_frameless_system_resize(
+                self, event.globalPosition().toPoint()
+            ):
+                event.accept()
+                return
         super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event) -> None:
+        self._update_frameless_resize_cursor(event.position().toPoint())
+        super().mouseMoveEvent(event)
+
+    def leaveEvent(self, event) -> None:
+        self.unsetCursor()
+        super().leaveEvent(event)
 
     def closeEvent(self, event) -> None:
         self._save_geometry()
@@ -190,6 +412,7 @@ class ImageGenJobQueueDialog(QDialog):
         self.hide()
 
     def hideEvent(self, event) -> None:
+        self._persist_size_mode()
         self._save_geometry()
         super().hideEvent(event)
 
@@ -203,11 +426,8 @@ class ImageGenJobQueueDialog(QDialog):
 
     def showEvent(self, event) -> None:
         super().showEvent(event)
-        if not self._geometry_was_restored:
-            QTimer.singleShot(
-                0, lambda: _center_styled_dialog_on_screen(self, self.main_window)
-            )
-        self._panel.set_queue_compact(False)
+        self._pending_initial_center = not self._geometry_was_restored
+        self._restore_size_mode_pending = True
         self._sync_dialog_width_limits()
         self._schedule_refresh_table()
         self._panel.refresh_header_status()

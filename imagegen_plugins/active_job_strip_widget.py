@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+from typing import Callable
+
 from PySide6.QtCore import QEvent, Qt, QTimer
 from PySide6.QtWidgets import (
     QFrame,
@@ -17,6 +19,7 @@ from imagegen_plugins.image_gen_controller import get_imagegen_controller
 from imagegen_plugins.model_task_status_info import (
     _ACTIVE_JOB_STRIP_FRAME_CHROME_V,
     active_job_strip_layout_widths,
+    active_job_timing_progress_row_count,
     build_active_job_timing_cell_html,
     wrap_active_job_timing_table_html,
 )
@@ -99,12 +102,40 @@ class ActiveJobStripWidget(QWidget):
         self._active_job_hovered_anchor: str | None = None
         self._live_timer: QTimer | None = None
         self._cached_content_height = 0
+        self._progress_row_count = 0
+        self._deferred_remeasure_pending = False
+        self._on_content_height_changed: Callable[[], None] | None = None
         self._resize_refresh_timer = QTimer(self)
         self._resize_refresh_timer.setSingleShot(True)
         self._resize_refresh_timer.setInterval(50)
         self._resize_refresh_timer.timeout.connect(lambda: self.refresh(force=True))
         self._setup_ui()
         self._connect_controller()
+
+    def set_on_content_height_changed(
+        self, callback: Callable[[], None] | None
+    ) -> None:
+        self._on_content_height_changed = callback
+
+    def _emit_content_height_changed(self) -> None:
+        cb = self._on_content_height_changed
+        if cb is not None:
+            cb()
+
+    def _schedule_deferred_remeasure(self) -> None:
+        if self._deferred_remeasure_pending:
+            return
+        self._deferred_remeasure_pending = True
+        QTimer.singleShot(0, self._deferred_remeasure)
+
+    def _deferred_remeasure(self) -> None:
+        self._deferred_remeasure_pending = False
+        if not self.isVisible() or not self._controller.is_running():
+            return
+        prev_h = self.height()
+        self.refresh(force=True)
+        if self.height() != prev_h:
+            self._emit_content_height_changed()
 
     def _setup_ui(self) -> None:
         h_policy = (
@@ -214,10 +245,15 @@ class ActiveJobStripWidget(QWidget):
             return
         if not self._controller.is_running():
             self._cached_content_height = 0
+            self._progress_row_count = 0
             self.hide()
             return
         if not force and not self._controller.task_status_display_needs_refresh():
             return
+        prev_h = self.height()
+        row_count = active_job_timing_progress_row_count(self._controller)
+        rows_changed = row_count != self._progress_row_count
+        self._progress_row_count = row_count
         frame_w, browser_w = self._layout_widths()
         hovered = self._active_job_hovered_anchor
         cell_html = build_active_job_timing_cell_html(
@@ -249,6 +285,10 @@ class ActiveJobStripWidget(QWidget):
         self._cached_content_height = self.height()
         self.show()
         _disable_tab_focus(self)
+        if rows_changed:
+            self._schedule_deferred_remeasure()
+        elif self.height() != prev_h:
+            self._emit_content_height_changed()
 
     def content_height(self) -> int:
         """Height when visible, or last measured height for compact layout."""

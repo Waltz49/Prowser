@@ -655,6 +655,39 @@ def save_job_queue_geometry_hex(geom_hex: str) -> None:
     _mutate_imagegen_settings(mutate)
 
 
+def load_job_queue_always_on_top() -> bool:
+    settings = get_config().load_settings()
+    imagegen = settings.get("imagegen") or {}
+    return bool(imagegen.get("job_queue_always_on_top", False))
+
+
+def save_job_queue_always_on_top(enabled: bool) -> None:
+    def mutate(imagegen: dict) -> None:
+        imagegen["job_queue_always_on_top"] = bool(enabled)
+
+    _mutate_imagegen_settings(mutate)
+
+
+_JOB_QUEUE_SIZE_MODES = frozenset({"all", "one", "strip"})
+
+
+def load_job_queue_size_mode() -> str:
+    """Saved floating job control dialog size mode (all / one / strip)."""
+    settings = get_config().load_settings()
+    imagegen = settings.get("imagegen") or {}
+    mode = imagegen.get("job_queue_size_mode", "all")
+    return mode if mode in _JOB_QUEUE_SIZE_MODES else "all"
+
+
+def save_job_queue_size_mode(mode: str) -> None:
+    mode = mode if mode in _JOB_QUEUE_SIZE_MODES else "all"
+
+    def mutate(imagegen: dict) -> None:
+        imagegen["job_queue_size_mode"] = mode
+
+    _mutate_imagegen_settings(mutate)
+
+
 def load_hold_job_queue() -> bool:
     settings = get_config().load_settings()
     imagegen = settings.get("imagegen") or {}
