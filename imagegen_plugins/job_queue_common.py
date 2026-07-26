@@ -177,8 +177,9 @@ def build_job_queue_action_widget(
         refine_btn = QPushButton()
         refine_btn.setCheckable(True)
         refine_btn.setToolTip(
-            "Refinement: replace the first source image with each new result "
-            "for later copies; other source images keep their order."
+            "Image Based Refinement:\n\n"
+            "Base subsequent image copies on previous result image.\n\n"
+            "Other source images keep their order."
         )
         refine_btn.setStyleSheet(_series_refinement_button_stylesheet())
         refine_btn.blockSignals(True)

@@ -27,7 +27,6 @@ from theme.theme_service import get_active_theme
 
 IMAGE_GEN_FIELD_RESET_BTN_SIZE = 26
 _IMAGE_GEN_TRASH_ICON_PX = 16
-_IMAGE_GEN_GEAR_ICON_PX = 18
 IMAGE_GEN_PROMPT_CLEAR_BTN_SCALE = 0.8
 IMAGE_GEN_PROMPT_CLEAR_BTN_SIZE = round(
     IMAGE_GEN_FIELD_RESET_BTN_SIZE * IMAGE_GEN_PROMPT_CLEAR_BTN_SCALE
@@ -36,6 +35,7 @@ _IMAGE_GEN_PROMPT_CLEAR_ICON_PX = round(
     _IMAGE_GEN_TRASH_ICON_PX * IMAGE_GEN_PROMPT_CLEAR_BTN_SCALE
 )
 IMAGE_GEN_DIM_HELPER_BTN_SIZE = 20 #DGN: 26
+_IMAGE_GEN_GEAR_ICON_PX = _IMAGE_GEN_TRASH_ICON_PX
 
 IMAGE_GEN_FIELD_GROUP_SPACING = 10
 IMAGE_GEN_FIELD_LABEL_SPACING = 2
@@ -919,7 +919,7 @@ class _ImageGenGearSettingsButton(QPushButton):
         )
         self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         self.setFixedSize(
-            IMAGE_GEN_FIELD_RESET_BTN_SIZE, IMAGE_GEN_FIELD_RESET_BTN_SIZE
+            IMAGE_GEN_DIM_HELPER_BTN_SIZE, IMAGE_GEN_DIM_HELPER_BTN_SIZE
         )
         self.clicked.connect(self._open_settings_tab)
 
@@ -966,7 +966,7 @@ def image_gen_gear_settings_btn_stylesheet(
 
     t = get_active_theme()
     chrome_bg = image_gen_preview_client_background_hex()
-    sz = IMAGE_GEN_FIELD_RESET_BTN_SIZE
+    sz = IMAGE_GEN_DIM_HELPER_BTN_SIZE
     return f"""
         {selector} {{
             background-color: {chrome_bg};

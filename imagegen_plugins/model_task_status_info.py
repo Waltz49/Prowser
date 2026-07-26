@@ -213,7 +213,7 @@ _INFO_PANEL_PREFIX_W = 40
 _INFO_PANEL_POSTFIX_W = 48
 _INFO_PANEL_BAR_MIN_W = 48
 _INFO_PANEL_BAR_H = 10
-_INFO_PANEL_PROGRESS_BAR_FILL_HEX = "#3478F6"
+_INFO_PANEL_PROGRESS_BAR_FILL_HEX = "#3478F6" # Progress Bar Color
 _INFO_PANEL_ACTIVE_JOB_TABLE_BORDER_W = 1
 _INFO_PANEL_NOWRAP = 'nowrap="1" style="white-space:nowrap;"'
 # QFrame border (2) + stylesheet padding 4px top/bottom (8).
