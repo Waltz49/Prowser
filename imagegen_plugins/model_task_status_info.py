@@ -350,12 +350,12 @@ def _information_panel_progress_bar_html(
     fill_percent = max(0, min(100, int(fill_percent)))
     h = _INFO_PANEL_BAR_H
     if show_pending_start_indicator and fill_percent <= 0:
+        # Match empty progress-bar cell height (small font/line-height on <td> shrinks in QTextBrowser).
         return (
             f'<table width="{bar_width_px}" cellspacing="0" cellpadding="0" '
             f'style="border:1px solid {border_hex}; table-layout:fixed;"><tr>'
             f'<td width="{bar_width_px}" bgcolor="{bg_hex}" height="{h}" '
-            f'align="center" valign="middle" '
-            f'style="font-size:9px;line-height:{h}px;color:#FFFFFF;">'
+            f'align="center" valign="middle" style="color:#FFFFFF;">'
             f"\u2192</td></tr></table>"
         )
     filled_w = max(0, min(bar_width_px, int(round(bar_width_px * fill_percent / 100.0))))

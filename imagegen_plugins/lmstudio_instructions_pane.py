@@ -501,6 +501,19 @@ class LmStudioInstructionsPane:
         )
         self._widget = widget
         self.sync_toggle_highlight()
+        if self._instructions_edit is not None:
+            self._install_sentence_case_on_blur_if_needed(self._instructions_edit)
+
+    def _install_sentence_case_on_blur_if_needed(self, edit: QPlainTextEdit) -> None:
+        if not self._image_gen_styled:
+            return
+        if not getattr(self._parent, "_panel_mode", False):
+            return
+        from imagegen_plugins.image_gen_form_layout import (
+            install_image_gen_prompt_sentence_case_on_blur,
+        )
+
+        install_image_gen_prompt_sentence_case_on_blur(edit, per_line=True)
 
     def toolbar_host(self) -> Optional[QWidget]:
         self._ensure_widget()

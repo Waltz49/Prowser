@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from PySide6.QtCore import QEvent, QObject, QTimer, Qt, QSize
@@ -299,6 +300,83 @@ def image_gen_prompt_edit_set_plain_text(
         _image_gen_prompt_stream_scroll_helper(edit).set_plain_text(text)
     else:
         edit.setPlainText(text)
+
+
+_SENTENCE_START_RE = re.compile(r"(^|[.!?]\s+)(\w)")
+_IMAGE_GEN_PROMPT_SENTENCE_CASE_BLUR_ATTR = "_image_gen_prompt_sentence_case_blur"
+
+
+def sentence_case(text: str) -> str:
+    """Capitalize the first letter of each sentence."""
+    text = text.strip()
+    if not text:
+        return ""
+    return _SENTENCE_START_RE.sub(lambda m: m.group(1) + m.group(2).upper(), text)
+
+
+def sentence_case_lines(text: str) -> str:
+    """Apply sentence case to each non-empty line."""
+    lines: list[str] = []
+    for line in text.splitlines():
+        lines.append(sentence_case(line) if line.strip() else line)
+    return "\n".join(lines)
+
+
+def _image_gen_prompt_edit_is_streaming(edit: QPlainTextEdit) -> bool:
+    helper = getattr(edit, _IMAGE_GEN_PROMPT_STREAM_SCROLL_ATTR, None)
+    return bool(helper is not None and getattr(helper, "_streaming_active", False))
+
+
+def apply_sentence_case_to_plain_text_edit(
+    edit: QPlainTextEdit,
+    *,
+    per_line: bool = False,
+) -> bool:
+    if not _image_gen_prompt_edit_is_alive(edit) or edit.isReadOnly():
+        return False
+    if _image_gen_prompt_edit_is_streaming(edit):
+        return False
+    text = edit.toPlainText()
+    normalized = sentence_case_lines(text) if per_line else sentence_case(text)
+    if normalized != text:
+        edit.setPlainText(normalized)
+        return True
+    return False
+
+
+class _ImageGenPromptSentenceCaseBlurFilter(QObject):
+    def __init__(
+        self,
+        edit: QPlainTextEdit,
+        *,
+        per_line: bool = False,
+    ) -> None:
+        super().__init__(edit)
+        self._edit = edit
+        self._per_line = per_line
+
+    def eventFilter(self, obj: QObject, event: QEvent) -> bool:
+        if (
+            event.type() == QEvent.Type.FocusOut
+            and obj is self._edit
+            and isinstance(obj, QPlainTextEdit)
+            and not obj.isReadOnly()
+        ):
+            apply_sentence_case_to_plain_text_edit(obj, per_line=self._per_line)
+        return super().eventFilter(obj, event)
+
+
+def install_image_gen_prompt_sentence_case_on_blur(
+    edit: QPlainTextEdit,
+    *,
+    per_line: bool = False,
+) -> None:
+    if getattr(edit, _IMAGE_GEN_PROMPT_SENTENCE_CASE_BLUR_ATTR, False):
+        return
+    filt = _ImageGenPromptSentenceCaseBlurFilter(edit, per_line=per_line)
+    edit.installEventFilter(filt)
+    edit._image_gen_prompt_sentence_case_blur_filter = filt  # type: ignore[attr-defined]
+    setattr(edit, _IMAGE_GEN_PROMPT_SENTENCE_CASE_BLUR_ATTR, True)
 
 
 class ImageGenPromptPlainTextEdit(QPlainTextEdit):
@@ -1547,6 +1625,7 @@ class ImageGenFieldsPanel:
     """Vertical form: model + full-width prompt, then controls with optional side buttons."""
 
     def __init__(self, parent: QWidget, *, compact: bool = False):
+        self._compact = compact
         self.widget = QWidget(parent)
         self._layout = QVBoxLayout(self.widget)
         if compact:
@@ -2014,6 +2093,8 @@ class ImageGenFieldsPanel:
                 QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum
             )
             configure_image_gen_prompt_edit(control)
+            if self._compact:
+                install_image_gen_prompt_sentence_case_on_blur(control)
             display_control = wrap_image_gen_prompt_row_with_copy(
                 control, control
             )
@@ -2157,6 +2238,8 @@ class ImageGenFieldsPanel:
             display_control = wrap_image_gen_prompt_row_with_copy(
                 control, copy_from_edit
             )
+            if self._compact:
+                install_image_gen_prompt_sentence_case_on_blur(copy_from_edit)
         if stretch_control:
             display_control.setSizePolicy(
                 QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
