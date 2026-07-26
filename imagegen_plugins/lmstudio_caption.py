@@ -6,6 +6,8 @@ Requires the 'lmstudio' Python SDK (pip install lmstudio) and
 LMStudio running on localhost:1234 with a vision-capable model loaded.
 """
 
+import threading
+import time
 from typing import Optional
 
 from config import get_config, CAPTION_DEFAULTS
@@ -147,12 +149,14 @@ def _ensure_caption_model(client):
             f"Saved model: {saved_key}\n\nDetail: {e}"
         ) from e
     _persist_last_lm_model_key(saved_key)
+    invalidate_lmstudio_services_availability_cache()
     return model
 
 
 
 def unload_all_lmstudio_models() -> None:
     """Unload every LLM currently loaded in the LM Studio server (frees RAM for image models)."""
+    invalidate_lmstudio_services_availability_cache()
     try:
         from chat_plugins.chat_lmstudio_activity import is_chat_lmstudio_prediction_active
 
@@ -207,14 +211,26 @@ def is_lmstudio_sdk_installed() -> bool:
     return True
 
 
-def is_lmstudio_services_available() -> bool:
-    """Return True if LMStudio SDK is installed, server is reachable, and a model is loaded."""
+_LMSTUDIO_SERVICES_CACHE_TTL_SEC = 5.0
+_lmstudio_services_cache_lock = threading.Lock()
+_lmstudio_services_cache: tuple[float, bool] | None = None
+
+
+def invalidate_lmstudio_services_availability_cache() -> None:
+    """Clear cached LM Studio reachability / loaded-model probe."""
+    global _lmstudio_services_cache
+    with _lmstudio_services_cache_lock:
+        _lmstudio_services_cache = None
+
+
+def _probe_lmstudio_services_available() -> bool:
+    """Return True if LMStudio server is reachable and a model is loaded or remembered."""
     if not is_lmstudio_sdk_installed():
         return False
     import lmstudio as lms
 
     cap_settings = _get_caption_settings()
-    lms_host = cap_settings['lms_host']
+    lms_host = cap_settings["lms_host"]
     try:
         if not lms.Client.is_valid_api_host(lms_host):
             return False
@@ -227,6 +243,23 @@ def is_lmstudio_services_available() -> bool:
             return bool(_get_last_lm_model_key())
     except Exception:
         return False
+
+
+def is_lmstudio_services_available(*, force_refresh: bool = False) -> bool:
+    """Return True if LMStudio SDK is installed, server is reachable, and a model is loaded."""
+    global _lmstudio_services_cache
+    if not force_refresh:
+        with _lmstudio_services_cache_lock:
+            cached = _lmstudio_services_cache
+            if cached is not None:
+                ts, result = cached
+                if time.monotonic() - ts < _LMSTUDIO_SERVICES_CACHE_TTL_SEC:
+                    return result
+
+    result = _probe_lmstudio_services_available()
+    with _lmstudio_services_cache_lock:
+        _lmstudio_services_cache = (time.monotonic(), result)
+    return result
 
 
 def get_image_caption_stream(file_path: str, user_prompt_override: str | None = None):

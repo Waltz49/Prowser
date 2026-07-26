@@ -3,9 +3,10 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QKeySequence, QShortcut, QCursor
+from PySide6.QtCore import QEvent, QObject, Qt
+from PySide6.QtGui import QKeyEvent, QCursor
 from PySide6.QtWidgets import (
+    QApplication,
     QDialog,
     QLabel,
     QSizePolicy,
@@ -47,7 +48,8 @@ from utils import (
     _center_styled_dialog_on_screen,
     apply_macos_frameless_floating_dialog,
     frameless_resize_cursor_for_pos,
-    raise_dialog_without_space_hop,
+    present_passive_floating_dialog,
+    raise_passive_floating_dialog,
     save_dialog_geometry_hex,
     try_start_frameless_system_resize,
 )
@@ -55,6 +57,52 @@ from utils import (
 _DIALOG_BORDER_PX = 1
 _SCREEN_EDGE_MARGIN = 8
 _JOB_QUEUE_DIALOG_OBJECT_NAME = "jobQueueFloatingDialog"
+
+
+def _is_cmd_j(event: QKeyEvent) -> bool:
+    mods = event.modifiers() & ~Qt.KeyboardModifier.KeypadModifier
+    cmd_pressed = bool(
+        mods & (Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.MetaModifier)
+    )
+    other_mods = mods & ~(
+        Qt.KeyboardModifier.ControlModifier
+        | Qt.KeyboardModifier.MetaModifier
+        | Qt.KeyboardModifier.ShiftModifier
+        | Qt.KeyboardModifier.AltModifier
+    )
+    return (
+        event.key() == Qt.Key.Key_J
+        and cmd_pressed
+        and (other_mods == Qt.KeyboardModifier.NoModifier or other_mods == 0)
+    )
+
+
+class _JobQueueKeyPassthroughFilter(QObject):
+    """Forward keys to the main window when the dialog is active; keep Cmd+J to hide."""
+
+    def __init__(self, dialog: "ImageGenJobQueueDialog") -> None:
+        super().__init__(dialog)
+        self._dialog = dialog
+
+    def eventFilter(self, watched: QObject, event: QEvent) -> bool:
+        if event.type() != QEvent.Type.KeyPress:
+            return False
+        if not self._dialog.isVisible() or not self._dialog.isActiveWindow():
+            return False
+        if watched is not self._dialog and not self._dialog.isAncestorOf(
+            watched  # type: ignore[arg-type]
+        ):
+            return False
+        key_event = event  # type: ignore[assignment]
+        if _is_cmd_j(key_event):
+            self._dialog.hide()
+            key_event.accept()
+            return True
+        main_window = self._dialog.main_window
+        if main_window is not None and hasattr(main_window, "keyPressEvent"):
+            main_window.keyPressEvent(key_event)
+            return True
+        return False
 
 
 def _job_queue_floating_shell_stylesheet() -> str:
@@ -92,6 +140,10 @@ class ImageGenJobQueueDialog(QDialog):
         self.setWindowTitle("Job Control")
         self.setModal(False)
         apply_macos_frameless_floating_dialog(self, always_on_top=self._always_on_top)
+        self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, True)
+        self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self._key_passthrough_filter: _JobQueueKeyPassthroughFilter | None = None
+        self._key_passthrough_filter_installed = False
         self.setMouseTracking(True)
         self._sync_dialog_width_limits()
 
@@ -150,9 +202,33 @@ class ImageGenJobQueueDialog(QDialog):
 
         empty_label.mousePressEvent = _on_empty_label_press
 
-        dismiss_shortcut = QShortcut(QKeySequence("Ctrl+J"), self)
-        dismiss_shortcut.setContext(Qt.ShortcutContext.WindowShortcut)
-        dismiss_shortcut.activated.connect(self.hide)
+    def _install_key_passthrough_filter(self) -> None:
+        if self._key_passthrough_filter_installed:
+            return
+        app = QApplication.instance()
+        if app is None:
+            return
+        filt = self._key_passthrough_filter
+        if filt is None:
+            filt = _JobQueueKeyPassthroughFilter(self)
+            self._key_passthrough_filter = filt
+        app.installEventFilter(filt)
+        self._key_passthrough_filter_installed = True
+
+    def _remove_key_passthrough_filter(self) -> None:
+        if not self._key_passthrough_filter_installed:
+            return
+        filt = self._key_passthrough_filter
+        app = QApplication.instance()
+        if filt is None or app is None:
+            return
+        app.removeEventFilter(filt)
+        self._key_passthrough_filter_installed = False
+
+    def _restore_main_window_keyboard_focus(self) -> None:
+        host = self.main_window
+        if host is not None:
+            host.activateWindow()
 
     def is_job_queue_always_on_top(self) -> bool:
         return self._always_on_top
@@ -167,7 +243,7 @@ class ImageGenJobQueueDialog(QDialog):
         apply_macos_frameless_floating_dialog(self, always_on_top=enabled)
         if was_visible:
             self.show()
-            raise_dialog_without_space_hop(self)
+            raise_passive_floating_dialog(self)
 
     def _is_empty_queue_state(self) -> bool:
         return not self._panel.is_queue_list_visible() and not self._panel.has_job_rows()
@@ -242,14 +318,21 @@ class ImageGenJobQueueDialog(QDialog):
             panel_h = self._panel.content_height_for_size_mode(mode)
         return max(self.minimumHeight(), chrome + panel_h)
 
-    def _resize_anchored_bottom(self, target_height: int) -> None:
+    def _resize_anchored_bottom(
+        self, target_height: int, *, anchor_bottom_y: int | None = None
+    ) -> None:
         """Resize while keeping the window bottom edge fixed (clamp to screen)."""
         from utils import _resolve_screen_for_styled_dialog
 
         geo = self.geometry()
         width = geo.width()
         # Use exclusive bottom (y + height); QRect.bottom() is inclusive and drifts -1 each resize.
-        bottom_y = geo.y() + geo.height()
+        # Capture anchor before layout/minimumHeight changes — Qt may grow the window downward first.
+        bottom_y = (
+            int(anchor_bottom_y)
+            if anchor_bottom_y is not None
+            else geo.y() + geo.height()
+        )
         target_height = max(self.minimumHeight(), target_height)
         new_y = bottom_y - target_height
 
@@ -290,6 +373,7 @@ class ImageGenJobQueueDialog(QDialog):
             pass
 
     def _apply_dialog_size_mode(self, mode: str) -> None:
+        anchor_bottom_y = self.geometry().y() + self.geometry().height()
         if mode == QUEUE_SIZE_ALL:
             self._panel.prepare_expand_layout()
         self._panel.set_queue_size_mode(mode)
@@ -305,7 +389,7 @@ class ImageGenJobQueueDialog(QDialog):
                 break
             prev_height = target_height
 
-        self._resize_anchored_bottom(target_height)
+        self._resize_anchored_bottom(target_height, anchor_bottom_y=anchor_bottom_y)
         self._persist_size_mode()
 
     def _heights_match(self, a: int, b: int) -> bool:
@@ -376,8 +460,12 @@ class ImageGenJobQueueDialog(QDialog):
     def _sync_dialog_height_to_panel_impl(self) -> None:
         if not self.isVisible():
             return
+        anchor_bottom_y = self.geometry().y() + self.geometry().height()
         mode = self._panel.queue_size_mode()
         shrink = self._panel.should_shrink_wrap_client()
+        fixed_height = mode != QUEUE_SIZE_ALL or shrink
+        if fixed_height:
+            self._panel.prepare_size_measure()
         self._sync_shell_layout_for_mode(mode)
         if mode == QUEUE_SIZE_ALL and not shrink:
             chrome = self._layout_chrome_height()
@@ -394,9 +482,7 @@ class ImageGenJobQueueDialog(QDialog):
                 return
         else:
             target = self._dialog_height_for_panel_mode(mode)
-            if abs(target - self.height()) <= 1:
-                return
-        self._resize_anchored_bottom(target)
+        self._resize_anchored_bottom(target, anchor_bottom_y=anchor_bottom_y)
 
     def _schedule_refresh_table(self) -> None:
         self._panel.schedule_refresh()
@@ -437,6 +523,7 @@ class ImageGenJobQueueDialog(QDialog):
         self.hide()
 
     def hideEvent(self, event) -> None:
+        self._remove_key_passthrough_filter()
         self._persist_size_mode()
         self._save_geometry()
         super().hideEvent(event)
@@ -451,11 +538,24 @@ class ImageGenJobQueueDialog(QDialog):
 
     def showEvent(self, event) -> None:
         super().showEvent(event)
+        self._install_key_passthrough_filter()
+        self._restore_main_window_keyboard_focus()
         self._pending_initial_center = not self._geometry_was_restored
         self._restore_size_mode_pending = True
         self._sync_dialog_width_limits()
         self._schedule_refresh_table()
         self._panel.refresh_header_status()
+
+    def keyPressEvent(self, event: QKeyEvent) -> None:
+        if _is_cmd_j(event):
+            self.hide()
+            event.accept()
+            return
+        main_window = self.main_window
+        if main_window is not None and hasattr(main_window, "keyPressEvent"):
+            main_window.keyPressEvent(event)
+            return
+        super().keyPressEvent(event)
 
 
 def open_imagegen_job_queue_dialog(main_window) -> None:
@@ -464,9 +564,7 @@ def open_imagegen_job_queue_dialog(main_window) -> None:
     if dlg is None:
         dlg = ImageGenJobQueueDialog(main_window)
         main_window._imagegen_job_queue_dialog = dlg
-    from utils import present_auxiliary_dialog
-
-    present_auxiliary_dialog(dlg)
+    present_passive_floating_dialog(dlg)
 
 
 def show_imagegen_job_queue_dialog(main_window) -> None:

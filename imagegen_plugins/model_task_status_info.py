@@ -442,6 +442,20 @@ def _series_progress_row(
     return ("Copies:", f"0/{series_total}", "", "0")
 
 
+def _queue_jobs_progress_row(
+    completed_jobs: int, total_jobs: int
+) -> tuple[str, str, str, str] | None:
+    """One Jobs progress-bar row for queued work behind the active job."""
+    if total_jobs <= 1:
+        return None
+    total = int(total_jobs)
+    completed = max(0, min(int(completed_jobs), total))
+    current = min(completed + 1, total)
+    remaining = total - current
+    fill_percent = int(round(100.0 * completed / total))
+    return ("Jobs:", f"{current}/{total}", str(remaining), str(fill_percent))
+
+
 def format_information_generation_timing_cell_html(
     elapsed_seconds: float,
     estimate_seconds: float | None = None,
@@ -449,6 +463,8 @@ def format_information_generation_timing_cell_html(
     cancel_icon_html: str = "",
     completed_series: int | None = None,
     total_series: int | None = None,
+    completed_queue_jobs: int | None = None,
+    total_queue_jobs: int | None = None,
     completed_steps: int | None = None,
     total_steps: int | None = None,
     content_width_px: int = 0,
@@ -519,6 +535,11 @@ def format_information_generation_timing_cell_html(
         if series_row is not None:
             progress_rows.append(series_row)
 
+    if completed_queue_jobs is not None and total_queue_jobs is not None:
+        jobs_row = _queue_jobs_progress_row(completed_queue_jobs, total_queue_jobs)
+        if jobs_row is not None:
+            progress_rows.append(jobs_row)
+
     pending_start = (
         completed_steps is not None
         and total_steps is not None
@@ -582,6 +603,8 @@ def format_information_generation_cooldown_cell_html(
     skip_hovered: bool = False,
     completed_series: int | None = None,
     total_series: int | None = None,
+    completed_queue_jobs: int | None = None,
+    total_queue_jobs: int | None = None,
     content_width_px: int = 0,
 ) -> str:
     """Cooldown row for the jobs-pane strip; optional series progress below."""
@@ -596,11 +619,16 @@ def format_information_generation_cooldown_cell_html(
     )
     body = _information_panel_inline_row_html(text, icons)
 
-    if completed_series is None or total_series is None:
-        return body
-
-    series_row = _series_progress_row(completed_series, total_series)
-    if series_row is None:
+    progress_rows: list[tuple[str, str, str, str]] = []
+    if completed_series is not None and total_series is not None:
+        series_row = _series_progress_row(completed_series, total_series)
+        if series_row is not None:
+            progress_rows.append(series_row)
+    if completed_queue_jobs is not None and total_queue_jobs is not None:
+        jobs_row = _queue_jobs_progress_row(completed_queue_jobs, total_queue_jobs)
+        if jobs_row is not None:
+            progress_rows.append(jobs_row)
+    if not progress_rows:
         return body
 
     th = get_active_theme()
@@ -608,15 +636,15 @@ def format_information_generation_cooldown_cell_html(
         content_width_px or 250, has_icon=False
     )
     bar_w = _information_panel_bar_width(row_width)
-    series_html = _information_panel_progress_rows_html(
-        [series_row],
+    progress_html = _information_panel_progress_rows_html(
+        progress_rows,
         row_width,
         bar_w,
         fill_hex=_INFO_PANEL_PROGRESS_BAR_FILL_HEX,
         border_hex=th.progress_bar_border_hex,
         bg_hex=th.progress_bar_bg_hex,
     )
-    return f"{body}<br>{series_html}"
+    return f"{body}<br>{progress_html}"
 
 
 def generation_cancel_icon_html(*, hovered: bool = False) -> str:
@@ -634,7 +662,9 @@ def generation_cancel_icon_html(*, hovered: bool = False) -> str:
     )
 
 
-def active_job_timing_progress_row_count(controller) -> int:
+def active_job_timing_progress_row_count(
+    controller, *, include_queue_jobs_row: bool = False
+) -> int:
     """Stacked progress-bar rows in the active-job strip (excludes cooldown text row).
 
     Keep in sync with progress_rows built in format_information_generation_timing_cell_html.
@@ -644,8 +674,13 @@ def active_job_timing_progress_row_count(controller) -> int:
     series_rows = 0
     if series_progress is not None and series_progress[1] > 1:
         series_rows = 1
+    queue_jobs_rows = 0
+    if include_queue_jobs_row:
+        queue_progress = controller.snapshot_queue_jobs_progress_for_active_job_strip()
+        if queue_progress is not None and queue_progress[1] > 1:
+            queue_jobs_rows = 1
     if remaining > 0:
-        return series_rows
+        return series_rows + queue_jobs_rows
 
     elapsed, estimate, step, step_total = (
         controller.snapshot_generation_timing_for_info_panel()
@@ -655,7 +690,7 @@ def active_job_timing_progress_row_count(controller) -> int:
     count = 1
     if step_total is not None and int(step_total) > 0:
         count += 1
-    count += series_rows
+    count += series_rows + queue_jobs_rows
     return count
 
 
@@ -665,6 +700,7 @@ def build_active_job_timing_cell_html(
     content_width_px: int,
     cancel_hovered: bool = False,
     skip_hovered: bool = False,
+    include_queue_jobs_row: bool = False,
 ) -> str | None:
     """Elapsed/Est progress or cooldown row for the jobs-pane active-job strip.
 
@@ -676,6 +712,13 @@ def build_active_job_timing_cell_html(
     if series_progress is not None:
         completed_series, total_series = series_progress
 
+    completed_queue_jobs = None
+    total_queue_jobs = None
+    if include_queue_jobs_row:
+        queue_progress = controller.snapshot_queue_jobs_progress_for_active_job_strip()
+        if queue_progress is not None:
+            completed_queue_jobs, total_queue_jobs = queue_progress
+
     remaining = controller.copy_cooldown_seconds_remaining()
     if remaining > 0:
         return format_information_generation_cooldown_cell_html(
@@ -684,6 +727,8 @@ def build_active_job_timing_cell_html(
             skip_hovered=skip_hovered,
             completed_series=completed_series,
             total_series=total_series,
+            completed_queue_jobs=completed_queue_jobs,
+            total_queue_jobs=total_queue_jobs,
             content_width_px=content_width_px,
         )
     elapsed, estimate, step, step_total = (
@@ -697,6 +742,8 @@ def build_active_job_timing_cell_html(
         cancel_icon_html=generation_cancel_icon_html(hovered=cancel_hovered),
         completed_series=completed_series,
         total_series=total_series,
+        completed_queue_jobs=completed_queue_jobs,
+        total_queue_jobs=total_queue_jobs,
         completed_steps=step,
         total_steps=step_total,
         content_width_px=content_width_px,

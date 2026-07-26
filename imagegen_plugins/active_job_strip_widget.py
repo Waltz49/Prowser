@@ -61,6 +61,8 @@ def _apply_active_job_strip_html(
     browser: QTextBrowser, body_html: str, *, content_width: int
 ) -> int:
     """Size the active-job strip browser to the bordered table (no trailing fill box)."""
+    browser.setMinimumHeight(0)
+    browser.setMaximumHeight(16777215)
     browser.setFixedWidth(content_width)
     browser.setHtml(_wrap_task_info_html(body_html))
     browser.document().setDocumentMargin(0)
@@ -104,6 +106,7 @@ class ActiveJobStripWidget(QWidget):
         self._cached_content_height = 0
         self._progress_row_count = 0
         self._deferred_remeasure_pending = False
+        self._deferred_remeasure_baseline_h = 0
         self._on_content_height_changed: Callable[[], None] | None = None
         self._resize_refresh_timer = QTimer(self)
         self._resize_refresh_timer.setSingleShot(True)
@@ -117,24 +120,38 @@ class ActiveJobStripWidget(QWidget):
     ) -> None:
         self._on_content_height_changed = callback
 
+    def _include_queue_jobs_row(self) -> bool:
+        parent = self.parent()
+        if parent is not None and hasattr(parent, "is_queue_compact"):
+            return bool(parent.is_queue_compact())
+        return False
+
     def _emit_content_height_changed(self) -> None:
         cb = self._on_content_height_changed
         if cb is not None:
             cb()
 
-    def _schedule_deferred_remeasure(self) -> None:
+    def _schedule_deferred_remeasure(self, *, before_height: int) -> None:
         if self._deferred_remeasure_pending:
+            if before_height > 0:
+                self._deferred_remeasure_baseline_h = min(
+                    self._deferred_remeasure_baseline_h or before_height,
+                    before_height,
+                )
             return
+        self._deferred_remeasure_baseline_h = before_height
         self._deferred_remeasure_pending = True
         QTimer.singleShot(0, self._deferred_remeasure)
 
     def _deferred_remeasure(self) -> None:
         self._deferred_remeasure_pending = False
         if not self.isVisible() or not self._controller.is_running():
+            self._deferred_remeasure_baseline_h = 0
             return
-        prev_h = self.height()
+        baseline_h = self._deferred_remeasure_baseline_h
+        self._deferred_remeasure_baseline_h = 0
         self.refresh(force=True)
-        if self.height() != prev_h:
+        if self.height() != baseline_h:
             self._emit_content_height_changed()
 
     def _setup_ui(self) -> None:
@@ -251,8 +268,13 @@ class ActiveJobStripWidget(QWidget):
         if not force and not self._controller.task_status_display_needs_refresh():
             return
         prev_h = self.height()
-        row_count = active_job_timing_progress_row_count(self._controller)
+        include_queue_jobs_row = self._include_queue_jobs_row()
+        row_count = active_job_timing_progress_row_count(
+            self._controller, include_queue_jobs_row=include_queue_jobs_row
+        )
         rows_changed = row_count != self._progress_row_count
+        if rows_changed:
+            self._cached_content_height = 0
         self._progress_row_count = row_count
         frame_w, browser_w = self._layout_widths()
         hovered = self._active_job_hovered_anchor
@@ -261,6 +283,7 @@ class ActiveJobStripWidget(QWidget):
             content_width_px=browser_w,
             cancel_hovered=hovered == "cancelgen://",
             skip_hovered=hovered == "skipcooldown://",
+            include_queue_jobs_row=include_queue_jobs_row,
         )
         if not cell_html:
             self._cached_content_height = 0
@@ -275,18 +298,21 @@ class ActiveJobStripWidget(QWidget):
             content_width=browser_w,
         )
         self._frame.setFixedWidth(frame_w)
+        self._frame.setMinimumHeight(0)
         self._frame.setFixedHeight(browser_h + _ACTIVE_JOB_STRIP_FRAME_CHROME_V)
         layout = self.layout()
         margin_h = 0
         if layout is not None:
             margins = layout.contentsMargins()
             margin_h = margins.top() + margins.bottom()
+        self.setMinimumHeight(0)
         self.setFixedHeight(self._frame.height() + margin_h)
         self._cached_content_height = self.height()
         self.show()
         _disable_tab_focus(self)
         if rows_changed:
-            self._schedule_deferred_remeasure()
+            self._schedule_deferred_remeasure(before_height=prev_h)
+            self._emit_content_height_changed()
         elif self.height() != prev_h:
             self._emit_content_height_changed()
 

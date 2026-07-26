@@ -107,6 +107,8 @@ class ImageGenPromptGrammar:
         self._dot_timer.timeout.connect(self._on_dot_tick)
 
     def create_button(self) -> Optional[QPushButton]:
+        if getattr(self._dialog, "_defer_flux_prompt_extras", False):
+            return None
         if not is_lmstudio_services_available():
             return None
         if self._btn is None:

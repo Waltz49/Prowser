@@ -821,9 +821,20 @@ class JobQueuePanelWidget(QWidget):
             return
         if not self._controller.task_status_display_needs_refresh():
             return
+        prev_strip_h = 0
+        if hasattr(self, "_active_job_strip") and self._active_job_strip.isVisible():
+            prev_strip_h = self._active_job_strip.height()
         self._refresh_active_row(force=True)
         self._active_job_strip.refresh(force=True)
         self._controller.mark_task_status_display_refreshed()
+        if self._queue_size_mode in (QUEUE_SIZE_STRIP, QUEUE_SIZE_ONE):
+            new_strip_h = (
+                self._active_job_strip.height()
+                if self._active_job_strip.isVisible()
+                else 0
+            )
+            if abs(new_strip_h - prev_strip_h) > 1:
+                self._on_active_strip_content_height_changed()
 
     def pause_live_refresh(self) -> None:
         """Pause periodic refresh while image-gen dialog builds on the GUI thread."""
@@ -1037,7 +1048,11 @@ class JobQueuePanelWidget(QWidget):
         self.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
         )
+        if content_h < self.height():
+            self.setMinimumHeight(0)
+            self.setMaximumHeight(16777215)
         self.setFixedHeight(content_h)
+        self.setMaximumHeight(content_h)
         self.updateGeometry()
 
     def _apply_panel_layout_stretch(self) -> None:

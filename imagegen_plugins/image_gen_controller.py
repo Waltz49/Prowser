@@ -182,6 +182,7 @@ class ImageGenController(QObject):
         self._queue_persist_timer = QTimer(self)
         self._queue_persist_timer.setSingleShot(True)
         self._queue_persist_timer.timeout.connect(self._persist_job_queue_now)
+        self._queue_drain_total = 0
         self._gpu_cleanup_active = False
         self._restore_persisted_job_queue()
 
@@ -1701,6 +1702,23 @@ class ImageGenController(QObject):
         if not self._tasks.is_running() and not self._is_in_copy_cooldown():
             return None
         return self._copies_done, self._copies_total
+
+    def snapshot_queue_jobs_progress_for_active_job_strip(
+        self,
+    ) -> tuple[int, int] | None:
+        """Completed and total jobs in the current queue drain (active + waiting)."""
+        waiting = len(self._queue)
+        if not self._active_queue_job_id or waiting == 0:
+            if not self._active_queue_job_id and not self._queue:
+                self._queue_drain_total = 0
+            return None
+        snapshot_total = 1 + waiting
+        if self._queue_drain_total < snapshot_total:
+            self._queue_drain_total = snapshot_total
+        total = self._queue_drain_total
+        current = total - waiting
+        completed = max(0, current - 1)
+        return completed, total
 
     def get_task_reference_paths(self) -> list[str]:
         return list(self._task_reference_paths)

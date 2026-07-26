@@ -764,10 +764,26 @@ def raise_dialog_without_space_hop(dialog: QDialog) -> None:
         dialog.activateWindow()
 
 
+def raise_passive_floating_dialog(dialog: QDialog) -> None:
+    """Raise a floating dialog without stealing keyboard focus from the host."""
+    dialog.raise_()
+    host = dialog_main_window(dialog)
+    if host_is_macos_space_mode(host):
+        fix_macos_dialog_same_space(dialog)
+    if host is not None:
+        host.activateWindow()
+
+
 def present_auxiliary_dialog(dialog: QDialog) -> None:
     """Show a non-modal auxiliary dialog."""
     dialog.show()
     raise_dialog_without_space_hop(dialog)
+
+
+def present_passive_floating_dialog(dialog: QDialog) -> None:
+    """Show a non-modal floating dialog that leaves keyboard focus on the host."""
+    dialog.show()
+    raise_passive_floating_dialog(dialog)
 
 
 FRAMELESS_RESIZE_EDGE_MARGIN = 6

@@ -9,7 +9,6 @@ from typing import Any, Callable, Optional
 from PySide6.QtCore import QTimer, Qt
 from PySide6.QtWidgets import (
     QCheckBox,
-    QFrame,
     QPlainTextEdit,
     QPushButton,
     QSizePolicy,
@@ -18,6 +17,7 @@ from PySide6.QtWidgets import (
 )
 
 from imagegen_plugins.image_gen_form_layout import (
+    IMAGE_GEN_BELOW_PROMPT_SPACING,
     IMAGE_GEN_CHECKBOX_ROW_SPACING,
     image_gen_prompt_edit_set_plain_text,
     image_gen_prompt_stream_session_begin,
@@ -254,6 +254,8 @@ class ImageGenFluxPromptAi:
         image_noun: str = "source image",
     ) -> bool:
         """Create Gen Prompt / checkbox widgets once when LM Studio is available."""
+        if getattr(owner, "_defer_flux_prompt_extras", False):
+            return False
         if not is_lmstudio_services_available():
             return False
         self._reset_stale_ai_widgets()
@@ -308,24 +310,8 @@ class ImageGenFluxPromptAi:
         return True
 
     def import_row_buttons(self, owner: Any) -> list[QPushButton]:
-        """Gen Prompt / Undo AI buttons for the row under the image prompt field."""
-        from imagegen_plugins.flux_prompt_system_mount import _flux_pass_image_noun
-
-        if not self._ensure_ai_widgets(
-            owner, image_noun=_flux_pass_image_noun(owner)
-        ):
-            return []
-        if not self.ai_controls_active(owner):
-            self._hide_import_row_buttons()
-            return []
-        buttons: list[QPushButton] = []
-        if _flux_prompt_widget_alive(self._ai_btn):
-            self._ai_btn.show()
-            buttons.append(self._ai_btn)
-        if _flux_prompt_widget_alive(self._undo_btn):
-            self._update_action_buttons()
-            buttons.append(self._undo_btn)
-        return buttons
+        """Gen Prompt / Undo live in the AI Prompt Enhancement section, not the import row."""
+        return []
 
     def create_toolbar(
         self,
@@ -336,6 +322,10 @@ class ImageGenFluxPromptAi:
         if not self._ensure_ai_widgets(owner, image_noun=image_noun):
             return None
 
+        from imagegen_plugins.image_gen_form_layout import (
+            create_image_gen_prompt_button_bar_row,
+        )
+
         col = QWidget(self._dialog)
         col.setObjectName("imageGenFluxPromptAiCheckboxCol")
         col.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
@@ -344,14 +334,36 @@ class ImageGenFluxPromptAi:
         layout.setSpacing(IMAGE_GEN_CHECKBOX_ROW_SPACING)
         layout.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
         layout.addWidget(self._pass_image_cb, 0)
-        sep = QFrame(col)
-        sep.setFrameShape(QFrame.Shape.HLine)
-        # sep.setFrameShadow(QFrame.Shadow.Sunken)
-        layout.addWidget(sep)
-        layout.addWidget(self._job_cb, 0)
+
+        row, row_layout = create_image_gen_prompt_button_bar_row(horizontal_pad=False)
+        if _flux_prompt_widget_alive(self._ai_btn):
+            configure_flux_prompt_toolbar_button(self._ai_btn)
+            self._ai_btn.setParent(row)
+            self._ai_btn.show()
+            row_layout.addWidget(self._ai_btn, 0)
+        if _flux_prompt_widget_alive(self._undo_btn):
+            configure_flux_prompt_toolbar_button(self._undo_btn)
+            self._update_action_buttons()
+            row_layout.addWidget(self._undo_btn, 0)
+        row_layout.addStretch(1)
+        layout.addSpacing(IMAGE_GEN_BELOW_PROMPT_SPACING)
+        layout.addWidget(row, 0)
 
         self._toolbar = col
         return col
+
+    def create_job_checkbox_row(
+        self,
+        owner: Any,
+        *,
+        image_noun: str = "source image",
+    ) -> Optional[QWidget]:
+        """Job checkbox below the collapsible system-prompt section (same indent)."""
+        from imagegen_plugins.image_gen_form_layout import wrap_image_gen_prompt_subsection
+
+        if not self._ensure_ai_widgets(owner, image_noun=image_noun):
+            return None
+        return wrap_image_gen_prompt_subsection(self._job_cb, self._dialog)
 
     def ai_controls_mounted(self) -> bool:
         """True when the flux prompt AI toolbar was created."""

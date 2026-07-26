@@ -175,6 +175,7 @@ class LmStudioInstructionsPane:
         parent: QWidget,
         *,
         label_text: str = "System Prompt",
+        section_label_text: str = "AI Prompt Enhancement",
         placeholder: str = "Provide system instructions for the AI…",
         toggle_tooltip: str = "Show/hide system prompt for Prompt AI",
         line_count: int = LMSTUDIO_INSTRUCTIONS_LINE_COUNT,
@@ -195,6 +196,7 @@ class LmStudioInstructionsPane:
         self._hover_filter: Optional[_InstructionsButtonHoverFilter] = None
         self._splitter: Optional[QSplitter] = None
         self._label_text = label_text
+        self._section_label_text = section_label_text
         self._placeholder = placeholder
         self._line_count = max(1, int(line_count))
         self._toggle_tooltip = toggle_tooltip
@@ -204,6 +206,7 @@ class LmStudioInstructionsPane:
         self._instructions_edit: Optional[QPlainTextEdit] = None
         self._widget: Optional[QWidget] = None
         self._toolbar_host: Optional[QWidget] = None
+        self._below_section_host: Optional[QWidget] = None
         self._editor_block: Optional[QWidget] = None
         self._action_col: Optional[QWidget] = None
         self._action_layout: Optional[QVBoxLayout] = None
@@ -212,6 +215,9 @@ class LmStudioInstructionsPane:
         self._mic_btn: Optional[QPushButton] = None
         self._collapse_arrow: Optional[_ClickableCollapseLabel] = None
         self._collapse_title: Optional[_ClickableCollapseLabel] = None
+        self._outer_collapse_arrow: Optional[_ClickableCollapseLabel] = None
+        self._outer_collapse_title: Optional[_ClickableCollapseLabel] = None
+        self._section_body: Optional[QWidget] = None
         self._body_widget: Optional[QWidget] = None
         self._build_instructions_widget()
 
@@ -360,6 +366,7 @@ class LmStudioInstructionsPane:
             section_layout.setSpacing(IMAGE_GEN_FIELD_LABEL_SPACING)
             section_layout.addWidget(self._toolbar_host, 0)
             section_layout.addSpacing(IMAGE_GEN_BELOW_PROMPT_SPACING)
+            section_layout.addSpacing(IMAGE_GEN_BELOW_PROMPT_SPACING)
             section_layout.addWidget(label_row, 0)
             body_widget = wrap_image_gen_field_control_indent(field_row, section)
             self._body_widget = body_widget
@@ -367,7 +374,63 @@ class LmStudioInstructionsPane:
             section.setSizePolicy(
                 QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum
             )
-            col.addWidget(wrap_image_gen_prompt_subsection(section, group_parent), 0)
+            self._below_section_host = QWidget(group_parent)
+            self._below_section_host.setSizePolicy(
+                QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum
+            )
+            below_section_col = QVBoxLayout(self._below_section_host)
+            below_section_col.setContentsMargins(0, 0, 0, 0)
+            below_section_col.setSpacing(IMAGE_GEN_BELOW_PROMPT_SPACING)
+            section_body = QWidget(group_parent)
+            section_body_layout = QVBoxLayout(section_body)
+            section_body_layout.setContentsMargins(0, 0, 0, 0)
+            section_body_layout.setSpacing(IMAGE_GEN_BELOW_PROMPT_SPACING)
+            section_body_layout.addWidget(
+                wrap_image_gen_prompt_subsection(section, section_body), 0
+            )
+            section_body_layout.addWidget(self._below_section_host, 0)
+            self._section_body = section_body
+            outer_header_row = QWidget(group_parent)
+            outer_header_row.setObjectName("imageGenAiEnhancementLabelRow")
+            outer_header_row.setSizePolicy(
+                QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
+            )
+            outer_header_layout = QHBoxLayout(outer_header_row)
+            outer_header_layout.setContentsMargins(0, 8, 0, 0)
+            outer_header_layout.setSpacing(4)
+            outer_collapse_arrow = _ClickableCollapseLabel(outer_header_row)
+            outer_arrow_font = outer_collapse_arrow.font()
+            outer_arrow_font.setPixelSize(_COLLAPSE_ARROW_FONT_PX)
+            outer_collapse_arrow.setFont(outer_arrow_font)
+            outer_collapse_arrow.setSizePolicy(
+                QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed
+            )
+            outer_collapse_title = _ClickableCollapseLabel(outer_header_row)
+            outer_collapse_title.setObjectName(IMAGE_GEN_FIELD_LABEL_OBJECT_NAME)
+            outer_collapse_title.setText(self._section_label_text)
+            outer_collapse_title.setSizePolicy(
+                QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed
+            )
+            section_tooltip = "Click to expand or collapse AI prompt enhancement"
+            outer_collapse_arrow.setToolTip(section_tooltip)
+            outer_collapse_title.setToolTip(section_tooltip)
+            outer_collapse_arrow.clicked.connect(self._toggle_section_expanded)
+            outer_collapse_title.clicked.connect(self._toggle_section_expanded)
+            self._outer_collapse_arrow = outer_collapse_arrow
+            self._outer_collapse_title = outer_collapse_title
+            outer_header_layout.addWidget(
+                outer_collapse_arrow,
+                0,
+                Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+            )
+            outer_header_layout.addWidget(
+                outer_collapse_title,
+                0,
+                Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+            )
+            outer_header_layout.addStretch(1)
+            col.addWidget(outer_header_row, 0)
+            col.addWidget(section_body, 0)
             widget = group_parent
             self._instructions_edit = edit
         else:
@@ -445,9 +508,26 @@ class LmStudioInstructionsPane:
                 child.deleteLater()
         layout.addWidget(toolbar, 0)
 
+    def set_below_section_widget(self, widget: QWidget) -> None:
+        host = self._below_section_host
+        if host is None:
+            return
+        layout = host.layout()
+        if layout is None:
+            return
+        while layout.count():
+            item = layout.takeAt(0)
+            child = item.widget()
+            if child is not None:
+                child.setParent(None)
+                child.deleteLater()
+        layout.addWidget(widget, 0)
+
     def _ai_services_available(self) -> bool:
         if not self._image_gen_styled:
             return True
+        if getattr(self._parent, "_defer_flux_prompt_extras", False):
+            return False
         from imagegen_plugins.lmstudio_caption import is_lmstudio_services_available
 
         return is_lmstudio_services_available()
@@ -475,6 +555,9 @@ class LmStudioInstructionsPane:
     def _toggle_editor_expanded(self) -> None:
         self.set_editor_expanded(not self._editor_expanded)
 
+    def _toggle_section_expanded(self) -> None:
+        self.set_visible(not self._visible)
+
     def is_editor_expanded(self) -> bool:
         return self._editor_expanded
 
@@ -487,15 +570,44 @@ class LmStudioInstructionsPane:
             self._on_editor_expanded_changed()
 
     def _apply_content_visibility(self) -> None:
-        vis = self._visible
+        if not self._image_gen_styled:
+            vis = self._visible
+            if self._widget is not None:
+                self._widget.setVisible(vis)
+            if not vis:
+                if self._clear_btn is not None:
+                    self._clear_btn.setVisible(False)
+                return
+            if self._toolbar_host is not None:
+                self._toolbar_host.setVisible(self._ai_services_available())
+            if self._below_section_host is not None:
+                self._below_section_host.setVisible(self._ai_services_available())
+            self._apply_editor_expanded_state()
+            return
+
+        ai_available = self._ai_services_available()
         if self._widget is not None:
-            self._widget.setVisible(vis)
-        if not vis:
+            self._widget.setVisible(ai_available)
+        if not ai_available:
+            if self._clear_btn is not None:
+                self._clear_btn.setVisible(False)
+            return
+
+        section_expanded = self._visible
+        if self._outer_collapse_arrow is not None:
+            self._outer_collapse_arrow.setText(
+                _EXPANDED_ARROW if section_expanded else _COLLAPSED_ARROW
+            )
+        if self._section_body is not None:
+            self._section_body.setVisible(section_expanded)
+        if not section_expanded:
             if self._clear_btn is not None:
                 self._clear_btn.setVisible(False)
             return
         if self._toolbar_host is not None:
-            self._toolbar_host.setVisible(self._ai_services_available())
+            self._toolbar_host.setVisible(True)
+        if self._below_section_host is not None:
+            self._below_section_host.setVisible(True)
         self._apply_editor_expanded_state()
 
     def sync_image_gen_content_visibility(self) -> None:
@@ -505,13 +617,7 @@ class LmStudioInstructionsPane:
         self._apply_content_visibility()
 
     def _sync_toggle_location(self) -> None:
-        if not self._image_gen_styled or self._toggle_btn is None:
-            return
-        from imagegen_plugins.flux_prompt_system_mount import (
-            sync_flux_prompt_system_toggle_location,
-        )
-
-        sync_flux_prompt_system_toggle_location(self._parent)
+        return
 
     def sync_toggle_highlight(self) -> None:
         if self._toggle_btn is None:
@@ -558,7 +664,8 @@ class LmStudioInstructionsPane:
                 self._splitter.setSizes([0, total])
         if self._on_visibility_changed is not None:
             self._on_visibility_changed()
-        self._sync_toggle_location()
+        if not self._image_gen_styled:
+            self._sync_toggle_location()
         self.sync_toggle_highlight()
 
     def effective_override_text(self) -> Optional[str]:
