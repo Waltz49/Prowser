@@ -217,6 +217,7 @@ class LmStudioInstructionsPane:
         self._collapse_title: Optional[_ClickableCollapseLabel] = None
         self._outer_collapse_arrow: Optional[_ClickableCollapseLabel] = None
         self._outer_collapse_title: Optional[_ClickableCollapseLabel] = None
+        self._outer_inactive_label: Optional[QLabel] = None
         self._section_body: Optional[QWidget] = None
         self._body_widget: Optional[QWidget] = None
         self._build_instructions_widget()
@@ -416,8 +417,15 @@ class LmStudioInstructionsPane:
             outer_collapse_title.setToolTip(section_tooltip)
             outer_collapse_arrow.clicked.connect(self._toggle_section_expanded)
             outer_collapse_title.clicked.connect(self._toggle_section_expanded)
+            outer_inactive_label = QLabel("(Inactive)", outer_header_row)
+            outer_inactive_label.setSizePolicy(
+                QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed
+            )
+            outer_inactive_label.setStyleSheet(f"color: {TEXT_DISABLED_HEX};")
+            outer_inactive_label.setVisible(False)
             self._outer_collapse_arrow = outer_collapse_arrow
             self._outer_collapse_title = outer_collapse_title
+            self._outer_inactive_label = outer_inactive_label
             outer_header_layout.addWidget(
                 outer_collapse_arrow,
                 0,
@@ -427,6 +435,11 @@ class LmStudioInstructionsPane:
                 outer_collapse_title,
                 0,
                 Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+            )
+            outer_header_layout.addWidget(
+                outer_inactive_label,
+                0,
+                Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignBottom,
             )
             outer_header_layout.addStretch(1)
             col.addWidget(outer_header_row, 0)
@@ -598,6 +611,8 @@ class LmStudioInstructionsPane:
             self._outer_collapse_arrow.setText(
                 _EXPANDED_ARROW if section_expanded else _COLLAPSED_ARROW
             )
+        if self._outer_inactive_label is not None:
+            self._outer_inactive_label.setVisible(not section_expanded)
         if self._section_body is not None:
             self._section_body.setVisible(section_expanded)
         if not section_expanded:

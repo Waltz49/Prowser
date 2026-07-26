@@ -1448,6 +1448,13 @@ def create_image_preview_row(image_paths, labels=None, size=96):
 def show_styled_warning(parent, title, text):
     """Show a styled warning message box"""
     from PySide6.QtWidgets import QMessageBox
+    from thumbnails.thumbnail_constants import is_vision_required_error
+
+    if is_vision_required_error(text):
+        from browser_window.managers.lmstudio_launcher import show_ai_caption_error_dialog
+
+        show_ai_caption_error_dialog(parent, text, window_title=title)
+        return
     msg_box = styled_message_box(parent, QMessageBox.Warning, title, text)
     msg_box.exec()
 
@@ -1461,6 +1468,13 @@ def show_styled_information(parent, title, text):
 
 def show_styled_critical(parent, title, text):
     """Show a styled critical message box"""
+    from thumbnails.thumbnail_constants import is_vision_required_error
+
+    if is_vision_required_error(text):
+        from browser_window.managers.lmstudio_launcher import show_ai_caption_error_dialog
+
+        show_ai_caption_error_dialog(parent, text, window_title=title)
+        return
     msg_box = styled_message_box(parent, QMessageBox.Critical, title, text)
     msg_box.exec()
 

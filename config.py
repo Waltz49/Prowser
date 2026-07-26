@@ -376,6 +376,7 @@ class ImageBrowserConfig:
             'imagegen_max_generation_dimension': 1024,
             'imagegen_series_cooldown_seconds': 60,
             'imagegen_add_chat_prefix_postfix': True,
+            'imagegen_fast_open_action': 'from_text',
             'browse_view_actual_size': False,
             # ms on same browse image before recording to Image History (0 = immediate; max 5000; 500 ms steps in UI)
             'browse_image_history_save_after_ms': 3000,

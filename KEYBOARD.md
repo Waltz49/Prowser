@@ -316,6 +316,7 @@ Start with **Shift+Cmd+S** (Tools → Slideshows → Floating Frames).
 | Key | Action |
 |-----|--------|
 | Option+/ (⌥/) | Open last-used image function dialog |
+| Shift+Option+/ (⇧⌥/) | Open image-gen dialog primed from current image (From Text or Edit Image per Settings) |
 | Cmd+J | Job queue |
 
 Infill paint canvas (when open): **[** / **]** brush size; **Cmd+Z** / **Cmd+Shift+Z** undo/redo strokes.

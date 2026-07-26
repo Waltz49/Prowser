@@ -1307,6 +1307,11 @@ class SettingsDialog(QDialog):
                     if hasattr(self, 'imagegen_add_chat_prefix_postfix_checkbox')
                     else True
                 ),
+                'imagegen_fast_open_action': (
+                    self.imagegen_fast_open_action_combo.currentData()
+                    if hasattr(self, 'imagegen_fast_open_action_combo')
+                    else 'from_text'
+                ),
             }
         elif tab_widget == self.slideshow_settings_tab:
             return {
@@ -1824,6 +1829,11 @@ class SettingsDialog(QDialog):
                 self._update_imagegen_series_cooldown_label()
             if hasattr(self, 'imagegen_add_chat_prefix_postfix_checkbox'):
                 self.imagegen_add_chat_prefix_postfix_checkbox.setChecked(True)
+            if hasattr(self, 'imagegen_fast_open_action_combo'):
+                for i in range(self.imagegen_fast_open_action_combo.count()):
+                    if self.imagegen_fast_open_action_combo.itemData(i) == 'from_text':
+                        self.imagegen_fast_open_action_combo.setCurrentIndex(i)
+                        break
         elif tab_widget == self.slideshow_settings_tab:
             self.slideshow_rate_spinbox.setValue(self.DEFAULT_SLIDESHOW_RATE)
             self.transition_speed_spinbox.setValue(self.DEFAULT_TRANSITION_SPEED)
@@ -2024,6 +2034,11 @@ class SettingsDialog(QDialog):
                 self._update_imagegen_series_cooldown_label()
             if hasattr(self, 'imagegen_add_chat_prefix_postfix_checkbox'):
                 self.imagegen_add_chat_prefix_postfix_checkbox.setChecked(True)
+            if hasattr(self, 'imagegen_fast_open_action_combo'):
+                for i in range(self.imagegen_fast_open_action_combo.count()):
+                    if self.imagegen_fast_open_action_combo.itemData(i) == 'from_text':
+                        self.imagegen_fast_open_action_combo.setCurrentIndex(i)
+                        break
         elif tab_widget == self.slideshow_settings_tab:
             self.slideshow_rate_spinbox.setValue(self.DEFAULT_SLIDESHOW_RATE)
             self.transition_speed_spinbox.setValue(self.DEFAULT_TRANSITION_SPEED)
@@ -2493,6 +2508,28 @@ class SettingsDialog(QDialog):
             ),
             subtitle="Apply chat prefix/postfix rules to image prompts.",
             gear_tooltip="Edit prefix and postfix rules",
+        )
+
+        self.imagegen_fast_open_action_combo = QComboBox()
+        self.imagegen_fast_open_action_combo.addItem("From Text", userData="from_text")
+        self.imagegen_fast_open_action_combo.addItem("Edit Image", userData="edit_image")
+        self.imagegen_fast_open_action_combo.setToolTip(
+            "Opens the unified image-generation dialog primed from the\n"
+            "current image's user comment (prompt and import available)."
+        )
+        self.imagegen_fast_open_action_combo.setFixedHeight(28)
+        self.imagegen_fast_open_action_combo.setMinimumWidth(160)
+        self.imagegen_fast_open_action_combo.setStyleSheet(
+            "QComboBox { font-size: 12px; padding: 4px; }"
+        )
+        imagegen_panel.add_form_row(
+            f"Fast Open action ({SHIFT_SYMBOL}{OPTION_SYMBOL} /)",
+            self.imagegen_fast_open_action_combo,
+            tooltip=(
+                "Shift+Option+/ opens the unified image-generation dialog\n"
+                "primed from the current image's user comment."
+            ),
+            subtitle="Primed open from the current image.",
         )
 
         default_dim_index = (
@@ -3354,6 +3391,12 @@ class SettingsDialog(QDialog):
         if hasattr(self, 'imagegen_add_chat_prefix_postfix_checkbox'):
             enabled = settings.get('imagegen_add_chat_prefix_postfix', True)
             self.imagegen_add_chat_prefix_postfix_checkbox.setChecked(enabled)
+        if hasattr(self, 'imagegen_fast_open_action_combo'):
+            action = settings.get('imagegen_fast_open_action', 'from_text')
+            for i in range(self.imagegen_fast_open_action_combo.count()):
+                if self.imagegen_fast_open_action_combo.itemData(i) == action:
+                    self.imagegen_fast_open_action_combo.setCurrentIndex(i)
+                    break
 
     def _imagegen_max_generation_dimension_px(self) -> int:
         from imagegen_plugins.image_gen_dim_limits import (
@@ -7834,6 +7877,11 @@ class SettingsDialog(QDialog):
                 self.imagegen_add_chat_prefix_postfix_checkbox.isChecked()
                 if hasattr(self, 'imagegen_add_chat_prefix_postfix_checkbox')
                 else True
+            ),
+            'imagegen_fast_open_action': (
+                self.imagegen_fast_open_action_combo.currentData()
+                if hasattr(self, 'imagegen_fast_open_action_combo')
+                else 'from_text'
             ),
             'filtered_tree': self.original_settings.get('filtered_tree', 'images'),  # UI removed, value set from Tree Filtering menu and persisted
             'filter_pattern': ImageBrowserConfig.normalize_filter_pattern(self.filter_pattern_input.text().strip()),

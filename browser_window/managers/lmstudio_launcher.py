@@ -201,9 +201,8 @@ def show_ai_caption_error_dialog(
         button_bar.addWidget(queue_btn)
 
     def _on_lmstudio():
-        if is_lmstudio_app_installed():
-            launch_lmstudio()
         _dismiss()
+        open_lmstudio_or_show_install_help(parent)
 
     lmstudio_btn = QPushButton(lmstudio_label)
     lmstudio_btn.setStyleSheet(button_style)

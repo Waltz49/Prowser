@@ -59,6 +59,10 @@ from utils import (
 )
 
 _ALT_SLASH = QKeySequence(Qt.AltModifier | Qt.Key_Slash)
+_SHIFT_ALT_SLASH = QKeySequence(Qt.ShiftModifier | Qt.AltModifier | Qt.Key_Slash)
+
+FAST_OPEN_FROM_TEXT = "from_text"
+FAST_OPEN_EDIT_IMAGE = "edit_image"
 
 _CREATE_FUNCTION_ACTIONS = (
     (FUNCTION_CREATE, "Create an image from text..."),
@@ -483,6 +487,28 @@ def _dialog_initial_prompt_from_user_comment(
     return initial_prompt_from_usercomment(user_comment)
 
 
+def _user_comment_for_active_image(main_window) -> str:
+    """User comment for image-gen priming (matches File Information pane)."""
+    path = getattr(main_window, "current_image_path", None)
+    if not path or not os.path.isfile(path):
+        return ""
+    try:
+        from exif.exif_utils import (
+            get_exif_dict_named_from_image_path,
+            get_user_description_from_exif_dict,
+        )
+
+        exif_dict = get_exif_dict_named_from_image_path(path)
+        desc = get_user_description_from_exif_dict(exif_dict)
+        if not desc:
+            return ""
+        from imagegen_plugins.image_gen_naming import format_user_comment_text_for_display
+
+        return format_user_comment_text_for_display(desc) or ""
+    except Exception:
+        return ""
+
+
 
 def open_imagegen_create_from_text_dialog(
     main_window, *, user_comment: Optional[str] = None, auto_generate: bool = False
@@ -761,6 +787,22 @@ def start_active_imagegen_generation(
     )
 
 
+def start_fast_imagegen_generation(main_window) -> None:
+    """Open image-gen dialog primed from the current image (⇧⌥/)."""
+    from config import get_config
+
+    action = get_config().load_settings().get(
+        "imagegen_fast_open_action", FAST_OPEN_FROM_TEXT
+    )
+    user_comment = _user_comment_for_active_image(main_window)
+    if action == FAST_OPEN_EDIT_IMAGE:
+        open_imagegen_edit_dialog(main_window, user_comment=user_comment)
+    else:
+        open_imagegen_create_from_text_dialog(
+            main_window, user_comment=user_comment
+        )
+
+
 def _open_download_models_dialog(main_window) -> None:
     from imagegen_plugins.debug_download_models_dialog import run_download_models_dialog
 
@@ -802,6 +844,15 @@ def setup_create_menu(menubar, main_window) -> None:
     )
     create_menu.addAction(primary_action)
     main_window.imagegen_primary_action = primary_action
+
+    fast_open_action = QAction("Fast open image generation", main_window)
+    fast_open_action.setShortcut(_SHIFT_ALT_SLASH)
+    fast_open_action.triggered.connect(
+        lambda: start_fast_imagegen_generation(main_window)
+    )
+    main_window.addAction(fast_open_action)
+    main_window.imagegen_fast_open_action = fast_open_action
+
     create_menu.addSeparator()
 
     def _on_function_selected(function: str) -> None:
