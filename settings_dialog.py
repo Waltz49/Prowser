@@ -2190,11 +2190,14 @@ class SettingsDialog(QDialog):
 
         self.filter_validation_label = QLabel("")
         self.filter_validation_label.setObjectName("macPreferenceRowSubtitle")
+        self.filter_validation_label.setFixedWidth(20)
+        self.filter_validation_label.setAlignment(Qt.AlignCenter)
 
         self.apply_filter_button = QPushButton("Apply")
         self.apply_filter_button.setToolTip("Apply filter immediately")
         self.apply_filter_button.clicked.connect(self.apply_filter_now)
         self.apply_filter_button.setFixedHeight(28)
+        self.apply_filter_button.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
         self.apply_filter_button.setStyleSheet(f"""
             QPushButton {{
                 padding: 4px 10px;
@@ -2211,9 +2214,9 @@ class SettingsDialog(QDialog):
             }}
         """)
 
-        self.filter_pattern_layout.addWidget(self.filter_pattern_input)
-        self.filter_pattern_layout.addWidget(self.filter_validation_label)
-        self.filter_pattern_layout.addWidget(self.apply_filter_button)
+        self.filter_pattern_layout.addWidget(self.filter_pattern_input, 1)
+        self.filter_pattern_layout.addWidget(self.filter_validation_label, 0)
+        self.filter_pattern_layout.addWidget(self.apply_filter_button, 0)
 
         self.match_count_label = QLabel("")
         self.match_count_label.setObjectName("macPreferenceRowSubtitle")
@@ -3621,8 +3624,8 @@ class SettingsDialog(QDialog):
         self.match_count_label.setText("")
         
         if not pattern:
-            self.filter_validation_label.setText("No filter applied")
-            self.filter_validation_label.setStyleSheet(f"color: {TEXT_DISABLED_HEX}; font-style: italic;")
+            self.filter_validation_label.setText("")
+            self.filter_validation_label.setStyleSheet("")
             # Enable buttons
             if hasattr(self, 'ok_button'):
                 self.ok_button.setEnabled(True)
@@ -3642,14 +3645,35 @@ class SettingsDialog(QDialog):
                             _, ext = os.path.splitext(filename)
                             if ext.lower() in image_extensions:
                                 total_files += 1
-                    self.match_count_label.setText(f"{total_files} total files in directory.")
+                    self.match_count_label.setText(
+                        f"No filter applied — {total_files} total files in directory."
+                    )
+                    self.match_count_label.setStyleSheet(
+                        f"color: {TEXT_DISABLED_HEX}; font-style: italic; font-size: 11px;"
+                    )
+                else:
+                    self.match_count_label.setText("No filter applied")
+                    self.match_count_label.setStyleSheet(
+                        f"color: {TEXT_DISABLED_HEX}; font-style: italic; font-size: 11px;"
+                    )
+            else:
+                self.match_count_label.setText("No filter applied")
+                self.match_count_label.setStyleSheet(
+                    f"color: {TEXT_DISABLED_HEX}; font-style: italic; font-size: 11px;"
+                )
             return True
             
         try:
             # Check for basic syntax errors
             if pattern.count('[') != pattern.count(']'):
-                self.filter_validation_label.setText("Invalid: Unmatched brackets")
-                self.filter_validation_label.setStyleSheet(f"color: {ERROR_COLOR_HEX}; font-style: italic;")
+                self.filter_validation_label.setText("❌")
+                self.filter_validation_label.setStyleSheet(
+                    f"color: {ERROR_COLOR_HEX}; font-style: italic;"
+                )
+                self.match_count_label.setText("Invalid: Unmatched brackets")
+                self.match_count_label.setStyleSheet(
+                    f"color: {ERROR_COLOR_HEX}; font-style: italic; font-size: 11px;"
+                )
                 # Disable buttons
                 if hasattr(self, 'ok_button'):
                     self.ok_button.setEnabled(False)
@@ -3677,6 +3701,10 @@ class SettingsDialog(QDialog):
             except Exception:
                 self.filter_validation_label.setText("❌") # invalid pattern
                 self.filter_validation_label.setStyleSheet(f"color: {ERROR_COLOR_HEX}; font-style: italic;")
+                self.match_count_label.setText("Invalid filter pattern")
+                self.match_count_label.setStyleSheet(
+                    f"color: {ERROR_COLOR_HEX}; font-style: italic; font-size: 11px;"
+                )
                 # Disable buttons
                 if hasattr(self, 'ok_button'):
                     self.ok_button.setEnabled(False)
@@ -3687,6 +3715,10 @@ class SettingsDialog(QDialog):
         except Exception:
             self.filter_validation_label.setText("❌") # error validating pattern
             self.filter_validation_label.setStyleSheet(f"color: {ERROR_COLOR_HEX}; font-style: italic;")
+            self.match_count_label.setText("Error validating filter pattern")
+            self.match_count_label.setStyleSheet(
+                f"color: {ERROR_COLOR_HEX}; font-style: italic; font-size: 11px;"
+            )
             # Disable buttons
             if hasattr(self, 'ok_button'):
                 self.ok_button.setEnabled(False)
