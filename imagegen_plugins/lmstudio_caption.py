@@ -13,6 +13,7 @@ from typing import Optional
 from config import get_config, CAPTION_DEFAULTS
 from imagegen_plugins.ai_prompt_exit import apply_text_ai_exit
 from print_call_decorator import log_exception, print_call
+from thumbnails.thumbnail_constants import VISION_REQUIRED_MSG
 
 
 _CHANNEL_MARKER = '<channel|>'
@@ -77,12 +78,6 @@ def _model_key_from_handle(model) -> Optional[str]:
         return None
 
 
-_VISION_REQUIRED_MSG = (
-    "The loaded model does not support image input.\n\n"
-    "Please load a vision-capable model (VLM) in LMStudio."
-)
-
-
 def _loaded_model_supports_vision(model) -> bool | None:
     """Return True/False from LM Studio model info, or None if unknown."""
     try:
@@ -109,8 +104,8 @@ def _require_vision_capable_model(model) -> None:
     except Exception:
         pass
     if display_name:
-        raise RuntimeError(f"{_VISION_REQUIRED_MSG}\n\nLoaded model: {display_name}")
-    raise RuntimeError(_VISION_REQUIRED_MSG)
+        raise RuntimeError(f"{VISION_REQUIRED_MSG}\n\nLoaded model: {display_name}")
+    raise RuntimeError(VISION_REQUIRED_MSG)
 
 
 def _remember_loaded_lm_model_keys(client) -> None:
@@ -336,8 +331,5 @@ def get_image_caption_stream(file_path: str, user_prompt_override: str | None = 
             log_exception(e)
             err_lower = str(e).lower()
             if any(k in err_lower for k in ("vision", "image", "multimodal", "vlm", "visual")):
-                raise RuntimeError(
-                    "The loaded model does not support image input.\n\n"
-                    "Please load a vision-capable model (VLM) in LMStudio."
-                )
+                raise RuntimeError(VISION_REQUIRED_MSG)
             raise RuntimeError(f"Caption generation failed.\n\nDetail: {e}")

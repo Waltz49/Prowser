@@ -109,7 +109,12 @@ def show_ai_caption_error_dialog(
     )
     from PySide6.QtCore import Qt
     from PySide6.QtGui import QTextDocument
-    from utils import get_button_style, get_dialog_shell_stylesheet
+    from utils import (
+        get_button_style,
+        get_dialog_shell_stylesheet,
+        vision_required_icon_pixmap,
+    )
+    from thumbnails.thumbnail_constants import is_vision_required_error
 
     dialog = QDialog(parent)
     dialog.setWindowTitle(window_title)
@@ -122,15 +127,20 @@ def show_ai_caption_error_dialog(
 
     dialog.setStyleSheet(get_dialog_shell_stylesheet() + get_button_style())
 
+    def _dialog_icon_pixmap():
+        if is_vision_required_error(error_msg):
+            px = vision_required_icon_pixmap()
+            if not px.isNull():
+                return px
+        return dialog.style().standardIcon(QStyle.SP_MessageBoxWarning).pixmap(44, 44)
+
     main_layout = QVBoxLayout(dialog)
     main_layout.setSpacing(18)
     main_layout.setContentsMargins(22, 18, 22, 18)
 
     icon_layout = QHBoxLayout()
     icon_label = QLabel()
-    icon_label.setPixmap(
-        dialog.style().standardIcon(QStyle.SP_MessageBoxWarning).pixmap(44, 44)
-    )
+    icon_label.setPixmap(_dialog_icon_pixmap())
     icon_layout.addWidget(icon_label, alignment=Qt.AlignTop)
 
     text_label = QLabel(error_msg)

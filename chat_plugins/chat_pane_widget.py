@@ -810,7 +810,14 @@ class ChatPaneWidget(QWidget):
             self._remove_streaming_widget()
             self._set_generation_stop_ui(False)
             self._maybe_persist_session()
-            QMessageBox.warning(self, "Chat Error", err)
+            from thumbnails.thumbnail_constants import is_vision_required_error
+            if is_vision_required_error(err):
+                from browser_window.managers.lmstudio_launcher import (
+                    show_ai_caption_error_dialog,
+                )
+                show_ai_caption_error_dialog(self, err, window_title="Chat Error")
+            else:
+                QMessageBox.warning(self, "Chat Error", err)
 
         def on_cancelled() -> None:
             idx = self._session.index_of(placeholder.message_id)

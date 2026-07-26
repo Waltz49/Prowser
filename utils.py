@@ -1026,6 +1026,27 @@ def _apply_styled_message_proceed_note(
     QApplication.processEvents()
 
 
+def vision_required_icon_pixmap(size: int | None = None) -> QPixmap:
+    """Return the no-vision asset scaled for dialog use, or a null pixmap if missing."""
+    from theme.theme_base import asset_path
+    from thumbnails.thumbnail_constants import (
+        VISION_REQUIRED_ICON,
+        VISION_REQUIRED_ICON_DIALOG_PX,
+    )
+
+    if size is None:
+        size = VISION_REQUIRED_ICON_DIALOG_PX
+    px = QPixmap(asset_path(VISION_REQUIRED_ICON))
+    if px.isNull():
+        return QPixmap()
+    return px.scaled(
+        size,
+        size,
+        Qt.AspectRatioMode.KeepAspectRatio,
+        Qt.TransformationMode.SmoothTransformation,
+    )
+
+
 def styled_message_box(
     parent,
     icon,
@@ -1118,8 +1139,12 @@ def styled_message_box(
     icon_layout = QHBoxLayout()
     if icon is not None and icon in [QMessageBox.Warning, QMessageBox.Critical, QMessageBox.Information, QMessageBox.Question]:
         icon_label = QLabel()
-        # Choose icon pixmap based on type:
-        if icon == QMessageBox.Warning:
+        from thumbnails.thumbnail_constants import is_vision_required_error
+
+        vision_icon = vision_required_icon_pixmap() if is_vision_required_error(text) else QPixmap()
+        if not vision_icon.isNull():
+            icon_label.setPixmap(vision_icon)
+        elif icon == QMessageBox.Warning:
             icon_label.setPixmap(dialog.style().standardIcon(QStyle.SP_MessageBoxWarning).pixmap(44, 44))
         elif icon == QMessageBox.Critical:
             icon_label.setPixmap(dialog.style().standardIcon(QStyle.SP_MessageBoxCritical).pixmap(44, 44))

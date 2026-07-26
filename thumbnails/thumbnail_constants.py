@@ -150,6 +150,21 @@ CHAT_REJECTED_RESPONSE_PHRASES: List[str] = [
     "standards",
 ]
 
+# LM Studio: shown when a loaded model cannot accept image input
+VISION_REQUIRED_MSG = (
+    "The loaded LM Studio model does not support image input.\n\n"
+    "Please load a vision-capable model in LMStudio."
+)
+VISION_REQUIRED_ICON = "no_vision.webp"
+VISION_REQUIRED_ICON_DIALOG_PX = 64
+
+
+def is_vision_required_error(message: str) -> bool:
+    """Return True when *message* is (or contains) the vision-model-required text."""
+    if not message:
+        return False
+    return VISION_REQUIRED_MSG in message
+
 # Context menu item metrics (toolbar, status bar, thumbnail, file tree — shared QMenu QSS)
 QMENU_ITEM_MIN_HEIGHT = 20
 QMENU_ITEM_PADDING_V = 0

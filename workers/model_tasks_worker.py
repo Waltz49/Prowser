@@ -25,6 +25,7 @@ if _REPO_ROOT not in sys.path:
 
 from debug_log import debug_timestamp
 from print_call_decorator import log_exception, print_call
+from thumbnails.thumbnail_constants import VISION_REQUIRED_MSG
 
 from imagegen_plugins.image_gen_active_model import (
     FUNCTION_CREATE,
@@ -622,10 +623,7 @@ def get_flux_prompt_stream(
                 k in err_lower
                 for k in ("vision", "image", "multimodal", "vlm", "visual")
             ):
-                raise RuntimeError(
-                    "The loaded model does not support image input.\n\n"
-                    "Please load a vision-capable model (VLM) in LMStudio."
-                ) from e
+                raise RuntimeError(VISION_REQUIRED_MSG) from e
             raise RuntimeError(f"Prompt refinement failed.\n\nDetail: {e}") from e
 
 

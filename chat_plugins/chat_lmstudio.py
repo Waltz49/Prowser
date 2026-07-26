@@ -9,7 +9,7 @@ from chat_plugins.chat_prompt_config import load_system_prompt_config, save_syst
 from config import CAPTION_DEFAULTS, CHAT_DEFAULTS, get_config
 from imagegen_plugins.ai_prompt_exit import apply_text_ai_exit
 from chat_plugins.chat_prefix_postfix import apply_prefix_postfix_rules
-from thumbnails.thumbnail_constants import CHAT_REJECTED_RESPONSE_PHRASES
+from thumbnails.thumbnail_constants import CHAT_REJECTED_RESPONSE_PHRASES, VISION_REQUIRED_MSG
 
 from chat_plugins.chat_debug_log import log_chat_llm_input
 from chat_plugins.chat_session import ChatMessage
@@ -241,10 +241,7 @@ def stream_chat_response(
                 k in err_lower
                 for k in ("vision", "image", "multimodal", "vlm", "visual")
             ):
-                raise RuntimeError(
-                    "The loaded model does not support image input.\n\n"
-                    "Please load a vision-capable model (VLM) in LMStudio."
-                ) from e
+                raise RuntimeError(VISION_REQUIRED_MSG) from e
             raise RuntimeError(f"Chat generation failed.\n\nDetail: {e}") from e
 
 

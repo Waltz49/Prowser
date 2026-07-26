@@ -105,16 +105,20 @@ class _JobQueueKeyPassthroughFilter(QObject):
         return False
 
 
-def _job_queue_floating_shell_stylesheet() -> str:
+def _job_queue_floating_shell_stylesheet(*, strip_mode: bool = False) -> str:
     """1px sidebar-pane border; background matches jobs pane."""
     th = get_active_theme()
     border_hex = tc.SIDEBAR_HEADER_BORDER_HEX or th.sidebar_header_border_hex
+    if strip_mode:
+        border_css = f"{_DIALOG_BORDER_PX}px solid transparent"
+    else:
+        border_css = f"{_DIALOG_BORDER_PX}px solid {border_hex}"
     bg_hex = th.sidebar_background_color_hex
     text_hex = th.sidebar_text_color_hex
     return f"""
     #{_JOB_QUEUE_DIALOG_OBJECT_NAME} {{
         background-color: {bg_hex};
-        border: {_DIALOG_BORDER_PX}px solid {border_hex};
+        border: {border_css};
         border-radius: 3px;
     }}
     #{_JOB_QUEUE_DIALOG_OBJECT_NAME} QWidget {{
@@ -268,7 +272,15 @@ class ImageGenJobQueueDialog(QDialog):
     def _sync_titlebar_visibility(self, mode: str) -> None:
         self._header.setVisible(not self._titlebar_hidden_for_mode(mode))
 
+    def _refresh_shell_stylesheet(self, mode: str | None = None) -> None:
+        if mode is None:
+            mode = self._panel.queue_size_mode()
+        self.setStyleSheet(
+            _job_queue_floating_shell_stylesheet(strip_mode=(mode == QUEUE_SIZE_STRIP))
+        )
+
     def _sync_shell_layout_for_mode(self, mode: str) -> None:
+        self._refresh_shell_stylesheet(mode)
         self._sync_titlebar_visibility(mode)
         layout = self._shell_layout
         shrink = self._panel.should_shrink_wrap_client()
