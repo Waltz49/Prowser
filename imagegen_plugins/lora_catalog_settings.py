@@ -12,6 +12,7 @@ from imagegen_plugins.lora_catalogs.flux1_fill import FLUX1_FILL_LORAS
 from imagegen_plugins.lora_catalogs.flux1_t2i import FLUX1_T2I_LORAS
 from imagegen_plugins.lora_catalogs.flux2_klein import FLUX2_KLEIN_LORAS
 from imagegen_plugins.lora_catalogs.sd15 import SD15_LORAS
+from imagegen_plugins.lora_catalogs.z_image_turbo import Z_IMAGE_TURBO_LORAS
 from imagegen_plugins.lora_entry import DEFAULT_ENABLED_LORA_IDS_BY_HOST
 from imagegen_plugins.lora_host_registry import LORA_HOST_ORDER
 from imagegen_plugins.lora_model_registry import (
@@ -22,7 +23,13 @@ from imagegen_plugins.lora_model_registry import (
 
 from imagegen_plugins.lora_user_entries import USER_ENTRIES_KEY, user_lora_entries_from_lc
 
-LORA_CATALOG = {**FLUX1_T2I_LORAS, **FLUX1_FILL_LORAS, **FLUX2_KLEIN_LORAS, **SD15_LORAS}
+LORA_CATALOG = {
+    **FLUX1_T2I_LORAS,
+    **FLUX1_FILL_LORAS,
+    **FLUX2_KLEIN_LORAS,
+    **SD15_LORAS,
+    **Z_IMAGE_TURBO_LORAS,
+}
 
 _LEGACY_ENABLED_KEY = "enabled_ids"
 _LEGACY_DELETED_KEY = "deleted_ids"
@@ -256,7 +263,7 @@ def migrate_lora_catalog(lc: Dict[str, Any]) -> Dict[str, Any]:
     for host_id in LORA_HOST_ORDER:
         slice_ = by_host.get(host_id)
         if not isinstance(slice_, dict):
-            by_host[host_id] = _empty_slice()
+            by_host[host_id] = dict(default_by_host().get(host_id, _empty_slice()))
         else:
             by_host[host_id] = _normalize_host_slice(host_id, slice_, _catalog_for_lc(lc))
 

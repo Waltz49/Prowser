@@ -43,6 +43,7 @@ def imagegen_backend_missing_message(plugin: ImageGenModelPlugin) -> str:
         "mflux_fill_infill",
         "mflux_flux2_klein_edit",
         "mflux_flux2_klein_create",
+        "mflux_z_image_turbo",
     ):
         if plugin.pipeline_id in ("mflux_fill_expand", "mflux_fill_infill"):
             product = "FLUX Fill"

@@ -18,6 +18,7 @@ from imagegen_plugins.hf_model_ids import (
     SD15_LORA_MODEL_KEYS,
     ANYTHING_FURRY,
     REALISTIC_VISION_V4_NOVAE,
+    Z_IMAGE_TURBO_MFLUX_4BIT,
 )
 from imagegen_plugins.lora_entry import FluxLoraEntry
 from imagegen_plugins.lora_host_registry import (
@@ -25,6 +26,7 @@ from imagegen_plugins.lora_host_registry import (
     HOST_FLUX1_T2I,
     HOST_FLUX2_KLEIN,
     HOST_SD15,
+    HOST_Z_IMAGE_TURBO,
 )
 
 if TYPE_CHECKING:
@@ -103,6 +105,12 @@ LORA_SETTINGS_MODELS: Tuple[LoraSettingsModel, ...] = (
         ANYTHING_FURRY,
         ANYTHING_FURRY,
         "Create image dialog when Anything Furry is selected",
+        ("create",),
+    ),
+    LoraSettingsModel(
+        Z_IMAGE_TURBO_MFLUX_4BIT,
+        Z_IMAGE_TURBO_MFLUX_4BIT,
+        "Create image dialog when Z-Image Turbo (4-bit) is selected",
         ("create",),
     ),
 )
@@ -203,6 +211,8 @@ def lora_probe_pipeline_id(model_key: str) -> Optional[str]:
         return "mflux_flux2_klein_edit"
     if mk in SD15_LORA_MODEL_KEYS:
         return "sd15_diffusers"
+    if mk == Z_IMAGE_TURBO_MFLUX_4BIT:
+        return "mflux_z_image_turbo"
     return None
 
 
@@ -300,6 +310,8 @@ def host_id_for_lora_model(model_key: str) -> Optional[str]:
         return HOST_FLUX2_KLEIN
     if model_key in SD15_LORA_MODEL_KEYS:
         return HOST_SD15
+    if model_key == Z_IMAGE_TURBO_MFLUX_4BIT:
+        return HOST_Z_IMAGE_TURBO
     return None
 
 

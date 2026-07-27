@@ -32,6 +32,10 @@ DEFAULT_ENABLED_LORA_IDS_BY_HOST: dict[str, tuple[str, ...]] = {
     ),
     "flux1_fill": (),
     "flux2_klein": (),
+    "z_image_turbo": (
+        "z_childrens_drawings",
+        "z_technically_color",
+    ),
     "sd15": (
         "sd15_anime_character",
         "sd15_furry",

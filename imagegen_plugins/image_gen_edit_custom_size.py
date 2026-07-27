@@ -5,11 +5,12 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, Tuple
 
-from PySide6.QtCore import Qt, QSize
+from PySide6.QtCore import Qt, QSize, Signal
 from PySide6.QtWidgets import (
     QCheckBox,
     QGroupBox,
     QHBoxLayout,
+    QLabel,
     QPushButton,
     QSizePolicy,
     QVBoxLayout,
@@ -20,6 +21,7 @@ from imagegen_plugins.image_gen_fields import FieldSpec
 from imagegen_plugins.image_gen_field_blocks import model_reset_default
 from imagegen_plugins.image_gen_form_layout import (
     IMAGE_GEN_DIM_HELPER_BTN_SIZE,
+    IMAGE_GEN_FIELD_LABEL_OBJECT_NAME,
     IMAGE_GEN_FIELD_RESET_BTN_SIZE,
     ImageGenFieldsPanel,
     create_image_gen_dim_helper_icon_button,
@@ -38,6 +40,79 @@ from imagegen_plugins.imagegen_control_tooltips import (
 )
 
 _USE_CUSTOM_SIZE_BASE_LABEL = "Use Custom Size"
+_CUSTOM_SIZE_BASE_LABEL = "Custom Size"
+_COLLAPSED_ARROW = "\u25b6"  # ▶
+_EXPANDED_ARROW = "\u25bc"  # ▼
+_COLLAPSE_ARROW_FONT_PX = 13
+
+
+class _CustomSizeCollapseHeader(QWidget):
+    """Collapse/expand header compatible with bool field collection (isChecked/setChecked)."""
+
+    toggled = Signal(bool)
+
+    def __init__(self, parent: Optional[QWidget] = None, *, expanded: bool = False):
+        super().__init__(parent)
+        self._expanded = bool(expanded)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        row = QHBoxLayout(self)
+        row.setContentsMargins(2, 0, 0, 0)
+        row.setSpacing(4)
+        self._arrow = QLabel(self)
+        arrow_font = self._arrow.font()
+        arrow_font.setPixelSize(_COLLAPSE_ARROW_FONT_PX)
+        self._arrow.setFont(arrow_font)
+        self._arrow.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        self._arrow.setSizePolicy(
+            QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed
+        )
+        self._title = QLabel(self)
+        self._title.setObjectName(IMAGE_GEN_FIELD_LABEL_OBJECT_NAME)
+        self._title.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        self._title.setSizePolicy(
+            QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed
+        )
+        row.addWidget(
+            self._arrow,
+            0,
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+        )
+        row.addWidget(
+            self._title,
+            0,
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+        )
+        self.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
+        self._apply_expanded_state()
+
+    def isChecked(self) -> bool:
+        return self._expanded
+
+    def setChecked(self, checked: bool) -> None:
+        checked = bool(checked)
+        if self._expanded == checked:
+            return
+        self._expanded = checked
+        self._apply_expanded_state()
+        self.toggled.emit(checked)
+
+    def setToolTip(self, tip: str) -> None:
+        super().setToolTip(tip)
+
+    def set_title_text(self, text: str) -> None:
+        self._title.setText(text)
+
+    def mousePressEvent(self, event) -> None:
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.setChecked(not self._expanded)
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
+    def _apply_expanded_state(self) -> None:
+        self._arrow.setText(
+            _EXPANDED_ARROW if self._expanded else _COLLAPSED_ARROW
+        )
 
 
 def _image_pixel_size(image_path: str) -> Optional[Tuple[int, int]]:
@@ -73,26 +148,125 @@ def _first_source_pixel_size(dialog: Any) -> Optional[Tuple[int, int]]:
     return w, h
 
 
-def _use_custom_size_checkbox_text(
-    *, checked: bool, size: Optional[Tuple[int, int]]
+def _custom_size_header_text(
+    *,
+    base_label: str,
+    expanded: bool,
+    size: Optional[Tuple[int, int]],
 ) -> str:
-    if checked or size is None:
-        return _USE_CUSTOM_SIZE_BASE_LABEL
+    if expanded or size is None:
+        return base_label
     w, h = size
-    return f"{_USE_CUSTOM_SIZE_BASE_LABEL} ( Current: {w} x {h} )"
+    return f"{base_label} ( Current: {w} x {h} )"
 
 
-def _refresh_use_custom_size_checkbox_label(
-    dialog: Any, use_widget: QWidget
+def _int_slider_spin(widget: QWidget):
+    inner = widget.layout()
+    return inner.itemAt(1).widget()
+
+
+def _slider_pixel_size(
+    width_widget: QWidget, height_widget: QWidget
+) -> Optional[Tuple[int, int]]:
+    try:
+        w = int(_int_slider_spin(width_widget).value())
+        h = int(_int_slider_spin(height_widget).value())
+    except Exception:
+        return None
+    if w <= 0 or h <= 0:
+        return None
+    return w, h
+
+
+def _refresh_custom_size_collapse_header(
+    header: QWidget,
+    *,
+    base_label: str,
+    expanded: bool,
+    size: Optional[Tuple[int, int]],
 ) -> None:
-    if not isinstance(use_widget, QCheckBox):
+    if not isinstance(header, _CustomSizeCollapseHeader):
         return
-    use_widget.setText(
-        _use_custom_size_checkbox_text(
-            checked=use_widget.isChecked(),
-            size=_first_source_pixel_size(dialog),
+    header.set_title_text(
+        _custom_size_header_text(
+            base_label=base_label,
+            expanded=expanded,
+            size=size,
         )
     )
+
+
+def _connect_custom_size_dim_refresh(
+    width_widget: QWidget,
+    height_widget: QWidget,
+    refresh: Any,
+) -> None:
+    for widget in (width_widget, height_widget):
+        inner = widget.layout()
+        if inner is None:
+            continue
+        for index in range(inner.count()):
+            child = inner.itemAt(index).widget()
+            if child is not None and hasattr(child, "valueChanged"):
+                child.valueChanged.connect(lambda _v: refresh())
+
+
+def _refresh_use_custom_size_header(dialog: Any, use_widget: QWidget) -> None:
+    _refresh_custom_size_collapse_header(
+        use_widget,
+        base_label=_USE_CUSTOM_SIZE_BASE_LABEL,
+        expanded=use_widget.isChecked() if isinstance(use_widget, _CustomSizeCollapseHeader) else False,
+        size=_first_source_pixel_size(dialog),
+    )
+
+
+def _refresh_slider_custom_size_header(
+    header: QWidget,
+    width_widget: QWidget,
+    height_widget: QWidget,
+) -> None:
+    expanded = header.isChecked() if isinstance(header, _CustomSizeCollapseHeader) else True
+    _refresh_custom_size_collapse_header(
+        header,
+        base_label=_CUSTOM_SIZE_BASE_LABEL,
+        expanded=expanded,
+        size=_slider_pixel_size(width_widget, height_widget),
+    )
+
+
+def _mount_collapsible_custom_size_section(
+    dialog: Any,
+    panel: ImageGenFieldsPanel,
+    *,
+    collapse_header: _CustomSizeCollapseHeader,
+    group_box: QGroupBox,
+    expanded: bool,
+    on_toggled: Any,
+) -> QWidget:
+    section = QWidget(panel._controls_host)
+    section.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
+    section_col = QVBoxLayout(section)
+    section_col.setContentsMargins(0, 0, 0, 0)
+    section_col.setSpacing(8)
+    section_col.addWidget(
+        collapse_header,
+        0,
+        Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+    )
+    group_body = wrap_image_gen_field_control_indent(group_box, section)
+    group_body.setVisible(expanded)
+    section_col.addWidget(group_body, 0)
+
+    def _on_collapsed_toggled(checked: bool) -> None:
+        group_body.setVisible(checked)
+        on_toggled(checked)
+        if getattr(dialog, "_panel_mode", False):
+            dialog.state_changed.emit()
+
+    collapse_header.toggled.connect(_on_collapsed_toggled)
+    panel.prepend_full_width_control_header(section)
+    dialog._custom_size_header = section
+    return section
 
 
 def migrate_edit_size_saved_values(values: Dict[str, Any]) -> Dict[str, Any]:
@@ -305,12 +479,20 @@ def _remove_existing_custom_size_section(
     *,
     optional: bool,
 ) -> None:
+    existing_header = getattr(dialog, "_custom_size_header", None)
+    if existing_header is not None:
+        if existing_header in panel._full_width_control_headers:
+            panel._full_width_control_headers.remove(existing_header)
+        existing_header.deleteLater()
+        dialog._custom_size_header = None
     existing = getattr(dialog, "_custom_size_outer", None)
-    if existing is None:
+    if existing is not None:
+        if existing in panel._control_groups:
+            panel._control_groups.remove(existing)
+        existing.deleteLater()
+        dialog._custom_size_outer = None
+    if existing_header is None and existing is None:
         return
-    if existing in panel._control_groups:
-        panel._control_groups.remove(existing)
-    existing.deleteLater()
     dialog._refresh_use_custom_size_label = None
     remove_keys = ("width", "height")
     if optional:
@@ -332,7 +514,7 @@ def mount_custom_size_section(
     build_options: Optional[WidgetBuildOptions] = None,
     optional: bool = False,
 ) -> None:
-    """Mount Custom Size controls; optional=True adds Use Custom Size checkbox (edit)."""
+    """Mount Custom Size controls in a full-width collapsible section."""
     _remove_existing_custom_size_section(
         dialog, panel, widgets, specs, optional=optional
     )
@@ -351,8 +533,6 @@ def mount_custom_size_section(
             dim_step=mode.dim_step,
             model_defaults=getattr(dialog.plugin, "model_defaults", None),
         )
-        use_widget, use_extra = widget_for_field_spec(use_spec, options=opts)
-        apply_field_control_tooltips(use_spec, use_widget)
     else:
         width_spec, height_spec = custom_size_width_height_specs(
             values,
@@ -377,43 +557,66 @@ def mount_custom_size_section(
         aspect_cb=aspect_cb,
         values=values,
     )
-    outer = QWidget(panel._controls_host)
-    outer.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
-    outer_col = QVBoxLayout(outer)
-    outer_col.setContentsMargins(0, 0, 0, 0)
-    outer_col.setSpacing(8)
 
-    if optional and use_widget is not None:
-        outer_col.addWidget(
-            use_widget, 0, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
-        )
+    if optional and use_spec is not None:
         use_checked = bool(use_spec.default)
-        group_box.setVisible(use_checked)
+        use_widget = _CustomSizeCollapseHeader(
+            panel._controls_host, expanded=use_checked
+        )
+        from imagegen_plugins.imagegen_control_tooltips import field_tooltip
 
-        _refresh_use_custom_size_checkbox_label(dialog, use_widget)
+        tip = field_tooltip(use_spec)
+        if tip:
+            use_widget.setToolTip(tip)
+        use_extra = None
+
+        def _on_edit_custom_size_toggled(checked: bool) -> None:
+            _refresh_use_custom_size_header(dialog, use_widget)
+
+        _mount_collapsible_custom_size_section(
+            dialog,
+            panel,
+            collapse_header=use_widget,
+            group_box=group_box,
+            expanded=use_checked,
+            on_toggled=_on_edit_custom_size_toggled,
+        )
+        _refresh_use_custom_size_header(dialog, use_widget)
         dialog._refresh_use_custom_size_label = (
-            lambda: _refresh_use_custom_size_checkbox_label(dialog, use_widget)
+            lambda: _refresh_use_custom_size_header(dialog, use_widget)
         )
-
-        def _on_use_custom_size_toggled(checked: bool) -> None:
-            group_box.setVisible(checked)
-            _refresh_use_custom_size_checkbox_label(dialog, use_widget)
-            panel.reflow_controls()
-            if getattr(dialog, "_panel_mode", False):
-                dialog.state_changed.emit()
-
-        use_widget.toggled.connect(_on_use_custom_size_toggled)
     else:
-        outer_col.addWidget(
-            make_image_gen_field_label("Custom size", outer),
-            0,
-            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+        collapse_header = _CustomSizeCollapseHeader(
+            panel._controls_host, expanded=True
         )
 
-    outer_col.addWidget(wrap_image_gen_field_control_indent(group_box, outer))
+        def _on_create_custom_size_toggled(checked: bool) -> None:
+            _refresh_slider_custom_size_header(
+                collapse_header, width_widget, height_widget
+            )
 
-    panel.prepend_control_group(outer)
-    dialog._custom_size_outer = outer
+        _mount_collapsible_custom_size_section(
+            dialog,
+            panel,
+            collapse_header=collapse_header,
+            group_box=group_box,
+            expanded=True,
+            on_toggled=_on_create_custom_size_toggled,
+        )
+        _refresh_slider_custom_size_header(
+            collapse_header, width_widget, height_widget
+        )
+        dialog._refresh_use_custom_size_label = (
+            lambda: _refresh_slider_custom_size_header(
+                collapse_header, width_widget, height_widget
+            )
+        )
+        _connect_custom_size_dim_refresh(
+            width_widget,
+            height_widget,
+            dialog._refresh_use_custom_size_label,
+        )
+
     panel.reflow_controls()
 
     widgets[width_spec.key] = (width_widget, width_extra, width_spec)
@@ -435,7 +638,7 @@ def mount_edit_custom_size_section(
     pipeline_id: str,
     build_options: Optional[WidgetBuildOptions] = None,
 ) -> None:
-    """Mount Use Custom Size + Custom Size group; merge widgets/specs on dialog."""
+    """Mount collapse header + Custom Size group; merge widgets/specs on dialog."""
     mount_custom_size_section(
         dialog,
         panel,

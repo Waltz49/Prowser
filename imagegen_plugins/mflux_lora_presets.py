@@ -24,7 +24,7 @@ from imagegen_plugins.lora_catalog import (
     lora_entry_min_steps,
     lora_weights_file_is_valid,
 )
-from imagegen_plugins.lora_host_registry import HOST_FLUX1_T2I, HOST_SD15, lora_host_for_pipeline
+from imagegen_plugins.lora_host_registry import HOST_FLUX1_T2I, HOST_SD15, HOST_Z_IMAGE_TURBO, lora_host_for_pipeline
 
 FLUX_LORA_CATALOG = LORA_CATALOG
 
@@ -74,8 +74,8 @@ def _normalize_preset_id(preset_id: Any) -> str:
 
 
 def _assert_mflux_compatible_lora(path: str, *, host_id: str | None = None) -> None:
-    """Reject FLUX.1 LoRA key layouts known to crash MFLUX (not used for FLUX.2 Klein)."""
-    if host_id == "flux2_klein":
+    """Reject FLUX.1 LoRA key layouts known to crash MFLUX (not used for FLUX.2 Klein or Z-Image)."""
+    if host_id in ("flux2_klein", HOST_Z_IMAGE_TURBO):
         return
     try:
         from safetensors import safe_open
@@ -381,10 +381,12 @@ def apply_lora_to_mflux_payload(
     *,
     for_fill: bool = False,
     for_klein: bool = False,
+    for_z_image: bool = False,
 ) -> None:
     """Set mflux_lora_paths/scales when one or more presets are selected."""
     from imagegen_plugins.job_values_snapshot import job_values_snapshotted
 
+    lora_host = HOST_Z_IMAGE_TURBO if for_z_image else HOST_FLUX1_T2I
     pipeline_id = str(merged.get("pipeline_id") or "").strip() or None
     if job_values_snapshotted(dict(merged)):
         snap_paths = merged.get("mflux_lora_paths")
@@ -400,13 +402,13 @@ def apply_lora_to_mflux_payload(
             if not stack:
                 merged.pop("mflux_lora_paths", None)
                 merged.pop("mflux_lora_scales", None)
-                strip_lora_payload_keys_for_host(merged, host_id=HOST_FLUX1_T2I, pop=True)
+                strip_lora_payload_keys_for_host(merged, host_id=lora_host, pop=True)
                 return
             if len(saved_paths) == len(saved_scales) == len(stack):
-                strip_lora_payload_keys_for_host(merged, host_id=HOST_FLUX1_T2I, pop=True)
+                strip_lora_payload_keys_for_host(merged, host_id=lora_host, pop=True)
                 merged["mflux_lora_paths"] = saved_paths
                 merged["mflux_lora_scales"] = saved_scales
-                if not for_fill and not for_klein:
+                if not for_fill and not for_klein and not for_z_image:
                     merged["steps"] = effective_steps_for_lora_stack(
                         int(merged.get("steps") or 0),
                         stack,
@@ -422,11 +424,11 @@ def apply_lora_to_mflux_payload(
     if not stack:
         merged.pop("mflux_lora_paths", None)
         merged.pop("mflux_lora_scales", None)
-        strip_lora_payload_keys_for_host(merged, host_id=HOST_FLUX1_T2I, pop=True)
+        strip_lora_payload_keys_for_host(merged, host_id=lora_host, pop=True)
         return
 
     from config import get_config
-    from imagegen_plugins.hf_model_ids import FLUX1_DEV, FLUX1_FILL_DEV
+    from imagegen_plugins.hf_model_ids import FLUX1_DEV, FLUX1_FILL_DEV, Z_IMAGE_TURBO_MFLUX_4BIT
     from imagegen_plugins.lora_catalog import (
         klein_lora_mismatch_message,
         lora_model_key_from_values,
@@ -434,7 +436,9 @@ def apply_lora_to_mflux_payload(
     )
 
     model_key = lora_model_key_from_values(dict(merged))
-    if for_fill:
+    if for_z_image:
+        model_key = model_key or Z_IMAGE_TURBO_MFLUX_4BIT
+    elif for_fill:
         model_key = model_key or FLUX1_FILL_DEV
     elif not model_key:
         model_key = FLUX1_DEV
@@ -443,7 +447,7 @@ def apply_lora_to_mflux_payload(
     paths: List[str] = []
     scales: List[float] = []
 
-    strip_lora_payload_keys_for_host(merged, host_id=HOST_FLUX1_T2I, pop=True)
+    strip_lora_payload_keys_for_host(merged, host_id=lora_host, pop=True)
 
     for preset_id in stack:
         entry = get_lora_entry(preset_id)
@@ -452,7 +456,17 @@ def apply_lora_to_mflux_payload(
         if entry.host_id == HOST_SD15:
             raise ValueError(
                 f"LoRA «{entry.display_name}» is for SD 1.5 only. "
-                "Select an SD 1.5 model in Create, or pick a FLUX/Klein LoRA."
+                "Select an SD 1.5 model in Create, or pick a compatible LoRA."
+            )
+        if for_z_image and entry.host_id != HOST_Z_IMAGE_TURBO:
+            raise ValueError(
+                f"LoRA «{entry.display_name}» is not for Z-Image Turbo. "
+                "Pick a Z-Image LoRA in Settings → LoRA or the Create dialog."
+            )
+        if not for_z_image and entry.host_id == HOST_Z_IMAGE_TURBO:
+            raise ValueError(
+                f"LoRA «{entry.display_name}» is for Z-Image Turbo only. "
+                "Select Z-Image Turbo (4-bit) in Create, or pick a FLUX/Klein LoRA."
             )
 
         if model_key and not lora_probe_passed_for_model(
@@ -470,7 +484,7 @@ def apply_lora_to_mflux_payload(
             if active and not entry_matches_lora_model(entry, active):
                 raise ValueError(klein_lora_mismatch_message(entry, active))
 
-        if not for_fill and not for_klein:
+        if not for_fill and not for_klein and not for_z_image:
             required = (entry.base_hf_model_id or FLUX1_DEV).strip()
             active = str(merged.get("hf_model_id") or "").strip()
             if required and active and required != active:
@@ -489,7 +503,7 @@ def apply_lora_to_mflux_payload(
 
     merged["mflux_lora_paths"] = paths
     merged["mflux_lora_scales"] = scales
-    if not for_fill and not for_klein:
+    if not for_fill and not for_klein and not for_z_image:
         merged["steps"] = effective_steps_for_lora_stack(
             int(merged.get("steps") or 0),
             stack,

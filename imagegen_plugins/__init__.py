@@ -54,6 +54,12 @@ def discover_plugins() -> List[ImageGenModelPlugin]:
     except ImportError:
         pass
     try:
+        from imagegen_plugins.z_image_turbo_mflux_4bit import Z_IMAGE_TURBO_MFLUX_4BIT_PLUGIN
+
+        candidates.append(Z_IMAGE_TURBO_MFLUX_4BIT_PLUGIN)
+    except ImportError:
+        pass
+    try:
         from imagegen_plugins.realistic_vision_v4_sd15 import (
             REALISTIC_VISION_V4_SD15_PLUGIN,
         )

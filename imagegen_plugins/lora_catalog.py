@@ -25,6 +25,7 @@ from imagegen_plugins.lora_catalogs.flux1_fill import FLUX1_FILL_LORAS
 from imagegen_plugins.lora_catalogs.flux1_t2i import FLUX1_T2I_LORAS
 from imagegen_plugins.lora_catalogs.flux2_klein import FLUX2_KLEIN_LORAS
 from imagegen_plugins.lora_catalogs.sd15 import SD15_LORAS
+from imagegen_plugins.lora_catalogs.z_image_turbo import Z_IMAGE_TURBO_LORAS
 from imagegen_plugins.lora_entry import (
     DEFAULT_CACHE,
     DEFAULT_ENABLED_LORA_IDS,
@@ -65,12 +66,16 @@ LORA_CATALOG: Dict[str, FluxLoraEntry] = {
     **FLUX1_FILL_LORAS,
     **FLUX2_KLEIN_LORAS,
     **SD15_LORAS,
+    **Z_IMAGE_TURBO_LORAS,
 }
 
 # Back-compat alias used across the codebase.
 FLUX_LORA_CATALOG = LORA_CATALOG
 
-MFLUX_LORA_GENERATE_PIPELINES: Tuple[str, ...] = ("flux_schnell_mflux_play",)
+MFLUX_LORA_GENERATE_PIPELINES: Tuple[str, ...] = (
+    "flux_schnell_mflux_play",
+    "mflux_z_image_turbo",
+)
 MFLUX_LORA_FILL_PIPELINES: Tuple[str, ...] = ("mflux_fill_expand", "mflux_fill_infill")
 MFLUX_LORA_T2I_AND_FILL: Tuple[str, ...] = (
     MFLUX_LORA_GENERATE_PIPELINES + MFLUX_LORA_FILL_PIPELINES

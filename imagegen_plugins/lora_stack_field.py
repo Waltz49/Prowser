@@ -46,6 +46,9 @@ _POPUP_WIDTH_SLACK = 16
 _WEIGHT_COL_WIDTH = 52
 _SCALE_MIN = 0.1
 _SCALE_MAX = 2.0
+_EMPTY_LORAS_MESSAGE = (
+    "No LoRAs available. Enable and download in Settings → LoRA."
+)
 
 
 def _format_scale(value: float) -> str:
@@ -107,10 +110,11 @@ class LoraSelectionPopup(QFrame):
         self._grid.setVerticalSpacing(4)
         self._grid.setColumnStretch(1, 1)
         self._scroll.setWidget(self._checks_host)
-        root.addWidget(self._scroll, 1)
+        root.addWidget(self._scroll, 0)
 
         self._rows: List[Tuple[str, QCheckBox, QLineEdit]] = []
         self._fallback_scales: Dict[str, float] = {}
+        self._empty_label: Optional[QLabel] = None
         self._preferred_width = _POPUP_MIN_WIDTH
         self._committed = False
 
@@ -136,6 +140,10 @@ class LoraSelectionPopup(QFrame):
             f"QFrame#imageGenLoraSelectionPopup QLabel#loraPopupHeader {{"
             f" color: {text};"
             f" font-size: 11px;"
+            f"}}"
+            f"QFrame#imageGenLoraSelectionPopup QLabel#loraPopupEmpty {{"
+            f" color: {text};"
+            f" font-size: 12px;"
             f"}}"
             f"QFrame#imageGenLoraSelectionPopup QLineEdit#loraPopupWeightEdit {{"
             f" background-color: {bg};"
@@ -174,6 +182,17 @@ class LoraSelectionPopup(QFrame):
                 w.deleteLater()
         self._rows.clear()
         self._fallback_scales.clear()
+        self._empty_label = None
+
+    def _add_empty_state_row(self) -> None:
+        label = QLabel(_EMPTY_LORAS_MESSAGE, self._checks_host)
+        label.setObjectName("loraPopupEmpty")
+        label.setWordWrap(True)
+        label.setAlignment(
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+        )
+        self._grid.addWidget(label, 0, 0, 1, 3)
+        self._empty_label = label
 
     def _add_header_row(self) -> None:
         name_hdr = QLabel("LoRA", self._checks_host)
@@ -198,6 +217,26 @@ class LoraSelectionPopup(QFrame):
         cb.toggled.connect(_on_toggled)
         _on_toggled(cb.isChecked())
 
+    def _row_height_estimate(self) -> int:
+        if not self._rows:
+            return _ROW_HEIGHT_ESTIMATE
+        _, _, weight_edit = self._rows[0]
+        return max(_ROW_HEIGHT_ESTIMATE, weight_edit.sizeHint().height() + 2)
+
+    def _update_popup_layout_metrics(self, *, show_header: bool) -> None:
+        row_h = self._row_height_estimate()
+        if self._empty_label is not None:
+            self._empty_label.setFixedWidth(max(_POPUP_MIN_WIDTH - _POPUP_PADDING * 2 - 4, 200))
+            msg_h = self._empty_label.heightForWidth(self._empty_label.width())
+            scroll_h = max(msg_h, row_h) + _POPUP_PADDING * 2
+        else:
+            visible_data_rows = min(len(self._rows), _POPUP_MAX_VISIBLE_ROWS)
+            header_h = _HEADER_ROW_HEIGHT if show_header else 0
+            scroll_h = header_h + visible_data_rows * row_h + _POPUP_PADDING * 2
+        self._scroll.setFixedHeight(scroll_h)
+        self._preferred_width = self._measure_popup_width()
+        self._checks_host.setMinimumWidth(self._preferred_width - 2)
+
     def set_choices(
         self,
         choices: List[Tuple[str, str]],
@@ -207,14 +246,18 @@ class LoraSelectionPopup(QFrame):
         from imagegen_plugins.lora_catalog import get_lora_entry
 
         self._clear_checks()
+        selectable = [(label, preset_id) for label, preset_id in choices if preset_id != "none"]
+        if not selectable:
+            self._add_empty_state_row()
+            self._update_popup_layout_metrics(show_header=False)
+            return
+
         self._add_header_row()
         selected = set(selected_ids)
         validator = QDoubleValidator(_SCALE_MIN, _SCALE_MAX, 2, self)
         validator.setNotation(QDoubleValidator.Notation.StandardNotation)
         row = 1
-        for label, preset_id in choices:
-            if preset_id == "none":
-                continue
+        for label, preset_id in selectable:
             entry = get_lora_entry(preset_id)
             scale = float(entry.scale) if entry is not None else 1.0
             self._fallback_scales[preset_id] = scale
@@ -236,20 +279,13 @@ class LoraSelectionPopup(QFrame):
             self._rows.append((preset_id, cb, weight_edit))
             row += 1
 
-        data_rows = max(1, len(self._rows))
-        visible_data_rows = min(data_rows, _POPUP_MAX_VISIBLE_ROWS)
-        scroll_h = (
-            _HEADER_ROW_HEIGHT
-            + visible_data_rows * _ROW_HEIGHT_ESTIMATE
-            + _POPUP_PADDING * 2
-        )
-        self._scroll.setFixedHeight(scroll_h)
-        self._preferred_width = self._measure_popup_width()
-        self._checks_host.setMinimumWidth(self._preferred_width - 2)
+        self._update_popup_layout_metrics(show_header=True)
 
     def _measure_popup_width(self) -> int:
         fm = QFontMetrics(self.font())
         label_w = fm.horizontalAdvance("LoRA")
+        if self._empty_label is not None:
+            label_w = max(label_w, fm.horizontalAdvance(_EMPTY_LORAS_MESSAGE) // 2)
         for _preset_id, cb, weight_edit in self._rows:
             label_w = max(label_w, fm.horizontalAdvance(cb.text()))
             label_w = max(label_w, weight_edit.sizeHint().width())
@@ -294,7 +330,6 @@ class LoraSelectionPopup(QFrame):
 
     def show_below(self, anchor: QWidget) -> None:
         self._committed = False
-        self.adjustSize()
         width = max(
             anchor.width(),
             getattr(self, "_preferred_width", _POPUP_MIN_WIDTH),
@@ -305,6 +340,12 @@ class LoraSelectionPopup(QFrame):
             width = min(width, avail.width() - 16)
         width = max(width, _POPUP_MIN_WIDTH)
         self.setFixedWidth(width)
+        self.setMaximumHeight(16777215)
+        self.setMinimumHeight(0)
+        self.adjustSize()
+        layout = self.layout()
+        if layout is not None:
+            self.setFixedHeight(layout.sizeHint().height())
         global_pos = anchor.mapToGlobal(QPoint(0, anchor.height()))
         if screen is not None:
             avail = screen.availableGeometry()
@@ -398,6 +439,7 @@ class LoraStackField(QWidget):
         if le is not None:
             le.setText(text)
         self.summary_combo.blockSignals(False)
+        finalize_lora_combo_display(self.summary_combo)
 
     def _configure_stack_mode_combo(self) -> None:
         self.summary_combo.setEditable(True)
@@ -405,13 +447,18 @@ class LoraStackField(QWidget):
         if le is not None:
             le.setReadOnly(True)
             le.setCursor(Qt.CursorShape.PointingHandCursor)
+            le.setFrame(False)
             if not self._line_edit_filter_installed:
                 le.installEventFilter(self)
                 self._line_edit_filter_installed = True
+        combo_h = self.summary_combo.fontMetrics().height() + 10
+        self.summary_combo.setFixedHeight(combo_h)
         self.summary_combo.setMaxVisibleItems(0)
 
     def _configure_single_mode_combo(self) -> None:
         self.summary_combo.setEditable(False)
+        self.summary_combo.setMinimumHeight(0)
+        self.summary_combo.setMaximumHeight(16777215)
         self.summary_combo.setMaxVisibleItems(12)
 
     def populate(

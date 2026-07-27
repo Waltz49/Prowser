@@ -33,5 +33,13 @@ def run_worker_main(pipeline_id: str) -> int:
         from imagegen_plugins.pipelines.mflux_flux2_klein_edit import main as klein_edit_main
 
         return int(klein_edit_main())
+    if pipeline_id == "mflux_z_image_turbo":
+        from imagegen_plugins.pipelines.mflux_z_image_turbo import main as z_image_mflux_main
+
+        return int(z_image_mflux_main())
+    if pipeline_id == "z_image_turbo_sdnq":
+        from imagegen_plugins.pipelines.z_image_turbo import main as z_image_sdnq_main
+
+        return int(z_image_sdnq_main())
     print(f"Unknown imagegen pipeline: {pipeline_id}", file=sys.stderr)
     return 2

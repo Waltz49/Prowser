@@ -4,13 +4,14 @@
 from __future__ import annotations
 
 from PySide6.QtCore import QEvent, QObject, Qt
-from PySide6.QtGui import QKeyEvent, QCursor
+from PySide6.QtGui import QKeyEvent, QCursor, QWindow
 from PySide6.QtWidgets import (
     QApplication,
     QDialog,
     QLabel,
     QSizePolicy,
     QVBoxLayout,
+    QWidget,
 )
 
 from imagegen_plugins.image_gen_persistence import (
@@ -84,14 +85,21 @@ class _JobQueueKeyPassthroughFilter(QObject):
         super().__init__(dialog)
         self._dialog = dialog
 
+    def _watched_belongs_to_dialog(self, watched: QObject) -> bool:
+        if watched is self._dialog:
+            return True
+        if isinstance(watched, QWidget):
+            return self._dialog.isAncestorOf(watched)
+        if isinstance(watched, QWindow):
+            return watched is self._dialog.windowHandle()
+        return False
+
     def eventFilter(self, watched: QObject, event: QEvent) -> bool:
         if event.type() != QEvent.Type.KeyPress:
             return False
         if not self._dialog.isVisible() or not self._dialog.isActiveWindow():
             return False
-        if watched is not self._dialog and not self._dialog.isAncestorOf(
-            watched  # type: ignore[arg-type]
-        ):
+        if not self._watched_belongs_to_dialog(watched):
             return False
         key_event = event  # type: ignore[assignment]
         if _is_cmd_j(key_event):

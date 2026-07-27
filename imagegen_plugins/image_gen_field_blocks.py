@@ -93,7 +93,7 @@ def steps_slider_block(
     lo = steps_min
     lora_id = None
     lora_stack: list[str] = []
-    if pipeline_id == "flux_schnell_mflux_play":
+    if pipeline_id in ("flux_schnell_mflux_play", "mflux_z_image_turbo"):
         from imagegen_plugins.mflux_lora_presets import (
             effective_steps_for_lora,
             effective_steps_for_lora_stack,

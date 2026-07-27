@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Append missing LoRA trigger words to the generation prompt at job time."""
+"""Add missing LoRA trigger words to the generation prompt at job time."""
 
 from __future__ import annotations
 
@@ -24,15 +24,29 @@ def prompt_contains_lora_trigger(prompt: str, trigger: str) -> bool:
     return re.search(pattern, prompt_s, re.IGNORECASE) is not None
 
 
+def _format_prompt_with_triggers(prompt_s: str, trigger_block: str) -> str:
+    """Insert trigger text per thumbnails.thumbnail_constants.TRIGGER_POSITION."""
+    from thumbnails.thumbnail_constants import TRIGGER_POSITION
+
+    block = (trigger_block or "").strip()
+    if not block:
+        return prompt_s
+    if not prompt_s:
+        return block
+    if TRIGGER_POSITION == 0:
+        return f"{block}\n\n{prompt_s}"
+    if TRIGGER_POSITION == 2:
+        return f"{block}\n\n{prompt_s}\n\n{block}"
+    return f"{prompt_s}\n\n{block}"
+
+
 def prompt_with_lora_trigger_added(prompt: str, trigger: str) -> str:
-    """Append the trigger to the prompt when it is missing."""
+    """Add the trigger to the prompt when it is missing (placement from TRIGGER_POSITION)."""
     prompt_s = (prompt or "").strip()
     trigger_s = (trigger or "").strip()
     if not trigger_s or prompt_contains_lora_trigger(prompt_s, trigger_s):
         return prompt_s
-    if prompt_s:
-        return f"{prompt_s}\n\n{trigger_s}"
-    return trigger_s
+    return _format_prompt_with_triggers(prompt_s, trigger_s)
 
 
 def _missing_lora_trigger_words(values: Dict[str, Any]) -> List[str]:
@@ -68,13 +82,13 @@ def augment_prompt_with_missing_lora_triggers(
     prompt: str,
     values: Dict[str, Any],
 ) -> str:
-    """Return prompt with any missing LoRA trigger words appended."""
+    """Return prompt with any missing LoRA trigger words added."""
     probe = dict(values)
     probe["prompt"] = prompt
-    out = (prompt or "").strip()
-    for trigger in _missing_lora_trigger_words(probe):
-        out = prompt_with_lora_trigger_added(out, trigger)
-    return out
+    missing = _missing_lora_trigger_words(probe)
+    if not missing:
+        return (prompt or "").strip()
+    return _format_prompt_with_triggers((prompt or "").strip(), "\n\n".join(missing))
 
 
 def apply_lora_triggers_for_run(values: Dict[str, Any]) -> None:

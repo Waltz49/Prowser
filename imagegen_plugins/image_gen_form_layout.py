@@ -1671,6 +1671,7 @@ class ImageGenFieldsPanel:
         self._side_btn_host: Optional[QWidget] = None
         self._below_row_in_layout = False
         self._control_groups: List[QWidget] = []
+        self._full_width_control_headers: List[QWidget] = []
         self._checkbox_groups: List[QWidget] = []
         self._reflow_timer = QTimer(self.widget)
         self._reflow_timer.setSingleShot(True)
@@ -1884,13 +1885,44 @@ class ImageGenFieldsPanel:
         for group in self._control_groups + self._checkbox_groups:
             group.setParent(None)
 
-    def _clear_controls_layout_wrappers(self) -> None:
+    def _full_width_header_ids(self) -> set[int]:
+        return {id(header) for header in self._full_width_control_headers}
+
+    def _clear_flow_layout_wrappers(self) -> None:
         self._detach_below_prompt_groups()
-        while self._controls_layout.count():
-            item = self._controls_layout.takeAt(0)
+        header_ids = self._full_width_header_ids()
+        for index in range(self._controls_layout.count() - 1, -1, -1):
+            item = self._controls_layout.itemAt(index)
+            if item is None:
+                continue
             widget = item.widget()
-            if widget is not None:
-                widget.deleteLater()
+            if widget is None or id(widget) in header_ids:
+                continue
+            self._controls_layout.removeWidget(widget)
+            widget.deleteLater()
+
+    def _clear_controls_layout_wrappers(self) -> None:
+        self._clear_flow_layout_wrappers()
+        for header in self._full_width_control_headers:
+            if header.parent() is not None:
+                header.setParent(None)
+            header.deleteLater()
+        self._full_width_control_headers.clear()
+
+    def _mount_full_width_control_headers(self) -> None:
+        for index, header in enumerate(self._full_width_control_headers):
+            if header.parent() is not self._controls_host:
+                header.setParent(self._controls_host)
+            while self._controls_layout.indexOf(header) != index:
+                current = self._controls_layout.indexOf(header)
+                if current >= 0:
+                    self._controls_layout.removeWidget(header)
+                self._controls_layout.insertWidget(
+                    index,
+                    header,
+                    0,
+                    Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop,
+                )
 
     def _mount_group_in_layout(
         self,
@@ -1932,7 +1964,11 @@ class ImageGenFieldsPanel:
         return column
 
     def _reflow_controls_layout(self) -> None:
-        if not self._control_groups and not self._checkbox_groups:
+        if (
+            not self._control_groups
+            and not self._checkbox_groups
+            and not self._full_width_control_headers
+        ):
             self._clear_controls_layout_wrappers()
             self._sync_minimum_widths()
             return
@@ -1971,7 +2007,8 @@ class ImageGenFieldsPanel:
         self._last_reflow_split = split
 
         self._ensure_below_row_in_layout()
-        self._clear_controls_layout_wrappers()
+        self._clear_flow_layout_wrappers()
+        self._mount_full_width_control_headers()
 
         if two_col and flow_sections:
             row = QWidget(self._controls_host)
@@ -2000,6 +2037,12 @@ class ImageGenFieldsPanel:
     def prepend_control_group(self, group: QWidget) -> None:
         self._ensure_below_row_in_layout()
         self._control_groups.insert(0, group)
+        self._schedule_reflow()
+
+    def prepend_full_width_control_header(self, header: QWidget) -> None:
+        """Full-width row above the flowing control columns (e.g. section headers)."""
+        self._ensure_below_row_in_layout()
+        self._full_width_control_headers.insert(0, header)
         self._schedule_reflow()
 
     def _append_control_group(self, group: QWidget) -> None:
@@ -2044,9 +2087,14 @@ class ImageGenFieldsPanel:
             self._prompt_group = None
         self._prompt_import_host = None
 
-        for group in self._control_groups + self._checkbox_groups:
+        for group in (
+            self._control_groups
+            + self._full_width_control_headers
+            + self._checkbox_groups
+        ):
             group.deleteLater()
         self._control_groups.clear()
+        self._full_width_control_headers.clear()
         self._checkbox_groups.clear()
         self._clear_controls_layout_wrappers()
 

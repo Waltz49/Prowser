@@ -63,6 +63,8 @@ def model_display_name(pipeline_id: str, hf_model_id: str) -> str:
         return "SANA Sprint 0.6B 1024px"
     if pipeline_id == "z_image_turbo_sdnq":
         return "Z-Image Turbo (8-bit)"
+    if pipeline_id == "mflux_z_image_turbo":
+        return "Z-Image Turbo (4-bit)"
     if pipeline_id == "sd15_diffusers":
         if hf_model_id and "/" in hf_model_id:
             return hf_model_id.split("/")[-1].replace("_", " ")
@@ -123,6 +125,8 @@ def pipeline_model_is_local(
     elif pipeline_id == "sana_sprint_600m":
         result = _hf_repo_snapshot_has_weights(hf_model_id)
     elif pipeline_id == "z_image_turbo_sdnq":
+        result = _hf_repo_snapshot_is_complete(hf_model_id, _Z_IMAGE_WEIGHT_SUBDIRS)
+    elif pipeline_id == "mflux_z_image_turbo":
         result = _hf_repo_snapshot_is_complete(hf_model_id, _Z_IMAGE_WEIGHT_SUBDIRS)
     elif pipeline_id == "sd15_diffusers":
         from imagegen_plugins.hf_model_ids import SD15_DEFAULT_VAE

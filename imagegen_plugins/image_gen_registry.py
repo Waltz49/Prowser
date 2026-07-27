@@ -22,6 +22,7 @@ from imagegen_plugins.image_gen_pipeline_modes import (
 _MFLUX_QUANT_STATUS_PIPELINES = frozenset(
     {
         "flux_schnell_mflux_play",
+        "mflux_z_image_turbo",
         "mflux_fill_expand",
         "mflux_fill_infill",
         "mflux_flux2_klein_create",

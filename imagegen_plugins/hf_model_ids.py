@@ -16,6 +16,7 @@ ANYTHING_FURRY = "stablediffusionapi/anythingfurry"
 SD15_DEFAULT_VAE = "stabilityai/sd-vae-ft-mse"
 
 Z_IMAGE_TURBO_SDNQ_INT8 = "Disty0/Z-Image-Turbo-SDNQ-int8"
+Z_IMAGE_TURBO_MFLUX_4BIT = "filipstrand/Z-Image-Turbo-mflux-4bit"
 
 # SD 1.5 checkpoints that use HOST_SD15 (settings + run dialog LoRA lists).
 SD15_LORA_MODEL_KEYS: tuple[str, ...] = (
@@ -31,6 +32,7 @@ LORA_PROBE_MODEL_ORDER: tuple[str, ...] = (
     FLUX2_KLEIN_9B,
     FLUX2_KLEIN_9B_KV,
     SCENEWORKS_FLUX2_KLEIN_9B_KV_MLX,
+    Z_IMAGE_TURBO_MFLUX_4BIT,
     REALISTIC_VISION_V4_NOVAE,
     ANYTHING_FURRY,
 )
@@ -46,6 +48,7 @@ LORA_MODEL_DISPLAY_NAMES: dict[str, str] = {
     REALISTIC_VISION_V4_NOVAE: "Realistic Vision V4.0",
     ANYTHING_FURRY: "Anything Furry",
     Z_IMAGE_TURBO_SDNQ_INT8: "Z-Image Turbo",
+    Z_IMAGE_TURBO_MFLUX_4BIT: "Z-Image Turbo 4-bit",
 }
 
 

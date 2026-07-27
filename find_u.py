@@ -46,6 +46,7 @@ ENTRY_MODULES: Tuple[str, ...] = (
     "imagegen_plugins.pipelines.mflux_flux2_klein_create",
     "imagegen_plugins.pipelines.mflux_flux2_klein_edit",
     "imagegen_plugins.pipelines.z_image_turbo",
+    "imagegen_plugins.pipelines.mflux_z_image_turbo",
     # PyInstaller runtime hook (imports frozen_support helpers at bundle startup).
     "pyinstaller_runtime_hook",
 )

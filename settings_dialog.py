@@ -956,7 +956,7 @@ class SettingsDialog(QDialog):
         self.tab_widget.addTab(self.theme_settings_tab, "Theme", "🎨")
         self.tab_widget.addTab(self.map_settings_tab, "Maps and Editor", "📱")
         self.tab_widget.addTab(self.slideshow_settings_tab, "Slideshow", "💥")
-        self.tab_widget.addTab(self.similarity_settings_tab, "Search Models", "🔍")
+        self.tab_widget.addTab(self.similarity_settings_tab, "Models for Search", "🔍")
         if self._show_faces_settings_tab:
             self.tab_widget.addTab(self.faces_tab, "Face Recognition", "🧑🏼‍🦱")
         if self._show_captioning_settings_tab:
@@ -5707,7 +5707,8 @@ class SettingsDialog(QDialog):
             "QComboBox#loraSettingsModelCombo { max-width: 4096px; }"
         )
         for model in lora_models_for_settings():
-            self._lora_model_combo.addItem(model.display_name, model.model_key)
+            label = model.display_name.rsplit("/", 1)[-1]
+            self._lora_model_combo.addItem(label, model.model_key)
         model_grid.addWidget(self._lora_model_combo, 0, 1)
         self._lora_available_in_label = QLabel()
         self._lora_available_in_label.setWordWrap(True)
@@ -5787,21 +5788,8 @@ class SettingsDialog(QDialog):
     def _update_lora_intro_text(self) -> None:
         if not hasattr(self, "_lora_intro_label"):
             return
-        from imagegen_plugins.lora_model_registry import lora_settings_model
-
-        model_key = self._current_lora_model_key()
-        model = lora_settings_model(model_key)
         self._update_lora_available_in_text()
-        if model is None:
-            self._lora_intro_label.setText("")
-            return
-        text = (
-            f"LoRAs listed here are valid for {model.display_name} only. "
-            "Tools → Debug → Check LoRAs probes on-disk LoRA weights against installed models "
-            "and enables passers here (unless Hidden). Install adapters for the generation menu. "
-            "The app does not change your selected base model when you pick a LoRA."
-        )
-        self._lora_intro_label.setText(text)
+        self._lora_intro_label.setText("Installed or available LoRAs:")
 
     def _load_lora_drafts_from_settings(self, settings: Optional[dict] = None) -> None:
         """Load per-model LoRA enable drafts (session source of truth)."""

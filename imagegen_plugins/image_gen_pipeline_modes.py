@@ -113,6 +113,22 @@ PIPELINE_MODES: Dict[str, PipelineMode] = {
         supports_negative_prompt=False,
         supports_progressive_images=False,
     ),
+    "mflux_z_image_turbo": PipelineMode(
+        pipeline_id="mflux_z_image_turbo",
+        worker_script="mflux_z_image_turbo.py",
+        steps_default=9,
+        steps_max=20,
+        guidance_min=0.0,
+        guidance_max=0.0,
+        guidance_default=0.0,
+        width_min=256,
+        width_max=1440,
+        height_min=256,
+        height_max=1440,
+        dim_step=16,
+        supports_negative_prompt=False,
+        supports_progressive_images=True,
+    ),
     "sd15_diffusers": PipelineMode(
         pipeline_id="sd15_diffusers",
         worker_script="sd15_diffusers.py",
@@ -263,7 +279,7 @@ def align_dims_for_pipeline(
         from imagegen_plugins.pipelines.sd15_diffusers import align_sd15_dims
 
         return align_sd15_dims(w, h, max_side=max_side)
-    if pipeline_id == "z_image_turbo_sdnq":
+    if pipeline_id in ("z_image_turbo_sdnq", "mflux_z_image_turbo"):
         from imagegen_plugins.pipelines.z_image_turbo import align_z_image_dims
 
         return align_z_image_dims(w, h, max_side=max_side)
@@ -421,6 +437,10 @@ def pipeline_is_available(pipeline_id: str) -> bool:
         from imagegen_plugins.pipelines.z_image_turbo import z_image_turbo_is_installed
 
         result = z_image_turbo_is_installed()
+    elif pipeline_id == "mflux_z_image_turbo":
+        from imagegen_plugins.pipelines.mflux_z_image_turbo import mflux_is_installed
+
+        result = mflux_is_installed()
     elif pipeline_id in ("mflux_fill_expand", "mflux_fill_infill"):
         from imagegen_plugins.pipelines.mflux_fill_expand import mflux_is_installed
 
@@ -456,6 +476,13 @@ def resolve_steps_for_run(pipeline_id: str, values: Dict[str, Any]) -> int:
         else:
             lora_id = coerce_lora_preset_id(values.get("mflux_lora", "none"))
             steps = effective_steps_for_lora(steps, lora_id, for_fill=False)
+        steps = max(mode.steps_min, min(mode.steps_max, steps))
+    if pipeline_id == "mflux_z_image_turbo":
+        stack = effective_lora_ids_from_values(
+            values, pipeline_id=pipeline_id, pop=False
+        )
+        if stack:
+            steps = effective_steps_for_lora_stack(steps, stack, for_fill=False)
         steps = max(mode.steps_min, min(mode.steps_max, steps))
     if pipeline_id in _MFLUX_PIPELINE_IDS:
         steps = max(MFLUX_FLOW_MATCH_MIN_STEPS, steps)
@@ -531,7 +558,8 @@ def merge_defaults(
         from imagegen_plugins.lora_host_registry import HOST_FLUX1_T2I
         from imagegen_plugins.mflux_lora_presets import strip_lora_payload_keys_for_host
 
-        strip_lora_payload_keys_for_host(base, host_id=HOST_FLUX1_T2I, pop=True)
+        host_id = lora_host_for_pipeline(pipeline_id) or HOST_FLUX1_T2I
+        strip_lora_payload_keys_for_host(base, host_id=host_id, pop=True)
         if "mflux_lora" in base:
             base["mflux_lora"] = coerce_lora_preset_id(base["mflux_lora"])
         raw_stack = base.get("mflux_lora_stack")
@@ -588,6 +616,11 @@ def build_worker_payload(
             merged,
             for_fill=(pipeline_id in ("mflux_fill_expand", "mflux_fill_infill")),
         )
+    if pipeline_id == "mflux_z_image_turbo":
+        from imagegen_plugins.mflux_lora_presets import apply_lora_to_mflux_payload
+
+        merged.pop("copies", None)
+        apply_lora_to_mflux_payload(merged, for_z_image=True)
     if pipeline_id == "mflux_fill_infill":
         from imagegen_plugins.pixelmator_export import missing_infill_export_paths
 

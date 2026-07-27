@@ -19,6 +19,7 @@ from imagegen_plugins.hf_model_ids import (
     REALISTIC_VISION_V4_NOVAE,
     SD15_DEFAULT_VAE,
     Z_IMAGE_TURBO_SDNQ_INT8,
+    Z_IMAGE_TURBO_MFLUX_4BIT,
     lora_model_display_name,
 )
 from imagegen_plugins.image_gen_model_availability import pipeline_model_is_local
@@ -41,6 +42,7 @@ MODEL_DOWNLOAD_SIZE_ESTIMATE_BYTES: Dict[str, int] = {
     SCENEWORKS_FLUX2_KLEIN_9B_KV_MLX: 22_000_000_000,
     "Efficient-Large-Model/Sana_Sprint_0.6B_1024px_diffusers": 7_703_533_162,
     Z_IMAGE_TURBO_SDNQ_INT8: 6_200_000_000,
+    Z_IMAGE_TURBO_MFLUX_4BIT: 5_900_000_000,
     ANYTHING_FURRY: 4_100_000_000,
     REALISTIC_VISION_V4_NOVAE: 4_265_000_000,
     SD15_DEFAULT_VAE: 334_000_000,

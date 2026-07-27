@@ -347,6 +347,24 @@ def _run_generate(payload: Dict[str, Any], job_id: str) -> None:
         from imagegen_plugins.pipelines.sd15_diffusers import run_from_payload
     elif pipeline_id == "z_image_turbo_sdnq":
         from imagegen_plugins.pipelines.z_image_turbo import run_from_payload
+    elif pipeline_id == "mflux_z_image_turbo":
+        if getattr(sys, "frozen", False):
+            try:
+                import mlx.core as mx
+
+                mx.default_device()
+            except Exception as e:
+                _log_worker_error("MLX native extension failed to load", e)
+                detail = str(e)
+                if "mlx._reprlib_fix" in detail:
+                    detail = (
+                        "MLX Python modules are incomplete in this app bundle "
+                        "(missing mlx._reprlib_fix). Rebuild with ./pyInstallerBuild.sh."
+                    )
+                raise RuntimeError(
+                    f"{detail} See Tools > Debug > View log for details."
+                ) from e
+        from imagegen_plugins.pipelines.mflux_z_image_turbo import run_from_payload
     elif pipeline_id in ("mflux_fill_expand", "mflux_fill_infill"):
         if getattr(sys, "frozen", False):
             try:

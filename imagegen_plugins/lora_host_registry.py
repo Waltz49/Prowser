@@ -15,12 +15,14 @@ from imagegen_plugins.hf_model_ids import (
     FLUX2_KLEIN_9B_KV,
     SCENEWORKS_FLUX2_KLEIN_9B_KV_MLX,
     SD15_LORA_MODEL_KEYS,
+    Z_IMAGE_TURBO_MFLUX_4BIT,
 )
 
 HOST_FLUX1_T2I = "flux1_t2i"
 HOST_FLUX1_FILL = "flux1_fill"
 HOST_FLUX2_KLEIN = "flux2_klein"
 HOST_SD15 = "sd15"
+HOST_Z_IMAGE_TURBO = "z_image_turbo"
 
 
 @dataclass(frozen=True)
@@ -65,6 +67,12 @@ LORA_HOSTS: Dict[str, LoraHost] = {
         pipeline_ids=("sd15_diffusers",),
         probe_targets=SD15_LORA_MODEL_KEYS,
     ),
+    HOST_Z_IMAGE_TURBO: LoraHost(
+        host_id=HOST_Z_IMAGE_TURBO,
+        display_name="Z-Image Turbo (Create)",
+        pipeline_ids=("mflux_z_image_turbo",),
+        probe_targets=(Z_IMAGE_TURBO_MFLUX_4BIT,),
+    ),
 }
 
 # Settings tab order.
@@ -72,6 +80,7 @@ LORA_HOST_ORDER: Tuple[str, ...] = (
     HOST_FLUX1_T2I,
     HOST_FLUX1_FILL,
     HOST_FLUX2_KLEIN,
+    HOST_Z_IMAGE_TURBO,
     HOST_SD15,
 )
 

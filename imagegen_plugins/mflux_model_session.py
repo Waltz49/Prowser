@@ -68,9 +68,11 @@ def release_all_mflux_sessions(*, reason: str = "explicit") -> None:
         perf_log_kv("model_unload", reason=reason, pipeline=_LOADED_PIPELINE_ID or "")
     from imagegen_plugins.mflux_flux1_session import release_flux1_sessions
     from imagegen_plugins.mflux_flux2_klein_session import release_flux2_klein_session
+    from imagegen_plugins.mflux_z_image_session import release_z_image_session
 
     release_flux2_klein_session(reason=reason)
     release_flux1_sessions(reason=reason)
+    release_z_image_session(reason=reason)
     _LOADED_PIPELINE_ID = None
     _LOADED_MODEL_KEY = None
     _image_model_retained = False
@@ -87,10 +89,11 @@ def prepare_image_model_for_payload(payload: Dict[str, Any]) -> None:
     if _LOADED_PIPELINE_ID is None:
         return
     if _LOADED_PIPELINE_ID != pipeline_id or _LOADED_MODEL_KEY != key:
+        old_pipeline_id = _LOADED_PIPELINE_ID
         release_all_mflux_sessions(
-            reason=f"pipeline_change {_LOADED_PIPELINE_ID!r}->{pipeline_id!r}"
+            reason=f"pipeline_change {old_pipeline_id!r}->{pipeline_id!r}"
         )
-        if _LOADED_PIPELINE_ID in (
+        if old_pipeline_id in (
             "sana_sprint_600m",
             "sd15_diffusers",
             "z_image_turbo_sdnq",
