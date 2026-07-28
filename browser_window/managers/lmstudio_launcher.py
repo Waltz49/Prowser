@@ -4,6 +4,7 @@ LM Studio macOS app launcher: verify installation and open the app.
 """
 
 import os
+from typing import Callable
 
 _LMSTUDIO_DOWNLOAD_URL = "https://lmstudio.ai/"
 
@@ -95,6 +96,9 @@ def show_ai_caption_error_dialog(
     When *on_run_foreground* or *on_run_now* is provided, adds a concurrent-run button.
     When *on_queue_job* is provided, adds a Queue Job button.
     """
+    from thumbnails.thumbnail_constants import is_vision_required_error
+    from utils import show_scrollable_text_dialog, vision_required_icon_pixmap
+
     run_callback = on_run_now if on_run_now is not None else on_run_foreground
     run_tooltip = (
         run_now_tooltip
@@ -103,113 +107,27 @@ def show_ai_caption_error_dialog(
     )
     run_label = "Run Now" if on_run_now is not None else "Run Foreground"
     lmstudio_label = "LM Studio" if on_queue_job is not None else "LM Studio..."
-    from PySide6.QtWidgets import (
-        QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-        QMessageBox, QStyle,
-    )
-    from PySide6.QtCore import Qt
-    from PySide6.QtGui import QTextDocument
-    from utils import (
-        get_button_style,
-        get_dialog_shell_stylesheet,
-        vision_required_icon_pixmap,
-    )
-    from thumbnails.thumbnail_constants import is_vision_required_error
 
-    dialog = QDialog(parent)
-    dialog.setWindowTitle(window_title)
-    dialog.setWindowFlags(
-        Qt.Dialog | Qt.WindowTitleHint | Qt.WindowSystemMenuHint
-        | Qt.WindowCloseButtonHint | Qt.WindowStaysOnTopHint
-    )
-    dialog.setWindowModality(Qt.WindowModality.ApplicationModal)
-    dialog.setMinimumWidth(340)
-
-    dialog.setStyleSheet(get_dialog_shell_stylesheet() + get_button_style())
-
-    def _dialog_icon_pixmap():
-        if is_vision_required_error(error_msg):
-            px = vision_required_icon_pixmap()
-            if not px.isNull():
-                return px
-        return dialog.style().standardIcon(QStyle.SP_MessageBoxWarning).pixmap(44, 44)
-
-    main_layout = QVBoxLayout(dialog)
-    main_layout.setSpacing(18)
-    main_layout.setContentsMargins(22, 18, 22, 18)
-
-    icon_layout = QHBoxLayout()
-    icon_label = QLabel()
-    icon_label.setPixmap(_dialog_icon_pixmap())
-    icon_layout.addWidget(icon_label, alignment=Qt.AlignTop)
-
-    text_label = QLabel(error_msg)
-    text_label.setWordWrap(True)
-    text_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
-    text_label.setMinimumWidth(240)
-    font_metrics = text_label.fontMetrics()
-    doc = QTextDocument()
-    doc.setDefaultFont(text_label.font())
-    doc.setTextWidth(240)
-    doc.setPlainText(error_msg)
-    ideal_height = doc.size().height()
-    padding = max(14, font_metrics.descent() + font_metrics.leading() + 10)
-    calculated_height = max(
-        int(ideal_height) + padding,
-        font_metrics.height() + padding,
-    )
-    text_label.setMinimumHeight(calculated_height)
-    icon_layout.addWidget(text_label)
-    main_layout.addLayout(icon_layout)
-
-    button_bar = QHBoxLayout()
-    button_bar.addStretch()
-    button_style = get_button_style()
-
-    def _dismiss():
-        dialog.accept()
-
-    ok_btn = QPushButton(cancel_label)
-    ok_btn.setStyleSheet(button_style)
-    ok_btn.setFocus()
-    ok_btn.clicked.connect(_dismiss)
-    button_bar.addWidget(ok_btn)
+    icon = vision_required_icon_pixmap() if is_vision_required_error(error_msg) else None
+    extra_actions: list[tuple[str, Callable[[], None], str | None, bool]] = []
 
     if run_callback is not None:
-
-        def _on_run():
-            run_callback()
-            _dismiss()
-
-        run_btn = QPushButton(run_label)
-        run_btn.setStyleSheet(button_style)
-        run_btn.setToolTip(run_tooltip)
-        run_btn.setDefault(True)
-        run_btn.clicked.connect(_on_run)
-        button_bar.addWidget(run_btn)
+        extra_actions.append((run_label, run_callback, run_tooltip, True))
 
     if on_queue_job is not None:
+        extra_actions.append(("Queue Job", on_queue_job, queue_job_tooltip, False))
 
-        def _on_queue():
-            on_queue_job()
-            _dismiss()
-
-        queue_btn = QPushButton("Queue Job")
-        queue_btn.setStyleSheet(button_style)
-        queue_btn.setToolTip(queue_job_tooltip)
-        queue_btn.clicked.connect(_on_queue)
-        button_bar.addWidget(queue_btn)
-
-    def _on_lmstudio():
-        _dismiss()
+    def _open_lmstudio() -> None:
         open_lmstudio_or_show_install_help(parent)
 
-    lmstudio_btn = QPushButton(lmstudio_label)
-    lmstudio_btn.setStyleSheet(button_style)
-    lmstudio_btn.clicked.connect(_on_lmstudio)
-    button_bar.addWidget(lmstudio_btn)
+    extra_actions.append((lmstudio_label, _open_lmstudio, None, False))
 
-    button_bar.addStretch()
-    main_layout.addLayout(button_bar)
-
-    dialog.exec()
+    show_scrollable_text_dialog(
+        parent,
+        window_title,
+        error_msg,
+        ok_label=cancel_label,
+        icon_pixmap=icon,
+        use_standard_warning_icon=icon is None or icon.isNull(),
+        extra_actions=extra_actions or None,
+    )

@@ -121,7 +121,7 @@ class _UnifiedDismissFilter(QObject):
             return False
         if event.modifiers() != Qt.KeyboardModifier.NoModifier:
             return False
-        self._shell._dismiss_discarding_current()
+        self._shell._on_close()
         event.accept()
         return True
 

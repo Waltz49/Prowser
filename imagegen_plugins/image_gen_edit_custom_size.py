@@ -370,14 +370,18 @@ def _add_labeled_slider_row(
 ) -> None:
     _compact_custom_size_dim_slider_row(control)
     row = QWidget(parent)
-    col = QVBoxLayout(row)
-    col.setContentsMargins(0, 0, 0, 0)
-    col.setSpacing(0)
-    col.addWidget(make_image_gen_field_label(label_text, row), 0)
-    col.addWidget(
-        wrap_image_gen_field_control_indent(
-            wrap_image_gen_bordered_field(control, bottom_pad=0), row
-        ),
+    hrow = QHBoxLayout(row)
+    hrow.setContentsMargins(0, 0, 0, 0)
+    hrow.setSpacing(6)
+    label = make_image_gen_field_label(label_text, row)
+    label.setWordWrap(False)
+    hrow.addWidget(
+        label,
+        0,
+        Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+    )
+    hrow.addWidget(
+        wrap_image_gen_bordered_field(control, bottom_pad=0),
         0,
         Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
     )

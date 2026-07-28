@@ -24,18 +24,22 @@ from chat_plugins.chat_ui_common import (
     ChatImageThumbRow,
     apply_chat_user_bubble_chrome,
     chat_assistant_message_stylesheet,
+    chat_audio_output_ui_enabled,
     chat_create_from_text_available,
     chat_prompt_edit_stylesheet,
+    chat_speak_button_stylesheet,
     create_chat_delete_button,
     create_chat_edit_button,
     create_chat_favorite_button,
     connect_chat_from_text_button_with_option_modifier,
     create_chat_from_text_button,
     create_chat_redo_button,
+    create_chat_speak_button,
     create_chat_stop_button,
     _icon_button_chrome_stylesheet,
     _local_paths_from_mime,
 )
+from speech_utils import is_speaking, speak_or_stop
 from theme.theme_service import get_active_theme
 
 
@@ -203,22 +207,28 @@ class ChatMessageWidget(QWidget):
         self._stop_btn = None
         self._from_text_btn = None
         self._favorite_btn = None
-        if message.role == "assistant" and chat_create_from_text_available():
-            self._from_text_btn = create_chat_from_text_button(self)
-            connect_chat_from_text_button_with_option_modifier(
-                self._from_text_btn, self._on_create_from_text
-            )
-            if on_create_from_text is not None:
-                self.create_from_text_requested.connect(on_create_from_text)
-        if message.role == "user":
+        self._speak_btn = None
+        self._speak_highlighted = False
+        if message.role == "assistant":
             self._stop_btn = create_chat_stop_button(self)
             self._stop_btn.clicked.connect(self.stop_requested.emit)
+            if chat_create_from_text_available():
+                self._from_text_btn = create_chat_from_text_button(self)
+                connect_chat_from_text_button_with_option_modifier(
+                    self._from_text_btn, self._on_create_from_text
+                )
+                if on_create_from_text is not None:
+                    self.create_from_text_requested.connect(on_create_from_text)
+        if message.role == "user":
             self._favorite_btn = create_chat_favorite_button(self)
             self._favorite_btn.clicked.connect(
                 lambda: self.favorite_requested.emit(message.message_id)
             )
             if on_favorite is not None:
                 self.favorite_requested.connect(on_favorite)
+        if chat_audio_output_ui_enabled():
+            self._speak_btn = create_chat_speak_button(self)
+            self._speak_btn.clicked.connect(self._on_speak_clicked)
         self._edit_btn = create_chat_edit_button(self)
         self._redo_btn = create_chat_redo_button(self)
         self._delete_btn = create_chat_delete_button(self)
@@ -236,15 +246,18 @@ class ChatMessageWidget(QWidget):
         actions.addStretch(1)
         if self._from_text_btn is not None:
             actions.addWidget(self._from_text_btn)
+        if self._stop_btn is not None:
+            actions.addWidget(self._stop_btn)
         if self._favorite_btn is not None:
-            if self._stop_btn is not None:
-                actions.addWidget(self._stop_btn)
             actions.addWidget(self._favorite_btn)
+        if self._speak_btn is not None:
+            actions.addWidget(self._speak_btn)
         actions.addWidget(self._edit_btn)
         actions.addWidget(self._redo_btn)
         actions.addWidget(self._delete_btn)
         outer.addLayout(actions)
         self._sync_from_text_button()
+        self._sync_speak_button()
 
     def message_id(self) -> str:
         return self._message.message_id
@@ -252,6 +265,13 @@ class ChatMessageWidget(QWidget):
     def set_stop_visible(self, visible: bool) -> None:
         if self._stop_btn is not None:
             self._stop_btn.setVisible(visible)
+
+    def set_speak_highlighted(self, highlighted: bool) -> None:
+        self._speak_highlighted = bool(highlighted)
+        if self._speak_btn is not None:
+            self._speak_btn.setStyleSheet(
+                chat_speak_button_stylesheet(highlighted=self._speak_highlighted)
+            )
 
     def displayed_image_paths(self) -> list[str]:
         if self._thumb_row is not None:
@@ -459,6 +479,24 @@ class ChatMessageWidget(QWidget):
         text = (self._message.text or "").strip()
         self._from_text_btn.setEnabled(bool(text))
 
+    def _speakable_text(self) -> str:
+        text = (self._message.text or "").strip()
+        if not text or text == "…":
+            return ""
+        return text
+
+    def _sync_speak_button(self) -> None:
+        if self._speak_btn is None:
+            return
+        self._speak_btn.setEnabled(bool(self._speakable_text()))
+
+    def _on_speak_clicked(self) -> None:
+        text = self._speakable_text()
+        if not text:
+            return
+        speak_or_stop(text)
+        self.set_speak_highlighted(is_speaking())
+
     def update_message(self, message: ChatMessage) -> None:
         self._message = message
         if self._body_label is not None:
@@ -466,6 +504,7 @@ class ChatMessageWidget(QWidget):
         if not self._editing:
             self._sync_image_thumb_row()
         self._sync_from_text_button()
+        self._sync_speak_button()
 
     def _start_edit(self) -> None:
         if self._editing:
@@ -559,3 +598,7 @@ class ChatMessageWidget(QWidget):
         ):
             if btn is not None:
                 btn.setStyleSheet(action_ss)
+        if self._speak_btn is not None:
+            self._speak_btn.setStyleSheet(
+                chat_speak_button_stylesheet(highlighted=self._speak_highlighted)
+            )

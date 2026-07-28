@@ -7,13 +7,17 @@ from collections.abc import Callable
 from typing import Optional
 
 from PySide6.QtCore import Qt, QSize, QEvent
-from PySide6.QtGui import QColor, QPainter, QPen
+from PySide6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPen
 from PySide6.QtWidgets import (
     QCheckBox,
+    QComboBox,
     QFrame,
     QHBoxLayout,
     QLabel,
+    QListView,
     QSizePolicy,
+    QStyle,
+    QStyleOptionComboBox,
     QVBoxLayout,
     QWidget,
 )
@@ -23,6 +27,160 @@ from settings.widgets.settings_dialog_theme import (
     SettingsGearButton,
     resolve_settings_chrome_from_widget,
 )
+
+
+_SETTINGS_LIST_COMBO_EXTRA_CHROME = 40
+
+
+def _settings_list_combo_text_width(
+    combo: QComboBox, *, font_size_px: int = 12
+) -> int:
+    font = QFont(combo.font())
+    if font_size_px > 0:
+        font.setPixelSize(font_size_px)
+    metrics = QFontMetrics(font)
+    return max(
+        (
+            metrics.horizontalAdvance(combo.itemText(index))
+            for index in range(combo.count())
+        ),
+        default=0,
+    )
+
+
+def settings_list_combo_width(combo: QComboBox, *, font_size_px: int = 12) -> int:
+    text_width = _settings_list_combo_text_width(combo, font_size_px=font_size_px)
+    opt = QStyleOptionComboBox()
+    opt.initFrom(combo)
+    style = combo.style()
+    if style is None:
+        return text_width + _SETTINGS_LIST_COMBO_EXTRA_CHROME
+    frame = style.pixelMetric(
+        QStyle.PixelMetric.PM_ComboBoxFrameWidth, opt, combo
+    )
+    arrow_rect = style.subControlRect(
+        QStyle.ComplexControl.CC_ComboBox,
+        opt,
+        QStyle.SubControl.SC_ComboBoxArrow,
+        combo,
+    )
+    arrow_width = arrow_rect.width() if arrow_rect.isValid() else 24
+    return text_width + arrow_width + frame * 2 + _SETTINGS_LIST_COMBO_EXTRA_CHROME
+
+
+def _apply_settings_list_combo_styles(
+    combo: QComboBox, *, width: int, font_size_px: int = 12
+) -> None:
+    combo.setStyleSheet(
+        "QComboBox#settingsListCombo {"
+        f" font-size: {font_size_px}px;"
+        " padding: 4px 8px;"
+        f" min-width: {width}px;"
+        f" max-width: {width}px;"
+        " }"
+        "QComboBox#settingsListCombo QAbstractItemView {"
+        f" font-size: {font_size_px}px;"
+        f" min-width: {width}px;"
+        " outline: none;"
+        " }"
+        "QComboBox#settingsListCombo QAbstractItemView::item {"
+        " padding: 4px 8px;"
+        " }"
+    )
+
+
+class SettingsListCombo(QComboBox):
+    """Preference combo with a non-native list popup sized to the longest item."""
+
+    def __init__(self, parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+        self._popup_width = 0
+        self._font_size_px = 12
+        self.setObjectName("settingsListCombo")
+        view = QListView(self)
+        view.setTextElideMode(Qt.TextElideMode.ElideNone)
+        view.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.setView(view)
+
+    def finish_setup(self, *, font_size_px: int = 12) -> None:
+        self._font_size_px = font_size_px
+        self._popup_width = settings_list_combo_width(self, font_size_px=font_size_px)
+        _apply_settings_list_combo_styles(
+            self, width=self._popup_width, font_size_px=font_size_px
+        )
+        self.setFixedWidth(self._popup_width)
+        self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        view = self.view()
+        if view is not None:
+            view.setMinimumWidth(self._popup_width)
+            row_height = max(
+                view.sizeHintForRow(0),
+                view.fontMetrics().height() + 8,
+            )
+            for index in range(self.count()):
+                self.setItemData(
+                    index,
+                    QSize(self._popup_width, row_height),
+                    Qt.ItemDataRole.SizeHintRole,
+                )
+
+    def refresh_item_width(self, *, font_size_px: Optional[int] = None) -> None:
+        self.finish_setup(font_size_px=font_size_px or self._font_size_px)
+
+    def showPopup(self) -> None:
+        width = self._popup_width or self.width()
+        view = self.view()
+        if view is not None:
+            view.setMinimumWidth(width)
+            popup = view.parentWidget()
+            if popup is not None:
+                popup.setMinimumWidth(width)
+                popup.setFixedWidth(width)
+        super().showPopup()
+
+
+def configure_settings_list_combo(
+    combo: QComboBox, *, font_size_px: int = 12
+) -> None:
+    """Size a settings list combo to its longest item without clipping or elision."""
+    if isinstance(combo, SettingsListCombo):
+        combo.finish_setup(font_size_px=font_size_px)
+        return
+    combo.setObjectName("settingsListCombo")
+    view = QListView(combo)
+    view.setTextElideMode(Qt.TextElideMode.ElideNone)
+    view.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+    combo.setView(view)
+    width = settings_list_combo_width(combo, font_size_px=font_size_px)
+    _apply_settings_list_combo_styles(combo, width=width, font_size_px=font_size_px)
+    combo.setFixedWidth(width)
+    combo.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+    view.setMinimumWidth(width)
+    row_height = max(view.sizeHintForRow(0), view.fontMetrics().height() + 8)
+    for index in range(combo.count()):
+        combo.setItemData(
+            index,
+            QSize(width, row_height),
+            Qt.ItemDataRole.SizeHintRole,
+        )
+
+
+def refresh_settings_list_combo(
+    combo: QComboBox, *, font_size_px: Optional[int] = None
+) -> None:
+    """Recompute width after combo items change."""
+    if isinstance(combo, SettingsListCombo):
+        combo.refresh_item_width(font_size_px=font_size_px)
+        return
+    configure_settings_list_combo(
+        combo, font_size_px=font_size_px if font_size_px is not None else 12
+    )
+
+
+def settings_list_combo_minimum_width(
+    combo: QComboBox, *, font_size_px: int = 12
+) -> int:
+    return settings_list_combo_width(combo, font_size_px=font_size_px)
 
 
 class MacToggleSwitch(QCheckBox):

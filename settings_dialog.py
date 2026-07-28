@@ -23,7 +23,7 @@ from PySide6.QtGui import QFont, QColor, QPixmap, QIcon, QFontMetrics, QPainter,
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QCheckBox, QPushButton, 
     QGroupBox, QFormLayout, QDialogButtonBox, QFrame, QSpinBox, QDoubleSpinBox,
-    QComboBox, QGridLayout, QMessageBox, QSizePolicy, QWidget, QTabWidget,
+    QGridLayout, QMessageBox, QSizePolicy, QWidget, QTabWidget,
     QLineEdit, QTextEdit, QFileDialog, QSlider, QRadioButton, QButtonGroup,
     QColorDialog, QApplication, QScrollArea, QProgressDialog
 )
@@ -149,8 +149,11 @@ from settings.widgets.collapsible_theme_group import (
 from settings.widgets.macos_preferences import (
     MacPreferencePanel,
     MacToggleSwitch,
+    SettingsListCombo,
     build_column_major_toggle_grid,
+    configure_settings_list_combo,
     mac_preference_section,
+    refresh_settings_list_combo,
 )
 from settings.widgets.multi_row_tab_widget import (
     FlowLayout,
@@ -2289,13 +2292,12 @@ class SettingsDialog(QDialog):
         # ----- Browse -----
         browse_title, browse_panel = mac_preference_section("Browse", inner)
 
-        self.space_mode_combo = QComboBox()
+        self.space_mode_combo = SettingsListCombo()
         self.space_mode_combo.addItem("Exit to thumbnails", userData="exit")
         self.space_mode_combo.addItem("Show next image", userData="advance")
+        configure_settings_list_combo(self.space_mode_combo)
         self.space_mode_combo.setToolTip("Default behavior for space key in browse mode")
         self.space_mode_combo.setFixedHeight(28)
-        self.space_mode_combo.setMinimumWidth(160)
-        self.space_mode_combo.setStyleSheet("QComboBox { font-size: 12px; padding: 4px; }")
         browse_panel.add_form_row(
             "Space Key",
             self.space_mode_combo,
@@ -2510,26 +2512,23 @@ class SettingsDialog(QDialog):
             gear_tooltip="Edit prefix and postfix rules",
         )
 
-        self.imagegen_fast_open_action_combo = QComboBox()
-        self.imagegen_fast_open_action_combo.addItem("From Text", userData="from_text")
-        self.imagegen_fast_open_action_combo.addItem("Edit Image", userData="edit_image")
+        self.imagegen_fast_open_action_combo = SettingsListCombo()
+        self.imagegen_fast_open_action_combo.addItem("Pronpt Only", userData="from_text")
+        self.imagegen_fast_open_action_combo.addItem("Image and Prompt", userData="edit_image")
+        configure_settings_list_combo(self.imagegen_fast_open_action_combo)
         self.imagegen_fast_open_action_combo.setToolTip(
             "Opens the unified image-generation dialog primed from the\n"
             "current image's user comment (prompt and import available)."
         )
         self.imagegen_fast_open_action_combo.setFixedHeight(28)
-        self.imagegen_fast_open_action_combo.setMinimumWidth(160)
-        self.imagegen_fast_open_action_combo.setStyleSheet(
-            "QComboBox { font-size: 12px; padding: 4px; }"
-        )
         imagegen_panel.add_form_row(
-            f"Fast Open action ({SHIFT_SYMBOL}{OPTION_SYMBOL} /)",
+            f"Fast Open Key Source ({SHIFT_SYMBOL}{OPTION_SYMBOL} /)",
             self.imagegen_fast_open_action_combo,
             tooltip=(
                 "Shift+Option+/ opens the unified image-generation dialog\n"
-                "primed from the current image's user comment."
+                "primed from the current image."
             ),
-            subtitle="Primed open from the current image.",
+            subtitle="Opens image generation dialog\nprimed from the current image.",
         )
 
         default_dim_index = (
@@ -2695,12 +2694,12 @@ class SettingsDialog(QDialog):
         preset_row.setContentsMargins(8, 12, 8, 8)
         preset_row.setSpacing(12)
         preset_row.addWidget(QLabel("Use palette from:"))
-        self.theme_preset_combo = QComboBox()
+        self.theme_preset_combo = SettingsListCombo()
         self.theme_preset_combo.addItem("Dark", "dark")
         self.theme_preset_combo.addItem("Light", "light")
         self.theme_preset_combo.addItem("User", "user")
+        configure_settings_list_combo(self.theme_preset_combo)
         self.theme_preset_combo.setToolTip("Each preset has its own saved color overrides.")
-        self.theme_preset_combo.setMinimumWidth(200)
         self.theme_preset_combo.currentIndexChanged.connect(self._on_theme_preset_changed)
         preset_row.addWidget(self.theme_preset_combo)
         preset_row.addStretch()
@@ -3868,13 +3867,11 @@ class SettingsDialog(QDialog):
         )
 
         # Default direction setting
-        self.direction_combo = QComboBox()
+        self.direction_combo = SettingsListCombo()
         self.direction_combo.addItems(['right', 'left', 'top', 'bottom', 'random', 'none'])
+        configure_settings_list_combo(self.direction_combo, font_size_px=13)
         self.direction_combo.setToolTip("Default direction for slideshow transitions")
         self.direction_combo.setFixedHeight(28)
-        self.direction_combo.setFixedWidth(80)
-        self.direction_combo.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
-        self.direction_combo.setStyleSheet("QComboBox { padding: 2px 8px; font-size: 13px; }")
         
         # -- Remove unused "direction_container" which causes the black block artifact --
         # Use the combo box directly in the grid layout. No need for a seperate container.
@@ -4354,14 +4351,13 @@ class SettingsDialog(QDialog):
         
         # Destination menu action: none/copy/move
         action_row = QFormLayout()
-        self.destination_menu_action_combo = QComboBox()
+        self.destination_menu_action_combo = SettingsListCombo()
         self.destination_menu_action_combo.addItems(["None", "Copy", "Move"])
+        configure_settings_list_combo(self.destination_menu_action_combo)
         self.destination_menu_action_combo.setToolTip(
             "None: hide destination menu items and disable keys.\n"
             "Copy: copy files. Move: move files."
         )
-        self.destination_menu_action_combo.setMinimumWidth(60)
-        self.destination_menu_action_combo.setMaximumWidth(60)
         action_row.setContentsMargins(0,30,0,0)
         action_row.addRow("Destination menu action:", self.destination_menu_action_combo)
         layout.addLayout(action_row)
@@ -4576,8 +4572,8 @@ class SettingsDialog(QDialog):
         examine_btn.clicked.connect(self._faces_examine_current_image)
         btn_row.addWidget(examine_btn)
         btn_row.addStretch()
-        self._faces_jump_combo = QComboBox()
-        self._faces_jump_combo.setMinimumWidth(200)
+        self._faces_jump_combo = SettingsListCombo()
+        configure_settings_list_combo(self._faces_jump_combo)
         self._faces_jump_combo.setToolTip("Jump to a person in the list below")
         self._faces_jump_combo.currentIndexChanged.connect(self._on_faces_jump_combo_changed)
         btn_row.addWidget(self._faces_jump_combo)
@@ -4650,6 +4646,7 @@ class SettingsDialog(QDialog):
                 continue
             combo.addItem((s.get("name") or "").strip() or "(unnamed)", sid)
         combo.blockSignals(False)
+        refresh_settings_list_combo(combo)
 
     def _faces_update_jump_combo_entry_for_subject(self, subject_id: Optional[str], new_name: str) -> None:
         combo = getattr(self, '_faces_jump_combo', None)
@@ -4659,6 +4656,7 @@ class SettingsDialog(QDialog):
         for i in range(combo.count()):
             if combo.itemData(i) == subject_id:
                 combo.setItemText(i, label)
+                refresh_settings_list_combo(combo)
                 break
 
     def _on_faces_jump_combo_changed(self, index: int) -> None:
@@ -5407,8 +5405,9 @@ class SettingsDialog(QDialog):
         similarity_layout.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
         
         # Similarity metric setting
-        self.similarity_metric_combo = QComboBox()
+        self.similarity_metric_combo = SettingsListCombo()
         self.similarity_metric_combo.addItems(["Cosine", "Euclidean", "Manhattan"])
+        configure_settings_list_combo(self.similarity_metric_combo)
         self.similarity_metric_combo.setToolTip(
             "Similarity metric for image similarity sorting:\n"
             "Cosine: Measures angle between feature vectors\n"
@@ -5419,10 +5418,6 @@ class SettingsDialog(QDialog):
             "distance)"
         )
         self.similarity_metric_combo.setFixedHeight(28)
-        self.similarity_metric_combo.setMinimumWidth(0)
-        self.similarity_metric_combo.setMaximumWidth(180)
-        self.similarity_metric_combo.setStyleSheet("QComboBox {font-size: 12px; }")
-        self.similarity_metric_combo.setSizeAdjustPolicy(QComboBox.AdjustToContents)
         similarity_layout.addRow("Similarity Metric:", self.similarity_metric_combo)
         
         # ResNet Model Selection
@@ -5688,27 +5683,15 @@ class SettingsDialog(QDialog):
         model_lbl = QLabel("Model:")
         model_lbl.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         model_grid.addWidget(model_lbl, 0, 0, Qt.AlignmentFlag.AlignTop)
-        self._lora_model_combo = QComboBox()
-        self._lora_model_combo.setObjectName("loraSettingsModelCombo")
+        self._lora_model_combo = SettingsListCombo()
         self._lora_model_combo.setToolTip(
             "Base image generation model whose LoRA adapters are\n"
             "listed below."
         )
-        self._lora_model_combo.setSizePolicy(
-            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
-        )
-        self._lora_model_combo.setSizeAdjustPolicy(
-            QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon
-        )
-        self._lora_model_combo.setMinimumContentsLength(36)
-        # Global theme caps QComboBox at 160px; fill the row after "Model:".
-        self._lora_model_combo.setMaximumWidth(4096)
-        self._lora_model_combo.setStyleSheet(
-            "QComboBox#loraSettingsModelCombo { max-width: 4096px; }"
-        )
         for model in lora_models_for_settings():
             label = model.display_name.rsplit("/", 1)[-1]
             self._lora_model_combo.addItem(label, model.model_key)
+        configure_settings_list_combo(self._lora_model_combo)
         model_grid.addWidget(self._lora_model_combo, 0, 1)
         self._lora_available_in_label = QLabel()
         self._lora_available_in_label.setWordWrap(True)

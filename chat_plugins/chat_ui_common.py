@@ -907,6 +907,63 @@ def create_chat_stop_button(parent=None):
     return btn
 
 
+def chat_speak_button_stylesheet(*, highlighted: bool = False) -> str:
+    th = get_active_theme()
+    sz = _ICON_BTN_SIZE
+    btn_bg = th.sidebar_background_color_hex
+    border = (
+        getattr(th, "button_border_hover_hex", th.accent_color_hex)
+        if highlighted
+        else th.border_default_hex
+    )
+    color = (
+        getattr(th, "button_border_hover_hex", th.accent_color_hex)
+        if highlighted
+        else th.dialog_text_color_hex
+    )
+    hover_border = getattr(th, "button_border_hover_hex", th.accent_color_hex)
+    return f"""
+        QPushButton {{
+            background-color: {btn_bg};
+            border: 1px solid {border};
+            border-radius: 3px;
+            padding: 0px;
+            color: {color};
+            font-size: 14px;
+            min-width: {sz}px;
+            max-width: {sz}px;
+            min-height: {sz}px;
+            max-height: {sz}px;
+        }}
+        QPushButton:hover:enabled {{
+            background-color: {th.button_bg_hover_hex};
+            border: 1px solid {hover_border};
+            color: {hover_border};
+        }}
+        QPushButton:disabled {{
+            opacity: 0.35;
+        }}
+    """
+
+
+def chat_audio_output_ui_enabled() -> bool:
+    try:
+        from bundle_capabilities import audio_output_ui_enabled
+
+        return audio_output_ui_enabled()
+    except ImportError:
+        return True
+
+
+def create_chat_speak_button(parent=None):
+    """Read-aloud control — same ꡴ symbol as File Information pane."""
+    btn = QPushButton("꡴", parent)
+    btn.setToolTip("Read aloud (click again to stop)")
+    btn.setFixedSize(_ICON_BTN_SIZE, _ICON_BTN_SIZE)
+    btn.setStyleSheet(chat_speak_button_stylesheet())
+    return btn
+
+
 def create_chat_favorite_button(parent=None):
     btn = QPushButton(parent)
     btn.setToolTip("Save as favorite user prompt")

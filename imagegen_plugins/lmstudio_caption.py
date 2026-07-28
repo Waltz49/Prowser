@@ -13,7 +13,10 @@ from typing import Optional
 from config import get_config, CAPTION_DEFAULTS
 from imagegen_plugins.ai_prompt_exit import apply_text_ai_exit
 from print_call_decorator import log_exception, print_call
-from thumbnails.thumbnail_constants import VISION_REQUIRED_MSG
+from thumbnails.thumbnail_constants import (
+    VISION_REQUIRED_MSG,
+    lmstudio_exception_implies_vision_required,
+)
 
 
 _CHANNEL_MARKER = '<channel|>'
@@ -329,7 +332,6 @@ def get_image_caption_stream(file_path: str, user_prompt_override: str | None = 
                 yield fragment.content
         except Exception as e:
             log_exception(e)
-            err_lower = str(e).lower()
-            if any(k in err_lower for k in ("vision", "image", "multimodal", "vlm", "visual")):
-                raise RuntimeError(VISION_REQUIRED_MSG)
-            raise RuntimeError(f"Caption generation failed.\n\nDetail: {e}")
+            if lmstudio_exception_implies_vision_required(e):
+                raise RuntimeError(VISION_REQUIRED_MSG) from e
+            raise RuntimeError(f"Caption generation failed.\n\nDetail: {e}") from e

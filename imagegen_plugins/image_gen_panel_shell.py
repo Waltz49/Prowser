@@ -103,18 +103,18 @@ def find_image_gen_unified_shell(widget: Any) -> Optional[Any]:
     """Walk parents to the unified shell hosting panel_mode children."""
     host = widget
     while host is not None:
-        if callable(getattr(host, "_dismiss_discarding_current", None)):
+        if getattr(host, "_image_gen_persistent_panel", False):
             return host
         host = host.parent()
     return None
 
 
 def panel_mode_reject(panel: Any) -> bool:
-    """Route reject/Escape from an embedded panel to the unified shell."""
+    """Route reject/Escape from an embedded panel to the unified shell close handler."""
     if not getattr(panel, "_panel_mode", False):
         return False
     shell = find_image_gen_unified_shell(panel)
     if shell is None:
         return False
-    shell._dismiss_discarding_current()
+    shell._on_close()
     return True

@@ -1445,12 +1445,141 @@ def create_image_preview_row(image_paths, labels=None, size=96):
     return row, thumb_labels
 
 
+def show_scrollable_text_dialog(
+    parent,
+    title: str,
+    text: str,
+    *,
+    ok_label: str = "Ok",
+    min_width: int = 520,
+    min_height: int = 320,
+    stay_on_top: bool = True,
+    icon_pixmap: Optional["QPixmap"] = None,
+    use_standard_warning_icon: bool = False,
+    extra_actions: Optional[
+        list[tuple[str, Callable[[], None], Optional[str], bool]]
+    ] = None,
+) -> None:
+    """Show a resizable, scrollable dialog for long error or detail text."""
+    from PySide6.QtCore import Qt
+    from PySide6.QtGui import QFont
+    from PySide6.QtWidgets import (
+        QDialog,
+        QHBoxLayout,
+        QLabel,
+        QPushButton,
+        QSizePolicy,
+        QStyle,
+        QTextEdit,
+        QVBoxLayout,
+    )
+
+    dialog = QDialog(parent)
+    dialog.setWindowTitle(title)
+    flags = (
+        Qt.WindowType.Window
+        | Qt.WindowType.WindowTitleHint
+        | Qt.WindowType.WindowSystemMenuHint
+        | Qt.WindowType.WindowCloseButtonHint
+        | Qt.WindowType.WindowMaximizeButtonHint
+    )
+    if stay_on_top:
+        flags |= Qt.WindowType.WindowStaysOnTopHint
+    dialog.setWindowFlags(flags)
+    dialog.setWindowModality(Qt.WindowModality.ApplicationModal)
+    dialog.setMinimumSize(min_width, min_height)
+    dialog.resize(max(min_width, 640), max(min_height, 360))
+    dialog.setStyleSheet(
+        get_standard_dialog_stylesheet(monospace_text_edit=True)
+    )
+
+    main_layout = QVBoxLayout(dialog)
+    apply_standard_dialog_layout(main_layout)
+
+    header_layout = QHBoxLayout()
+    header_layout.setSpacing(12)
+    if icon_pixmap is not None and not icon_pixmap.isNull():
+        icon_label = QLabel()
+        icon_label.setPixmap(icon_pixmap)
+        header_layout.addWidget(icon_label, alignment=Qt.AlignmentFlag.AlignTop)
+    elif use_standard_warning_icon:
+        icon_label = QLabel()
+        icon_label.setPixmap(
+            dialog.style().standardIcon(QStyle.SP_MessageBoxWarning).pixmap(44, 44)
+        )
+        header_layout.addWidget(icon_label, alignment=Qt.AlignmentFlag.AlignTop)
+    header_layout.addStretch()
+    if header_layout.count() > 1:
+        main_layout.addLayout(header_layout)
+
+    text_edit = QTextEdit()
+    text_edit.setReadOnly(True)
+    text_edit.setPlainText(text)
+    text_edit.setLineWrapMode(QTextEdit.LineWrapMode.WidgetWidth)
+    text_edit.setSizePolicy(
+        QSizePolicy.Policy.Expanding,
+        QSizePolicy.Policy.Expanding,
+    )
+    mono = QFont("Monaco")
+    if not mono.exactMatch():
+        mono = QFont("Menlo")
+    if not mono.exactMatch():
+        mono = QFont("Courier New")
+    mono.setStyleHint(QFont.StyleHint.Monospace)
+    mono.setPointSize(12)
+    text_edit.setFont(mono)
+    main_layout.addWidget(text_edit, stretch=1)
+
+    button_bar = QHBoxLayout()
+    button_bar.addStretch()
+    button_style = get_button_style()
+
+    def _dismiss() -> None:
+        dialog.accept()
+
+    ok_btn = QPushButton(ok_label)
+    ok_btn.setStyleSheet(button_style)
+    ok_btn.clicked.connect(_dismiss)
+    default_set = False
+    if not extra_actions:
+        ok_btn.setDefault(True)
+        ok_btn.setFocus()
+        default_set = True
+    button_bar.addWidget(ok_btn)
+
+    for label, callback, tooltip, is_default in extra_actions or []:
+        btn = QPushButton(label)
+        btn.setStyleSheet(button_style)
+        if tooltip:
+            btn.setToolTip(tooltip)
+
+        def _on_extra(cb: Callable[[], None] = callback) -> None:
+            cb()
+            _dismiss()
+
+        btn.clicked.connect(_on_extra)
+        if is_default:
+            btn.setDefault(True)
+            btn.setFocus()
+            default_set = True
+        button_bar.addWidget(btn)
+
+    if not default_set:
+        ok_btn.setDefault(True)
+        ok_btn.setFocus()
+
+    button_bar.addStretch()
+    main_layout.addLayout(button_bar)
+
+    dialog.exec()
+
+
 def show_styled_warning(parent, title, text):
     """Show a styled warning message box"""
     from PySide6.QtWidgets import QMessageBox
-    from thumbnails.thumbnail_constants import is_vision_required_error
+    from thumbnails.thumbnail_constants import is_lmstudio_error_dialog_message
 
-    if is_vision_required_error(text):
+    if is_lmstudio_error_dialog_message(text):
         from browser_window.managers.lmstudio_launcher import show_ai_caption_error_dialog
 
         show_ai_caption_error_dialog(parent, text, window_title=title)
@@ -1468,9 +1597,9 @@ def show_styled_information(parent, title, text):
 
 def show_styled_critical(parent, title, text):
     """Show a styled critical message box"""
-    from thumbnails.thumbnail_constants import is_vision_required_error
+    from thumbnails.thumbnail_constants import is_lmstudio_error_dialog_message
 
-    if is_vision_required_error(text):
+    if is_lmstudio_error_dialog_message(text):
         from browser_window.managers.lmstudio_launcher import show_ai_caption_error_dialog
 
         show_ai_caption_error_dialog(parent, text, window_title=title)

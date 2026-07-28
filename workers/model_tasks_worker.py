@@ -25,7 +25,10 @@ if _REPO_ROOT not in sys.path:
 
 from debug_log import debug_timestamp
 from print_call_decorator import log_exception, print_call
-from thumbnails.thumbnail_constants import VISION_REQUIRED_MSG
+from thumbnails.thumbnail_constants import (
+    VISION_REQUIRED_MSG,
+    lmstudio_exception_implies_vision_required,
+)
 
 from imagegen_plugins.image_gen_active_model import (
     FUNCTION_CREATE,
@@ -636,11 +639,7 @@ def get_flux_prompt_stream(
                     yield fragment.content
         except Exception as e:
             log_exception(e)
-            err_lower = str(e).lower()
-            if use_image and any(
-                k in err_lower
-                for k in ("vision", "image", "multimodal", "vlm", "visual")
-            ):
+            if use_image and lmstudio_exception_implies_vision_required(e):
                 raise RuntimeError(VISION_REQUIRED_MSG) from e
             raise RuntimeError(f"Prompt refinement failed.\n\nDetail: {e}") from e
 

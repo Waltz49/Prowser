@@ -75,6 +75,7 @@ from chat_plugins.chat_prefix_postfix import run_chat_prefix_postfix_library
 from chat_plugins.chat_system_prompt_dialog import edit_chat_system_prompt
 from chat_plugins.chat_tools_menu import show_chat_context_menu, show_chat_tools_menu
 from chat_plugins.chat_worker import ChatLmStudioService
+from speech_utils import is_speaking, register_speech_state_listener, unregister_speech_state_listener
 from theme.theme_base import job_pane_tools_icon_path
 from theme.theme_service import get_active_theme
 from utils import get_button_style
@@ -280,10 +281,11 @@ class ChatPaneWidget(QWidget):
         self._editing_message_widget: ChatMessageWidget | None = None
         self._lm_service = ChatLmStudioService.instance()
         self._streaming_widget: ChatMessageWidget | None = None
-        self._generating_user_widget: ChatMessageWidget | None = None
+        self._generating_assistant_widget: ChatMessageWidget | None = None
         self._lm_available_on_show = True
         self._chat_started = False
         self._setup_ui()
+        register_speech_state_listener(self._on_speech_state_changed)
         install_chat_redo_key_filter(self)
         install_chat_tab_key_filter(self)
         if self._preserve_across_sessions:
@@ -637,7 +639,15 @@ class ChatPaneWidget(QWidget):
                 w.deleteLater()
         self._message_widgets.clear()
         self._streaming_widget = None
-        self._generating_user_widget = None
+        self._generating_assistant_widget = None
+
+    def _on_speech_state_changed(self, _speaking: bool) -> None:
+        QTimer.singleShot(0, self._refresh_speak_highlights)
+
+    def _refresh_speak_highlights(self) -> None:
+        speaking = is_speaking()
+        for widget in self._message_widgets:
+            widget.set_speak_highlighted(speaking)
 
     def _wire_message_widget(self, widget: ChatMessageWidget) -> None:
         widget.edit_ended.connect(
@@ -649,15 +659,12 @@ class ChatPaneWidget(QWidget):
         if not active:
             for widget in self._message_widgets:
                 widget.set_stop_visible(False)
-            self._generating_user_widget = None
+            self._generating_assistant_widget = None
             return
-        user_idx = self._session.last_user_index()
-        user_widget: ChatMessageWidget | None = None
-        if 0 <= user_idx < len(self._message_widgets):
-            user_widget = self._message_widgets[user_idx]
-        self._generating_user_widget = user_widget
+        assistant_widget = self._streaming_widget
+        self._generating_assistant_widget = assistant_widget
         for widget in self._message_widgets:
-            widget.set_stop_visible(widget is user_widget)
+            widget.set_stop_visible(widget is assistant_widget)
 
     def _on_stop_generation(self) -> None:
         if self._is_worker_active():
@@ -810,14 +817,21 @@ class ChatPaneWidget(QWidget):
             self._remove_streaming_widget()
             self._set_generation_stop_ui(False)
             self._maybe_persist_session()
-            from thumbnails.thumbnail_constants import is_vision_required_error
-            if is_vision_required_error(err):
+            from thumbnails.thumbnail_constants import is_lmstudio_error_dialog_message
+            if is_lmstudio_error_dialog_message(err):
                 from browser_window.managers.lmstudio_launcher import (
                     show_ai_caption_error_dialog,
                 )
                 show_ai_caption_error_dialog(self, err, window_title="Chat Error")
             else:
-                QMessageBox.warning(self, "Chat Error", err)
+                from utils import show_scrollable_text_dialog
+
+                show_scrollable_text_dialog(
+                    self,
+                    "Chat Error",
+                    err,
+                    use_standard_warning_icon=True,
+                )
 
         def on_cancelled() -> None:
             idx = self._session.index_of(placeholder.message_id)
@@ -840,28 +854,35 @@ class ChatPaneWidget(QWidget):
             for m in self._session.messages
             if m.message_id != placeholder.message_id
         ]
-        auto_image_gen_mode = None
-        auto_image_gen_user_paths: list[str] = []
-        attach_assistant_sources = False
+        auto_image_gen_user_msg: ChatMessage | None = None
         for msg in reversed(history):
             if msg.role == "user":
-                auto_image_gen_mode = effective_image_gen_auto_mode(
-                    msg.text,
-                    has_user_images=bool(msg.image_paths),
-                    automatic_create=self._automatic_create,
-                )
-                auto_image_gen_user_paths = paths_for_image_gen(msg)
-                attach_assistant_sources = user_message_wants_assistant_sources(
-                    msg.text,
-                    has_user_images=bool(msg.image_paths),
-                ) or (
-                    self._copy_images_to_assistant
-                    and auto_image_gen_mode == "edit"
-                    and bool(auto_image_gen_user_paths)
-                )
-                if auto_image_gen_mode == "edit" and not attach_assistant_sources:
-                    auto_image_gen_mode = "create"
+                auto_image_gen_user_msg = msg
                 break
+
+        def _resolve_auto_image_gen_at_finish() -> tuple[
+            Optional[str], bool, list[str]
+        ]:
+            if auto_image_gen_user_msg is None:
+                return None, False, []
+            msg = auto_image_gen_user_msg
+            user_paths = paths_for_image_gen(msg)
+            mode = effective_image_gen_auto_mode(
+                msg.text,
+                has_user_images=bool(msg.image_paths),
+                automatic_create=self._automatic_create,
+            )
+            attach_sources = user_message_wants_assistant_sources(
+                msg.text,
+                has_user_images=bool(msg.image_paths),
+            ) or (
+                self._copy_images_to_assistant
+                and mode == "edit"
+                and bool(user_paths)
+            )
+            if mode == "edit" and not attach_sources:
+                mode = "create"
+            return mode, attach_sources, user_paths
 
         def on_finished_with_auto_generate(
             final: str, suppress_auto_image_gen: bool
@@ -869,6 +890,9 @@ class ChatPaneWidget(QWidget):
             on_finished(final)
             if suppress_auto_image_gen:
                 return
+            auto_image_gen_mode, attach_assistant_sources, auto_image_gen_user_paths = (
+                _resolve_auto_image_gen_at_finish()
+            )
             edit_source_paths: list[str] = []
             if attach_assistant_sources and auto_image_gen_user_paths:
                 edit_source_paths = self._apply_assistant_reference_images(

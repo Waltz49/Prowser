@@ -169,6 +169,114 @@ def is_vision_required_error(message: str) -> bool:
         return False
     return VISION_REQUIRED_MSG in message
 
+
+# LM Studio runtime failures that mention "image" but are not missing-vision errors.
+_LMSTUDIO_VISION_RUNTIME_EXCLUDE: tuple[str, ...] = (
+    "image features and image tokens",
+    "image token",
+    "do not match",
+    "merge_input_ids_with_image",
+    "could not prepare image",
+    "prepare image for",
+    "pixel_values",
+    "failed to process",
+    "image preprocessing",
+)
+
+_LMSTUDIO_VISION_CAPABILITY_MARKERS: tuple[str, ...] = (
+    "does not support vision",
+    "does not support image",
+    "not support vision",
+    "not support image",
+    "cannot accept image",
+    "can't accept image",
+    "not a vision",
+    "non-vision",
+    "non vision",
+    "no vision",
+    "vision not supported",
+    "vision is not supported",
+    "without vision support",
+    "lacks vision",
+    "not multimodal",
+    "non-multimodal",
+    "non multimodal",
+    "text-only model",
+    "text only model",
+    "not a vlm",
+    "not vlm",
+    "only supports text",
+    "visual input is not supported",
+)
+
+
+def lmstudio_exception_implies_vision_required(exc: BaseException) -> bool:
+    """Return True when an LM Studio generation error means the loaded model lacks vision."""
+    err_lower = str(exc).lower()
+    if not err_lower:
+        return False
+    for phrase in _LMSTUDIO_VISION_RUNTIME_EXCLUDE:
+        if phrase in err_lower:
+            return False
+    for phrase in _LMSTUDIO_VISION_CAPABILITY_MARKERS:
+        if phrase in err_lower:
+            return True
+    if "vision" in err_lower and any(
+        p in err_lower
+        for p in (
+            "not support",
+            "unsupported",
+            "does not support",
+            "cannot support",
+            "can't support",
+            "no vision",
+            "without vision",
+        )
+    ):
+        return True
+    if "multimodal" in err_lower and any(
+        p in err_lower for p in ("not ", "non-", "non ", "without ")
+    ):
+        return True
+    if "vlm" in err_lower and "not" in err_lower:
+        return True
+    if "image" in err_lower and any(
+        p in err_lower
+        for p in (
+            "not support",
+            "unsupported",
+            "does not support",
+            "cannot accept",
+            "can't accept",
+            "not accept",
+        )
+    ):
+        return True
+    return False
+
+
+_LMSTUDIO_ERROR_DIALOG_MARKERS: tuple[str, ...] = (
+    "Please start LMStudio and enable the local API server.",
+    "Start LM Studio, enable the local API server",
+    "LMStudio server is not running",
+    "Could not contact LMStudio server",
+    "LM Studio is not available",
+    "The LMStudio Python SDK is not installed",
+    "Chat generation failed",
+    "Caption generation failed",
+    "Prompt refinement failed",
+)
+
+
+def is_lmstudio_error_dialog_message(message: str) -> bool:
+    """True when the LM Studio error dialog (with Open LM Studio button) should be used."""
+    if not message:
+        return False
+    if is_vision_required_error(message):
+        return True
+    return any(marker in message for marker in _LMSTUDIO_ERROR_DIALOG_MARKERS)
+
+
 # Context menu item metrics (toolbar, status bar, thumbnail, file tree — shared QMenu QSS)
 QMENU_ITEM_MIN_HEIGHT = 20
 QMENU_ITEM_PADDING_V = 0
