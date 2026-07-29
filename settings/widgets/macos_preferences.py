@@ -329,8 +329,8 @@ class MacPreferenceGearToggleRow(QWidget):
 
         title_label = QLabel(title)
         title_label.setObjectName("macPreferenceRowTitle")
-        title_label.setWordWrap(False)
-        title_label.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
+        title_label.setWordWrap(True)
+        title_label.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Preferred)
         if tooltip:
             title_label.setToolTip(tooltip)
             self.toggle.setToolTip(tooltip)
