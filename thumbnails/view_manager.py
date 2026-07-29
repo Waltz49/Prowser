@@ -77,11 +77,30 @@ class CursorManager(QObject):
         if app:
             app.installEventFilter(self)
     
+    def _is_browse_mode_active(self) -> bool:
+        mw = self.parent()
+        return mw is not None and getattr(mw, "current_view_mode", None) == "browse"
+
     def _widget_under_cursor(self) -> QWidget | None:
         app = QApplication.instance()
         if app is None:
             return None
         return app.widgetAt(QCursor.pos())
+
+    def _widget_global_rect(self, widget: QWidget | None) -> QRect | None:
+        if widget is None or not widget.isVisible():
+            return None
+        try:
+            top_left = widget.mapToGlobal(QPoint(0, 0))
+        except RuntimeError:
+            return None
+        return QRect(top_left, widget.size())
+
+    def _pointer_over_widget(self, widget: QWidget) -> bool:
+        rect = self._widget_global_rect(widget)
+        if rect is None or rect.isEmpty():
+            return False
+        return rect.contains(QCursor.pos())
 
     def _is_descendant_of(self, widget: QWidget | None, ancestor: QWidget) -> bool:
         w = widget
@@ -92,18 +111,27 @@ class CursorManager(QObject):
         return False
 
     def _exclusion_roots(self) -> tuple[QWidget, ...]:
-        """Sidebars and status bar — never auto-hide the cursor here."""
+        """Sidebars, status bar, and chat — never auto-hide the cursor here."""
         mw = self.parent()
         if mw is None:
             return ()
         roots: list[QWidget] = []
-        for name in ("combined_sidebar", "right_sidebar", "status_bar"):
+        seen: set[int] = set()
+        for name in ("combined_sidebar", "right_sidebar", "status_bar", "sidebar_chat_widget"):
             w = getattr(mw, name, None)
-            if w is not None:
+            if w is not None and id(w) not in seen:
                 roots.append(w)
+                seen.add(id(w))
+        chat = getattr(getattr(mw, "combined_sidebar", None), "chat_widget", None)
+        if chat is not None and id(chat) not in seen:
+            roots.append(chat)
+            seen.add(id(chat))
         return tuple(roots)
 
     def _is_over_excluded_zone(self) -> bool:
+        for root in self._exclusion_roots():
+            if self._pointer_over_widget(root):
+                return True
         w = self._widget_under_cursor()
         for root in self._exclusion_roots():
             if self._is_descendant_of(w, root):
@@ -112,11 +140,15 @@ class CursorManager(QObject):
 
     def _is_over_hide_zone(self) -> bool:
         """True when the cursor is over the browse canvas (self.widget) or its children."""
+        if not self._is_browse_mode_active():
+            return False
         if self._is_over_excluded_zone():
             return False
         widget = self.widget
         if widget is None or not widget.isVisible():
             return False
+        if self._pointer_over_widget(widget):
+            return True
         return self._is_descendant_of(self._widget_under_cursor(), widget)
 
     def _clear_override_cursors(self):
@@ -128,19 +160,19 @@ class CursorManager(QObject):
 
     def _leave_hide_zone(self):
         """Restore cursor and stop auto-hide when pointer leaves the browse canvas."""
-        if self._over_hide_zone:
-            self._over_hide_zone = False
+        self._over_hide_zone = False
         self.hide_timer.stop()
         self._clear_override_cursors()
         if self.is_cursor_hidden:
-            self.widget.setCursor(self.original_cursor)
-            self.is_cursor_hidden = False
+            self._show_cursor()
 
     def _update_hide_zone_state(self):
         """Track enter/leave of the hide zone; show cursor and stop timer on leave."""
+        if not self._is_browse_mode_active():
+            self._leave_hide_zone()
+            return
         if self._is_over_excluded_zone():
-            if self._over_hide_zone or self.is_cursor_hidden:
-                self._leave_hide_zone()
+            self._leave_hide_zone()
             return
         over = self._is_over_hide_zone()
         if over != self._over_hide_zone:
@@ -149,8 +181,10 @@ class CursorManager(QObject):
                 self.hide_timer.start(self.hide_delay_ms)
             else:
                 self._leave_hide_zone()
-        elif not over and self.is_cursor_hidden:
-            self._show_cursor()
+        elif not over:
+            self._clear_override_cursors()
+            if self.is_cursor_hidden:
+                self._show_cursor()
 
     def eventFilter(self, obj, event):
         """
@@ -163,10 +197,10 @@ class CursorManager(QObject):
         Returns:
             bool: True if event was handled, False to pass to parent
         """
-        # Don't process events when paused
-        if self._paused:
+        # Don't process events when paused or outside browse mode
+        if self._paused or not self._is_browse_mode_active():
             return False
-            
+
         # Listen for mouse movement and button events globally
         if event.type() in (
             QEvent.MouseMove,
@@ -205,7 +239,7 @@ class CursorManager(QObject):
     
     def _hide_cursor(self):
         """Hide the cursor only while it remains over the browse canvas."""
-        if not self._is_over_hide_zone():
+        if not self._is_browse_mode_active() or self._is_over_excluded_zone() or not self._is_over_hide_zone():
             return
         if not self.is_cursor_hidden:
             # Widget-level only: app-wide override hides the cursor in sidebars too
@@ -237,6 +271,9 @@ class CursorManager(QObject):
     def start(self):
         """Start cursor management (starts the hide timer when over the browse canvas)."""
         self._clear_override_cursors()
+        if not self._is_browse_mode_active():
+            self._over_hide_zone = False
+            return
         self._over_hide_zone = self._is_over_hide_zone()
         if self._over_hide_zone:
             self.hide_timer.start(self.hide_delay_ms)
@@ -2196,10 +2233,15 @@ class ViewManager:
 
     def _setup_cursor_manager(self):
         """Initialize and start cursor manager for browse mode"""
-        # Clean up existing cursor manager if any
-        if self.main_window.cursor_manager:
-            self.main_window.cursor_manager.cleanup()
-        
+        old_manager = self.main_window.cursor_manager
+        if old_manager:
+            old_manager.cleanup()
+            old_manager.deleteLater()
+            self.main_window.cursor_manager = None
+
+        if getattr(self.main_window, "current_view_mode", None) != "browse":
+            return
+
         # Hide cursor only over the image canvas, not sidebars/dialogs/status bar
         hide_widget = (
             getattr(self.main_window, 'image_container', None)

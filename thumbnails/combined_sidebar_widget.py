@@ -1222,6 +1222,7 @@ class CombinedSidebarWidget(QWidget):
             self._update_splitter_sizes()
             self.tree_visibility_changed.emit(visible)
             self._update_overall_visibility()
+            self._refresh_browse_cursor_for_pointer()
         elif visible and self.tree_widget:
             self.tree_widget.show()
 
@@ -1239,6 +1240,7 @@ class CombinedSidebarWidget(QWidget):
             self._update_splitter_sizes()
             self.preview_visibility_changed.emit(visible)
             self._update_overall_visibility()
+            self._refresh_browse_cursor_for_pointer()
 
         if not visible:
             self._maybe_reenter_chat_cover()
