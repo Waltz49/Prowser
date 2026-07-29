@@ -529,6 +529,10 @@ class ChatMessageWidget(QWidget):
         self._edit_input.setPlainText(self._message.text or "")
         self._edit_input.show()
         self._attach_click_away_filter()
+        # Double-click opens edit on the second press; the following release can
+        # land outside the smaller edit bubble and would otherwise commit immediately.
+        if QApplication.mouseButtons() & Qt.MouseButton.LeftButton:
+            self._ignore_next_click_away_release = True
         self._edit_input.setFocus()
 
     def _commit_edit(self) -> None:
