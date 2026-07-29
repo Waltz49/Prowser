@@ -13,7 +13,6 @@ from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
     QFrame,
-    QGraphicsOpacityEffect,
     QHBoxLayout,
     QHeaderView,
     QLabel,
@@ -38,6 +37,7 @@ from chat_plugins.chat_ui_common import (
     chat_prompt_edit_stylesheet,
     install_cmd_enter_accept,
 )
+from config import get_config
 from settings.widgets.macos_preferences import MacToggleSwitch
 from utils import get_button_style, get_dialog_shell_stylesheet
 
@@ -66,7 +66,6 @@ class PrefixPostfixEntry:
 @dataclass
 class PrefixPostfixStore:
     entries: list[PrefixPostfixEntry] = field(default_factory=list)
-    enabled: bool = True
 
     @classmethod
     def load(cls) -> PrefixPostfixStore:
@@ -86,14 +85,10 @@ class PrefixPostfixStore:
                     active=bool(item.get("active", True)),
                 )
             )
-        enabled = config.get("enabled")
-        if not isinstance(enabled, bool):
-            enabled = True
-        return cls(entries=entries, enabled=enabled)
+        return cls(entries=entries)
 
     def save(self) -> None:
         config = load_prefix_postfix_config()
-        config["enabled"] = self.enabled
         config["entries"] = [
             {
                 "id": entry.id,
@@ -115,11 +110,15 @@ class PrefixPostfixStore:
         return None
 
 
+def _prefix_postfix_rules_enabled() -> bool:
+    return bool(get_config().load_settings().get("imagegen_add_chat_prefix_postfix", True))
+
+
 def apply_prefix_postfix_rules(text: str, *, for_images: bool) -> str:
     """Apply enabled prefix/postfix entries in list order."""
-    store = PrefixPostfixStore.load()
-    if not store.enabled:
+    if not _prefix_postfix_rules_enabled():
         return text
+    store = PrefixPostfixStore.load()
     prefixes: list[str] = []
     postfixes: list[str] = []
     for entry in store.entries:
@@ -256,17 +255,12 @@ class ChatPrefixPostfixDialog(QDialog):
         self._row_widgets: list[_PrefixPostfixRowWidgets] = []
 
         layout = QVBoxLayout(self)
-        instr_row = QHBoxLayout()
-        instr_row.addWidget(
-            QLabel("Prefix and postfix rules applied when sending chat or image prompts:")
+        layout.addWidget(
+            QLabel(
+                "Prefix and postfix rules applied when sending chat or image prompts "
+                "(enable in Settings → General → Image Generation)."
+            )
         )
-        instr_row.addStretch(1)
-        self._enable_switch = MacToggleSwitch()
-        self._enable_switch.setChecked(self._store.enabled)
-        self._enable_switch.setToolTip("Enable prefix and postfix rules")
-        self._enable_switch.toggled.connect(self._on_enabled_toggled)
-        instr_row.addWidget(self._enable_switch)
-        layout.addLayout(instr_row)
 
         self._table = QTableWidget(0, 8, self)
         self._table.setHorizontalHeaderLabels(
@@ -295,8 +289,6 @@ class ChatPrefixPostfixDialog(QDialog):
         self._table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self._table.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self._table.verticalHeader().setDefaultSectionSize(ICON_BTN_SIZE + 8)
-        self._table_opacity = QGraphicsOpacityEffect(self._table)
-        self._table.setGraphicsEffect(self._table_opacity)
         layout.addWidget(self._table, stretch=1)
 
         add_btn = QPushButton("Add…")
@@ -324,19 +316,9 @@ class ChatPrefixPostfixDialog(QDialog):
             """
         )
         self._rebuild_table()
-        self._update_table_dim_state()
 
     def result_store(self) -> PrefixPostfixStore:
         return self._store
-
-    def _on_enabled_toggled(self, enabled: bool) -> None:
-        self._store.enabled = enabled
-        self._update_table_dim_state()
-
-    def _update_table_dim_state(self) -> None:
-        dimmed = not self._store.enabled
-        self._table_opacity.setOpacity(0.35 if dimmed else 1.0)
-        self._table.setEnabled(not dimmed)
 
     def _update_row_checkbox_states(self, row: _PrefixPostfixRowWidgets) -> None:
         """Grey row checkboxes when the per-entry toggle is off."""
@@ -424,8 +406,6 @@ class ChatPrefixPostfixDialog(QDialog):
             self._update_row_checkbox_states(row_widgets)
             self._row_widgets.append(row_widgets)
 
-        self._update_table_dim_state()
-
     def _sync_row_to_entry(self, row: _PrefixPostfixRowWidgets) -> None:
         entry = self._store.find_entry(row.entry_id)
         if entry is None:
@@ -477,7 +457,6 @@ class ChatPrefixPostfixDialog(QDialog):
 
     def accept(self) -> None:
         self._sync_all_rows_to_store()
-        self._store.enabled = self._enable_switch.isChecked()
         super().accept()
 
 

@@ -329,16 +329,16 @@ class MacPreferenceGearToggleRow(QWidget):
 
         title_label = QLabel(title)
         title_label.setObjectName("macPreferenceRowTitle")
-        title_label.setWordWrap(True)
-        title_label.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Preferred)
+        title_label.setWordWrap(False)
+        title_label.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
         if tooltip:
             title_label.setToolTip(tooltip)
             self.toggle.setToolTip(tooltip)
-        title_row.addWidget(title_label, 0, Qt.AlignVCenter)
+        title_row.addWidget(title_label, 0, Qt.AlignTop)
 
         gear_button = SettingsGearButton(self, tooltip=gear_tooltip or tooltip)
         gear_button.clicked.connect(on_gear_clicked)
-        title_row.addWidget(gear_button, 0, Qt.AlignVCenter)
+        title_row.addWidget(gear_button, 0, Qt.AlignTop)
         title_row.addStretch(1)
         text_col.addLayout(title_row)
 

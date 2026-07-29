@@ -127,7 +127,6 @@ def _default_user_prompt_config() -> dict[str, Any]:
 
 def _default_prefix_postfix_config() -> dict[str, Any]:
     return {
-        "enabled": True,
         "entries": [],
     }
 
@@ -263,9 +262,6 @@ def _normalize_user_prompt_config(raw: dict[str, Any]) -> dict[str, Any]:
 
 def _normalize_prefix_postfix_config(raw: dict[str, Any]) -> dict[str, Any]:
     config = _default_prefix_postfix_config()
-    enabled = raw.get("enabled")
-    if isinstance(enabled, bool):
-        config["enabled"] = enabled
     config["entries"] = _normalize_prefix_postfix_entries(raw.get("entries"))
     return config
 

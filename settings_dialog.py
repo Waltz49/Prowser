@@ -2501,14 +2501,13 @@ class SettingsDialog(QDialog):
         )
 
         self.imagegen_add_chat_prefix_postfix_checkbox = imagegen_panel.add_gear_toggle(
-            "Add prefix/postfix from chat",
+            "Add prefix/postfix strings",
             on_gear_clicked=self._open_chat_prefix_postfix_library,
             tooltip=(
-                "When enabled, prefix and postfix rules marked for images\n"
-                "in the chat prefix/postfix library are applied to image\n"
-                "generation prompts."
+                "When enabled, prefix and postfix strings are applied to chat and image\n"
+                "prompts subject to selections."
             ),
-            subtitle="Apply chat prefix/postfix rules to image prompts.",
+            subtitle="Apply prefix/postfix rules to chat and image prompts.",
             gear_tooltip="Edit prefix and postfix rules",
         )
 
