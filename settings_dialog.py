@@ -2521,7 +2521,7 @@ class SettingsDialog(QDialog):
         )
         self.imagegen_fast_open_action_combo.setFixedHeight(28)
         imagegen_panel.add_form_row(
-            f"Fast Open Key Source ({SHIFT_SYMBOL}{OPTION_SYMBOL} /)",
+            f"Fast Open Key Source ({SHIFT_SYMBOL}{OPTION_SYMBOL} / )",
             self.imagegen_fast_open_action_combo,
             tooltip=(
                 "Shift+Option+/ opens the unified image-generation dialog\n"
