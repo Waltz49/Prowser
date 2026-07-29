@@ -248,6 +248,11 @@ class ImageBrowserConfig:
     def settings_file(self) -> Path:
         """Get settings file path: ~/.prowser/data/settings.json"""
         return self.data_dir / "settings.json"
+
+    @property
+    def lora_catalog_file(self) -> Path:
+        """Get LoRA catalog file path: ~/.prowser/data/lora_catalog.json"""
+        return self.data_dir / "lora_catalog.json"
     
     # Debug log files (in ~/.prowser/logs/)
     
@@ -352,6 +357,8 @@ class ImageBrowserConfig:
             'logs_dir': str(self.logs_dir),
             'audio_dir': str(self.audio_dir),
             'data_dir': str(self.data_dir),
+            'settings_file': str(self.settings_file),
+            'lora_catalog_file': str(self.lora_catalog_file),
             'named_pipe': str(self.named_pipe),
         }
         
@@ -641,6 +648,10 @@ class ImageBrowserConfig:
             needs_save = True
         if save_merged and needs_save:
             self._save_settings_unlocked(settings)
+        from imagegen_plugins.lora_catalog_store import migrate_embedded_lora_catalog_if_needed
+
+        if migrate_embedded_lora_catalog_if_needed(settings):
+            self._save_settings_unlocked(settings)
         return self._merge_browse_preview_into_loaded_settings(settings)
 
     def _load_settings_locked(self, default_settings: dict) -> dict:
@@ -858,27 +869,6 @@ IMAGEGEN_DEFAULTS = {
         },
         "last_function": "edit",
         "show_progressive_images": False,
-        "lora_catalog": {
-            "by_model": {
-                "black-forest-labs/FLUX.1-schnell": {"enabled_ids": [], "hidden_ids": []},
-                "black-forest-labs/FLUX.1-dev": {
-                    "enabled_ids": [
-                        "mspaint1",
-                        "super_realism",
-                        "sldr_nsfw_v2",
-                        "pola_photo_flux",
-                        "paper_cutout",
-                    ],
-                    "hidden_ids": [],
-                },
-                "black-forest-labs/FLUX.1-Fill-dev": {"enabled_ids": [], "hidden_ids": []},
-                "black-forest-labs/FLUX.2-klein-4B": {"enabled_ids": [], "hidden_ids": []},
-                "black-forest-labs/FLUX.2-klein-9B": {"enabled_ids": [], "hidden_ids": []},
-                "black-forest-labs/FLUX.2-klein-9b-kv": {"enabled_ids": [], "hidden_ids": []},
-                "SceneWorks/flux2-klein-9b-kv-mlx": {"enabled_ids": [], "hidden_ids": []},
-            },
-            "model_support": {},
-        },
         "models": {
             "flux_schnell_mflux": {
                 "prompt": "",

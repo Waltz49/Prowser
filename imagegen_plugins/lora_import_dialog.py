@@ -118,6 +118,9 @@ class _ImportLoraWorker(QThread):
         comment: str,
         cancel_flag: List[bool],
         reuse_lora_id: Optional[str] = None,
+        repo_id: str = "",
+        filename: str = "",
+        recovery_source_path: str = "",
     ) -> None:
         super().__init__()
         self._source_path = source_path
@@ -128,6 +131,9 @@ class _ImportLoraWorker(QThread):
         self._comment = comment
         self._cancel_flag = cancel_flag
         self._reuse_lora_id = (reuse_lora_id or "").strip() or None
+        self._repo_id = (repo_id or "").strip()
+        self._filename = (filename or "").strip()
+        self._recovery_source_path = (recovery_source_path or "").strip()
         self._created_new_entry = False
 
     def _cancelled(self) -> bool:
@@ -172,6 +178,9 @@ class _ImportLoraWorker(QThread):
                     trigger_word=self._trigger_word or None,
                     scale=self._scale,
                     comment=self._comment or None,
+                    repo_id=self._repo_id,
+                    filename=self._filename,
+                    source_path=self._recovery_source_path or None,
                 )
                 entry = get_lora_entry(entry.lora_id)
                 if entry is None:
@@ -188,6 +197,9 @@ class _ImportLoraWorker(QThread):
                         trigger_word=self._trigger_word or None,
                         scale=self._scale,
                         comment=self._comment or None,
+                        repo_id=self._repo_id,
+                        filename=self._filename,
+                        source_path=self._recovery_source_path or None,
                     )
                     entry = get_lora_entry(existing.lora_id)
                     if entry is None:
@@ -200,7 +212,13 @@ class _ImportLoraWorker(QThread):
                         trigger_word=self._trigger_word or None,
                         scale=self._scale,
                         comment=self._comment or None,
+                        repo_id=self._repo_id,
+                        filename=self._filename,
                     )
+                    if self._recovery_source_path:
+                        from dataclasses import replace
+
+                        entry = replace(entry, source_path=self._recovery_source_path)
                     self._created_new_entry = True
             from imagegen_plugins.mflux_lora_presets import _assert_mflux_compatible_lora
 
@@ -234,9 +252,45 @@ class _ImportLoraWorker(QThread):
                 model_key=self._model_key,
                 supported_models=[self._model_key],
             )
+            try:
+                from imagegen_plugins.image_gen_persistence import enrich_lora_origin_metadata
+
+                enrich_lora_origin_metadata(entry.lora_id)
+                from imagegen_plugins.lora_catalog import get_lora_entry
+
+                refreshed = get_lora_entry(entry.lora_id)
+                if refreshed is not None:
+                    entry = refreshed
+            except Exception:
+                pass
             self.finished_result.emit(True, "", entry)
         except Exception as exc:
             self.finished_result.emit(False, str(exc), entry)
+
+
+class _FindOriginWorker(QThread):
+    finished_result = Signal(bool, str, object)
+
+    def __init__(self, lora_id: str) -> None:
+        super().__init__()
+        self._lora_id = lora_id
+
+    def run(self) -> None:
+        try:
+            from imagegen_plugins.image_gen_persistence import enrich_lora_origin_metadata
+
+            match = enrich_lora_origin_metadata(self._lora_id)
+            if match is None:
+                self.finished_result.emit(
+                    False,
+                    "No matching Civitai or Hugging Face source was found.",
+                    None,
+                )
+                return
+            self.finished_result.emit(True, "", match)
+        except Exception as exc:
+            self.finished_result.emit(False, str(exc), None)
+
 
 
 class LoraEntryDialog(QDialog):
@@ -267,7 +321,7 @@ class LoraEntryDialog(QDialog):
         is_edit = mode == "edit"
         self.setWindowTitle("Edit LoRA" if is_edit else "Add Downloaded LoRA")
         self.setWindowModality(Qt.WindowModality.WindowModal)
-        self.resize(580, 340 if is_edit else 320)
+        self.resize(580, 420 if is_edit else 400)
         self.setStyleSheet(
             get_dialog_shell_stylesheet()
             + get_button_style()
@@ -336,11 +390,36 @@ class LoraEntryDialog(QDialog):
         _pin_row_height(self._comment_edit)
         self._comment_edit.setPlaceholderText("Optional notes (Settings tab only)")
         form.addRow("Comment:", self._comment_edit)
+
+        self._repo_edit = QLineEdit()
+        _pin_row_height(self._repo_edit)
+        self._repo_edit.setPlaceholderText("Optional Hugging Face repo for reinstall")
+        form.addRow("HF repo:", self._repo_edit)
+
+        self._filename_edit = QLineEdit()
+        _pin_row_height(self._filename_edit)
+        self._filename_edit.setPlaceholderText("Optional .safetensors filename on Hugging Face")
+        form.addRow("HF file:", self._filename_edit)
+
+        self._recovery_path_edit = _SafetensorsPathLineEdit(self)
+        self._recovery_path_edit.setPlaceholderText(
+            "Local path or download URL for reinstall (Civitai / Hugging Face)"
+        )
+        form.addRow("Recovery path:", self._recovery_path_edit)
         layout.addLayout(form)
         self._form = form
 
         btn_row = QHBoxLayout()
         btn_row.setSpacing(10)
+        self._find_origin_btn = None
+        if is_edit:
+            self._find_origin_btn = QPushButton("Find source online")
+            _pin_row_height(self._find_origin_btn, width_policy=QSizePolicy.Policy.Fixed)
+            self._find_origin_btn.setToolTip(
+                "Search Civitai (file hash) and Hugging Face for reinstall metadata"
+            )
+            self._find_origin_btn.clicked.connect(self._find_origin_online)
+            btn_row.addWidget(self._find_origin_btn)
         btn_row.addStretch()
         cancel_btn = QPushButton("Cancel")
         _pin_row_height(cancel_btn, width_policy=QSizePolicy.Policy.Fixed)
@@ -391,6 +470,11 @@ class LoraEntryDialog(QDialog):
         self._trigger_edit.setText(entry.trigger_word or "")
         self._scale_spin.setValue(float(entry.scale))
         self._comment_edit.setText(entry.comment or "")
+        self._repo_edit.setText(entry.repo_id or "")
+        self._filename_edit.setText(entry.filename or "")
+        recovery = (entry.source_path or entry.local_path or "").strip()
+        if recovery:
+            self._recovery_path_edit.setText(_lora_path_for_display(recovery))
 
     def _on_path_changed(self, text: str) -> None:
         if self._mode != "add":
@@ -469,6 +553,9 @@ class LoraEntryDialog(QDialog):
                 trigger_word=self._trigger_edit.text().strip() or None,
                 scale=float(self._scale_spin.value()),
                 comment=self._comment_edit.text().strip() or None,
+                repo_id=self._repo_edit.text().strip(),
+                filename=self._filename_edit.text().strip(),
+                source_path=self._recovery_path_edit.text().strip() or None,
             )
         except ValueError as exc:
             show_styled_warning(self, "Edit LoRA", str(exc))
@@ -518,8 +605,8 @@ class LoraEntryDialog(QDialog):
 
             st = model_state(get_config().load_settings(), self._model_key)
             enabled = set(st.get("enabled_ids") or [])
-            hidden = set(st.get("hidden_ids") or [])
-            if reuse_lora_id in enabled and reuse_lora_id not in hidden:
+            deleted = set(st.get("deleted_ids") or st.get("hidden_ids") or [])
+            if reuse_lora_id in enabled and reuse_lora_id not in deleted:
                 show_styled_information(
                     self,
                     "Add LoRA",
@@ -545,6 +632,8 @@ class LoraEntryDialog(QDialog):
         cancel_flag: List[bool] = [False]
         progress.canceled.connect(lambda: cancel_flag.__setitem__(0, True))
 
+        recovery_path = self._recovery_path_edit.text().strip() or resolved_path
+
         worker = _ImportLoraWorker(
             source_path=resolved_path,
             display_name=name,
@@ -554,6 +643,9 @@ class LoraEntryDialog(QDialog):
             comment=self._comment_edit.text().strip(),
             cancel_flag=cancel_flag,
             reuse_lora_id=reuse_lora_id,
+            repo_id=self._repo_edit.text().strip(),
+            filename=self._filename_edit.text().strip(),
+            recovery_source_path=recovery_path,
         )
 
         def on_done(ok: bool, err: str, entry: object) -> None:

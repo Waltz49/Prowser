@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Per-base-model LoRA catalog state in settings.json (load, migrate, defaults)."""
+"""Per-base-model LoRA catalog state (load, migrate, defaults).
+
+User catalog state is persisted in ~/.prowser/data/lora_catalog.json via
+lora_catalog_store.py so it can be backed up separately from settings.json.
+"""
 
 from __future__ import annotations
 
@@ -32,14 +36,28 @@ LORA_CATALOG = {
 }
 
 _LEGACY_ENABLED_KEY = "enabled_ids"
-_LEGACY_DELETED_KEY = "deleted_ids"
+_LEGACY_FLAT_DELETED_KEY = "deleted_ids"
+_LEGACY_HIDDEN_KEY = "hidden_ids"
 _BY_HOST_KEY = "by_host"
 _BY_MODEL_KEY = "by_model"
 ENTRY_OVERRIDES_KEY = "entry_overrides"
+USER_PRESET_KEY = "lora_user_preset"
+DELETED_IDS_KEY = "deleted_ids"
 
 
 def _empty_slice() -> Dict[str, List[str]]:
-    return {"enabled_ids": [], "hidden_ids": []}
+    return {"enabled_ids": [], DELETED_IDS_KEY: []}
+
+
+def _slice_deleted_ids(slice_: Dict[str, Any]) -> List[str]:
+    """Read deleted ids from a model/host slice, migrating legacy hidden_ids."""
+    deleted = slice_.get(DELETED_IDS_KEY)
+    if isinstance(deleted, list) and deleted:
+        return [str(x) for x in deleted]
+    hidden = slice_.get(_LEGACY_HIDDEN_KEY)
+    if isinstance(hidden, list):
+        return [str(x) for x in hidden]
+    return []
 
 
 def entry_overrides_from_lc(lc: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
@@ -103,7 +121,7 @@ def default_by_host() -> Dict[str, Dict[str, List[str]]]:
         enabled = list(DEFAULT_ENABLED_LORA_IDS_BY_HOST.get(host_id, ()))
         out[host_id] = {
             "enabled_ids": [x for x in enabled if x in LORA_CATALOG],
-            "hidden_ids": [],
+            DELETED_IDS_KEY: [],
         }
     return out
 
@@ -114,7 +132,7 @@ def default_by_model() -> Dict[str, Dict[str, List[str]]]:
         enabled = list(DEFAULT_ENABLED_LORA_IDS_BY_MODEL.get(model_key, ()))
         out[model_key] = {
             "enabled_ids": [x for x in enabled if x in LORA_CATALOG],
-            "hidden_ids": [],
+            DELETED_IDS_KEY: [],
         }
     return out
 
@@ -137,7 +155,7 @@ def _normalize_host_slice(
             for x in (enabled if isinstance(enabled, list) else [])
             if str(x) in catalog and catalog[str(x)].host_id == host_id
         ],
-        "hidden_ids": [],
+        DELETED_IDS_KEY: _slice_deleted_ids(slice_),
     }
 
 
@@ -149,6 +167,7 @@ def _normalize_model_slice(
 ) -> Dict[str, List[str]]:
     ms = model_support if isinstance(model_support, dict) else {}
     enabled = slice_.get("enabled_ids")
+    deleted_raw = _slice_deleted_ids(slice_)
     return {
         "enabled_ids": [
             str(x)
@@ -158,7 +177,14 @@ def _normalize_model_slice(
                 catalog[str(x)], model_key, model_support=ms
             )
         ],
-        "hidden_ids": [],
+        DELETED_IDS_KEY: [
+            str(x)
+            for x in deleted_raw
+            if str(x) in catalog
+            and entry_matches_lora_model(
+                catalog[str(x)], model_key, model_support=ms
+            )
+        ],
     }
 
 
@@ -175,13 +201,13 @@ def _by_model_from_by_host(by_host: Dict[str, Dict[str, List[str]]]) -> Dict[str
             for mk in lora_models_for_entry(entry):
                 if str(lid) not in out[mk]["enabled_ids"]:
                     out[mk]["enabled_ids"].append(str(lid))
-        for lid in slice_.get("hidden_ids") or []:
+        for lid in _slice_deleted_ids(slice_):
             entry = LORA_CATALOG.get(str(lid))
             if entry is None:
                 continue
             for mk in lora_models_for_entry(entry):
-                if str(lid) not in out[mk]["hidden_ids"]:
-                    out[mk]["hidden_ids"].append(str(lid))
+                if str(lid) not in out[mk][DELETED_IDS_KEY]:
+                    out[mk][DELETED_IDS_KEY].append(str(lid))
     return out
 
 
@@ -200,7 +226,7 @@ def _ensure_by_model(lc: Dict[str, Any], by_host: Dict[str, Dict[str, List[str]]
                     for x in DEFAULT_ENABLED_LORA_IDS_BY_MODEL.get(model_key, ())
                     if str(x) in LORA_CATALOG
                 ],
-                "hidden_ids": [],
+                DELETED_IDS_KEY: [],
             }
         else:
             by_model[model_key] = _normalize_model_slice(
@@ -221,7 +247,7 @@ def migrate_lora_catalog(lc: Dict[str, Any]) -> Dict[str, Any]:
         by_host = default_by_host()
 
     legacy_enabled = lc.get(_LEGACY_ENABLED_KEY)
-    legacy_deleted = lc.get(_LEGACY_DELETED_KEY)
+    legacy_deleted = lc.get(_LEGACY_FLAT_DELETED_KEY)
 
     if isinstance(legacy_enabled, list) and legacy_enabled:
         if had_by_host:
@@ -253,11 +279,11 @@ def migrate_lora_catalog(lc: Dict[str, Any]) -> Dict[str, Any]:
                 continue
             host = entry.host_id
             slice_ = dict(by_host.get(host) or _empty_slice())
-            hidden = list(slice_.get("hidden_ids") or [])
+            deleted = list(_slice_deleted_ids(slice_))
             lid_s = str(lid)
-            if lid_s not in hidden:
-                hidden.append(lid_s)
-            slice_["hidden_ids"] = hidden
+            if lid_s not in deleted:
+                deleted.append(lid_s)
+            slice_[DELETED_IDS_KEY] = deleted
             by_host[host] = slice_
 
     for host_id in LORA_HOST_ORDER:
@@ -281,13 +307,14 @@ def migrate_lora_catalog(lc: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def lora_catalog_from_settings(settings: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-    if settings is None:
-        from config import get_config
+    if settings is not None:
+        imagegen = settings.get("imagegen") or {}
+        lc = imagegen.get("lora_catalog")
+        if isinstance(lc, dict) and lc:
+            return migrate_lora_catalog(dict(lc))
+    from imagegen_plugins.lora_catalog_store import load_lora_catalog_file
 
-        settings = get_config().load_settings()
-    imagegen = settings.get("imagegen") or {}
-    lc = dict(imagegen.get("lora_catalog") or {})
-    return migrate_lora_catalog(lc)
+    return load_lora_catalog_file()
 
 
 def model_state(
@@ -301,16 +328,29 @@ def model_state(
         return _empty_slice()
     return {
         "enabled_ids": list(slice_.get("enabled_ids") or []),
-        "hidden_ids": list(slice_.get("hidden_ids") or []),
+        DELETED_IDS_KEY: list(_slice_deleted_ids(slice_)),
     }
 
+
+def deleted_lora_ids_for_model(
+    model_key: str,
+    settings: Optional[Dict[str, Any]] = None,
+    *,
+    draft_by_model: Optional[Dict[str, Any]] = None,
+) -> FrozenSet[str]:
+    if isinstance(draft_by_model, dict) and model_key in draft_by_model:
+        slice_ = draft_by_model.get(model_key)
+        if isinstance(slice_, dict):
+            return frozenset(_slice_deleted_ids(slice_))
+    return frozenset(model_state(settings, model_key)[DELETED_IDS_KEY])
 
 
 def hidden_lora_ids_for_model(
     model_key: str,
     settings: Optional[Dict[str, Any]] = None,
 ) -> FrozenSet[str]:
-    return frozenset(model_state(settings, model_key)["hidden_ids"])
+    """Back-compat alias for deleted_lora_ids_for_model."""
+    return deleted_lora_ids_for_model(model_key, settings)
 
 
 def enabled_lora_ids_for_model(

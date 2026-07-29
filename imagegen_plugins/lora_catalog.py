@@ -9,6 +9,7 @@ from typing import Any, Dict, FrozenSet, List, Optional, Tuple, TYPE_CHECKING
 
 from imagegen_plugins.lora_catalog_settings import (
     apply_entry_overrides,
+    deleted_lora_ids_for_model,
     enabled_lora_ids_for_model,
     entry_overrides_from_lc,
     lora_catalog_from_settings,
@@ -80,6 +81,11 @@ MFLUX_LORA_FILL_PIPELINES: Tuple[str, ...] = ("mflux_fill_expand", "mflux_fill_i
 MFLUX_LORA_T2I_AND_FILL: Tuple[str, ...] = (
     MFLUX_LORA_GENERATE_PIPELINES + MFLUX_LORA_FILL_PIPELINES
 )
+
+LORA_LIFECYCLE_ACTIVE = "active"
+LORA_LIFECYCLE_INSTALLED = "installed"
+LORA_LIFECYCLE_UNINSTALLED = "uninstalled"
+LORA_LIFECYCLE_DELETED = "deleted"
 
 
 def klein_lora_mismatch_message(entry: FluxLoraEntry, active_hf_model_id: str) -> str:
@@ -208,13 +214,159 @@ def is_lora_installed(
     return local_lora_weights_path(lora_id, settings) is not None
 
 
+def has_recovery_source(entry: FluxLoraEntry) -> bool:
+    """True when weights can be reinstalled (HF, remote URL, local source file, or bundled path)."""
+    if (entry.repo_id or "").strip() and (entry.filename or "").strip():
+        return True
+    for raw in (entry.source_path, entry.local_path):
+        text = str(raw or "").strip()
+        if not text:
+            continue
+        lower = text.lower()
+        if lower.startswith(("http://", "https://")):
+            if "civitai.com" in lower or "civit.red" in lower or "huggingface.co" in lower or "hf.co" in lower:
+                return True
+            continue
+        if lora_weights_file_is_valid(Path(text).expanduser()):
+            return True
+    return False
+
+
+def lora_install_source_url(entry: FluxLoraEntry) -> str:
+    """Human-readable install source for progress UI."""
+    repo_id = (entry.repo_id or "").strip()
+    filename = (entry.filename or "").strip()
+    if repo_id and filename:
+        return f"https://huggingface.co/{repo_id}/resolve/main/{filename}"
+    source = (entry.source_path or "").strip()
+    if source.lower().startswith(("http://", "https://")):
+        return source
+    if repo_id:
+        return f"https://huggingface.co/{repo_id}"
+    if source:
+        return source
+    return (entry.local_path or "").strip()
+
+
+def lora_install_progress_label(
+    lora_id: str,
+    *,
+    model_key: str = "",
+    settings: Optional[Dict[str, Any]] = None,
+) -> str:
+    entry = get_lora_entry(lora_id, settings)
+    if entry is None:
+        return f"Downloading {lora_id}…"
+    name = lora_base_display_name(entry, model_key=model_key) or entry.display_name
+    url = lora_install_source_url(entry)
+    if url:
+        return f"Downloading {name} from\n{url}"
+    return f"Downloading {name}…"
+
+
+def lora_needs_compatibility_check(
+    lora_id: str,
+    model_key: str,
+    settings: Optional[Dict[str, Any]] = None,
+) -> bool:
+    entry = get_lora_entry(lora_id, settings)
+    if entry is None or entry.mflux_compatible is False:
+        return False
+    if not entry_matches_lora_model(entry, model_key, settings=settings):
+        return False
+    if entry.mflux_compatible is True:
+        return False
+    return not lora_probe_passed_for_model(lora_id, model_key, settings)
+
+
+def lora_lifecycle_state(
+    lora_id: str,
+    model_key: str,
+    settings: Optional[Dict[str, Any]] = None,
+    *,
+    draft_by_model: Optional[Dict[str, Any]] = None,
+) -> str:
+    """Return active | installed | uninstalled | deleted for a library entry."""
+    from imagegen_plugins.lora_user_entries import is_user_lora_id
+
+    entry = get_lora_entry(lora_id, settings)
+    if entry is None:
+        return LORA_LIFECYCLE_DELETED
+    if not is_user_lora_id(lora_id):
+        if lora_id in deleted_lora_ids_for_model(
+            model_key, settings, draft_by_model=draft_by_model
+        ):
+            return LORA_LIFECYCLE_DELETED
+    if not is_lora_installed(lora_id, settings):
+        return LORA_LIFECYCLE_UNINSTALLED
+    if _lora_enabled_for_model(lora_id, model_key, settings, draft_by_model):
+        return LORA_LIFECYCLE_ACTIVE
+    return LORA_LIFECYCLE_INSTALLED
+
+
+def lora_status_label(
+    lora_id: str,
+    model_key: str,
+    settings: Optional[Dict[str, Any]] = None,
+    *,
+    draft_by_model: Optional[Dict[str, Any]] = None,
+) -> str:
+    state = lora_lifecycle_state(
+        lora_id, model_key, settings, draft_by_model=draft_by_model
+    )
+    if lora_needs_compatibility_check(lora_id, model_key, settings):
+        return "needs check"
+    if state == LORA_LIFECYCLE_ACTIVE:
+        return "active"
+    if state == LORA_LIFECYCLE_INSTALLED:
+        return "installed"
+    if state == LORA_LIFECYCLE_UNINSTALLED:
+        return "uninstalled"
+    return "deleted"
+
+
+def lora_delete_is_uninstall(
+    entry: FluxLoraEntry,
+    model_key: str,
+    settings: Optional[Dict[str, Any]] = None,
+    *,
+    draft_by_model: Optional[Dict[str, Any]] = None,
+) -> bool:
+    """True when delete should remove weights only (Uninstalled), not erase the entry."""
+    if not is_lora_installed(entry.lora_id, settings):
+        return False
+    return has_recovery_source(entry)
+
+
+def lora_delete_is_remove_from_library(
+    entry: FluxLoraEntry,
+    model_key: str,
+    settings: Optional[Dict[str, Any]] = None,
+    *,
+    draft_by_model: Optional[Dict[str, Any]] = None,
+) -> bool:
+    """True when delete should hide/remove the library entry (Deleted state)."""
+    from imagegen_plugins.lora_user_entries import is_user_lora_id
+
+    state = lora_lifecycle_state(
+        entry.lora_id, model_key, settings, draft_by_model=draft_by_model
+    )
+    if state == LORA_LIFECYCLE_UNINSTALLED:
+        return True
+    if is_user_lora_id(entry.lora_id) and not has_recovery_source(entry):
+        return True
+    if not is_user_lora_id(entry.lora_id) and not has_recovery_source(entry):
+        return True
+    return False
+
+
 
 def lora_model_support(settings: Optional[Dict[str, Any]] = None) -> Dict[str, Tuple[str, ...]]:
     if settings is None:
         from config import get_config
 
         settings = get_config().load_settings()
-    lc = migrate_lora_catalog(dict((settings.get("imagegen") or {}).get("lora_catalog") or {}))
+    lc = lora_catalog_from_settings(settings)
     raw = lc.get("model_support")
     if not isinstance(raw, dict):
         return {}
@@ -306,12 +458,20 @@ def probe_models_for_lora_entry(entry: FluxLoraEntry) -> Tuple[str, ...]:
 def catalog_entries_for_model(
     settings: Optional[Dict[str, Any]] = None,
     model_key: str = "",
+    *,
+    draft_by_model: Optional[Dict[str, Any]] = None,
 ) -> Tuple[FluxLoraEntry, ...]:
     """Settings grid: LoRAs that match this base model and passed Check LoRAs (if run)."""
+    from imagegen_plugins.lora_user_entries import is_user_lora_id
+
+    deleted = deleted_lora_ids_for_model(
+        model_key, settings, draft_by_model=draft_by_model
+    )
     return tuple(
         e
         for e in catalog_entries_sorted(settings)
         if lora_probe_passed_for_model(e.lora_id, model_key, settings)
+        and (is_user_lora_id(e.lora_id) or e.lora_id not in deleted)
     )
 
 
@@ -526,17 +686,9 @@ def _remove_empty_parents(path: Path, *, stop_at: Path) -> None:
         cur = cur.parent
 
 
-def delete_installed_lora_files(entry: FluxLoraEntry) -> None:
-    """Remove downloaded LoRA weights from disk (and empty cache directories)."""
+def remove_lora_weights_from_disk(entry: FluxLoraEntry) -> None:
+    """Remove LoRA weight files from disk only (no settings mutation)."""
     import shutil
-
-    from imagegen_plugins.lora_user_entries import is_user_lora_id
-
-    if is_user_lora_id(entry.lora_id):
-        from imagegen_plugins.image_gen_persistence import remove_user_lora
-
-        remove_user_lora(entry.lora_id)
-        return
 
     if entry.repo_id:
         dest_dir = _lora_download_local_dir(entry)
@@ -566,3 +718,14 @@ def delete_installed_lora_files(entry: FluxLoraEntry) -> None:
             parent = local.parent
             local.unlink(missing_ok=True)
             _remove_empty_parents(parent, stop_at=DEFAULT_CACHE)
+
+
+def delete_installed_lora_files(entry: FluxLoraEntry) -> None:
+    """Remove downloaded LoRA weights from disk (and empty cache directories)."""
+    from imagegen_plugins.lora_user_entries import is_user_lora_id, remove_user_lora_files
+
+    if is_user_lora_id(entry.lora_id):
+        remove_user_lora_files(entry)
+        return
+
+    remove_lora_weights_from_disk(entry)

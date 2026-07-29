@@ -460,7 +460,9 @@ def run_lora_compatibility_check(
             if model_key not in by_model_enabled:
                 st = model_state(settings, model_key)
                 by_model_enabled[model_key] = list(st.get("enabled_ids") or [])
-                by_model_hidden[model_key] = list(st.get("hidden_ids") or [])
+                by_model_hidden[model_key] = list(
+                    st.get("deleted_ids") or st.get("hidden_ids") or []
+                )
 
     for lid, skipped_entry in (
         (e.lora_id, e)
@@ -640,7 +642,7 @@ def run_lora_compatibility_check(
     result.by_model = {
         mk: {
             "enabled_ids": list(by_model_enabled.get(mk, [])),
-            "hidden_ids": list(by_model_hidden.get(mk, [])),
+            "deleted_ids": list(by_model_hidden.get(mk, [])),
         }
         for mk in by_model_enabled
     }

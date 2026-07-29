@@ -244,8 +244,9 @@ def _raw_model_support_dict(
     if isinstance(model_support, dict):
         return model_support
     if isinstance(settings, dict):
-        imagegen = settings.get("imagegen") or {}
-        lc = imagegen.get("lora_catalog") or {}
+        from imagegen_plugins.lora_catalog_settings import lora_catalog_from_settings
+
+        lc = lora_catalog_from_settings(settings)
         raw = lc.get("model_support")
         if isinstance(raw, dict):
             return raw

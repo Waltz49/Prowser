@@ -18,7 +18,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
 # Third-party imports
-from PySide6.QtCore import Qt, Signal, QTimer, QObject, QEvent, QMutexLocker, QPoint, QRect
+from PySide6.QtCore import Qt, Signal, QTimer, QObject, QEvent, QMutexLocker, QPoint, QRect, QSize
 from PySide6.QtGui import QFont, QColor, QPixmap, QIcon, QFontMetrics, QPainter, QPen, QBrush
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QCheckBox, QPushButton, 
@@ -76,7 +76,7 @@ from config import (
     merge_browse_transparency_settings,
 )
 from thumbnails.thumbnail_constants import get_image_extensions, clear_image_extensions_cache, DIALOG_TEXT_COLOR_HEX, asset_path
-from utils import format_file_size, styled_message_box, show_styled_warning, show_styled_information, show_styled_critical, show_styled_question
+from utils import format_file_size, styled_message_box, show_styled_warning, show_styled_information, show_styled_critical, show_styled_question, show_scrollable_text_dialog
 from theme.theme_service import (
     apply_theme,
     default_dark_theme_colors,
@@ -1912,7 +1912,7 @@ class SettingsDialog(QDialog):
                 "enabled_ids": list(
                     DEFAULT_ENABLED_LORA_IDS_BY_MODEL.get(model_key, ())
                 ),
-                "hidden_ids": [],
+                "deleted_ids": [],
             }
             self._show_lora_draft_for_model(model_key)
         elif tab_widget == self.favorites_tab:
@@ -2117,7 +2117,7 @@ class SettingsDialog(QDialog):
                 "enabled_ids": list(
                     DEFAULT_ENABLED_LORA_IDS_BY_MODEL.get(model_key, ())
                 ),
-                "hidden_ids": [],
+                "deleted_ids": [],
             }
             self._show_lora_draft_for_model(model_key)
         elif tab_widget == self.favorites_tab:
@@ -5666,6 +5666,61 @@ class SettingsDialog(QDialog):
             if container is not None:
                 container.setVisible(False)
 
+    def _create_lora_hide_uninstalled_button(self) -> QPushButton:
+        from files.tree_toolbar import create_tree_filter_icon, filter_toolbar_button_stylesheet
+        from theme.theme_service import get_active_theme
+        from utils import get_button_focus_colors
+        from widgets.icon_hover_swap import attach_icon_hover_swap
+
+        focus_bg, focus_border, focus_text = get_button_focus_colors()
+        theme = get_active_theme()
+        btn = QPushButton()
+        btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn.setFixedSize(26, 26)
+        btn.setIconSize(QSize(20, 20))
+        btn.setCheckable(True)
+        btn.setChecked(False)
+        btn.setStyleSheet(
+            filter_toolbar_button_stylesheet(theme, focus_bg, focus_border, focus_text)
+        )
+        btn.clicked.connect(self._toggle_lora_uninstalled_visibility)
+        self._lora_hide_uninstalled_icon_swap = attach_icon_hover_swap(btn, QIcon(), QIcon())
+        self._update_lora_hide_uninstalled_button(btn)
+        return btn
+
+    def _update_lora_hide_uninstalled_button(self, btn: Optional[QPushButton] = None) -> None:
+        from files.tree_toolbar import create_tree_filter_icon
+
+        button = btn or getattr(self, "_lora_hide_uninstalled_btn", None)
+        if button is None:
+            return
+        hide = getattr(self, "_lora_hide_uninstalled", False)
+        button.setChecked(hide)
+        button.setToolTip(
+            "Show uninstalled LoRAs"
+            if hide
+            else "Hide uninstalled LoRAs"
+        )
+        normal = create_tree_filter_icon("use_filter", hide, hover=False)
+        hover = create_tree_filter_icon("use_filter", hide, hover=True)
+        swap = getattr(self, "_lora_hide_uninstalled_icon_swap", None)
+        if swap is not None:
+            swap.set_icons(normal, hover)
+        else:
+            button.setIcon(normal)
+
+    def _toggle_lora_uninstalled_visibility(self) -> None:
+        btn = getattr(self, "_lora_hide_uninstalled_btn", None)
+        if btn is None:
+            return
+        self._lora_hide_uninstalled = btn.isChecked()
+        self._update_lora_hide_uninstalled_button(btn)
+        model_key = getattr(self, "_lora_model_key", None) or self._current_lora_model_key()
+        slice_ = self._lora_draft_slice(model_key)
+        self._rebuild_lora_settings_grid()
+        self._apply_lora_settings_to_widgets(slice_["enabled_ids"])
+
     def setup_lora_settings_tab(self):
         """LoRA catalog tab: per base model dropdown, enable / install / delete."""
         from config import get_config
@@ -5729,6 +5784,32 @@ class SettingsDialog(QDialog):
         scroll.setWidget(self._lora_rows_host)
         layout.addWidget(scroll, 1)
 
+        preset_row = QHBoxLayout()
+        preset_row.setSpacing(8)
+        self._lora_hide_uninstalled = False
+        self._lora_hide_uninstalled_btn = self._create_lora_hide_uninstalled_button()
+        preset_row.addWidget(self._lora_hide_uninstalled_btn)
+        self._lora_save_preset_btn = QPushButton("Save my setup")
+        self._lora_save_preset_btn.setToolTip(
+            "Save the current enabled LoRAs per base model as your personal default."
+        )
+        self._lora_save_preset_btn.clicked.connect(self._save_lora_user_preset)
+        self._lora_apply_preset_btn = QPushButton("Apply my setup")
+        self._lora_apply_preset_btn.setToolTip(
+            "Restore enabled LoRAs from your saved setup."
+        )
+        self._lora_apply_preset_btn.clicked.connect(self._apply_lora_user_preset)
+        self._lora_restore_defaults_btn = QPushButton("Restore app recommendations")
+        self._lora_restore_defaults_btn.setToolTip(
+            "Show and enable the app's recommended LoRAs for each base model."
+        )
+        self._lora_restore_defaults_btn.clicked.connect(self._restore_app_lora_recommendations)
+        preset_row.addWidget(self._lora_save_preset_btn)
+        preset_row.addWidget(self._lora_apply_preset_btn)
+        preset_row.addWidget(self._lora_restore_defaults_btn)
+        preset_row.addStretch()
+        layout.addLayout(preset_row)
+
         self._lora_model_combo.currentIndexChanged.connect(self._on_lora_model_combo_changed)
         self._load_lora_drafts_from_settings(cfg_settings)
         initial_model_key = self._resolve_lora_model_key(cfg_settings)
@@ -5771,7 +5852,7 @@ class SettingsDialog(QDialog):
         if not hasattr(self, "_lora_intro_label"):
             return
         self._update_lora_available_in_text()
-        self._lora_intro_label.setText("Installed or available LoRAs:")
+        self._lora_intro_label.setText("LoRA library for this base model:")
 
     def _load_lora_drafts_from_settings(self, settings: Optional[dict] = None) -> None:
         """Load per-model LoRA enable drafts (session source of truth)."""
@@ -5786,7 +5867,7 @@ class SettingsDialog(QDialog):
             st = model_state(settings, model_key)
             drafts[model_key] = {
                 "enabled_ids": list(st["enabled_ids"]),
-                "hidden_ids": [],
+                "deleted_ids": list(st.get("deleted_ids") or st.get("hidden_ids") or []),
             }
         self._lora_draft_by_model = drafts
         self._lora_draft_at_load = self._normalized_lora_drafts(drafts)
@@ -5798,7 +5879,9 @@ class SettingsDialog(QDialog):
         return {
             str(mk): {
                 "enabled_ids": sorted((sl or {}).get("enabled_ids") or []),
-                "hidden_ids": sorted((sl or {}).get("hidden_ids") or []),
+                "deleted_ids": sorted(
+                    (sl or {}).get("deleted_ids") or (sl or {}).get("hidden_ids") or []
+                ),
             }
             for mk, sl in source.items()
             if isinstance(sl, dict)
@@ -5819,18 +5902,23 @@ class SettingsDialog(QDialog):
         if isinstance(draft, dict):
             return {
                 "enabled_ids": list(draft.get("enabled_ids") or []),
-                "hidden_ids": list(draft.get("hidden_ids") or []),
+                "deleted_ids": list(
+                    draft.get("deleted_ids") or draft.get("hidden_ids") or []
+                ),
             }
-        return {"enabled_ids": [], "hidden_ids": []}
+        return {"enabled_ids": [], "deleted_ids": []}
 
     def _save_lora_widgets_to_draft(self, model_key: str) -> None:
         if not model_key:
             return
         if not hasattr(self, "_lora_draft_by_model"):
             self._lora_draft_by_model = {}
+        prev = self._lora_draft_by_model.get(model_key)
+        if not isinstance(prev, dict):
+            prev = {}
         self._lora_draft_by_model[model_key] = {
             "enabled_ids": self._get_lora_enabled_ids_from_widgets(),
-            "hidden_ids": [],
+            "deleted_ids": list(prev.get("deleted_ids") or prev.get("hidden_ids") or []),
         }
 
     def _show_lora_draft_for_model(self, model_key: str) -> None:
@@ -5843,11 +5931,11 @@ class SettingsDialog(QDialog):
 
     def _lora_settings_overlay(self, base_settings: dict) -> dict:
         """Merge in-memory LoRA draft for the current base model."""
-        from imagegen_plugins.lora_catalog_settings import migrate_lora_catalog
+        from imagegen_plugins.lora_catalog_settings import lora_catalog_from_settings
 
         cfg = dict(base_settings)
         imagegen = dict(cfg.get("imagegen") or {})
-        lc = migrate_lora_catalog(dict(imagegen.get("lora_catalog") or {}))
+        lc = dict(lora_catalog_from_settings(base_settings))
         model_key = self._current_lora_model_key()
         bm = dict(lc.get("by_model") or {})
         slice_ = self._lora_draft_slice(model_key)
@@ -5879,7 +5967,9 @@ class SettingsDialog(QDialog):
             by_model={
                 str(mk): {
                     "enabled_ids": list((sl or {}).get("enabled_ids") or []),
-                    "hidden_ids": [],
+                    "deleted_ids": list(
+                        (sl or {}).get("deleted_ids") or (sl or {}).get("hidden_ids") or []
+                    ),
                 }
                 for mk, sl in drafts.items()
                 if isinstance(sl, dict)
@@ -5906,9 +5996,17 @@ class SettingsDialog(QDialog):
         from PySide6.QtCore import QThread, Signal
         from PySide6.QtWidgets import QApplication
 
-        from imagegen_plugins.mflux_lora_presets import resolve_lora_path
+        from imagegen_plugins.image_gen_persistence import install_lora_entry
+        from imagegen_plugins.lora_catalog import lora_install_progress_label
 
-        progress = QProgressDialog("Downloading LoRA weights…", "Cancel", 0, 0, self)
+        model_key = self._current_lora_model_key()
+        progress = QProgressDialog(
+            lora_install_progress_label(lora_id, model_key=model_key),
+            "Cancel",
+            0,
+            0,
+            self,
+        )
         progress.setWindowTitle("Install LoRA")
         progress.setWindowModality(Qt.WindowModality.WindowModal)
         progress.setMinimumDuration(0)
@@ -5925,7 +6023,7 @@ class SettingsDialog(QDialog):
                     self.finished_ok.emit(False, "Cancelled")
                     return
                 try:
-                    resolve_lora_path(lora_id)
+                    install_lora_entry(lora_id)
                     self.finished_ok.emit(True, "")
                 except Exception as e:
                     self.finished_ok.emit(False, str(e))
@@ -5935,10 +6033,13 @@ class SettingsDialog(QDialog):
         def on_done(ok: bool, err: str) -> None:
             progress.close()
             if ok:
-                self._rebuild_lora_settings_grid()
-                self._apply_lora_settings_to_widgets(
-                    self._get_lora_enabled_ids_from_widgets()
+                model_key = (
+                    getattr(self, "_lora_model_key", None)
+                    or self._current_lora_model_key()
                 )
+                slice_ = self._lora_draft_slice(model_key)
+                self._rebuild_lora_settings_grid()
+                self._apply_lora_settings_to_widgets(slice_["enabled_ids"])
             elif err and err != "Cancelled":
                 show_styled_warning(self, "Install LoRA", err)
 
@@ -5967,22 +6068,125 @@ class SettingsDialog(QDialog):
             if mw is not None and hasattr(mw, "refresh_open_imagegen_lora_combos"):
                 mw.refresh_open_imagegen_lora_combos()
 
+    def _save_lora_user_preset(self) -> None:
+        from imagegen_plugins.image_gen_persistence import save_lora_user_preset
+
+        self._flush_lora_tab_to_disk()
+        try:
+            save_lora_user_preset()
+        except Exception as exc:
+            show_styled_warning(self, "Save LoRA setup", str(exc))
+            return
+        show_styled_information(self, "Save LoRA setup", "Your LoRA setup was saved.")
+
+    def _apply_lora_user_preset(self) -> None:
+        from imagegen_plugins.image_gen_persistence import apply_lora_user_preset
+
+        self._flush_lora_tab_to_disk()
+        reply = show_styled_question(
+            self,
+            "Apply LoRA setup",
+            "Restore your saved enabled LoRAs for each base model?\n\n"
+            "Missing weights are not downloaded automatically.",
+            default_no=True,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            enabled_count, _install_count = apply_lora_user_preset(install_missing=False)
+        except Exception as exc:
+            show_styled_warning(self, "Apply LoRA setup", str(exc))
+            return
+        self._reload_lora_drafts_and_grid()
+        show_styled_information(
+            self,
+            "Apply LoRA setup",
+            f"Restored {enabled_count} enabled LoRA(s) from your saved setup.",
+        )
+
+    def _restore_app_lora_recommendations(self) -> None:
+        from imagegen_plugins.image_gen_persistence import restore_app_lora_recommendations
+
+        self._flush_lora_tab_to_disk()
+        reply = show_styled_question(
+            self,
+            "Restore app recommendations",
+            "Restore the app's recommended LoRAs?\n\n"
+            "This clears deleted shipped LoRAs and adds any missing recommendations "
+            "to your enabled list. Weights are not downloaded automatically.",
+            default_no=True,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            enabled_count, _install_count = restore_app_lora_recommendations(
+                install_missing=False,
+                overwrite_enabled=False,
+            )
+        except Exception as exc:
+            show_styled_warning(self, "Restore app recommendations", str(exc))
+            return
+        self._reload_lora_drafts_and_grid()
+        show_styled_information(
+            self,
+            "Restore app recommendations",
+            f"Restored {enabled_count} recommended LoRA(s) to your library.",
+        )
+
     def _reload_lora_drafts_and_grid(self) -> None:
         from config import get_config
 
         self._load_lora_drafts_from_settings(get_config().load_settings())
         self._show_lora_draft_for_model(self._current_lora_model_key())
 
+    def _disable_lora_in_all_model_drafts(self, lora_id: str) -> None:
+        """Remove a LoRA id from enabled lists in every in-memory model draft."""
+        from imagegen_plugins.lora_model_registry import LORA_SETTINGS_MODEL_ORDER
+
+        if not hasattr(self, "_lora_draft_by_model"):
+            self._lora_draft_by_model = {}
+        for model_key in LORA_SETTINGS_MODEL_ORDER:
+            slice_ = self._lora_draft_slice(model_key)
+            self._lora_draft_by_model[model_key] = {
+                "enabled_ids": [
+                    x for x in slice_["enabled_ids"] if x != lora_id
+                ],
+                "deleted_ids": list(slice_["deleted_ids"]),
+            }
+
+    def _finish_lora_delete(self, lora_id: str, *, model_key: str, do_uninstall: bool) -> None:
+        title = "Remove from disk" if do_uninstall else "Delete LoRA"
+        try:
+            if do_uninstall:
+                from imagegen_plugins.image_gen_persistence import uninstall_lora_weights
+
+                uninstall_lora_weights(lora_id)
+            else:
+                from imagegen_plugins.image_gen_persistence import delete_lora_from_library
+
+                delete_lora_from_library(lora_id, model_key=model_key)
+            self._reload_lora_drafts_and_grid()
+        except Exception as e:
+            show_styled_warning(self, title, str(e))
+            return
+
+        mw = self.parent()
+        if mw is not None and hasattr(mw, "refresh_open_imagegen_lora_combos"):
+            mw.refresh_open_imagegen_lora_combos()
+
     def _delete_lora_catalog_entry(self, lora_id: str) -> None:
-        """Delete downloaded LoRA weights from disk (with confirmation)."""
+        """Uninstall or permanently delete a LoRA (with confirmation)."""
         from imagegen_plugins.hf_model_ids import lora_model_display_name
         from imagegen_plugins.lora_catalog import (
-            delete_installed_lora_files,
             get_lora_entry,
+            has_recovery_source,
             lora_disk_delete_allowed,
+            lora_lifecycle_state,
             lora_shared_model_labels,
+            LORA_LIFECYCLE_ACTIVE,
+            LORA_LIFECYCLE_INSTALLED,
+            LORA_LIFECYCLE_UNINSTALLED,
         )
-        from imagegen_plugins.lora_user_entries import is_user_lora_id
 
         entry = get_lora_entry(lora_id)
         if entry is None:
@@ -5995,12 +6199,46 @@ class SettingsDialog(QDialog):
 
         cfg_settings = self._lora_settings_overlay(get_config().load_settings())
         drafts = getattr(self, "_lora_draft_by_model", {}) or {}
-        if not lora_disk_delete_allowed(entry, cfg_settings, draft_by_model=drafts):
-            show_styled_warning(
+        state = lora_lifecycle_state(
+            lora_id, model_key, cfg_settings, draft_by_model=drafts
+        )
+        recoverable = has_recovery_source(entry)
+        on_disk = state in (LORA_LIFECYCLE_ACTIVE, LORA_LIFECYCLE_INSTALLED)
+
+        if on_disk and not lora_disk_delete_allowed(
+            entry, cfg_settings, draft_by_model=drafts
+        ):
+            shared = lora_shared_model_labels(entry, cfg_settings)
+            shared_text = ", ".join(shared) if shared else "multiple base models"
+            message = (
+                f"«{label}» is shared by {shared_text} and is still enabled on at least "
+                "one of them.\n\nDisable it on every model that uses this file before "
+                "deleting, or use Delete from all to disable everywhere and remove the LoRA."
+            )
+
+            def delete_from_all() -> None:
+                self._disable_lora_in_all_model_drafts(lora_id)
+                self._persist_all_lora_drafts_to_disk()
+                self._finish_lora_delete(
+                    lora_id,
+                    model_key=model_key,
+                    do_uninstall=recoverable,
+                )
+
+            show_scrollable_text_dialog(
                 self,
                 "Delete LoRA",
-                f"«{label}» is shared by multiple base models and is still enabled on at least "
-                "one of them. Disable it on every model that uses this file before deleting.",
+                message,
+                ok_label="Ok",
+                use_standard_warning_icon=True,
+                extra_actions=[
+                    (
+                        "Delete from all",
+                        delete_from_all,
+                        "Disable on all models and delete this LoRA",
+                        False,
+                    ),
+                ],
             )
             return
 
@@ -6013,19 +6251,29 @@ class SettingsDialog(QDialog):
                 + ". Deleting removes it for all of them."
             )
 
-        if is_user_lora_id(lora_id):
+        if on_disk and recoverable:
             message = (
-                f"Delete imported LoRA «{label}» from disk and remove it from settings?\n\n"
+                f"Remove downloaded weights for «{label}» from disk?\n\n"
+                "The LoRA stays in your library. You can Install it again later, "
+                "or press Delete again to remove it completely."
+                f"{shared_note}"
+            )
+            title = "Remove from disk"
+            do_uninstall = True
+        elif state == LORA_LIFECYCLE_UNINSTALLED and recoverable:
+            message = (
+                f"Remove «{label}» from your LoRA library?\n\n"
+                f"It will no longer appear for {model_label}."
+            )
+            title = "Remove from library"
+            do_uninstall = False
+        else:
+            message = (
+                f"Delete «{label}» permanently from disk and remove it from your library?\n\n"
                 f"This affects {model_label}.{shared_note}"
             )
             title = "Delete LoRA"
-        else:
-            message = (
-                f"Delete downloaded weights for «{label}» from disk?\n\n"
-                "You can Install them again later from this screen."
-                f"{shared_note}"
-            )
-            title = "Delete LoRA"
+            do_uninstall = False
 
         reply = show_styled_question(
             self,
@@ -6036,27 +6284,9 @@ class SettingsDialog(QDialog):
         if reply != QMessageBox.StandardButton.Yes:
             return
 
-        try:
-            if is_user_lora_id(lora_id):
-                from imagegen_plugins.image_gen_persistence import remove_user_lora
-
-                remove_user_lora(lora_id)
-                self._reload_lora_drafts_and_grid()
-            else:
-                from imagegen_plugins.image_gen_persistence import (
-                    remove_lora_enabled_everywhere,
-                )
-
-                delete_installed_lora_files(entry)
-                remove_lora_enabled_everywhere(lora_id)
-                self._reload_lora_drafts_and_grid()
-        except Exception as e:
-            show_styled_warning(self, "Delete LoRA", str(e))
-            return
-
-        mw = self.parent()
-        if mw is not None and hasattr(mw, "refresh_open_imagegen_lora_combos"):
-            mw.refresh_open_imagegen_lora_combos()
+        self._finish_lora_delete(
+            lora_id, model_key=model_key, do_uninstall=do_uninstall
+        )
 
     def _rebuild_lora_settings_grid(self) -> None:
         """Rebuild LoRA rows for the selected base model."""
@@ -6065,9 +6295,12 @@ class SettingsDialog(QDialog):
         from config import get_config
         from imagegen_plugins.lora_catalog import (
             catalog_entries_for_model,
+            has_recovery_source,
             is_lora_installed,
             lora_choice_label,
-            lora_disk_delete_allowed,
+            lora_lifecycle_state,
+            lora_status_label,
+            LORA_LIFECYCLE_UNINSTALLED,
         )
 
         while self._lora_rows_layout.count():
@@ -6090,11 +6323,25 @@ class SettingsDialog(QDialog):
         drafts = getattr(self, "_lora_draft_by_model", {}) or {}
 
         row_count = 0
-        for entry in catalog_entries_for_model(cfg_settings, model_key):
+        for entry in catalog_entries_for_model(
+            cfg_settings, model_key, draft_by_model=drafts
+        ):
             installed = is_lora_installed(entry.lora_id)
+            lifecycle = lora_lifecycle_state(
+                entry.lora_id, model_key, cfg_settings, draft_by_model=drafts
+            )
+            if (
+                lifecycle == LORA_LIFECYCLE_UNINSTALLED
+                and getattr(self, "_lora_hide_uninstalled", False)
+            ):
+                continue
             cb = MacToggleSwitch()
             cb.setToolTip(entry.repo_id or entry.local_path or entry.lora_id)
             cb.stateChanged.connect(self._on_lora_checkbox_state_changed)
+            if lifecycle == LORA_LIFECYCLE_UNINSTALLED:
+                cb.setChecked(False)
+                cb.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+                cb.setCursor(Qt.CursorShape.ArrowCursor)
             self._lora_checkboxes[entry.lora_id] = cb
 
             name_lbl = QLabel(lora_choice_label(entry, model_key=model_key))
@@ -6108,13 +6355,9 @@ class SettingsDialog(QDialog):
                 font.setBold(True)
                 name_lbl.setFont(font)
 
-            from imagegen_plugins.lora_user_entries import is_user_lora_id
-
-            # Imported/user LoRAs are always on disk; only curated catalog rows need install state.
-            if is_user_lora_id(entry.lora_id):
-                status_text = "imported"
-            else:
-                status_text = "installed" if installed else "not installed"
+            status_text = lora_status_label(
+                entry.lora_id, model_key, cfg_settings, draft_by_model=drafts
+            )
             status_lbl = QLabel(status_text)
             status_lbl.setStyleSheet(f"color: {TEXT_DISABLED_HEX}; font-size: 11px;")
             status_lbl.setWordWrap(True)
@@ -6136,29 +6379,42 @@ class SettingsDialog(QDialog):
             )
 
             install_btn = None
-            if not installed and (entry.repo_id or entry.local_path):
+            if lifecycle == LORA_LIFECYCLE_UNINSTALLED and has_recovery_source(entry):
                 install_btn = QPushButton("Install")
-                install_btn.setToolTip(f"Download {entry.display_name}")
+                install_btn.setToolTip(f"Install {entry.display_name}")
                 install_btn.clicked.connect(
                     lambda checked=False, lid=entry.lora_id: self._install_lora_catalog_entry(
                         lid
                     )
                 )
 
-            del_btn = None
-            if installed and lora_disk_delete_allowed(
-                entry, cfg_settings, draft_by_model=drafts
-            ):
-                del_btn = QPushButton()
-                del_btn.setToolTip(
-                    f"Delete {lora_choice_label(entry, model_key=model_key)} from disk"
-                )
-                del_btn.setStyleSheet(self._lora_trash_button_style())
-                del_btn.clicked.connect(
-                    lambda checked=False, lid=entry.lora_id: self._delete_lora_catalog_entry(
-                        lid
+            del_btn = QPushButton()
+            if lifecycle == LORA_LIFECYCLE_UNINSTALLED:
+                if has_recovery_source(entry):
+                    tip = (
+                        f"Remove {lora_choice_label(entry, model_key=model_key)} "
+                        "from library"
                     )
+                else:
+                    tip = (
+                        f"Delete {lora_choice_label(entry, model_key=model_key)} "
+                        "permanently"
+                    )
+            elif has_recovery_source(entry):
+                tip = (
+                    f"Remove {lora_choice_label(entry, model_key=model_key)} from disk"
                 )
+            else:
+                tip = (
+                    f"Delete {lora_choice_label(entry, model_key=model_key)} permanently"
+                )
+            del_btn.setToolTip(tip)
+            del_btn.setStyleSheet(self._lora_trash_button_style())
+            del_btn.clicked.connect(
+                lambda checked=False, lid=entry.lora_id: self._delete_lora_catalog_entry(
+                    lid
+                )
+            )
 
             edit_btn = QPushButton()
             edit_btn.setToolTip(
@@ -6225,11 +6481,16 @@ class SettingsDialog(QDialog):
     def _apply_lora_settings_to_widgets(self, enabled_ids: List[str]) -> None:
         if not hasattr(self, "_lora_checkboxes"):
             return
+        from imagegen_plugins.lora_catalog import is_lora_installed
+
         enabled = set(enabled_ids or [])
         self._lora_syncing_checkboxes = True
         try:
             for lora_id, cb in self._lora_checkboxes.items():
-                cb.setChecked(lora_id in enabled)
+                if not is_lora_installed(lora_id):
+                    cb.setChecked(False)
+                else:
+                    cb.setChecked(lora_id in enabled)
         finally:
             self._lora_syncing_checkboxes = False
 

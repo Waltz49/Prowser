@@ -213,6 +213,8 @@ def build_user_lora_entry(
     trigger_word: Optional[str] = None,
     scale: float = 1.0,
     comment: Optional[str] = None,
+    repo_id: str = "",
+    filename: str = "",
     settings: Optional[Dict[str, Any]] = None,
 ) -> FluxLoraEntry:
     host_id = host_id_for_lora_model(model_key)
@@ -227,6 +229,8 @@ def build_user_lora_entry(
         host_id=host_id,
         lora_id=lora_id,
         display_name=(display_name or display_name_from_path(source_path)).strip(),
+        repo_id=(repo_id or "").strip(),
+        filename=(filename or "").strip(),
         local_path=str(dest),
         scale=float(scale),
         base_hf_model_id=model_key,
@@ -236,6 +240,49 @@ def build_user_lora_entry(
         comment=(comment or "").strip() or None,
         source_path=str(resolved_source),
     )
+
+
+def reinstall_user_lora(entry: FluxLoraEntry) -> Path:
+    """Re-copy or download weights for a user LoRA entry."""
+    from imagegen_plugins.mflux_lora_presets import resolve_lora_path
+
+    if (entry.repo_id or "").strip() and (entry.filename or "").strip():
+        return Path(resolve_lora_path(entry.lora_id))
+    source_text = (entry.source_path or "").strip()
+    if not source_text:
+        raise ValueError("No recovery source is configured for this LoRA.")
+    if source_text.lower().startswith(("http://", "https://")):
+        return _download_lora_from_url(source_text, entry)
+    source = validate_safetensors_source(source_text)
+    dest = copy_lora_to_user_cache(source, entry.lora_id)
+    return dest
+
+
+def _download_lora_from_url(url: str, entry: FluxLoraEntry) -> Path:
+    import os
+    import urllib.parse
+    import urllib.request
+
+    dest_dir = USER_LORA_CACHE_ROOT / entry.lora_id
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    filename = (entry.filename or "").strip()
+    if not filename:
+        tail = urllib.parse.urlparse(url).path.rsplit("/", 1)[-1]
+        filename = tail if tail.endswith(".safetensors") else f"{entry.lora_id}.safetensors"
+    dest = dest_dir / filename
+    req = urllib.request.Request(
+        url,
+        headers={"User-Agent": "Prowser/1.0"},
+    )
+    token = (os.environ.get("CIVITAI_API_TOKEN") or os.environ.get("CIVITAI_TOKEN") or "").strip()
+    if token and ("civitai.com" in url or "civit.red" in url):
+        req.add_header("Authorization", f"Bearer {token}")
+    with urllib.request.urlopen(req, timeout=120) as resp:
+        data = resp.read()
+    if len(data) < 1024:
+        raise ValueError("Downloaded LoRA file is too small to be valid.")
+    dest.write_bytes(data)
+    return dest.resolve()
 
 
 def remove_user_lora_files(entry: FluxLoraEntry) -> None:
