@@ -9651,6 +9651,9 @@ if __name__ == "__main__":
     from PySide6.QtWidgets import QApplication, QWidget
 
     app = QApplication(sys.argv)
+    from combo_popup_utils import install_combo_popup_below_globally
+
+    install_combo_popup_below_globally()
     
     # Apply global dark theme stylesheet for consistent UI styling (same as prowser.py)
     from thumbnails.thumbnail_constants import get_dark_theme_stylesheet

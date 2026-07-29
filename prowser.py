@@ -852,6 +852,9 @@ def main():
     
     # Create the application first - before any QWidget operations
     app = QApplication(sys.argv)
+    from combo_popup_utils import install_combo_popup_below_globally
+
+    install_combo_popup_below_globally()
     _startup_profile_mark("after_QApplication")
     app.setApplicationName("Prowser")
     app.setApplicationDisplayName("Prowser")

@@ -6,7 +6,14 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional, Tuple
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QComboBox, QLabel, QSizePolicy, QVBoxLayout, QWidget
+from PySide6.QtWidgets import (
+    QComboBox,
+    QLabel,
+    QListView,
+    QSizePolicy,
+    QVBoxLayout,
+    QWidget,
+)
 
 from imagegen_plugins.image_gen_fields import FieldSpec
 from imagegen_plugins.image_gen_form_layout import (
@@ -119,6 +126,11 @@ def configure_lora_combo(combo: QComboBox) -> None:
     # Theme min-width lives on #imageGenDialog QComboBox#imageGenLoraCombo; keep size caps here.
     combo.setMinimumWidth(280)
     combo.setMaximumWidth(4096)
+    if not isinstance(combo.view(), QListView):
+        view = QListView(combo)
+        view.setTextElideMode(Qt.TextElideMode.ElideNone)
+        view.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        combo.setView(view)
     view = combo.view()
     if view is not None:
         view.setTextElideMode(Qt.TextElideMode.ElideNone)

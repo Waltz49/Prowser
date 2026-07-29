@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, Tuple
 
-from PySide6.QtCore import QPoint, Qt, Signal
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QDoubleValidator, QFontMetrics, QKeyEvent
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -14,12 +14,15 @@ from PySide6.QtWidgets import (
     QGridLayout,
     QLabel,
     QLineEdit,
+    QListView,
     QScrollArea,
     QSizePolicy,
     QStyle,
     QVBoxLayout,
     QWidget,
 )
+
+from combo_popup_utils import position_popup_below_anchor
 
 from imagegen_plugins.image_gen_model_selector import (
     _LORA_COMBO_OBJECT_NAME,
@@ -346,13 +349,7 @@ class LoraSelectionPopup(QFrame):
         layout = self.layout()
         if layout is not None:
             self.setFixedHeight(layout.sizeHint().height())
-        global_pos = anchor.mapToGlobal(QPoint(0, anchor.height()))
-        if screen is not None:
-            avail = screen.availableGeometry()
-            right_edge = global_pos.x() + width
-            if right_edge > avail.right() - 8:
-                global_pos.setX(max(avail.left() + 8, avail.right() - 8 - width))
-        self.move(global_pos)
+        position_popup_below_anchor(self, anchor)
         self.show()
         self.raise_()
         self.activateWindow()
