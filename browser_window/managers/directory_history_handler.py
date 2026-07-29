@@ -70,10 +70,56 @@ class DirectoryHistoryHandler:
             pass # f"Error saving directory state: {e}")
             import traceback
             traceback.print_exc()
+
+    def thumbnail_context_would_change(
+        self, pre_state: Dict[str, Any], new_files: List[str]
+    ) -> bool:
+        """True when closing browse would show the wrong thumbnail grid."""
+        if not pre_state or not new_files:
+            return False
+        if pre_state.get('specific_files'):
+            return True
+        if pre_state.get('presentation') == 'reference_graph':
+            return True
+        new_dir = os.path.dirname(os.path.abspath(new_files[0]))
+        pre_dir = pre_state.get('directory')
+        if pre_dir and os.path.normpath(pre_dir) != os.path.normpath(new_dir):
+            return True
+        return False
+
+    def clear_browse_return_state(self) -> None:
+        if hasattr(self.main_window, '_browse_return_thumbnail_state'):
+            self.main_window._browse_return_thumbnail_state = None
+
+    def prepare_displacement_before_files_load(
+        self, files: List[str], *, entering_browse: bool
+    ) -> None:
+        """Stash thumbnail context before a files-load displaces the current grid."""
+        if getattr(self.main_window, 'restoring_from_history', False):
+            return
+        if not files:
+            return
+        if getattr(self.main_window, '_browse_return_thumbnail_state', None):
+            return
+
+        captured_state = self.capture_current_state()
+        if not captured_state:
+            return
+
+        if entering_browse and self.thumbnail_context_would_change(
+            captured_state, files
+        ):
+            self.main_window._browse_return_thumbnail_state = captured_state
+
+        self.save_current_state(
+            'directory_history_handler.prepare_displacement_before_files_load',
+            delay=0.0,
+        )
     
     def navigate_backward(self):
         """Pop previous state and restore it"""
-    
+        self.clear_browse_return_state()
+
         if not self.backward_stack:
             self._notify_status("No previous directories in history", 3000)
             return
@@ -117,6 +163,8 @@ class DirectoryHistoryHandler:
     
     def navigate_forward(self):
         """Restore next state from forward stack"""
+        self.clear_browse_return_state()
+
         if not self.forward_stack:
             self._notify_status("No next directories in history", 3000)
             return

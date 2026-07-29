@@ -2067,7 +2067,11 @@ class ViewManager:
             
             # Check if we should return to list view
             return_to_list = getattr(self.main_window, '_return_to_list_view', False)
-            
+            stashed_state = getattr(
+                self.main_window, '_browse_return_thumbnail_state', None
+            )
+            restored_from_stash = False
+
             if return_to_list:
                 self.main_window.stacked_widget.setCurrentIndex(2)  # List view is index 2
                 self.main_window.current_view_mode = 'list'
@@ -2077,13 +2081,20 @@ class ViewManager:
                 # Update list view to highlight current image
                 self.update_list_view()
             else:
+                if stashed_state is not None:
+                    handler = self.main_window.directory_stack_history_handler
+                    restore_state = dict(stashed_state)
+                    restore_state['view_mode'] = 'thumbnail'
+                    restored_from_stash = handler._restore_state_direct(restore_state)
+                    handler.clear_browse_return_state()
+
                 self.main_window.stacked_widget.setCurrentIndex(0)
                 self.main_window.current_view_mode = 'thumbnail'
                 # Restore sidebar BEFORE emitting view mode changed, so _immediate_splitter_update
                 # sees correct layout (avoids refresh-then-resize double refresh when tree visible)
                 self.main_window.manage_sidebar_visibility_for_view_mode('thumbnail')
                 # Ensure thumbnails are populated when exiting browse mode
-                if self.main_window.displayed_images:
+                if not restored_from_stash and self.main_window.displayed_images:
                     canvas = (
                         self.main_window.thumbnail_container.canvas
                         if hasattr(self.main_window, 'thumbnail_container')

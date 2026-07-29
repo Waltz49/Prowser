@@ -391,6 +391,7 @@ class ImageBrowserWindow(QMainWindow):
         # externally (e.g., via API). Used to avoid replacing the set with a full
         # directory scan when exiting fullscreen.
         self.specific_files_active: bool = False
+        self._browse_return_thumbnail_state: Optional[Dict[str, Any]] = None
         self.reference_graph_active: bool = False
         self.reference_graph_data = None
         self.reference_graph_focus_path: Optional[str] = None
@@ -1018,6 +1019,19 @@ class ImageBrowserWindow(QMainWindow):
             else:
                 requested_macos_space_mode = (
                     is_single_file_request and not is_multiple_files_request
+                )
+
+            if files and not getattr(self, 'restoring_from_history', False):
+                entering_browse = (
+                    len(files) == 1
+                    and not force_specific_files_grid
+                    and (
+                        fullscreen is True
+                        or (fullscreen is None and not prevent_browse_view)
+                    )
+                )
+                self.directory_stack_history_handler.prepare_displacement_before_files_load(
+                    files, entering_browse=entering_browse
                 )
             
             if filter_pattern is not None:

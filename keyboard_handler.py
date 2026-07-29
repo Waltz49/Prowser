@@ -1201,6 +1201,7 @@ class ThumbnailKeyboardHandler(BaseKeyboardHandler):
             forward_count = len(handler.forward_stack)
             handler.backward_stack.clear()
             handler.forward_stack.clear()
+            handler.clear_browse_return_state()
             total_cleared = backward_count + forward_count
             if total_cleared > 0:
                 handler._notify_status(f"Cleared {total_cleared} history entries", 3000)
@@ -1984,6 +1985,7 @@ class BrowseViewKeyboardHandler(BaseKeyboardHandler):
             forward_count = len(handler.forward_stack)
             handler.backward_stack.clear()
             handler.forward_stack.clear()
+            handler.clear_browse_return_state()
             total_cleared = backward_count + forward_count
             if total_cleared > 0:
                 handler._notify_status(f"Cleared {total_cleared} history entries", 3000)
