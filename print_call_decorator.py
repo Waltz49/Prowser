@@ -124,6 +124,14 @@ def print_call(func: Callable, wrap: bool = True, *, tee_terminal: bool = True) 
 
     @wraps(func)
     def wrapper(*args, **kwargs) -> Any:
+        try:
+            from model_debug_log import debug_mode_enabled
+
+            if not debug_mode_enabled():
+                return func(*args, **kwargs)
+        except ImportError:
+            pass
+
         original_func = get_original_func(func)
 
         if hasattr(original_func, "__self__"):

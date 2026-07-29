@@ -167,6 +167,13 @@ def _run_speech_process(argv: list[str], text: str) -> None:
             _notify_speech_listeners(False)
 
 
+def text_for_speech(text: str) -> str:
+    """Prepare plain text for TTS (strip markdown asterisks, etc.)."""
+    if not text:
+        return ""
+    return text.replace("*", "")
+
+
 def speak_text(text: str) -> bool:
     """
     Speak text via PROWSER_SAY_EXIT or macOS ``say``.
@@ -176,7 +183,9 @@ def speak_text(text: str) -> bool:
     global _speech_active, _stop_requested
     if not text or not text.strip():
         return False
-    text = text.strip()
+    text = text_for_speech(text.strip())
+    if not text.strip():
+        return False
     argv = _speak_argv(text)
     if not argv:
         return False

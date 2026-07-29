@@ -3,24 +3,9 @@
 
 from __future__ import annotations
 
-import json
-
-from config import get_config
-from debug_log import debug_timestamp
-from print_call_decorator import relax_json_for_log
+from model_debug_log import log_model_input, log_model_output
 
 _LOG_TAG = "chat_plugins.chat_lmstudio"
-
-
-def _debug_enabled() -> bool:
-    return bool(get_config().load_settings().get("debug_mode", False))
-
-
-def _write_json_log(kind: str, payload: dict) -> None:
-    body = relax_json_for_log(
-        json.dumps(payload, indent=2, ensure_ascii=False, default=str)
-    )
-    print(f"{debug_timestamp()} {_LOG_TAG} {kind}\n{body}\n", flush=True)
 
 
 def log_chat_llm_input(
@@ -29,10 +14,8 @@ def log_chat_llm_input(
     system_prompt: str,
     temperature: float,
 ) -> None:
-    if not _debug_enabled():
-        return
-    _write_json_log(
-        "input",
+    log_model_input(
+        _LOG_TAG,
         {
             "system_prompt": system_prompt,
             "messages": messages,
@@ -42,6 +25,4 @@ def log_chat_llm_input(
 
 
 def log_chat_llm_output(text: str) -> None:
-    if not _debug_enabled():
-        return
-    _write_json_log("output", {"text": text})
+    log_model_output(_LOG_TAG, text)

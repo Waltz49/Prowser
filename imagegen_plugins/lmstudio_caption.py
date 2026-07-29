@@ -312,6 +312,18 @@ def get_image_caption_stream(file_path: str, user_prompt_override: str | None = 
         system_prompt = apply_text_ai_exit(system_prompt)
         user_prompt = apply_text_ai_exit(user_prompt)
 
+        from model_debug_log import log_model_input
+
+        log_model_input(
+            "imagegen_plugins.lmstudio_caption",
+            {
+                "system_prompt": system_prompt,
+                "user_prompt": user_prompt,
+                "image_path": file_path,
+                "config": {"temperature": temperature},
+            },
+        )
+
         try:
             image_handle = client.files.prepare_image(file_path)
         except Exception as e:

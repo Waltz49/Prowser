@@ -10,7 +10,11 @@ from PySide6.QtWidgets import QHBoxLayout, QPushButton, QWidget
 
 from theme.theme_service import get_active_theme
 from thumbnails.thumbnail_constants import ALT_SYMBOL, COPY_SYMBOL
-from widgets.icon_hover_swap import IconHoverSwap, attach_icon_hover_swap, icon_pair_from_assets
+from widgets.icon_hover_swap import (
+    IconHoverSwap,
+    attach_icon_hover_swap,
+    icon_pair_from_assets,
+)
 
 INFO_ACTION_ICON_PX = 18
 INFO_ACTION_BTN_PX = 26
@@ -29,82 +33,66 @@ INFO_ACTION_TOOLTIPS = {
     "delete": "Delete user comment",
 }
 
-_IMAGE_ACTION_IDS = frozenset({"edit", "create", "editai", "delete"})
+_IMAGE_ACTION_IDS = frozenset({"edit", "create", "editai", "delete", "speak"})
 _IMAGE_ICON_PATHS = {
     "edit": ("comment_icon.png", "comment_icon_hover.png"),
     "create": ("fromText.png", "fromText_hover.png"),
     "editai": ("editAI.png", "editAI_hover.png"),
     "delete": ("trash_icon.png", "trash_icon_hover.png"),
+    "speak": ("bullhorn.png", "bullhorn_hover.png"),
 }
 _TEXT_ACTION_SYMBOLS = {
     "copy": COPY_SYMBOL,
-    "speak": "꡴",
 }
 
 
-def info_action_chip_button_stylesheet(*, highlighted: bool = False) -> str:
+def info_action_button_stylesheet(*, highlighted: bool = False, text_button: bool = False) -> str:
+    """Shared chrome for File Information action buttons (edit-style hover border)."""
     th = get_active_theme()
     border = (
         getattr(th, "button_border_hover_hex", th.accent_color_hex)
         if highlighted
         else th.information_icon_cell_border_muted_hex
     )
-    fg = (
-        getattr(th, "button_border_hover_hex", th.accent_color_hex)
-        if highlighted
-        else th.information_action_icon_muted_hex
-    )
     hover_border = getattr(th, "button_border_hover_hex", th.accent_color_hex)
     px = INFO_ACTION_BTN_PX
-    return f"""
-        QPushButton {{
-            background-color: {th.information_action_chip_bg_hex};
-            border: 1px solid {border};
-            border-radius: 6px;
-            color: {fg};
-            padding: 0px;
+    text_rules = ""
+    hover_text_rules = ""
+    if text_button:
+        text_rules = f"""
+            color: {th.dialog_text_color_hex};
             font-size: 14px;
-            min-width: {px}px;
-            max-width: {px}px;
-            min-height: {px}px;
-            max-height: {px}px;
-        }}
-        QPushButton:hover {{
-            border-color: {hover_border};
+        """
+        hover_text_rules = f"""
+        QPushButton:hover:enabled {{
             color: {hover_border};
-        }}
-        QPushButton:disabled {{
-            color: {th.text_disabled_hex};
-            border-color: {th.information_icon_cell_border_muted_hex};
-        }}
-    """
-
-
-def info_action_image_button_stylesheet(*, highlighted: bool = False) -> str:
-    th = get_active_theme()
-    border = (
-        getattr(th, "button_border_hover_hex", th.accent_color_hex)
-        if highlighted
-        else th.information_icon_cell_border_muted_hex
-    )
-    hover_border = getattr(th, "button_border_hover_hex", th.accent_color_hex)
-    px = INFO_ACTION_BTN_PX
+        }}"""
     return f"""
         QPushButton {{
             background-color: {th.information_action_chip_bg_hex};
             border: 1px solid {border};
             border-radius: 6px;
             padding: 0px;
+            opacity: 1;
+            {text_rules}
             min-width: {px}px;
             max-width: {px}px;
             min-height: {px}px;
             max-height: {px}px;
         }}
         QPushButton:hover {{
-            border-color: {hover_border};
+            border: 1px solid {hover_border};
         }}
+        QPushButton:hover:enabled {{
+            opacity: 1;
+        }}
+        {hover_text_rules}
         QPushButton:disabled {{
+            opacity: 0.35;
             border-color: {th.information_icon_cell_border_muted_hex};
+        }}
+        QPushButton:hover:disabled {{
+            opacity: 0.35;
         }}
     """
 
@@ -138,11 +126,9 @@ class InformationActionNavBar(QWidget):
             btn = QPushButton(text)
             btn.setToolTip(INFO_ACTION_TOOLTIPS.get(action_id, ""))
             btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+            btn.setAttribute(Qt.WidgetAttribute.WA_Hover, True)
             btn.setFixedSize(INFO_ACTION_BTN_PX, INFO_ACTION_BTN_PX)
-            if text:
-                btn.setIconSize(QSize(INFO_ACTION_ICON_PX, INFO_ACTION_ICON_PX))
-            else:
-                btn.setIconSize(QSize(INFO_ACTION_ICON_PX, INFO_ACTION_ICON_PX))
+            btn.setIconSize(QSize(INFO_ACTION_ICON_PX, INFO_ACTION_ICON_PX))
             btn.clicked.connect(
                 lambda _checked=False, aid=action_id: self.action_triggered.emit(aid)
             )
@@ -177,17 +163,21 @@ class InformationActionNavBar(QWidget):
         th = get_active_theme()
         self.setStyleSheet(th.file_tree_nav_container_stylesheet())
         for action_id, btn in self._buttons.items():
+            highlighted = self._speak_highlighted if action_id == "speak" else False
+            text_button = action_id in _TEXT_ACTION_SYMBOLS
             if action_id in _IMAGE_ACTION_IDS:
                 normal_name, hover_name = _IMAGE_ICON_PATHS[action_id]
                 normal, hover = icon_pair_from_assets(normal_name, hover_name)
                 swap = self._icon_hovers.get(action_id)
                 if swap is None:
-                    self._icon_hovers[action_id] = attach_icon_hover_swap(btn, normal, hover)
+                    self._icon_hovers[action_id] = attach_icon_hover_swap(
+                        btn, normal, hover
+                    )
                 else:
                     swap.set_icons(normal, hover)
-                btn.setStyleSheet(info_action_image_button_stylesheet())
-            else:
-                highlighted = self._speak_highlighted if action_id == "speak" else False
-                btn.setStyleSheet(
-                    info_action_chip_button_stylesheet(highlighted=highlighted)
+            btn.setStyleSheet(
+                info_action_button_stylesheet(
+                    highlighted=highlighted,
+                    text_button=text_button,
                 )
+            )

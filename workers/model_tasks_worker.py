@@ -433,6 +433,10 @@ def _run_generate(payload: Dict[str, Any], job_id: str) -> None:
             f"source={str(payload.get('pixelmator_doc_path') or '')!r}",
             flush=True,
         )
+    from model_debug_log import log_imagegen_payload
+
+    log_imagegen_payload(payload)
+
     job_t0 = time.perf_counter()
     try:
         with PerfTimer("worker_job", job_id=job_id, pipeline=pipeline_id):
@@ -596,6 +600,18 @@ def get_flux_prompt_stream(
 
     system_prompt = apply_text_ai_exit(system_prompt)
     user_text = apply_text_ai_exit(user_text)
+
+    from model_debug_log import log_model_input
+
+    log_model_input(
+        "workers.model_tasks_worker.flux_prompt",
+        {
+            "system_prompt": system_prompt,
+            "user_prompt": user_text,
+            "image_paths": image_files,
+            "config": {"temperature": cap_settings["temperature"]},
+        },
+    )
 
     temperature = cap_settings["temperature"]
 
