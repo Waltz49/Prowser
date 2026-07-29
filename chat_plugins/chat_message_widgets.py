@@ -540,7 +540,9 @@ class ChatMessageWidget(QWidget):
             return
         self._suppress_edit_focus_out = True
         try:
-            text = self._edit_input.toPlainText().strip()
+            from imagegen_plugins.image_gen_form_layout import sentence_case_lines
+
+            text = sentence_case_lines(self._edit_input.toPlainText().strip())
             images = (
                 self._thumb_row.image_paths()
                 if self._thumb_row is not None

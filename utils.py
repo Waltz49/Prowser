@@ -1553,7 +1553,10 @@ def show_scrollable_text_dialog(
         if tooltip:
             btn.setToolTip(tooltip)
 
-        def _on_extra(cb: Callable[[], None] = callback) -> None:
+        def _on_extra(
+            _checked: bool = False,
+            cb: Callable[[], None] = callback,
+        ) -> None:
             cb()
             _dismiss()
 
