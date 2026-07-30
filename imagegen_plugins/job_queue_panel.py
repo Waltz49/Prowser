@@ -686,7 +686,12 @@ class JobQueuePanelWidget(QWidget):
             if isinstance(widget, QAbstractButton):
                 return True
             if isinstance(widget, QTextBrowser):
-                return True
+                vp = widget.viewport()
+                if vp is not None:
+                    local = vp.mapFromGlobal(event.globalPosition().toPoint())
+                    if widget.anchorAt(local):
+                        return True
+                return False
             widget = widget.parentWidget()
         return False
 
