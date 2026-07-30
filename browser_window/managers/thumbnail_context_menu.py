@@ -163,15 +163,16 @@ class ThumbnailContextMenuHandler:
 
         menu.addSeparator()
 
-        # Edit in <editor> (⌘E) - single only
+        # Edit in <editor> (⌘E) - multi-select only when editor is Pixelmator Pro
         from config import get_config
         settings = get_config().load_settings()
         editor_app = settings.get('image_editor_app', 'Preview')
+        from files.external_editor import edit_current_image_with_editor, is_pixelmator_pro_editor
+        edit_enabled = single_only or (multi_select and is_pixelmator_pro_editor(editor_app))
         edit_action = menu.addAction(_shortcut_label(f"Edit in {editor_app}", "Ctrl+E"))
         edit_action.setShortcut(QKeySequence("Ctrl+E"))
-        edit_action.setEnabled(single_only)
-        if single_only:
-            from files.external_editor import edit_current_image_with_editor
+        edit_action.setEnabled(edit_enabled)
+        if edit_enabled:
             edit_action.triggered.connect(
                 lambda checked=False: edit_current_image_with_editor(mw)
             )

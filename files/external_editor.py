@@ -17,15 +17,47 @@ Enhanced Features:
 # Standard library imports
 import os
 import subprocess
+import tempfile
 import threading
 import time
-from typing import Optional
+from typing import List, Optional
 import traceback
 import psutil
 from PySide6.QtCore import QMutexLocker
 from macos_process import open_document_with_app
 from utils import get_main_window, show_styled_critical
 from config import get_config
+
+_PIXELMATOR_PRO_EDITOR_NAME = "Pixelmator Pro"
+
+_PIXELMATOR_MULTI_APPLESCRIPT = """on run argv
+  -- Resolve paths before telling Pixelmator (it can't coerce POSIX file itself)
+  set firstPath to POSIX file (item 1 of argv)
+  set extraFiles to {}
+  repeat with i from 2 to count of argv
+    set end of extraFiles to POSIX file (item i of argv)
+  end repeat
+
+  tell application "Pixelmator Pro"
+    activate
+    open firstPath
+    repeat until (count of documents) > 0
+      delay 0.2
+    end repeat
+    set docRef to front document
+    repeat with f in extraFiles
+      tell docRef
+        make new image layer with properties {file:contents of f, preserve transparency:true}
+      end tell
+    end repeat
+  end tell
+end run
+"""
+
+
+def is_pixelmator_pro_editor(editor_app: str) -> bool:
+    """Return True when the configured external editor is Pixelmator Pro."""
+    return editor_app.strip().lower() == _PIXELMATOR_PRO_EDITOR_NAME.lower()
 
 
 class TimestampPreservingEditor:
@@ -99,6 +131,40 @@ class TimestampPreservingEditor:
         except Exception:
             # Show QMessageBox error about not installed/not launchable app
             self._show_editor_not_installed_error(editor_app)
+            return False
+
+    def edit_pixelmator_pro_multi_files(self, file_paths: List[str], refresh_callback=None) -> bool:
+        """
+        Open multiple files in Pixelmator Pro (first as document, rest as layers)
+        while preserving timestamps/EXIF on the first file only.
+        """
+        if len(file_paths) < 2:
+            return False
+
+        for path in file_paths:
+            if (
+                not os.path.exists(path)
+                or not os.path.isfile(path)
+                or not os.access(path, os.R_OK)
+            ):
+                return False
+
+        first_path = file_paths[0]
+        self.file_path = first_path
+        self.refresh_callback = refresh_callback
+
+        try:
+            self._save_original_timestamps(first_path)
+            success, pid = _launch_pixelmator_pro_files(file_paths)
+            if success:
+                self.editor_pid = pid
+                if pid is not None:
+                    self._start_monitoring()
+                return True
+            self._show_editor_not_installed_error(_PIXELMATOR_PRO_EDITOR_NAME)
+            return False
+        except Exception:
+            self._show_editor_not_installed_error(_PIXELMATOR_PRO_EDITOR_NAME)
             return False
 
     def _show_editor_not_installed_error(self, editor_app: str):
@@ -500,6 +566,62 @@ class TimestampPreservingEditor:
 _editor_instance = TimestampPreservingEditor()
 
 
+def _launch_pixelmator_pro_files(file_paths: List[str]) -> tuple[bool, Optional[int]]:
+    """Open files in Pixelmator Pro (first as document, rest as layers)."""
+    editor_app = _PIXELMATOR_PRO_EDITOR_NAME
+    if not _editor_instance._check_editor_installed(editor_app):
+        return False, None
+
+    abs_paths = [os.path.abspath(p) for p in file_paths]
+    existing_pid = _editor_instance._find_editor_pid(editor_app)
+
+    try:
+        if len(abs_paths) == 1:
+            escaped = abs_paths[0].replace("\\", "\\\\").replace('"', '\\"')
+            script = (
+                'tell application "Pixelmator Pro"\n'
+                'activate\n'
+                f'open POSIX file "{escaped}"\n'
+                'end tell'
+            )
+            result = subprocess.run(
+                ["osascript", "-e", script],
+                capture_output=True,
+                text=True,
+                timeout=60,
+            )
+        else:
+            fd, tmp_path = tempfile.mkstemp(prefix="pixelmator_import_")
+            try:
+                with os.fdopen(fd, "w", encoding="utf-8") as script_file:
+                    script_file.write(_PIXELMATOR_MULTI_APPLESCRIPT)
+                result = subprocess.run(
+                    ["osascript", tmp_path, *abs_paths],
+                    capture_output=True,
+                    text=True,
+                    timeout=60,
+                )
+            finally:
+                try:
+                    os.remove(tmp_path)
+                except OSError:
+                    pass
+
+        if result.returncode != 0:
+            return (True, existing_pid) if existing_pid else (False, None)
+
+        for attempt in range(5):
+            time.sleep(0.5 + attempt * 0.5)
+            pid = _editor_instance._find_editor_pid(editor_app)
+            if pid is not None:
+                return True, pid
+        if existing_pid is not None:
+            return True, existing_pid
+        return True, None
+    except (subprocess.TimeoutExpired, subprocess.SubprocessError, OSError):
+        return (True, existing_pid) if existing_pid else (False, None)
+
+
 def notify_mtime_changed_by_app(file_path: str, new_mtime: float) -> None:
     """
     Notify the external editor that the app intentionally changed a file's mtime.
@@ -536,6 +658,26 @@ def edit_with_editor(file_path: str, refresh_callback=None) -> bool:
     
     return success
 
+
+def edit_with_pixelmator_pro_multi(file_paths: List[str], refresh_callback=None) -> bool:
+    """
+    Edit multiple files in Pixelmator Pro; monitor timestamp/EXIF on the first file only.
+    """
+    if not file_paths:
+        return False
+
+    first_path = file_paths[0]
+    _active_editing_sessions[first_path] = {
+        'start_time': time.time(),
+        'refresh_callback': refresh_callback,
+    }
+
+    success = _editor_instance.edit_pixelmator_pro_multi_files(file_paths, refresh_callback)
+    if not success:
+        _active_editing_sessions.pop(first_path, None)
+    return success
+
+
 def clear_editing_session(file_path: str) -> None:
     """
     Clear tracking for a specific editing session
@@ -556,9 +698,22 @@ def edit_current_image_with_editor(image_browser_instance) -> bool:
     Returns:
         bool: True if successful, False otherwise
     """
-    # Do nothing when more than 1 file is selected (guard for Cmd+E when menu state lags)
+    config = get_config()
+    settings = config.load_settings()
+    editor_app = settings.get('image_editor_app', 'Preview')
+
     if getattr(image_browser_instance, 'multi_select_mode', False):
-        return False
+        if not is_pixelmator_pro_editor(editor_app):
+            return False
+        paths = image_browser_instance.selection_manager.get_selected_files()
+        if len(paths) < 2:
+            return False
+
+        def refresh_callback(file_path):
+            refresh_image_in_browser(image_browser_instance, file_path)
+
+        return edit_with_pixelmator_pro_multi(paths, refresh_callback)
+
     # Get the currently displayed images using the new method
     displayed_images = image_browser_instance.get_displayed_images()
     if not displayed_images:

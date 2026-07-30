@@ -41,7 +41,7 @@ from PySide6.QtWidgets import (
 from theme.theme_service import get_active_theme
 from event_bus import SELECTION_CHANGED, DIRECTORY_LOADED, FILE_OPERATION_COMPLETE
 from cache.cache_prepopulator import prepopulate_cache
-from files.external_editor import edit_current_image_with_editor
+from files.external_editor import edit_current_image_with_editor, is_pixelmator_pro_editor
 from config import get_config
 from files.file_tree_handler import _get_excluded_paths, _is_excluded_path
 from thumbnails.thumbnail_constants import RED, RESET, SKIPPED_PATTERNS, get_image_extensions
@@ -2701,11 +2701,18 @@ class MenuManager:
             menu_text = f"Edit in {editor_app}"
             mw.edit_with_external_editor_action.setText(menu_text)
             
-            # Update enabled state - disable when more than 1 file is selected (all modes)
+            # Update enabled state - multi-select only for Pixelmator Pro
+            is_pixelmator = is_pixelmator_pro_editor(editor_app)
             if mw.current_view_mode == 'thumbnail':
-                mw.edit_with_external_editor_action.setEnabled(not mw.multi_select_mode)
+                if mw.multi_select_mode:
+                    mw.edit_with_external_editor_action.setEnabled(is_pixelmator)
+                else:
+                    mw.edit_with_external_editor_action.setEnabled(True)
             elif mw.current_view_mode == 'browse':
-                mw.edit_with_external_editor_action.setEnabled(not mw.multi_select_mode)
+                if mw.multi_select_mode:
+                    mw.edit_with_external_editor_action.setEnabled(is_pixelmator)
+                else:
+                    mw.edit_with_external_editor_action.setEnabled(True)
             elif mw.current_view_mode in ['slideshow', 'slideshow2', 'slideshow3']:
                 mw.edit_with_external_editor_action.setEnabled(not mw.multi_select_mode)
             else:
