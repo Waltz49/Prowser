@@ -75,18 +75,28 @@ _CREATE_FUNCTION_ACTIONS = (
 _FUNCTION_LABELS = {fn: label for fn, label in _CREATE_FUNCTION_ACTIONS}
 
 
+def _iter_job_queue_panels(main_window):
+    jobs = getattr(main_window, "sidebar_jobs_widget", None)
+    if jobs is not None:
+        yield jobs
+    dlg = getattr(main_window, "_imagegen_job_queue_dialog", None)
+    panel = getattr(dlg, "_panel", None) if dlg is not None else None
+    if panel is not None:
+        yield panel
+
+
 def begin_imagegen_dialog_build(main_window) -> None:
     main_window._imagegen_dialog_building = True
-    jobs = getattr(main_window, "sidebar_jobs_widget", None)
-    if jobs is not None and hasattr(jobs, "pause_live_refresh"):
-        jobs.pause_live_refresh()
+    for jobs in _iter_job_queue_panels(main_window):
+        if hasattr(jobs, "pause_live_refresh"):
+            jobs.pause_live_refresh()
 
 
 def end_imagegen_dialog_build(main_window) -> None:
     main_window._imagegen_dialog_building = False
-    jobs = getattr(main_window, "sidebar_jobs_widget", None)
-    if jobs is not None and hasattr(jobs, "resume_live_refresh"):
-        jobs.resume_live_refresh()
+    for jobs in _iter_job_queue_panels(main_window):
+        if hasattr(jobs, "resume_live_refresh"):
+            jobs.resume_live_refresh()
 
 
 def _raise_imagegen_function_dialog(dlg: QDialog) -> None:
@@ -252,6 +262,11 @@ def _open_or_switch_unified_dialog(
             seed_state=seed_state,
             edit_source_paths=source_image_paths,
         ):
+            show_styled_warning(
+                main_window,
+                "Job editor",
+                "Could not open the job editor for this queue row.",
+            )
             return
         existing.set_queue_replace_context(replace_job_id)
         _raise_imagegen_function_dialog(existing)
@@ -273,6 +288,11 @@ def _open_or_switch_unified_dialog(
         replace_job_id=replace_job_id,
         edit_source_paths=source_image_paths,
     ):
+        show_styled_warning(
+            main_window,
+            "Job editor",
+            "Could not open the job editor for this queue row.",
+        )
         return
     _show_imagegen_function_dialog(main_window, controller, function, dlg)
 
@@ -336,6 +356,11 @@ def open_imagegen_dialog_from_job(
 
     _warn_missing_job_paths(main_window, missing)
     seed_state = _job_session_state(function, job_values, initial_plugin_id)
+    source_image_paths = None
+    if function == FUNCTION_EDIT:
+        source_image_paths = list(seed_state.source_paths or [])
+        if not source_image_paths and seed_state.source_path:
+            source_image_paths = [seed_state.source_path]
     _open_or_switch_unified_dialog(
         main_window,
         controller,
@@ -343,6 +368,7 @@ def open_imagegen_dialog_from_job(
         initial_prompt=initial_prompt,
         seed_state=seed_state,
         replace_job_id=replace_job_id,
+        source_image_paths=source_image_paths,
     )
 
 

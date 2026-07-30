@@ -32,6 +32,7 @@ from imagegen_plugins.job_queue_common import (
     build_job_queue_action_widget,
     create_invalid_job_preview_label,
     info_html_for_queue_row,
+    job_queue_edit_row,
     open_reference_thumbnail_paths,
 )
 from config import job_queue_cell_background_hex
@@ -330,6 +331,22 @@ class _FlowReferenceThumbs(QWidget):
         super().mousePressEvent(event)
 
 
+class _JobCardDblClickFilter(QObject):
+    """Open the job editor on double-click (viewport + browser)."""
+
+    def __init__(self, opener: Callable[[], None], parent: QObject | None = None):
+        super().__init__(parent)
+        self._opener = opener
+
+    def eventFilter(self, obj: QObject, event: QEvent) -> bool:
+        if event.type() == QEvent.Type.MouseButtonDblClick:
+            mouse_event = event  # type: ignore[assignment]
+            if mouse_event.button() == Qt.MouseButton.LeftButton:
+                self._opener()
+                return True
+        return False
+
+
 class JobCard(QFrame):
     """One queue row: action buttons | status HTML + thumbnails."""
 
@@ -369,6 +386,7 @@ class JobCard(QFrame):
         _apply_job_queue_cell_background(self._content)
 
         self._info_browser = QTextBrowser()
+        self._dblclick_filter: _JobCardDblClickFilter | None = None
         configure_task_info_text_browser(
             self._info_browser, main_window, job_queue_cell=True
         )
@@ -379,6 +397,20 @@ class JobCard(QFrame):
         self._refs = _FlowReferenceThumbs(main_window, [])
         self._ensure_content_layout(False)
         row_layout.addWidget(self._content, 1)
+
+    def _ensure_dblclick_edit_filter(self) -> None:
+        """Install after prompt tooltip so this filter runs first on dbl-click."""
+        if self._dblclick_filter is not None:
+            return
+        opener = lambda: job_queue_edit_row(
+            self._main_window, self._controller, self._row_idx
+        )
+        filt = _JobCardDblClickFilter(opener, parent=self)
+        self._dblclick_filter = filt
+        self._info_browser.installEventFilter(filt)
+        viewport = self._info_browser.viewport()
+        if viewport is not None:
+            viewport.installEventFilter(filt)
 
     def _ref_count(self) -> int:
         if getattr(self._refs, "_references_invalid", False):
@@ -482,6 +514,7 @@ class JobCard(QFrame):
         self._scroll_width = scroll_width
         self._full_prompt = full_prompt or ""
         install_delayed_prompt_tooltip(self._info_browser, self._full_prompt)
+        self._ensure_dblclick_edit_filter()
         self._replace_refs(
             thumbnail_paths,
             content_width,
@@ -579,9 +612,10 @@ class JobCard(QFrame):
 class JobQueuePanelWidget(QWidget):
     """Scrollable job queue with active progress strip (shared by pane and dialog)."""
 
-    def __init__(self, main_window, parent=None):
+    def __init__(self, main_window, parent=None, *, job_control_dialog: bool = False):
         super().__init__(parent)
         self.main_window = main_window
+        self._job_control_dialog = job_control_dialog
         self._controller = get_imagegen_controller(main_window)
         self._job_cards: list[JobCard] = []
         self._refresh_table_timer: QTimer | None = None
@@ -652,12 +686,7 @@ class JobQueuePanelWidget(QWidget):
             if isinstance(widget, QAbstractButton):
                 return True
             if isinstance(widget, QTextBrowser):
-                vp = widget.viewport()
-                if vp is not None:
-                    local = vp.mapFromGlobal(event.globalPosition().toPoint())
-                    if widget.anchorAt(local):
-                        return True
-                return False
+                return True
             widget = widget.parentWidget()
         return False
 

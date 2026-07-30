@@ -354,12 +354,22 @@ class ImageGenUnifiedDialog(QDialog):
             self._clear_queue_replace_context()
 
         if function == FUNCTION_EDIT:
-            if edit_source_paths:
-                self.set_edit_source_paths_override(edit_source_paths)
+            edit_paths = list(edit_source_paths) if edit_source_paths else None
+            if not edit_paths and seed_state is not None:
+                if seed_state.source_paths:
+                    edit_paths = list(seed_state.source_paths)
+                elif seed_state.source_path:
+                    edit_paths = [seed_state.source_path]
+            if edit_paths:
+                self.set_edit_source_paths_override(edit_paths)
             else:
                 self.set_edit_source_paths_override(None)
 
-        if function == self._function and self._current_panel is not None:
+        if (
+            function == self._function
+            and self._current_panel is not None
+            and seed_state is None
+        ):
             if (
                 function == FUNCTION_EDIT
                 and self._edit_source_paths_override
@@ -368,7 +378,7 @@ class ImageGenUnifiedDialog(QDialog):
                 self._current_panel._set_edit_source_paths(
                     list(self._edit_source_paths_override)
                 )
-            if initial_prompt is not None and self._current_panel is not None:
+            if initial_prompt is not None:
                 restore = getattr(self._current_panel, "restore_state", None)
                 if restore is not None:
                     restore(None, initial_prompt=initial_prompt)
@@ -831,12 +841,18 @@ class ImageGenUnifiedDialog(QDialog):
         if not confirm_model_download_if_needed(plugin, self._main_window):
             return
         from imagegen_plugins.ai_prompt_exit import imagegen_values_for_dialog_save
+        from imagegen_plugins.flux_prompt_job import (
+            apply_flux_prompt_job_to_prepare_run_values,
+        )
 
         panel = self._current_panel
+        if panel is not None:
+            values = imagegen_values_for_dialog_save(values, panel)
+            apply_flux_prompt_job_to_prepare_run_values(panel, values, force=False)
         save_plugin_dialog_settings(
             self._function,
             plugin.plugin_id,
-            imagegen_values_for_dialog_save(values, panel) if panel is not None else values,
+            values,
         )
         set_active_plugin_for_function(self._main_window, self._function, plugin)
         job_id = self._replace_job_id

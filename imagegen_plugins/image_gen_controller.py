@@ -466,6 +466,7 @@ class ImageGenController(QObject):
         self, job_id: str, plugin: ImageGenModelPlugin, values: Dict[str, Any]
     ) -> bool:
         """Update settings for pending copies in the active batch (not the in-flight copy)."""
+        from imagegen_plugins.flux_prompt_job import strip_flux_prompt_ai_job_if_ui_inactive
         from imagegen_plugins.job_values_snapshot import snapshot_job_values_at_submit
 
         if not self.is_active_job_remaining_updatable(job_id):
@@ -482,6 +483,7 @@ class ImageGenController(QObject):
                 return False
             values["random_seed"] = True
             sync_random_seed_setting(self.main_window, True)
+        strip_flux_prompt_ai_job_if_ui_inactive(self._imagegen_submit_owner(), values)
         try:
             values = snapshot_job_values_at_submit(plugin, values)
         except Exception as e:
@@ -506,7 +508,10 @@ class ImageGenController(QObject):
         self, job_id: str, plugin: ImageGenModelPlugin, values: Dict[str, Any]
     ) -> bool:
         """Update a pending queue entry in place (same job_id and position)."""
-        from imagegen_plugins.flux_prompt_job import effective_job_prompt_for_tooltip
+        from imagegen_plugins.flux_prompt_job import (
+            effective_job_prompt_for_tooltip,
+            strip_flux_prompt_ai_job_if_ui_inactive,
+        )
         from imagegen_plugins.job_values_snapshot import snapshot_job_values_at_submit
 
         job = self._queued_job_by_id(job_id)
@@ -520,6 +525,7 @@ class ImageGenController(QObject):
                 return False
             values["random_seed"] = True
             sync_random_seed_setting(self.main_window, True)
+        strip_flux_prompt_ai_job_if_ui_inactive(self._imagegen_submit_owner(), values)
         try:
             values = snapshot_job_values_at_submit(plugin, values)
         except Exception as e:

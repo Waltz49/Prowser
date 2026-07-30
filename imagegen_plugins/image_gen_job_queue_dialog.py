@@ -185,7 +185,9 @@ class ImageGenJobQueueDialog(QDialog):
         self._header.configure_floating_window_move(self)
         layout.addWidget(self._header)
 
-        self._panel = JobQueuePanelWidget(main_window, self)
+        self._panel = JobQueuePanelWidget(
+            main_window, self, job_control_dialog=True
+        )
         self._panel.set_header_getter(lambda: self._header)
         self._panel.set_on_compact_geometry_changed(self._on_panel_geometry_changed)
         self._panel.configure_floating_window_move(
