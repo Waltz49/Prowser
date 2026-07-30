@@ -219,6 +219,18 @@ def _ensure_pipeline(hf_model_id: str, vae_hf_model_id: str) -> Any:
     return _pipe
 
 
+def probe_lora_weights(
+    hf_model_id: str,
+    lora_path: str,
+    lora_scale: float,
+    *,
+    vae_hf_model_id: str = "",
+) -> None:
+    """Load pipeline + LoRA weights without running inference (import compatibility probe)."""
+    pipe = _ensure_pipeline(hf_model_id, vae_hf_model_id)
+    _sync_lora_weights(pipe, [lora_path], [lora_scale])
+
+
 def run_from_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     if not diffusers_is_installed():
         raise RuntimeError(

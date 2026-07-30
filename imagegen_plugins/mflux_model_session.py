@@ -96,10 +96,12 @@ def prepare_image_model_for_payload(payload: Dict[str, Any]) -> None:
         if old_pipeline_id in (
             "sana_sprint_600m",
             "sd15_diffusers",
+            "sdxl_diffusers",
             "z_image_turbo_sdnq",
         ) or pipeline_id in (
             "sana_sprint_600m",
             "sd15_diffusers",
+            "sdxl_diffusers",
             "z_image_turbo_sdnq",
         ):
             try:
@@ -112,6 +114,12 @@ def prepare_image_model_for_payload(payload: Dict[str, Any]) -> None:
                 from imagegen_plugins.pipelines.sd15_diffusers import unload_pipeline as unload_sd15
 
                 unload_sd15()
+            except Exception:
+                pass
+            try:
+                from imagegen_plugins.pipelines.sdxl_diffusers import unload_pipeline as unload_sdxl
+
+                unload_sdxl(force=True)
             except Exception:
                 pass
             try:
@@ -142,6 +150,12 @@ def maybe_unload_idle_image_model() -> bool:
         from imagegen_plugins.pipelines.sd15_diffusers import unload_pipeline as unload_sd15
 
         unload_sd15()
+    except Exception:
+        pass
+    try:
+        from imagegen_plugins.pipelines.sdxl_diffusers import unload_pipeline as unload_sdxl
+
+        unload_sdxl(force=True)
     except Exception:
         pass
     try:

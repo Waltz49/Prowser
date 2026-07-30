@@ -19,6 +19,10 @@ def run_worker_main(pipeline_id: str) -> int:
         from imagegen_plugins.pipelines.sd15_diffusers import main as sd15_main
 
         return int(sd15_main())
+    if pipeline_id == "sdxl_diffusers":
+        from imagegen_plugins.pipelines.sdxl_diffusers import main as sdxl_main
+
+        return int(sdxl_main())
     if pipeline_id in ("mflux_fill_expand", "mflux_fill_infill"):
         from imagegen_plugins.pipelines.mflux_fill_expand import main as fill_main
 

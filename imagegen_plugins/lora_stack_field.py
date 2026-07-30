@@ -32,7 +32,7 @@ from imagegen_plugins.image_gen_model_selector import (
     populate_image_gen_lora_combo,
 )
 from imagegen_plugins.image_gen_registry import ImageGenModelPlugin
-from imagegen_plugins.lora_host_registry import HOST_SD15
+from imagegen_plugins.lora_host_registry import HOST_SD15, HOST_SDXL
 from imagegen_plugins.mflux_lora_presets import (
     LORA_UNSUPPORTED_LABEL,
     LORA_UNSUPPORTED_PRESET_ID,
@@ -471,7 +471,9 @@ class LoraStackField(QWidget):
         self._plugin = plugin
         host_id = getattr(plugin, "lora_host_id", None) if plugin else None
         use_stack = (
-            plugin_supports_lora(plugin) and host_id is not None and host_id != HOST_SD15
+            plugin_supports_lora(plugin)
+            and host_id is not None
+            and host_id not in (HOST_SD15,)
         )
         self._stack_mode = use_stack
 

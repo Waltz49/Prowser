@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 import re
 import urllib.error
 import urllib.parse
@@ -346,6 +345,10 @@ def _sha256_file(path: Path, *, chunk_size: int = 1024 * 1024) -> str:
 
 
 def _http_json(url: str, *, timeout_s: float) -> Optional[Any]:
+  from imagegen_plugins.civitai_client import civitai_http_json
+
+  if "civitai.com" in url:
+    return civitai_http_json(url, timeout_s=timeout_s)
   req = urllib.request.Request(
     url,
     headers={
@@ -353,9 +356,6 @@ def _http_json(url: str, *, timeout_s: float) -> Optional[Any]:
       "Accept": "application/json",
     },
   )
-  token = (os.environ.get("CIVITAI_API_TOKEN") or os.environ.get("CIVITAI_TOKEN") or "").strip()
-  if token and "civitai.com" in url:
-    req.add_header("Authorization", f"Bearer {token}")
   try:
     with urllib.request.urlopen(req, timeout=max(1.0, timeout_s)) as resp:
       raw = resp.read()

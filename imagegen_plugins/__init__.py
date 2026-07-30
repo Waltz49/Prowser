@@ -74,6 +74,12 @@ def discover_plugins() -> List[ImageGenModelPlugin]:
     except ImportError:
         pass
     try:
+        from imagegen_plugins.sdxl_base_plugin import SDXL_BASE_1_0_PLUGIN
+
+        candidates.append(SDXL_BASE_1_0_PLUGIN)
+    except ImportError:
+        pass
+    try:
         from imagegen_plugins.flux_fill_expand import FLUX_FILL_EXPAND_PLUGIN
 
         candidates.append(FLUX_FILL_EXPAND_PLUGIN)

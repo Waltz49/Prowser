@@ -139,7 +139,7 @@ def _coerce_lora_stack_list(raw: Any) -> List[str]:
 
 
 def _plugin_uses_lora_stack(plugin_id: str) -> bool:
-    """FLUX/mflux/Klein use multi-LoRA stacks; SD15 keeps single ``mflux_lora``."""
+    """FLUX/mflux/Klein/SDXL use multi-LoRA stacks; SD15 keeps single ``mflux_lora``."""
     from imagegen_plugins.lora_host_registry import HOST_SD15
 
     plugin_id = _normalize_plugin_id(plugin_id)
@@ -149,7 +149,7 @@ def _plugin_uses_lora_stack(plugin_id: str) -> bool:
         for plugin in discover_plugins():
             if plugin.plugin_id == plugin_id:
                 host = getattr(plugin, "lora_host_id", None)
-                return host is not None and host != HOST_SD15
+                return host is not None and host not in (HOST_SD15,)
     except Exception:
         pass
     return True

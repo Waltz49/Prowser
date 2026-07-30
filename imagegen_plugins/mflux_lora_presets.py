@@ -24,9 +24,11 @@ from imagegen_plugins.lora_catalog import (
     lora_entry_min_steps,
     lora_weights_file_is_valid,
 )
-from imagegen_plugins.lora_host_registry import HOST_FLUX1_T2I, HOST_SD15, HOST_Z_IMAGE_TURBO, lora_host_for_pipeline
+from imagegen_plugins.lora_host_registry import HOST_FLUX1_T2I, HOST_SD15, HOST_SDXL, HOST_Z_IMAGE_TURBO, lora_host_for_pipeline
 
 FLUX_LORA_CATALOG = LORA_CATALOG
+
+_DIFFUSERS_LORA_HOSTS = frozenset({HOST_SD15, HOST_SDXL})
 
 MFLUX_LORA_UI_CHOICES: Tuple[Tuple[str, str], ...] = (("None", "none"),) + tuple(
     (lora_choice_label(e), e.lora_id)
@@ -75,7 +77,7 @@ def _normalize_preset_id(preset_id: Any) -> str:
 
 def _assert_mflux_compatible_lora(path: str, *, host_id: str | None = None) -> None:
     """Reject FLUX.1 LoRA key layouts known to crash MFLUX (not used for FLUX.2 Klein or Z-Image)."""
-    if host_id in ("flux2_klein", HOST_Z_IMAGE_TURBO):
+    if host_id in _DIFFUSERS_LORA_HOSTS or host_id in ("flux2_klein", HOST_Z_IMAGE_TURBO):
         return
     try:
         from safetensors import safe_open
@@ -129,7 +131,7 @@ def resolve_lora_path(preset_id: str, *, cache_dir: Optional[Path] = None) -> st
         raise ValueError(f"Unknown mflux LoRA preset: {preset_id}")
 
     if entry.local_path:
-        if entry.host_id == HOST_SD15:
+        if entry.host_id in _DIFFUSERS_LORA_HOSTS:
             resolved = str(Path(entry.local_path).expanduser().resolve())
             if not lora_weights_file_is_valid(Path(resolved)):
                 raise RuntimeError(
@@ -148,13 +150,13 @@ def resolve_lora_path(preset_id: str, *, cache_dir: Optional[Path] = None) -> st
     if dest_path.is_file() and dest_path.stat().st_size > 1024:
         if lora_weights_file_is_valid(dest_path):
             resolved = str(dest_path.resolve())
-            if entry.host_id == HOST_SD15:
+            if entry.host_id in _DIFFUSERS_LORA_HOSTS:
                 if not lora_weights_file_is_valid(dest_path):
                     raise RuntimeError(
                         f"LoRA download looks incomplete or corrupt: {dest_path}. "
                         "Delete it and try again, or download manually from Hugging Face."
                     )
-            elif entry.host_id != HOST_SD15:
+            elif entry.host_id not in _DIFFUSERS_LORA_HOSTS:
                 _assert_mflux_compatible_lora(resolved, host_id=entry.host_id)
             return resolved
         try:
@@ -182,13 +184,13 @@ def resolve_lora_path(preset_id: str, *, cache_dir: Optional[Path] = None) -> st
     if not path.is_file():
         raise RuntimeError(f"LoRA download failed: {downloaded}")
     resolved = str(path.resolve())
-    if entry.host_id == HOST_SD15:
+    if entry.host_id in _DIFFUSERS_LORA_HOSTS:
         if not lora_weights_file_is_valid(path):
             raise RuntimeError(
                 f"LoRA download looks incomplete or corrupt: {path}. "
                 "Delete it and try again, or download manually from Hugging Face."
             )
-    elif entry.host_id != HOST_SD15:
+    elif entry.host_id not in _DIFFUSERS_LORA_HOSTS:
         _assert_mflux_compatible_lora(resolved, host_id=entry.host_id)
     return resolved
 
@@ -255,6 +257,10 @@ def _uses_sd15_single_lora(
 
 MFLUX_LORA_PAYLOAD_KEYS: Tuple[str, ...] = ("mflux_lora_paths", "mflux_lora_scales")
 SD15_LORA_PAYLOAD_KEYS: Tuple[str, ...] = ("sd15_lora_paths", "sd15_lora_scales")
+SDXL_LORA_PAYLOAD_KEYS: Tuple[str, ...] = ("sdxl_lora_paths", "sdxl_lora_scales")
+_DIFFUSERS_LORA_PAYLOAD_KEYS: Tuple[str, ...] = (
+    SD15_LORA_PAYLOAD_KEYS + SDXL_LORA_PAYLOAD_KEYS
+)
 
 
 def strip_lora_payload_keys_for_host(
@@ -265,10 +271,15 @@ def strip_lora_payload_keys_for_host(
 ) -> None:
     """Drop resolved LoRA paths that belong to a different pipeline family."""
     if host_id == HOST_SD15:
-        foreign = MFLUX_LORA_PAYLOAD_KEYS
+        keep = set(SD15_LORA_PAYLOAD_KEYS)
+    elif host_id == HOST_SDXL:
+        keep = set(SDXL_LORA_PAYLOAD_KEYS)
     else:
-        foreign = SD15_LORA_PAYLOAD_KEYS
-    for key in foreign:
+        keep = set(MFLUX_LORA_PAYLOAD_KEYS)
+    all_keys = MFLUX_LORA_PAYLOAD_KEYS + _DIFFUSERS_LORA_PAYLOAD_KEYS
+    for key in all_keys:
+        if key in keep:
+            continue
         if pop:
             values.pop(key, None)
         elif key in values:
@@ -291,8 +302,8 @@ def effective_lora_ids_from_values(
     """
     Active LoRA preset ids for generation, EXIF, and trigger-word guards.
 
-    SD 1.5 uses the single ``mflux_lora`` field only; ``mflux_lora_stack`` is ignored
-    so stale stack data from FLUX/Klein models does not leak into SD15 runs.
+    SD 1.5 uses the single ``mflux_lora`` field only; SDXL and MFLUX hosts use
+    ``mflux_lora_stack``.
     """
     pid = (pipeline_id or values.get("pipeline_id") or "").strip()
     if _uses_sd15_single_lora(values, pipeline_id=pid or None):
@@ -453,10 +464,10 @@ def apply_lora_to_mflux_payload(
         entry = get_lora_entry(preset_id)
         if entry is None:
             raise ValueError(f"Unknown mflux LoRA preset: {preset_id}")
-        if entry.host_id == HOST_SD15:
+        if entry.host_id in _DIFFUSERS_LORA_HOSTS:
             raise ValueError(
-                f"LoRA «{entry.display_name}» is for SD 1.5 only. "
-                "Select an SD 1.5 model in Create, or pick a compatible LoRA."
+                f"LoRA «{entry.display_name}» is for diffusers SD models only. "
+                "Select an SD 1.5 or SDXL model in Create, or pick a compatible LoRA."
             )
         if for_z_image and entry.host_id != HOST_Z_IMAGE_TURBO:
             raise ValueError(

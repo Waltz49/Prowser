@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import re
 import uuid
 from copy import deepcopy
 from dataclasses import dataclass, field
@@ -114,6 +115,33 @@ def _prefix_postfix_rules_enabled() -> bool:
     return bool(get_config().load_settings().get("imagegen_add_chat_prefix_postfix", True))
 
 
+def _normalize_for_prefix_postfix_compare(text: str) -> str:
+    """Case- and whitespace-insensitive comparison key."""
+    return re.sub(r"\s+", "", (text or "").casefold())
+
+
+def _normalized_item_count(haystack: str, item: str) -> int:
+    norm_item = _normalize_for_prefix_postfix_compare(item)
+    if not norm_item:
+        return 0
+    return _normalize_for_prefix_postfix_compare(haystack).count(norm_item)
+
+
+def _should_add_prefix(text: str, entry: PrefixPostfixEntry) -> bool:
+    if not entry.is_prefix or not entry.text:
+        return False
+    return _normalized_item_count(text, entry.text) < 1
+
+
+def _should_add_postfix(text: str, entry: PrefixPostfixEntry) -> bool:
+    if not entry.is_postfix or not entry.text:
+        return False
+    count = _normalized_item_count(text, entry.text)
+    if entry.is_prefix:
+        return count < 2
+    return count < 1
+
+
 def apply_prefix_postfix_rules(text: str, *, for_images: bool) -> str:
     """Apply enabled prefix/postfix entries in list order."""
     if not _prefix_postfix_rules_enabled():
@@ -129,9 +157,9 @@ def apply_prefix_postfix_rules(text: str, *, for_images: bool) -> str:
                 continue
         elif not entry.use_with_text:
             continue
-        if entry.is_prefix and entry.text:
+        if _should_add_prefix(text, entry):
             prefixes.append(entry.text)
-        if entry.is_postfix and entry.text:
+        if _should_add_postfix(text, entry):
             postfixes.append(entry.text)
     if not prefixes and not postfixes:
         return text

@@ -18,6 +18,7 @@ from imagegen_plugins.hf_model_ids import (
     ANYTHING_FURRY,
     REALISTIC_VISION_V4_NOVAE,
     SD15_DEFAULT_VAE,
+    SDXL_BASE_1_0,
     Z_IMAGE_TURBO_SDNQ_INT8,
     Z_IMAGE_TURBO_MFLUX_4BIT,
     lora_model_display_name,
@@ -46,6 +47,7 @@ MODEL_DOWNLOAD_SIZE_ESTIMATE_BYTES: Dict[str, int] = {
     ANYTHING_FURRY: 4_100_000_000,
     REALISTIC_VISION_V4_NOVAE: 4_265_000_000,
     SD15_DEFAULT_VAE: 334_000_000,
+    SDXL_BASE_1_0: 14_000_000_000,
 }
 
 _GATED_REPO_PREFIXES: Tuple[str, ...] = ("black-forest-labs/",)

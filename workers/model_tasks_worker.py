@@ -291,6 +291,12 @@ def _unload_image_model(*, reason: str = "explicit") -> None:
         unload_sd15()
     except Exception:
         pass
+    try:
+        from imagegen_plugins.pipelines.sdxl_diffusers import unload_pipeline as unload_sdxl
+
+        unload_sdxl(force=True)
+    except Exception:
+        pass
     gc.collect()
     if _LOADED_KIND == "image":
         _LOADED_KIND = None
@@ -348,6 +354,8 @@ def _run_generate(payload: Dict[str, Any], job_id: str) -> None:
         from imagegen_plugins.pipelines.sana_sprint import run_from_payload
     elif pipeline_id == "sd15_diffusers":
         from imagegen_plugins.pipelines.sd15_diffusers import run_from_payload
+    elif pipeline_id == "sdxl_diffusers":
+        from imagegen_plugins.pipelines.sdxl_diffusers import run_from_payload
     elif pipeline_id == "z_image_turbo_sdnq":
         from imagegen_plugins.pipelines.z_image_turbo import run_from_payload
     elif pipeline_id == "mflux_z_image_turbo":

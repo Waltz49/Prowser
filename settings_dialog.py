@@ -19,7 +19,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 # Third-party imports
 from PySide6.QtCore import Qt, Signal, QTimer, QObject, QEvent, QMutexLocker, QPoint, QRect, QSize
-from PySide6.QtGui import QFont, QColor, QPixmap, QIcon, QFontMetrics, QPainter, QPen, QBrush
+from PySide6.QtGui import QFont, QColor, QPixmap, QIcon, QFontMetrics, QPainter, QPen, QBrush, QDragEnterEvent, QDropEvent
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QCheckBox, QPushButton, 
     QGroupBox, QFormLayout, QDialogButtonBox, QFrame, QSpinBox, QDoubleSpinBox,
@@ -227,6 +227,61 @@ THEME_COLOR_SWATCH_TOOLTIPS = {
 TEXT_COLOR_HEX = tc.DIALOG_TEXT_COLOR_HEX
 PLACEHOLDER_ADD = "Add..."
 MIN_EDITOR_WIDTH_PX = 80
+
+
+class _LoraSettingsScrollArea(QScrollArea):
+    """LoRA catalog list area; accepts .safetensors file drops."""
+
+    safetensors_dropped = Signal(str)
+
+    def __init__(self, parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+        self.setAcceptDrops(True)
+        viewport = self.viewport()
+        if viewport is not None:
+            viewport.setAcceptDrops(True)
+            viewport.installEventFilter(self)
+
+    def _path_from_mime(self, mime) -> Optional[str]:
+        from imagegen_plugins.lora_import_dialog import safetensors_path_from_mime
+
+        path = safetensors_path_from_mime(mime)
+        return str(path) if path is not None else None
+
+    def _accept_drag(self, event) -> bool:
+        if self._path_from_mime(event.mimeData()) is not None:
+            event.acceptProposedAction()
+            return True
+        event.ignore()
+        return False
+
+    def dragEnterEvent(self, event: QDragEnterEvent) -> None:
+        self._accept_drag(event)
+
+    def dragMoveEvent(self, event: QDragEnterEvent) -> None:
+        self._accept_drag(event)
+
+    def dropEvent(self, event: QDropEvent) -> None:
+        path = self._path_from_mime(event.mimeData())
+        if path is None:
+            event.ignore()
+            return
+        self.safetensors_dropped.emit(path)
+        event.acceptProposedAction()
+
+    def eventFilter(self, obj: QObject, event: QEvent) -> bool:
+        if obj is self.viewport():
+            et = event.type()
+            if et == QEvent.Type.DragEnter:
+                self._accept_drag(event)
+                return True
+            if et == QEvent.Type.DragMove:
+                self._accept_drag(event)
+                return True
+            if et == QEvent.Type.Drop:
+                self.dropEvent(event)
+                return True
+        return super().eventFilter(obj, event)
 
 
 @dataclass
@@ -1009,15 +1064,6 @@ class SettingsDialog(QDialog):
         # Buttons
         button_layout = QHBoxLayout()
 
-        self._lora_add_button = QPushButton()
-        self._lora_add_button.setObjectName("loraAddDownloadedButton")
-        self._lora_add_button.setToolTip("Add downloaded LoRA (.safetensors)…")
-        self._lora_add_button.setFixedSize(34, 34)
-        self._lora_add_button.setStyleSheet(self._lora_add_button_style())
-        self._lora_add_button.clicked.connect(self._open_add_downloaded_lora_dialog)
-        self._lora_add_button.setVisible(False)
-        button_layout.addWidget(self._lora_add_button)
-        
         # Reset to defaults button (now resets only the current tab)
         self.reset_button = QPushButton("Reset to Defaults")
         self.reset_button.setToolTip(
@@ -1081,12 +1127,6 @@ class SettingsDialog(QDialog):
         initial_index = self.tab_widget.currentIndex()
         if initial_index >= 0:
             self.on_tab_changed(initial_index)
-        if getattr(self, "_lora_add_button", None):
-            lora_idx = self.tab_widget.indexOf(self.lora_settings_tab)
-            self._lora_add_button.setVisible(
-                getattr(self, "_show_lora_settings_tab", False)
-                and initial_index == lora_idx
-            )
         self._settings_tab_prev_index = self.tab_widget.currentIndex()
         self._settings_dialog_initializing = False
 
@@ -5559,7 +5599,7 @@ class SettingsDialog(QDialog):
         layout.addWidget(caption_group)
         layout.addStretch()
 
-    def _lora_add_button_style(self) -> str:
+    def _lora_add_button_style(self, size: int = 26) -> str:
         _plus_url = f"url({asset_path('series_plus_icon.png')})"
         _plus_hover_url = f"url({asset_path('series_plus_icon_hover.png')})"
         c = self._settings_chrome()
@@ -5568,11 +5608,11 @@ class SettingsDialog(QDialog):
                 background-color: {c.control_bg_hex};
                 border: 1px solid {BORDER_DEFAULT_HEX};
                 border-radius: 4px;
-                padding: 5px;
-                min-width: 34px;
-                max-width: 34px;
-                min-height: 34px;
-                max-height: 34px;
+                padding: 3px;
+                min-width: {size}px;
+                max-width: {size}px;
+                min-height: {size}px;
+                max-height: {size}px;
                 image: {_plus_url};
             }}
             QPushButton#loraAddDownloadedButton:focus {{
@@ -5721,6 +5761,15 @@ class SettingsDialog(QDialog):
         self._rebuild_lora_settings_grid()
         self._apply_lora_settings_to_widgets(slice_["enabled_ids"])
 
+    def _create_lora_add_button(self) -> QPushButton:
+        btn = QPushButton()
+        btn.setObjectName("loraAddDownloadedButton")
+        btn.setToolTip("Add downloaded LoRA (.safetensors)…")
+        btn.setFixedSize(26, 26)
+        btn.setStyleSheet(self._lora_add_button_style())
+        btn.clicked.connect(lambda: self._open_add_downloaded_lora_dialog())
+        return btn
+
     def setup_lora_settings_tab(self):
         """LoRA catalog tab: per base model dropdown, enable / install / delete."""
         from config import get_config
@@ -5767,10 +5816,11 @@ class SettingsDialog(QDialog):
         self._lora_draft_by_model: dict = {}
         self._lora_syncing_checkboxes = False
 
-        scroll = QScrollArea()
+        scroll = _LoraSettingsScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.NoFrame)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll.safetensors_dropped.connect(self._on_lora_safetensors_dropped)
         self._lora_rows_host = QWidget()
         self._lora_rows_host.setSizePolicy(
             QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Minimum
@@ -5789,6 +5839,8 @@ class SettingsDialog(QDialog):
         self._lora_hide_uninstalled = False
         self._lora_hide_uninstalled_btn = self._create_lora_hide_uninstalled_button()
         preset_row.addWidget(self._lora_hide_uninstalled_btn)
+        self._lora_add_button = self._create_lora_add_button()
+        preset_row.addWidget(self._lora_add_button)
         self._lora_save_preset_btn = QPushButton("Save my setup")
         self._lora_save_preset_btn.setToolTip(
             "Save the current enabled LoRAs per base model as your personal default."
@@ -6046,16 +6098,26 @@ class SettingsDialog(QDialog):
         worker.finished_ok.connect(on_done)
         worker.start()
 
-    def _open_add_downloaded_lora_dialog(self) -> None:
+    def _open_add_downloaded_lora_dialog(self, source_path: Optional[str] = None) -> None:
         from imagegen_plugins.lora_import_dialog import run_add_downloaded_lora_dialog
 
         self._ensure_lora_tab_ready()
         model_key = self._current_lora_model_key()
-        if run_add_downloaded_lora_dialog(self, model_key=model_key):
+        if run_add_downloaded_lora_dialog(
+            self,
+            model_key=model_key,
+            initial_source_path=source_path,
+        ):
             self._reload_lora_drafts_and_grid()
             mw = self.parent()
             if mw is not None and hasattr(mw, "refresh_open_imagegen_lora_combos"):
                 mw.refresh_open_imagegen_lora_combos()
+
+    def _on_lora_safetensors_dropped(self, source_path: str) -> None:
+        path = str(source_path or "").strip()
+        if not path:
+            return
+        self._open_add_downloaded_lora_dialog(path)
 
     def _open_edit_lora_dialog(self, lora_id: str) -> None:
         from imagegen_plugins.lora_import_dialog import run_edit_lora_dialog
@@ -8555,12 +8617,6 @@ class SettingsDialog(QDialog):
         # Lazy-load Faces tab on first visit (face_recognition import is slow)
         is_faces_tab = index == self.tab_widget.indexOf(self.faces_tab)
         is_cache_tab = index == self.tab_widget.indexOf(self.cache_management_tab)
-        is_lora_tab = (
-            getattr(self, "_show_lora_settings_tab", False)
-            and index == self.tab_widget.indexOf(self.lora_settings_tab)
-        )
-        if getattr(self, "_lora_add_button", None):
-            self._lora_add_button.setVisible(is_lora_tab)
         # Hide reset button and option note on cache tab and faces tab (before early return)
         hide_reset_row = is_cache_tab or is_faces_tab
         if getattr(self, 'reset_button', None):

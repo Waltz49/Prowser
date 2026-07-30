@@ -33,7 +33,7 @@ def _lora_scale_for_preset(values: Dict[str, Any], preset_id: str) -> float:
 
 def _snapshot_lora_for_job(values: Dict[str, Any], pipeline_id: str) -> None:
     from imagegen_plugins.lora_catalog import get_lora_entry
-    from imagegen_plugins.lora_host_registry import HOST_SD15, lora_host_for_pipeline
+    from imagegen_plugins.lora_host_registry import HOST_SD15, HOST_SDXL, lora_host_for_pipeline
     from imagegen_plugins.mflux_lora_presets import (
         effective_lora_ids_from_values,
         resolve_lora_path,
@@ -48,6 +48,8 @@ def _snapshot_lora_for_job(values: Dict[str, Any], pipeline_id: str) -> None:
         values.pop("mflux_lora_scales", None)
         values.pop("sd15_lora_paths", None)
         values.pop("sd15_lora_scales", None)
+        values.pop("sdxl_lora_paths", None)
+        values.pop("sdxl_lora_scales", None)
         values.pop(LORA_TRIGGER_WORDS_KEY, None)
         return
 
@@ -70,11 +72,22 @@ def _snapshot_lora_for_job(values: Dict[str, Any], pipeline_id: str) -> None:
         values["sd15_lora_scales"] = scales
         values.pop("mflux_lora_paths", None)
         values.pop("mflux_lora_scales", None)
+        values.pop("sdxl_lora_paths", None)
+        values.pop("sdxl_lora_scales", None)
+    elif host == HOST_SDXL:
+        values["sdxl_lora_paths"] = paths
+        values["sdxl_lora_scales"] = scales
+        values.pop("mflux_lora_paths", None)
+        values.pop("mflux_lora_scales", None)
+        values.pop("sd15_lora_paths", None)
+        values.pop("sd15_lora_scales", None)
     else:
         values["mflux_lora_paths"] = paths
         values["mflux_lora_scales"] = scales
         values.pop("sd15_lora_paths", None)
         values.pop("sd15_lora_scales", None)
+        values.pop("sdxl_lora_paths", None)
+        values.pop("sdxl_lora_scales", None)
 
 
 def snapshot_job_values_at_submit(

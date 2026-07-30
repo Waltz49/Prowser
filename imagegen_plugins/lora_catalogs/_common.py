@@ -5,13 +5,14 @@ from __future__ import annotations
 
 from typing import Optional
 
-from imagegen_plugins.hf_model_ids import ANYTHING_FURRY, FLUX1_DEV, FLUX1_FILL_DEV, Z_IMAGE_TURBO_MFLUX_4BIT
+from imagegen_plugins.hf_model_ids import ANYTHING_FURRY, FLUX1_DEV, FLUX1_FILL_DEV, SDXL_BASE_1_0, Z_IMAGE_TURBO_MFLUX_4BIT
 from imagegen_plugins.lora_entry import FluxLoraEntry, LORA_MIN_STEPS
 from imagegen_plugins.lora_host_registry import (
     HOST_FLUX1_FILL,
     HOST_FLUX1_T2I,
     HOST_FLUX2_KLEIN,
     HOST_SD15,
+    HOST_SDXL,
     HOST_Z_IMAGE_TURBO,
 )
 
@@ -108,6 +109,26 @@ def sd15_entry(
         repo_id,
         filename,
         base_hf_model_id=ANYTHING_FURRY,
+        mflux_compatible=True,
+        **kwargs,
+    )
+
+
+def sdxl_entry(
+    lora_id: str,
+    display_name: str,
+    repo_id: str,
+    filename: str,
+    **kwargs,
+) -> FluxLoraEntry:
+    # host_id=HOST_SDXL → all SDXL_LORA_MODEL_KEYS (see lora_models_for_entry).
+    return catalog_entry(
+        HOST_SDXL,
+        lora_id,
+        display_name,
+        repo_id,
+        filename,
+        base_hf_model_id=SDXL_BASE_1_0,
         mflux_compatible=True,
         **kwargs,
     )

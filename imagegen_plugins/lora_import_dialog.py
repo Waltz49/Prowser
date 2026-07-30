@@ -104,6 +104,11 @@ def _path_from_mime(mime) -> Optional[Path]:
     return None
 
 
+def safetensors_path_from_mime(mime) -> Optional[Path]:
+    """Return the first local .safetensors file path from a drag-and-drop mime payload."""
+    return _path_from_mime(mime)
+
+
 class _ImportLoraWorker(QThread):
     finished_result = Signal(bool, str, object)
 
@@ -303,6 +308,7 @@ class LoraEntryDialog(QDialog):
         model_key: str,
         mode: str = "add",
         lora_id: Optional[str] = None,
+        initial_source_path: Optional[str] = None,
     ) -> None:
         super().__init__(parent)
         self._model_key = model_key
@@ -438,6 +444,10 @@ class LoraEntryDialog(QDialog):
             self._prime_edit_fields()
         else:
             self._path_edit.textChanged.connect(self._on_path_changed)
+            initial_path = str(initial_source_path or "").strip()
+            if initial_path:
+                self._path_edit.setText(_lora_path_for_display(initial_path))
+                self._on_path_changed(self._path_edit.text())
 
     def _update_add_intro(self, *, reusing: bool) -> None:
         if self._mode != "add":
@@ -475,6 +485,72 @@ class LoraEntryDialog(QDialog):
         recovery = (entry.source_path or entry.local_path or "").strip()
         if recovery:
             self._recovery_path_edit.setText(_lora_path_for_display(recovery))
+
+    def _find_origin_online(self) -> None:
+        if not self._lora_id or self._edit_entry is None:
+            return
+        from imagegen_plugins.lora_origin_lookup import entry_needs_origin_lookup
+
+        if not entry_needs_origin_lookup(self._edit_entry):
+            show_styled_information(
+                self,
+                "Find source online",
+                "This LoRA already has Hugging Face or download URL metadata.",
+            )
+            return
+        if self._find_origin_btn is not None:
+            self._find_origin_btn.setEnabled(False)
+
+        progress = QProgressDialog(
+            "Searching Civitai and Hugging Face…",
+            None,
+            0,
+            0,
+            self,
+        )
+        progress.setWindowTitle("Find source online")
+        progress.setWindowModality(Qt.WindowModality.WindowModal)
+        progress.setMinimumDuration(0)
+        progress.show()
+        QApplication.processEvents()
+
+        worker = _FindOriginWorker(self._lora_id)
+
+        def on_done(ok: bool, err: str, match: object) -> None:
+            progress.close()
+            if self._find_origin_btn is not None:
+                self._find_origin_btn.setEnabled(True)
+            if ok and match is not None:
+                from imagegen_plugins.lora_catalog import get_lora_entry
+
+                refreshed = get_lora_entry(self._lora_id)
+                if refreshed is not None:
+                    self._edit_entry = refreshed
+                    self._trigger_edit.setText(refreshed.trigger_word or "")
+                    self._comment_edit.setText(refreshed.comment or "")
+                    self._repo_edit.setText(refreshed.repo_id or "")
+                    self._filename_edit.setText(refreshed.filename or "")
+                    recovery = (refreshed.source_path or refreshed.local_path or "").strip()
+                    if recovery:
+                        self._recovery_path_edit.setText(_lora_path_for_display(recovery))
+                note = str(getattr(match, "note", "") or "").strip()
+                source = (
+                    str(getattr(match, "page_url", "") or "").strip()
+                    or str(getattr(match, "download_url", "") or "").strip()
+                )
+                msg = "Reinstall metadata was updated."
+                if source:
+                    msg += f"\n\nSource: {source}"
+                if note:
+                    msg += f"\n({note})"
+                show_styled_information(self, "Find source online", msg)
+                return
+            if err:
+                show_styled_warning(self, "Find source online", err)
+
+        worker.finished_result.connect(on_done)
+        worker.start()
+        self._origin_worker = worker
 
     def _on_path_changed(self, text: str) -> None:
         if self._mode != "add":
@@ -580,11 +656,32 @@ class LoraEntryDialog(QDialog):
             show_styled_warning(self, "Add LoRA", "Enter a display name.")
             return
         resolved_path = _lora_path_for_validation(path)
-        try:
-            validate_safetensors_source(resolved_path)
-        except (OSError, ValueError) as exc:
-            show_styled_warning(self, "Add LoRA", str(exc))
-            return
+        recovery_path = self._recovery_path_edit.text().strip()
+        download_source_url = ""
+        if resolved_path.lower().startswith(("http://", "https://")):
+            download_source_url = resolved_path
+            try:
+                from imagegen_plugins.civitai_client import download_url_to_path
+                import tempfile
+
+                tmp_dir = Path(tempfile.mkdtemp(prefix="prowser_lora_import_"))
+                downloaded = download_url_to_path(
+                    resolved_path,
+                    tmp_dir / "import.safetensors",
+                )
+                resolved_path = str(downloaded)
+            except ValueError as exc:
+                show_styled_warning(self, "Add LoRA", str(exc))
+                return
+            except Exception as exc:
+                show_styled_warning(self, "Add LoRA", str(exc))
+                return
+        else:
+            try:
+                validate_safetensors_source(resolved_path)
+            except (OSError, ValueError) as exc:
+                show_styled_warning(self, "Add LoRA", str(exc))
+                return
         display_path = _lora_path_for_display(resolved_path)
         if display_path and display_path != path:
             self._set_path_edit_text(display_path)
@@ -632,7 +729,7 @@ class LoraEntryDialog(QDialog):
         cancel_flag: List[bool] = [False]
         progress.canceled.connect(lambda: cancel_flag.__setitem__(0, True))
 
-        recovery_path = self._recovery_path_edit.text().strip() or resolved_path
+        recovery_path = recovery_path or download_source_url or resolved_path
 
         worker = _ImportLoraWorker(
             source_path=resolved_path,
@@ -678,9 +775,15 @@ def run_add_downloaded_lora_dialog(
     parent: Optional[QWidget],
     *,
     model_key: str,
+    initial_source_path: Optional[str] = None,
 ) -> bool:
     """Open import dialog; return True if a LoRA was registered."""
-    dlg = LoraEntryDialog(parent, model_key=model_key, mode="add")
+    dlg = LoraEntryDialog(
+        parent,
+        model_key=model_key,
+        mode="add",
+        initial_source_path=initial_source_path,
+    )
     return dlg.exec() == QDialog.DialogCode.Accepted
 
 

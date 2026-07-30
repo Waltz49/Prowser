@@ -259,30 +259,17 @@ def reinstall_user_lora(entry: FluxLoraEntry) -> Path:
 
 
 def _download_lora_from_url(url: str, entry: FluxLoraEntry) -> Path:
-    import os
-    import urllib.parse
-    import urllib.request
+    from imagegen_plugins.civitai_client import download_url_to_path
 
     dest_dir = USER_LORA_CACHE_ROOT / entry.lora_id
     dest_dir.mkdir(parents=True, exist_ok=True)
     filename = (entry.filename or "").strip()
-    if not filename:
-        tail = urllib.parse.urlparse(url).path.rsplit("/", 1)[-1]
-        filename = tail if tail.endswith(".safetensors") else f"{entry.lora_id}.safetensors"
-    dest = dest_dir / filename
-    req = urllib.request.Request(
+    placeholder = dest_dir / (filename or f"{entry.lora_id}.safetensors")
+    return download_url_to_path(
         url,
-        headers={"User-Agent": "Prowser/1.0"},
+        placeholder,
+        filename_hint=filename,
     )
-    token = (os.environ.get("CIVITAI_API_TOKEN") or os.environ.get("CIVITAI_TOKEN") or "").strip()
-    if token and ("civitai.com" in url or "civit.red" in url):
-        req.add_header("Authorization", f"Bearer {token}")
-    with urllib.request.urlopen(req, timeout=120) as resp:
-        data = resp.read()
-    if len(data) < 1024:
-        raise ValueError("Downloaded LoRA file is too small to be valid.")
-    dest.write_bytes(data)
-    return dest.resolve()
 
 
 def remove_user_lora_files(entry: FluxLoraEntry) -> None:

@@ -16,7 +16,11 @@ from imagegen_plugins.hf_model_ids import (
     FLUX2_KLEIN_4B,
     FLUX2_KLEIN_9B,
     FLUX2_KLEIN_9B_KV,
+    REALISTIC_VISION_V4_NOVAE,
     SCENEWORKS_FLUX2_KLEIN_9B_KV_MLX,
+    SD15_DEFAULT_VAE,
+    SD15_LORA_MODEL_KEYS,
+    SDXL_BASE_1_0,
     lora_model_display_name,
 )
 from imagegen_plugins.lora_catalog import (
@@ -29,10 +33,12 @@ from imagegen_plugins.lora_catalog import (
     probe_models_for_lora_entry,
 )
 from imagegen_plugins.lora_catalog_settings import model_state
-from imagegen_plugins.lora_host_registry import HOST_SD15
+from imagegen_plugins.lora_host_registry import HOST_SD15, HOST_SDXL
+
+_DIFFUSERS_LORA_HOSTS = frozenset({HOST_SD15, HOST_SDXL})
 from imagegen_plugins.lora_model_registry import lora_probe_model_is_local
 
-# Models probe_lora_on_model can exercise (MFLUX paths).
+# Models probe_lora_on_model can exercise.
 _PROBEABLE_MODEL_KEYS = frozenset(
     {
         FLUX1_SCHNELL,
@@ -42,6 +48,8 @@ _PROBEABLE_MODEL_KEYS = frozenset(
         FLUX2_KLEIN_9B,
         FLUX2_KLEIN_9B_KV,
         SCENEWORKS_FLUX2_KLEIN_9B_KV_MLX,
+        SDXL_BASE_1_0,
+        *SD15_LORA_MODEL_KEYS,
     }
 )
 
@@ -121,7 +129,7 @@ def plan_disk_lora_probes(
     for entry in catalog_entries_sorted(settings):
         if entry.mflux_compatible is False:
             continue
-        if entry.host_id == HOST_SD15:
+        if entry.host_id in _DIFFUSERS_LORA_HOSTS:
             continue
         candidates.append(entry)
 
@@ -343,6 +351,56 @@ def _probe_klein_edit(
                 pass
 
 
+def _probe_diffusers(
+    *,
+    pipeline: str,
+    hf_model_id: str,
+    lora_path: str,
+    lora_scale: float,
+    cancel_check: Callable[[], bool],
+    vae_hf_model_id: str = "",
+) -> bool:
+    """Load diffusers SD 1.5 / SDXL pipeline + LoRA weights (no inference)."""
+    if cancel_check():
+        return False
+    try:
+        if pipeline == "sd15":
+            from imagegen_plugins.pipelines.sd15_diffusers import probe_lora_weights
+
+            probe_lora_weights(
+                hf_model_id,
+                lora_path,
+                lora_scale,
+                vae_hf_model_id=vae_hf_model_id,
+            )
+        elif pipeline == "sdxl":
+            from imagegen_plugins.pipelines.sdxl_diffusers import probe_lora_weights
+
+            probe_lora_weights(hf_model_id, lora_path, lora_scale)
+        else:
+            raise ValueError(f"Unknown diffusers probe pipeline: {pipeline}")
+        return True
+    except Exception as e:
+        if is_lora_incompatibility_error(e):
+            return False
+        msg = f"{type(e).__name__}: {e}".lower()
+        if "lora" in msg or "peft" in msg or "adapter" in msg:
+            return False
+        raise
+    finally:
+        try:
+            if pipeline == "sd15":
+                from imagegen_plugins.pipelines.sd15_diffusers import unload_pipeline
+
+                unload_pipeline()
+            elif pipeline == "sdxl":
+                from imagegen_plugins.pipelines.sdxl_diffusers import unload_pipeline
+
+                unload_pipeline()
+        except Exception:
+            pass
+
+
 def probe_lora_on_model(
     model_key: str,
     lora_path: str,
@@ -351,7 +409,7 @@ def probe_lora_on_model(
     *,
     entry: Optional[FluxLoraEntry] = None,
 ) -> bool:
-    """Return True if a minimal generation succeeds with this LoRA on model_key."""
+    """Return True if a minimal probe succeeds with this LoRA on model_key."""
 
     def prompt(fallback: str) -> str:
         if entry is None:
@@ -426,6 +484,28 @@ def probe_lora_on_model(
             quantize=None,
             model_path=tier_path,
         )
+    if model_key in SD15_LORA_MODEL_KEYS:
+        vae = (
+            SD15_DEFAULT_VAE
+            if model_key == REALISTIC_VISION_V4_NOVAE
+            else ""
+        )
+        return _probe_diffusers(
+            pipeline="sd15",
+            hf_model_id=model_key,
+            lora_path=lora_path,
+            lora_scale=lora_scale,
+            cancel_check=cancel_check,
+            vae_hf_model_id=vae,
+        )
+    if model_key == SDXL_BASE_1_0:
+        return _probe_diffusers(
+            pipeline="sdxl",
+            hf_model_id=SDXL_BASE_1_0,
+            lora_path=lora_path,
+            lora_scale=lora_scale,
+            cancel_check=cancel_check,
+        )
     raise ValueError(f"Unknown LoRA probe model: {model_key}")
 
 
@@ -468,7 +548,7 @@ def run_lora_compatibility_check(
         (e.lora_id, e)
         for e in _candidates
         if local_lora_weights_path(e.lora_id, settings) is None
-        and e.host_id != HOST_SD15
+        and e.host_id not in _DIFFUSERS_LORA_HOSTS
         and e.mflux_compatible is not False
     ):
         result.changes.append(

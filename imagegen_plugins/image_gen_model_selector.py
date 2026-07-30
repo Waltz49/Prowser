@@ -22,7 +22,7 @@ from imagegen_plugins.image_gen_form_layout import (
 )
 from imagegen_plugins.image_gen_persistence import load_plugin_dialog_settings
 from imagegen_plugins.image_gen_registry import ImageGenModelPlugin
-from imagegen_plugins.lora_host_registry import HOST_SD15
+from imagegen_plugins.lora_host_registry import HOST_SD15, HOST_SDXL
 from theme.theme_service import get_active_theme
 
 _MODEL_COMBO_MIN_WIDTH = 300
@@ -424,7 +424,7 @@ def sync_image_gen_lora_field(dialog: Any) -> None:
     use_stack = (
         plugin_supports_lora(plugin)
         and host_id is not None
-        and host_id != HOST_SD15
+        and host_id not in (HOST_SD15,)
     )
 
     lora_spec = next((s for s in specs if s.key == "mflux_lora"), None)

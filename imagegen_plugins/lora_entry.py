@@ -40,6 +40,9 @@ DEFAULT_ENABLED_LORA_IDS_BY_HOST: dict[str, tuple[str, ...]] = {
         "sd15_anime_character",
         "sd15_furry",
     ),
+    "sdxl": (
+        "sdxl_werewolf",
+    ),
 }
 
 # Back-compat alias for migration/tests.

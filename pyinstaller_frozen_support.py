@@ -149,6 +149,7 @@ def sdnq_is_installed() -> bool:
 _SANA_PIPELINE_MODULE = "diffusers.pipelines.sana.pipeline_sana_sprint"
 _Z_IMAGE_PIPELINE_MODULE = "diffusers.pipelines.z_image.pipeline_z_image"
 _SD15_PIPELINE_MODULE = "diffusers.pipelines.stable_diffusion.pipeline_stable_diffusion"
+_SDXL_PIPELINE_MODULE = "diffusers.pipelines.stable_diffusion_xl.pipeline_stable_diffusion_xl"
 
 
 def sana_sprint_pipeline_is_installed() -> bool:
@@ -176,12 +177,24 @@ def sd15_diffusers_pipeline_is_installed() -> bool:
     return _pipeline_module_on_disk(_SD15_PIPELINE_MODULE)
 
 
+def sdxl_diffusers_pipeline_is_installed() -> bool:
+    """True when the SDXL diffusers pipeline module is present (no import)."""
+    if getattr(sys, "frozen", False):
+        rel = _SDXL_PIPELINE_MODULE.replace(".", os.sep) + ".py"
+        for root in frozen_bundle_roots():
+            if os.path.isfile(os.path.join(root, rel)):
+                return True
+        return False
+    return _pipeline_module_on_disk(_SDXL_PIPELINE_MODULE)
+
+
 def diffusers_is_installed() -> bool:
     """True when a supported diffusers pipeline backend is present (menu + worker)."""
     return (
         sana_sprint_pipeline_is_installed()
         or z_image_pipeline_is_installed()
         or sd15_diffusers_pipeline_is_installed()
+        or sdxl_diffusers_pipeline_is_installed()
     )
 
 

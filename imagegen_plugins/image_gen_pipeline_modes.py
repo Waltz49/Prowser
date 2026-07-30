@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
 from imagegen_plugins.hf_model_ids import FLUX1_SCHNELL
-from imagegen_plugins.lora_host_registry import HOST_SD15, lora_host_for_pipeline
+from imagegen_plugins.lora_host_registry import HOST_SD15, HOST_SDXL, lora_host_for_pipeline
 from imagegen_plugins.mflux_lora_presets import (
     coerce_lora_preset_id,
     effective_lora_ids_from_values,
@@ -144,6 +144,22 @@ PIPELINE_MODES: Dict[str, PipelineMode] = {
         dim_step=8,
         supports_negative_prompt=True,
         supports_progressive_images=False,
+    ),
+    "sdxl_diffusers": PipelineMode(
+        pipeline_id="sdxl_diffusers",
+        worker_script="sdxl_diffusers.py",
+        steps_default=30,
+        steps_max=50,
+        guidance_default=7.5,
+        guidance_min=1.0,
+        guidance_max=20.0,
+        width_min=256,
+        width_max=896,
+        height_min=256,
+        height_max=896,
+        dim_step=8,
+        supports_negative_prompt=True,
+        supports_progressive_images=True,
     ),
     "mflux_fill_expand": PipelineMode(
         pipeline_id="mflux_fill_expand",
@@ -279,6 +295,10 @@ def align_dims_for_pipeline(
         from imagegen_plugins.pipelines.sd15_diffusers import align_sd15_dims
 
         return align_sd15_dims(w, h, max_side=max_side)
+    if pipeline_id == "sdxl_diffusers":
+        from imagegen_plugins.pipelines.sdxl_diffusers import align_sdxl_dims
+
+        return align_sdxl_dims(w, h, max_side=max_side)
     if pipeline_id in ("z_image_turbo_sdnq", "mflux_z_image_turbo"):
         from imagegen_plugins.pipelines.z_image_turbo import align_z_image_dims
 
@@ -433,6 +453,10 @@ def pipeline_is_available(pipeline_id: str) -> bool:
         from pyinstaller_frozen_support import sd15_diffusers_pipeline_is_installed
 
         result = sd15_diffusers_pipeline_is_installed()
+    elif pipeline_id == "sdxl_diffusers":
+        from pyinstaller_frozen_support import sdxl_diffusers_pipeline_is_installed
+
+        result = sdxl_diffusers_pipeline_is_installed()
     elif pipeline_id == "z_image_turbo_sdnq":
         from imagegen_plugins.pipelines.z_image_turbo import z_image_turbo_is_installed
 
@@ -541,7 +565,8 @@ def merge_defaults(
     if lora_host_for_pipeline(pipeline_id) == HOST_SD15:
         from imagegen_plugins.mflux_lora_presets import strip_lora_payload_keys_for_host
 
-        strip_lora_payload_keys_for_host(base, host_id=HOST_SD15, pop=True)
+        host_id = HOST_SD15
+        strip_lora_payload_keys_for_host(base, host_id=host_id, pop=True)
         raw_stack = base.get("mflux_lora_stack")
         pid = coerce_lora_preset_id(base.get("mflux_lora", "none"))
         if pid == "none" and isinstance(raw_stack, list) and raw_stack:
@@ -554,7 +579,7 @@ def merge_defaults(
         base.pop("mflux_lora_stack", None)
         if "mflux_lora" in base:
             base["mflux_lora"] = coerce_lora_preset_id(base["mflux_lora"])
-    else:
+    elif lora_host_for_pipeline(pipeline_id) is not None:
         from imagegen_plugins.lora_host_registry import HOST_FLUX1_T2I
         from imagegen_plugins.mflux_lora_presets import strip_lora_payload_keys_for_host
 
@@ -647,6 +672,11 @@ def build_worker_payload(
 
         merged.pop("copies", None)
         apply_lora_to_sd15_payload(merged)
+    if pipeline_id == "sdxl_diffusers":
+        from imagegen_plugins.sdxl_lora_presets import apply_lora_to_sdxl_payload
+
+        merged.pop("copies", None)
+        apply_lora_to_sdxl_payload(merged)
     if pipeline_id == "mflux_flux2_klein_expand":
         from imagegen_plugins.image_gen_naming import resolve_source_image_paths
         from imagegen_plugins.mflux_lora_presets import apply_lora_to_mflux_payload

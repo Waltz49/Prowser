@@ -26,6 +26,7 @@ _FLUX_REQUIRED_WEIGHT_SUBDIRS = ("vae", "transformer", "text_encoder", "text_enc
 _FLUX2_KLEIN_WEIGHT_SUBDIRS = ("vae", "transformer", "text_encoder")
 _Z_IMAGE_WEIGHT_SUBDIRS = ("vae", "transformer", "text_encoder")
 _SD15_WEIGHT_SUBDIRS = ("unet", "text_encoder")
+_SDXL_WEIGHT_SUBDIRS = ("unet", "text_encoder", "text_encoder_2", "vae")
 
 _model_local_cache: dict[tuple[str, str], bool] = {}
 
@@ -69,6 +70,10 @@ def model_display_name(pipeline_id: str, hf_model_id: str) -> str:
         if hf_model_id and "/" in hf_model_id:
             return hf_model_id.split("/")[-1].replace("_", " ")
         return "Stable Diffusion 1.5"
+    if pipeline_id == "sdxl_diffusers":
+        if hf_model_id and "/" in hf_model_id:
+            return hf_model_id.split("/")[-1].replace("_", " ").replace("-", " ")
+        return "Stable Diffusion XL 1.0"
     if pipeline_id in ("mflux_fill_expand", "mflux_fill_infill"):
         if hf_model_id and "/" in hf_model_id:
             return hf_model_id.split("/")[-1].replace(".", " ").replace("-", " ")
@@ -137,6 +142,8 @@ def pipeline_model_is_local(
             result = True
         else:
             result = _hf_repo_snapshot_has_weights(SD15_DEFAULT_VAE)
+    elif pipeline_id == "sdxl_diffusers":
+        result = _hf_repo_snapshot_is_complete(hf_model_id, _SDXL_WEIGHT_SUBDIRS)
     else:
         result = True
     if use_cache:
@@ -173,6 +180,24 @@ def confirm_model_download_if_needed(
     )
     if answer != QMessageBox.StandardButton.Ok:
         return False
+    if plugin.pipeline_id == "sdxl_diffusers":
+        try:
+            ensure_hf_repo_downloaded(
+                plugin.hf_model_id,
+                pipeline_id=plugin.pipeline_id,
+                parent=parent,
+            )
+        except Exception as e:
+            from utils import show_styled_critical
+
+            show_styled_critical(
+                parent,
+                "Download failed",
+                str(e)[:4000],
+            )
+            return False
+        invalidate_model_local_cache(plugin.pipeline_id, plugin.hf_model_id)
+        return pipeline_model_is_local(plugin.pipeline_id, plugin.hf_model_id)
     if plugin.pipeline_id in (
         "mflux_fill_expand",
         "mflux_flux2_klein_edit",
@@ -216,7 +241,7 @@ def confirm_model_download_if_needed(
 def ensure_hf_repo_downloaded(
     repo_id: str, *, pipeline_id: str = "mflux_flux2_klein_edit", parent=None
 ) -> str:
-    """Download or resume a full Hugging Face repo snapshot. Returns local snapshot path."""
+    """Download or resume a Hugging Face repo snapshot. Returns local snapshot path."""
     try:
         from huggingface_hub import snapshot_download
     except ImportError as e:
@@ -225,13 +250,20 @@ def ensure_hf_repo_downloaded(
             "Install with: pip install huggingface_hub"
         ) from e
 
+    from imagegen_plugins.hf_model_ids import hf_repo_snapshot_allow_patterns
+
+    download_kwargs: dict = {"repo_id": repo_id, "resume_download": True}
+    allow_patterns = hf_repo_snapshot_allow_patterns(pipeline_id, repo_id)
+    if allow_patterns:
+        download_kwargs["allow_patterns"] = list(allow_patterns)
+
     from PySide6.QtWidgets import QApplication
 
     app = QApplication.instance()
     if app is not None:
         app.setOverrideCursor(Qt.CursorShape.WaitCursor)
     try:
-        path = snapshot_download(repo_id=repo_id, resume_download=True)
+        path = snapshot_download(**download_kwargs)
     finally:
         if app is not None:
             app.restoreOverrideCursor()
