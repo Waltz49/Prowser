@@ -132,6 +132,7 @@ class ImageGenController(QObject):
         self._queue: List[QueuedGenerateJob] = []
         self._active_queue_job_id: str = ""
         self._active_thumbnail_paths: list[str] = []
+        self._selected_job_id: str | None = None
 
         self._active_plugin: Optional[ImageGenModelPlugin] = None
         self._output_path: str = ""
@@ -336,6 +337,97 @@ class ImageGenController(QObject):
                 )
             )
         return rows
+
+    def selected_job_id(self) -> str | None:
+        return self._selected_job_id
+
+    def set_selected_job_id(self, job_id: str | None) -> None:
+        job_id = str(job_id).strip() if job_id else None
+        if job_id == self._selected_job_id:
+            return
+        self._selected_job_id = job_id or None
+
+    def row_index_for_job_id(self, job_id: str) -> int:
+        for idx, row in enumerate(self.queue_snapshot()):
+            if row.job_id == job_id:
+                return idx
+        return -1
+
+    def resolve_selected_row_index(self) -> int:
+        rows = self.queue_snapshot()
+        if not rows:
+            self._selected_job_id = None
+            return -1
+        if self._selected_job_id:
+            for idx, row in enumerate(rows):
+                if row.job_id == self._selected_job_id:
+                    return idx
+        if rows[0].is_active:
+            self._selected_job_id = rows[0].job_id
+            return 0
+        self._selected_job_id = rows[0].job_id
+        return 0
+
+    def job_row_supports_image_refinement(self, row: int) -> bool:
+        record = self.job_record_for_row(row)
+        if record is None:
+            return False
+        _, values = record
+        paths = resolve_source_image_paths(values)
+        return bool(paths)
+
+    def move_queued_job(self, job_id: str, to_queue_index: int) -> bool:
+        """Reorder a pending job within ``_queue`` (active job is not movable)."""
+        if not job_id or job_id == self._active_queue_job_id:
+            return False
+        from_idx = None
+        for idx, job in enumerate(self._queue):
+            if job.job_id == job_id:
+                from_idx = idx
+                break
+        if from_idx is None:
+            return False
+        to_queue_index = max(0, min(int(to_queue_index), len(self._queue) - 1))
+        if from_idx == to_queue_index:
+            return False
+        job = self._queue.pop(from_idx)
+        self._queue.insert(to_queue_index, job)
+        self.queue_changed.emit()
+        self._schedule_persist_job_queue()
+        return True
+
+    def move_job_to_display_row(self, job_id: str, target_display_row: int) -> bool:
+        """Move a pending job to ``target_display_row`` in the visible list."""
+        rows = self.queue_snapshot()
+        if not rows or not job_id:
+            return False
+        from_row = self.row_index_for_job_id(job_id)
+        if from_row < 0 or rows[from_row].is_active:
+            return False
+        active_offset = 1 if rows[0].is_active else 0
+        if active_offset and target_display_row <= 0:
+            return False
+        target_display_row = max(0, min(int(target_display_row), len(rows)))
+        if from_row == target_display_row:
+            return False
+        pending_ids = [row.job_id for row in rows if not row.is_active]
+        if job_id not in pending_ids:
+            return False
+        pending_ids.remove(job_id)
+        insert_at = target_display_row - active_offset
+        insert_at = max(0, min(insert_at, len(pending_ids)))
+        pending_ids.insert(insert_at, job_id)
+        new_queue: list[QueuedGenerateJob] = []
+        for jid in pending_ids:
+            job = self._queued_job_by_id(jid)
+            if job is not None:
+                new_queue.append(job)
+        if len(new_queue) != len(self._queue):
+            return False
+        self._queue = new_queue
+        self.queue_changed.emit()
+        self._schedule_persist_job_queue()
+        return True
 
     def job_record_for_row(
         self, row: int

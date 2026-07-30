@@ -708,10 +708,10 @@ class MenuManager:
         except ImportError:
             _jobs_ui = True
         if _jobs_ui:
-            self.main_window.toggle_jobs_action = QAction('Show Jobs', self.main_window)
+            self.main_window.toggle_jobs_action = QAction('Jobs Pane', self.main_window)
             self.main_window.toggle_jobs_action.setCheckable(True)
             self.main_window.toggle_jobs_action.setChecked(
-                getattr(self.main_window, 'jobs_visible', False)
+                getattr(self.main_window, 'jobs_display_mode', 'pane') == 'pane'
             )
             self.main_window.toggle_jobs_action.setShortcut(QKeySequence('J'))
             self.main_window.toggle_jobs_action.triggered.connect(self.main_window.toggle_jobs)
@@ -781,10 +781,13 @@ class MenuManager:
             self.main_window.toggle_preview_action.setText('Hide Preview' if preview_visible else 'Show Preview')
             self.main_window.toggle_preview_action.setChecked(preview_visible)
             rs = getattr(self.main_window, 'right_sidebar', None)
-            jobs_visible = rs.is_jobs_visible() if rs else getattr(self.main_window, 'jobs_visible', False)
+            from imagegen_plugins.jobs_display_mode import get_jobs_display_mode, JOBS_DISPLAY_PANE
+            jobs_pane_mode = get_jobs_display_mode(self.main_window) == JOBS_DISPLAY_PANE
             if hasattr(self.main_window, 'toggle_jobs_action'):
-                self.main_window.toggle_jobs_action.setText('Hide Jobs' if jobs_visible else 'Show Jobs')
-                self.main_window.toggle_jobs_action.setChecked(jobs_visible)
+                self.main_window.toggle_jobs_action.setText(
+                    'Jobs Pane' if jobs_pane_mode else 'Show Jobs Pane'
+                )
+                self.main_window.toggle_jobs_action.setChecked(jobs_pane_mode)
             cs = self.main_window.combined_sidebar
             chat_visible = (
                 cs.is_chat_visible()

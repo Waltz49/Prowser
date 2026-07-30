@@ -592,7 +592,15 @@ class ImageGenExpandDialog(ImageGenDimensionAspectMixin, QDialog):
             out["placement_y"] = py
             out["placement_w"] = pw
             out["placement_h"] = ph
-        out["source_image_path"] = self.source_path
+        out.pop("source_image_paths", None)
+        out.pop("_canonical_source_image_paths", None)
+        path = str(self.source_path or "").strip()
+        if path and os.path.isfile(path):
+            ap = os.path.normpath(os.path.abspath(path))
+            out["source_image_path"] = ap
+            out["source_image_paths"] = [ap]
+        else:
+            out.pop("source_image_path", None)
         self._stash_aspect_lock_in_values(out)
         return out
 

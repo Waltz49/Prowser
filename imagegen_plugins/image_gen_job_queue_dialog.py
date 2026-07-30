@@ -103,7 +103,9 @@ class _JobQueueKeyPassthroughFilter(QObject):
             return False
         key_event = event  # type: ignore[assignment]
         if _is_cmd_j(key_event):
-            self._dialog.hide()
+            from imagegen_plugins.jobs_display_mode import show_jobs_panel
+
+            show_jobs_panel(self._dialog.main_window)
             key_event.accept()
             return True
         main_window = self._dialog.main_window
@@ -148,6 +150,7 @@ class ImageGenJobQueueDialog(QDialog):
         self._restore_size_mode_pending = False
         self._syncing_shell_geometry = False
         self._always_on_top = load_job_queue_always_on_top()
+        self._quit_shutdown = False
 
         self.setWindowTitle("Job Control")
         self.setModal(False)
@@ -180,7 +183,7 @@ class ImageGenJobQueueDialog(QDialog):
         )
         self._header.hide_button.setText("×")
         self._header.hide_button.setToolTip("Close job control dialog")
-        self._header.hide_button.clicked.connect(self.hide)
+        self._header.hide_button.clicked.connect(self._close_to_pane_mode)
         self._header.title_double_clicked.connect(self._cycle_header_size)
         self._header.configure_floating_window_move(self)
         layout.addWidget(self._header)
@@ -209,7 +212,7 @@ class ImageGenJobQueueDialog(QDialog):
                 event.button() == Qt.MouseButton.LeftButton
                 and self._is_empty_queue_state()
             ):
-                self.hide()
+                self._close_to_pane_mode()
                 event.accept()
                 return
             QLabel.mousePressEvent(empty_label, event)
@@ -539,7 +542,30 @@ class ImageGenJobQueueDialog(QDialog):
         self.unsetCursor()
         super().leaveEvent(event)
 
+    def _close_to_pane_mode(self) -> None:
+        from imagegen_plugins.jobs_display_mode import show_jobs_pane
+
+        show_jobs_pane(self.main_window)
+
+    def shutdown_for_quit(self) -> None:
+        """Permit real close and tear down before application exit."""
+        if self._quit_shutdown:
+            return
+        self._quit_shutdown = True
+        self._remove_key_passthrough_filter()
+        try:
+            self._persist_size_mode()
+            self._save_geometry()
+        except Exception:
+            pass
+        self.hide()
+        self.setParent(None)
+        self.deleteLater()
+
     def closeEvent(self, event) -> None:
+        if self._quit_shutdown:
+            super().closeEvent(event)
+            return
         self._save_geometry()
         event.ignore()
         self.hide()
@@ -580,6 +606,18 @@ class ImageGenJobQueueDialog(QDialog):
         super().keyPressEvent(event)
 
 
+def dismiss_job_queue_dialog_for_quit(main_window) -> None:
+    """Close the floating job panel during application shutdown."""
+    dlg = getattr(main_window, "_imagegen_job_queue_dialog", None)
+    if dlg is None:
+        return
+    if hasattr(dlg, "shutdown_for_quit"):
+        dlg.shutdown_for_quit()
+    else:
+        dlg.hide()
+    main_window._imagegen_job_queue_dialog = None
+
+
 def open_imagegen_job_queue_dialog(main_window) -> None:
     """Show the full job queue dialog (does not toggle hide)."""
     dlg = getattr(main_window, "_imagegen_job_queue_dialog", None)
@@ -590,11 +628,6 @@ def open_imagegen_job_queue_dialog(main_window) -> None:
 
 
 def show_imagegen_job_queue_dialog(main_window) -> None:
-    dlg = getattr(main_window, "_imagegen_job_queue_dialog", None)
-    if dlg is None:
-        dlg = ImageGenJobQueueDialog(main_window)
-        main_window._imagegen_job_queue_dialog = dlg
-    if dlg.isVisible():
-        dlg.hide()
-        return
-    open_imagegen_job_queue_dialog(main_window)
+    from imagegen_plugins.jobs_display_mode import show_jobs_panel
+
+    show_jobs_panel(main_window)

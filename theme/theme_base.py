@@ -41,6 +41,43 @@ def job_pane_tools_icon_path() -> str:
     return asset_path("job_pane_tools_icon.svg")
 
 
+def job_pane_flyout_icon_path() -> str:
+    """Fly out to floating panel (pane mode titlebar)."""
+    for name in ("flyout.png", "flyout.jpg"):
+        path = asset_path(name)
+        if os.path.isfile(path):
+            return path
+    return asset_path("flyout.png")
+
+
+def job_pane_flyout_hover_icon_path() -> str:
+    for name in ("flyout_hover.png", "flyout_hover.jpg"):
+        path = asset_path(name)
+        if os.path.isfile(path):
+            return path
+    return asset_path("flyout_hover.png")
+
+
+def job_pane_flyin_icon_path() -> str:
+    """Fly in to sidebar pane (panel mode titlebar)."""
+    for name in ("flyin.png", "flyin.jpg"):
+        path = asset_path(name)
+        if os.path.isfile(path):
+            return path
+    return asset_path("flyin.png")
+
+
+def job_pane_flyin_hover_icon_path() -> str:
+    for name in ("flyin_hover.png", "flyin_hover.jpg", "flyin_hover.jpg"):
+        path = asset_path(name)
+        if os.path.isfile(path):
+            return path
+    hover = asset_path("flyin_hover.png")
+    if os.path.isfile(hover):
+        return hover
+    return job_pane_flyin_icon_path()
+
+
 def asset_file_url(filename: str) -> str:
     """Return file:// URL for an asset, for use in HTML img src (e.g. QLabel RichText)."""
     return f"file://{asset_path(filename)}"

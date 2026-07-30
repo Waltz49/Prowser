@@ -50,6 +50,7 @@ class HeaderWidget(QFrame):
         self.omit_top_border = omit_top_border
         self.hide_button = None
         self.tools_button = None
+        self.flyout_button = None
         self._header_layout = None
         self._single_click_timer = QTimer(self)
         self._single_click_timer.setSingleShot(True)
@@ -95,6 +96,23 @@ class HeaderWidget(QFrame):
         self.hide_button.setFixedSize(20, 20)
         self.hide_button.setFocusPolicy(Qt.NoFocus)
         layout.addWidget(self.hide_button)
+        self.refresh_theme_styles()
+
+    def set_flyout_button(self, button: QPushButton | None) -> None:
+        """Optional titlebar flyout/flyin control (inserted at far right)."""
+        layout = self._header_layout
+        if layout is None:
+            return
+        if self.flyout_button is not None:
+            layout.removeWidget(self.flyout_button)
+            self.flyout_button.setParent(None)
+            self.flyout_button = None
+        if button is None:
+            return
+        button.setFixedSize(20, 20)
+        button.setFocusPolicy(Qt.NoFocus)
+        self.flyout_button = button
+        layout.addWidget(button)
         self.refresh_theme_styles()
 
     def set_tools_button(self, button: QPushButton | None) -> None:
@@ -225,6 +243,8 @@ class HeaderWidget(QFrame):
         self._style_titlebar_chip(self.hide_button)
         if self.tools_button is not None:
             self._style_titlebar_chip(self.tools_button)
+        if self.flyout_button is not None:
+            self._style_titlebar_chip(self.flyout_button)
 
     def _titlebar_click_excludes_chrome_buttons(self, event: QMouseEvent) -> bool:
         pos = event.position().toPoint()

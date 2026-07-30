@@ -147,16 +147,27 @@ class SidebarManager:
             return self.main_window.preview_visible
 
     def toggle_jobs(self):
-        """Toggle the visibility of the jobs pane in the right combined sidebar."""
-        if hasattr(self.main_window, "right_sidebar"):
+        """Force jobs sidebar pane mode (J key)."""
+        from imagegen_plugins.jobs_display_mode import show_jobs_pane
+
+        if self.main_window._should_reveal_sidebar_only('right'):
             rs = self.main_window.right_sidebar
-            if self.main_window._should_reveal_sidebar_only('right'):
-                return self.main_window._toggle_pane_with_chrome_restore(
-                    rs.is_jobs_visible, rs.set_jobs_visible, 'right_jobs_visible', 'right'
-                )
-            rs.set_jobs_visible(not rs.is_jobs_visible())
-            return rs.is_jobs_visible()
-        return False
+            if rs is not None and not rs.is_jobs_visible():
+                rs.set_jobs_visible(True)
+            show_jobs_pane(self.main_window)
+            return True
+        show_jobs_pane(self.main_window)
+        return getattr(self.main_window, "jobs_display_mode", "pane") == "pane"
+
+    def set_jobs_display_mode(self, mode: str) -> str:
+        from imagegen_plugins.jobs_display_mode import set_jobs_display_mode
+
+        return set_jobs_display_mode(self.main_window, mode)
+
+    def toggle_jobs_display_mode(self) -> str:
+        from imagegen_plugins.jobs_display_mode import toggle_jobs_display_mode
+
+        return toggle_jobs_display_mode(self.main_window)
 
     def toggle_chat(self):
         """Toggle the visibility of the chat pane in the left combined sidebar."""

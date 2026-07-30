@@ -6,8 +6,8 @@ from __future__ import annotations
 import os
 from typing import Callable
 
-from PySide6.QtCore import QEvent, QEventLoop, Qt, QTimer, QSize, QPoint, QObject
-from PySide6.QtGui import QIcon, QMouseEvent
+from PySide6.QtCore import QEvent, QEventLoop, Qt, QTimer, QSize, QPoint, QObject, QMimeData
+from PySide6.QtGui import QColor, QDrag, QIcon, QMouseEvent, QPainter, QPen
 from PySide6.QtWidgets import (
     QApplication,
     QAbstractButton,
@@ -26,10 +26,10 @@ from PySide6.QtWidgets import (
 from imagegen_plugins.active_job_strip_widget import ActiveJobStripWidget
 from imagegen_plugins.image_gen_controller import get_imagegen_controller
 from imagegen_plugins.job_queue_common import (
-    _ACTION_COL_WIDTH,
+    _ACTION_BAR_HEIGHT,
     _apply_job_queue_cell_background,
     _valid_preview_paths,
-    build_job_queue_action_widget,
+    JobQueueActionBar,
     create_invalid_job_preview_label,
     info_html_for_queue_row,
     job_queue_edit_row,
@@ -44,11 +44,24 @@ from status_bar_config import (
     _apply_task_info_html_to_browser,
     configure_task_info_text_browser,
 )
-from theme.theme_base import job_pane_tools_icon_path
+from theme.theme_base import (
+    job_pane_flyin_hover_icon_path,
+    job_pane_flyin_icon_path,
+    job_pane_flyout_hover_icon_path,
+    job_pane_flyout_icon_path,
+    job_pane_tools_icon_path,
+)
 from theme.theme_service import get_active_theme
 from browser_window.sidebar.sidebar_pane_chrome import apply_scroll_area_viewport_background
 from thumbnails.sidebar_pane_layout import MIN_JOBS_QUEUE_CONTENT_HEIGHT, pane_fit_height_tolerance
+from thumbnails import thumbnail_constants as tc
 from utils import create_job_status_thumbnail_label
+
+_JOB_QUEUE_DRAG_MIME = "application/x-prowser-job-queue-id"
+_CARD_CONTENT_MARGIN = 12
+_DROP_LINE_HEIGHT = 6
+_DROP_LINE_COLOR = QColor(40, 120, 250, 220)
+_DROP_LINE_PEN_WIDTH = 1
 
 _THUMB_SIZE = 55
 _THUMB_GAP = 14
@@ -165,17 +178,96 @@ def _disable_tab_focus(root: QWidget) -> None:
         child.setFocusPolicy(Qt.FocusPolicy.NoFocus)
 
 
-def _job_card_stylesheet() -> str:
+def _job_selection_border_hex() -> str:
+    """Active thumbnail index highlight (Settings → current image border)."""
+    hex_val = (tc.CURRENT_IMAGE_BORDER_COLOR_HEX or "").strip()
+    if hex_val:
+        return hex_val
+    return get_active_theme().current_image_border_color_hex
+
+
+def _job_selection_border_width_px() -> int:
+    w = int(tc.CURRENT_IMAGE_BORDER_WIDTH_PX or 0)
+    if w > 0:
+        return w
+    t = get_active_theme()
+    idx = int(getattr(t, "current_image_border_width_index", 2))
+    return max(1, min(10, idx))
+
+
+def _job_card_stylesheet(*, selected: bool = False) -> str:
     t = get_active_theme()
     bg = job_queue_cell_background_hex()
+    if selected:
+        border = _job_selection_border_hex()
+        width = _job_selection_border_width_px()
+    else:
+        border = t.border_default_hex
+        width = 1
     return f"""
         QFrame#sidebarJobCard {{
             background-color: {bg};
             color: {t.sidebar_text_color_hex};
-            border: 1px solid {t.border_default_hex};
+            border: {width}px solid {border};
             border-radius: 4px;
+            padding: 0px;
+            margin: 0px;
         }}
     """
+
+
+def refresh_jobs_flyout_buttons(main_window) -> None:
+    from imagegen_plugins.jobs_display_mode import (
+        JOBS_DISPLAY_PANE,
+        get_jobs_display_mode,
+    )
+
+    pane_mode = get_jobs_display_mode(main_window) == JOBS_DISPLAY_PANE
+    icon = job_pane_flyout_icon_path() if pane_mode else job_pane_flyin_icon_path()
+    hover = (
+        job_pane_flyout_hover_icon_path()
+        if pane_mode
+        else job_pane_flyin_hover_icon_path()
+    )
+    tooltip = (
+        "Open job queue in floating panel"
+        if pane_mode
+        else "Dock job queue in sidebar pane"
+    )
+    panels = []
+    rs = getattr(main_window, "right_sidebar", None)
+    if rs is not None:
+        w = getattr(rs, "jobs_widget", None)
+        if w is not None:
+            panels.append(w)
+    dlg = getattr(main_window, "_imagegen_job_queue_dialog", None)
+    if dlg is not None and getattr(dlg, "_panel", None) is not None:
+        panels.append(dlg._panel)
+    for panel in panels:
+        btn = getattr(panel, "_flyout_button", None)
+        if btn is None:
+            continue
+        btn.setIcon(QIcon(icon))
+        btn.setToolTip(tooltip)
+        btn.setProperty("_flyout_hover_icon", hover)
+
+
+class _JobQueueDropLine(QWidget):
+    """Horizontal insertion marker (matches thumbnail canvas drop indicator style)."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        self.setAutoFillBackground(False)
+        self.hide()
+
+    def paintEvent(self, event) -> None:
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        painter.setPen(QPen(_DROP_LINE_COLOR, _DROP_LINE_PEN_WIDTH))
+        mid_y = self.height() // 2
+        painter.drawLine(0, mid_y, self.width(), mid_y)
 
 
 class _FlowReferenceThumbs(QWidget):
@@ -348,7 +440,7 @@ class _JobCardDblClickFilter(QObject):
 
 
 class JobCard(QFrame):
-    """One queue row: action buttons | status HTML + thumbnails."""
+    """One queue row: status HTML + thumbnails (actions live in shared bar)."""
 
     def __init__(
         self,
@@ -356,31 +448,40 @@ class JobCard(QFrame):
         controller,
         row_idx: int,
         *,
+        job_id: str,
         is_active: bool,
+        on_select: Callable[[str], None] | None = None,
+        on_reorder_drop: Callable[[str, int], None] | None = None,
+        on_drop_hover: Callable[[int], None] | None = None,
+        on_drop_hover_clear: Callable[[], None] | None = None,
         parent=None,
     ):
         super().__init__(parent)
         self.setObjectName("sidebarJobCard")
-        self.setStyleSheet(_job_card_stylesheet())
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.setAcceptDrops(True)
         self._main_window = main_window
         self._controller = controller
         self._row_idx = row_idx
+        self._job_id = job_id
+        self._is_active = bool(is_active)
+        self._on_select = on_select
+        self._on_reorder_drop = on_reorder_drop
+        self._on_drop_hover = on_drop_hover
+        self._on_drop_hover_clear = on_drop_hover_clear
+        self._selected = False
         self._full_prompt = ""
         self._last_info_html = ""
         self._scroll_width = 0
         self._content_inline = False
+        self._last_content_width = 0
+        self._drag_start_pos: QPoint | None = None
+        self._drag_started = False
+        self._apply_card_style()
 
         row_layout = QHBoxLayout(self)
         row_layout.setContentsMargins(2, 2, 2, 2)
         row_layout.setSpacing(4)
-
-        self._actions = build_job_queue_action_widget(
-            main_window,
-            controller,
-            row_idx,
-            is_active=is_active,
-        )
-        row_layout.addWidget(self._actions, 0, Qt.AlignmentFlag.AlignTop)
 
         self._content = QWidget()
         _apply_job_queue_cell_background(self._content)
@@ -393,10 +494,179 @@ class JobCard(QFrame):
         self._info_browser.setSizePolicy(
             QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed
         )
+        self._info_browser.viewport().installEventFilter(self)
 
         self._refs = _FlowReferenceThumbs(main_window, [])
         self._ensure_content_layout(False)
         row_layout.addWidget(self._content, 1)
+
+    def job_id(self) -> str:
+        return self._job_id
+
+    def row_index(self) -> int:
+        return self._row_idx
+
+    def set_row_index(self, row_idx: int) -> None:
+        self._row_idx = row_idx
+
+    def is_active_row(self) -> bool:
+        return self._is_active
+
+    def set_selected(self, selected: bool) -> None:
+        selected = bool(selected)
+        if self._selected == selected:
+            return
+        self._selected = selected
+        self._apply_card_style()
+        if self._last_content_width > 0:
+            self._sync_card_height(
+                self._last_content_width,
+                scroll_width=self._scroll_width or None,
+            )
+        else:
+            self.updateGeometry()
+
+    def _frame_border_width_px(self) -> int:
+        return _job_selection_border_width_px() if self._selected else 1
+
+    def _layout_vertical_margins_px(self) -> int:
+        layout = self.layout()
+        if layout is None:
+            return 4
+        m = layout.contentsMargins()
+        return m.top() + m.bottom()
+
+    def _card_frame_minimum_height(self, content_h: int) -> int:
+        return content_h + self._layout_vertical_margins_px() + (
+            2 * self._frame_border_width_px()
+        )
+
+    def _apply_card_style(self) -> None:
+        self.setStyleSheet(_job_card_stylesheet(selected=self._selected))
+        if not self._is_active:
+            self.setCursor(
+                Qt.CursorShape.OpenHandCursor
+                if not self._drag_started
+                else Qt.CursorShape.ClosedHandCursor
+            )
+        else:
+            self.setCursor(Qt.CursorShape.ArrowCursor)
+
+    def _select_self(self) -> None:
+        if self._on_select is not None:
+            self._on_select(self._job_id)
+
+    def mousePressEvent(self, event: QMouseEvent) -> None:
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._select_self()
+            if not self._is_active:
+                self._drag_start_pos = event.position().toPoint()
+                self._drag_started = False
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event: QMouseEvent) -> None:
+        if (
+            not self._is_active
+            and self._drag_start_pos is not None
+            and event.buttons() & Qt.MouseButton.LeftButton
+            and not self._drag_started
+        ):
+            distance = (event.position().toPoint() - self._drag_start_pos).manhattanLength()
+            if distance >= QApplication.startDragDistance():
+                self._start_drag()
+                self._drag_started = True
+                event.accept()
+                return
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event: QMouseEvent) -> None:
+        self._drag_start_pos = None
+        self._drag_started = False
+        if not self._is_active:
+            self.setCursor(Qt.CursorShape.OpenHandCursor)
+        super().mouseReleaseEvent(event)
+
+    def _start_drag(self) -> None:
+        mime = QMimeData()
+        mime.setData(_JOB_QUEUE_DRAG_MIME, self._job_id.encode("utf-8"))
+        drag = QDrag(self)
+        drag.setMimeData(mime)
+        try:
+            drag.exec(Qt.DropAction.MoveAction)
+        finally:
+            if self._on_drop_hover_clear is not None:
+                self._on_drop_hover_clear()
+
+    def _reorder_drag_payload(self, event) -> str | None:
+        if not event.mimeData().hasFormat(_JOB_QUEUE_DRAG_MIME):
+            return None
+        payload = bytes(event.mimeData().data(_JOB_QUEUE_DRAG_MIME)).decode("utf-8")
+        if not payload or payload == self._job_id:
+            return None
+        return payload
+
+    def _insert_index_for_drag_y(self, local_y: float) -> int:
+        insert_after = local_y > (self.height() / 2)
+        return self._row_idx + (1 if insert_after else 0)
+
+    def dragEnterEvent(self, event) -> None:
+        if self._reorder_drag_payload(event) is not None:
+            if self._on_drop_hover is not None:
+                self._on_drop_hover(self._insert_index_for_drag_y(event.position().y()))
+            event.acceptProposedAction()
+            return
+        event.ignore()
+
+    def dragMoveEvent(self, event) -> None:
+        if self._reorder_drag_payload(event) is not None:
+            if self._on_drop_hover is not None:
+                self._on_drop_hover(self._insert_index_for_drag_y(event.position().y()))
+            event.acceptProposedAction()
+            return
+        event.ignore()
+
+    def dropEvent(self, event) -> None:
+        payload = self._reorder_drag_payload(event)
+        if payload is None:
+            event.ignore()
+            return
+        target_row = self._insert_index_for_drag_y(event.position().y())
+        if self._on_reorder_drop is not None:
+            self._on_reorder_drop(payload, target_row)
+        event.acceptProposedAction()
+
+    def eventFilter(self, obj, event) -> bool:
+        if obj is self._info_browser.viewport():
+            if event.type() == QEvent.Type.MouseButtonPress:
+                mouse = event  # type: ignore[assignment]
+                if mouse.button() == Qt.MouseButton.LeftButton:
+                    local = mouse.position().toPoint()
+                    if not self._info_browser.anchorAt(local):
+                        self._select_self()
+                        if not self._is_active:
+                            self._drag_start_pos = mouse.position().toPoint()
+                            self._drag_started = False
+                        return True
+            if event.type() == QEvent.Type.MouseMove and not self._is_active:
+                mouse = event  # type: ignore[assignment]
+                if (
+                    self._drag_start_pos is not None
+                    and mouse.buttons() & Qt.MouseButton.LeftButton
+                    and not self._drag_started
+                ):
+                    distance = (
+                        mouse.position().toPoint() - self._drag_start_pos
+                    ).manhattanLength()
+                    if distance >= QApplication.startDragDistance():
+                        self._start_drag()
+                        self._drag_started = True
+                        return True
+            if event.type() == QEvent.Type.MouseButtonRelease:
+                self._drag_start_pos = None
+                self._drag_started = False
+        return super().eventFilter(obj, event)
 
     def _ensure_dblclick_edit_filter(self) -> None:
         """Install after prompt tooltip so this filter runs first on dbl-click."""
@@ -497,8 +767,10 @@ class JobCard(QFrame):
         else:
             content_h = browser_h + refs_h + 2
         self._content.setMinimumHeight(content_h)
-        min_h = max(content_h, self._actions.sizeHint().height())
-        self.setMinimumHeight(min_h)
+        self._content.setMaximumHeight(content_h)
+        frame_h = self._card_frame_minimum_height(content_h)
+        self.setMinimumHeight(frame_h)
+        self.setMaximumHeight(16777215)
         self.updateGeometry()
 
     def set_row_content(
@@ -533,9 +805,10 @@ class JobCard(QFrame):
         sw = (
             scroll_width
             if scroll_width is not None
-            else self._scroll_width or (content_width + _ACTION_COL_WIDTH + 20)
+            else self._scroll_width or (content_width + _CARD_CONTENT_MARGIN)
         )
         self._scroll_width = sw
+        self._last_content_width = content_width
         self._ensure_content_layout(self._use_inline_refs_layout(sw))
         self._last_info_html = info_html or ""
         text_w = self._browser_content_width(content_width, sw)
@@ -562,7 +835,7 @@ class JobCard(QFrame):
         sw = (
             scroll_width
             if scroll_width is not None
-            else self._scroll_width or (content_width + _ACTION_COL_WIDTH + 20)
+            else self._scroll_width or (content_width + _CARD_CONTENT_MARGIN)
         )
         self._scroll_width = sw
         valid = [] if references_invalid else _valid_preview_paths(paths)
@@ -597,7 +870,7 @@ class JobCard(QFrame):
         self._reflow_visible_refs(content_width, sw)
 
     def reflow_refs(self, scroll_width: int) -> None:
-        content_width = max(80, scroll_width - _ACTION_COL_WIDTH - 20)
+        content_width = max(80, scroll_width - _CARD_CONTENT_MARGIN)
         self._scroll_width = scroll_width
         self._ensure_content_layout(self._use_inline_refs_layout(scroll_width))
         if self._last_info_html:
@@ -631,6 +904,9 @@ class JobQueuePanelWidget(QWidget):
         self._floating_double_click_callback: Callable[[], None] | None = None
         self._floating_drag_filter_targets: list[QWidget] = []
         self._preparing_size_measure = False
+        self._flyout_button: QPushButton | None = None
+        self._drop_indicator_index: int | None = None
+        self._drop_line: _JobQueueDropLine | None = None
         self._setup_ui()
         self._connect_controller()
 
@@ -734,7 +1010,7 @@ class JobQueuePanelWidget(QWidget):
         return True
 
     def attach_header_tools(self) -> None:
-        """Wire titlebar tools menu on the bound header (if any)."""
+        """Wire titlebar tools menu and flyout button on the bound header (if any)."""
         header = self._jobs_header()
         if header is None:
             return
@@ -756,6 +1032,138 @@ class JobQueuePanelWidget(QWidget):
         )
         if hasattr(header, "set_tools_button"):
             header.set_tools_button(btn)
+
+        fly_btn = QPushButton()
+        fly_btn.setIconSize(QSize(14, 14))
+        fly_btn.clicked.connect(self._on_flyout_clicked)
+        if hasattr(header, "set_flyout_button"):
+            header.set_flyout_button(fly_btn)
+        self._flyout_button = fly_btn
+        refresh_jobs_flyout_buttons(self.main_window)
+
+        refresh_jobs_flyout_buttons(self.main_window)
+
+    def _on_flyout_clicked(self) -> None:
+        sm = getattr(self.main_window, "sidebar_manager", None)
+        if sm is not None and hasattr(sm, "toggle_jobs_display_mode"):
+            sm.toggle_jobs_display_mode()
+            return
+        from imagegen_plugins.jobs_display_mode import toggle_jobs_display_mode
+
+        toggle_jobs_display_mode(self.main_window)
+
+    def _on_job_selected(self, job_id: str) -> None:
+        self._controller.set_selected_job_id(job_id)
+        self._sync_all_panels_selection()
+
+    def _sync_all_panels_selection(self) -> None:
+        self._sync_selection_ui()
+        mw = self.main_window
+        rs = getattr(mw, "right_sidebar", None)
+        other = getattr(rs, "jobs_widget", None) if rs is not None else None
+        if other is not None and other is not self:
+            other._sync_selection_ui()
+        dlg = getattr(mw, "_imagegen_job_queue_dialog", None)
+        panel = getattr(dlg, "_panel", None) if dlg is not None else None
+        if panel is not None and panel is not self:
+            panel._sync_selection_ui()
+
+    def _should_show_action_bar(self) -> bool:
+        """Show unless strip-only progress view or no jobs in queue."""
+        if self._queue_size_mode == QUEUE_SIZE_STRIP:
+            return False
+        return bool(self._job_cards) or self._controller.is_running()
+
+    def _action_bar_block_height(self) -> int:
+        if not self._should_show_action_bar():
+            return 0
+        h = self._action_bar.height()
+        if h > 0:
+            return h
+        hint = self._action_bar.sizeHint().height()
+        return hint if hint > 0 else _ACTION_BAR_HEIGHT
+
+    def _card_layout_height(self, card: JobCard) -> int:
+        h = card.minimumHeight()
+        if h > 0:
+            return h
+        return card.sizeHint().height()
+
+    def _on_job_reorder_drop(self, job_id: str, target_display_row: int) -> None:
+        self._clear_drop_indicator()
+        self._controller.move_job_to_display_row(job_id, target_display_row)
+
+    def _insert_index_at_list_y(self, y: int) -> int:
+        for idx, card in enumerate(self._job_cards):
+            if y < card.geometry().center().y():
+                return idx
+        return len(self._job_cards)
+
+    def _drop_line_geometry(self, insert_index: int) -> tuple[int, int, int]:
+        margins = self._list_layout.contentsMargins()
+        spacing = self._list_layout.spacing()
+        viewport = self._scroll.viewport()
+        if not self._job_cards:
+            x_host = margins.left()
+            w = max(1, self._list_host.width() - margins.left() - margins.right())
+            y_host = margins.top()
+            pt = self._list_host.mapTo(viewport, QPoint(x_host, y_host))
+            return pt.x(), pt.y(), w
+
+        if insert_index <= 0:
+            ref = self._job_cards[0]
+            if ref.is_active_row() and len(self._job_cards) > 1:
+                ref = self._job_cards[1]
+            gap_host = ref.mapTo(self._list_host, QPoint(0, 0))
+            gap_y = gap_host.y() - max(1, spacing // 2)
+        elif insert_index >= len(self._job_cards):
+            ref = self._job_cards[-1]
+            gap_host = ref.mapTo(self._list_host, QPoint(0, ref.height()))
+            gap_y = gap_host.y() + max(1, spacing // 2)
+        else:
+            ref = self._job_cards[insert_index]
+            gap_host = ref.mapTo(self._list_host, QPoint(0, 0))
+            gap_y = gap_host.y() - max(1, spacing // 2)
+
+        ref_tl = ref.mapTo(self._list_host, QPoint(0, 0))
+        pt = self._list_host.mapTo(viewport, QPoint(ref_tl.x(), gap_y))
+        return pt.x(), pt.y(), ref.width()
+
+    def _show_drop_indicator(self, insert_index: int) -> None:
+        insert_index = max(0, min(int(insert_index), len(self._job_cards)))
+        self._drop_indicator_index = insert_index
+        line = self._drop_line
+        if line is None:
+            return
+        x, y, w = self._drop_line_geometry(insert_index)
+        line.setGeometry(
+            x, y - _DROP_LINE_HEIGHT // 2, max(1, w), _DROP_LINE_HEIGHT
+        )
+        line.show()
+        line.raise_()
+        line.update()
+
+    def _clear_drop_indicator(self) -> None:
+        self._drop_indicator_index = None
+        if self._drop_line is not None:
+            self._drop_line.hide()
+
+    def _on_job_list_scrolled(self, _value: int) -> None:
+        if self._drop_indicator_index is not None:
+            self._show_drop_indicator(self._drop_indicator_index)
+
+    def _sync_selection_ui(self) -> None:
+        selected_id = self._controller.selected_job_id()
+        row_idx = self._controller.resolve_selected_row_index()
+        for card in self._job_cards:
+            card.set_selected(card.job_id() == selected_id)
+        if self._should_show_action_bar():
+            self._action_bar.show()
+            self._action_bar.update_for_row(row_idx)
+        else:
+            self._action_bar.hide()
+        self._reflow_all()
+        self._notify_shell_geometry_changed()
 
     def schedule_refresh(self) -> None:
         """Defer table rebuild (safe during controller signal handlers)."""
@@ -808,6 +1216,11 @@ class JobQueuePanelWidget(QWidget):
             self._on_active_strip_content_height_changed
         )
 
+        self._action_bar = JobQueueActionBar(
+            self.main_window, self._controller, self
+        )
+        self._action_bar.hide()
+
         self._scroll = QScrollArea()
         self._scroll.setWidgetResizable(True)
         self._scroll.setFrameShape(QScrollArea.Shape.NoFrame)
@@ -820,14 +1233,22 @@ class JobQueuePanelWidget(QWidget):
             vp.installEventFilter(self)
 
         self._list_host = QWidget()
+        self._list_host.setAcceptDrops(True)
+        self._list_host.installEventFilter(self)
         self._list_layout = QVBoxLayout(self._list_host)
         self._list_layout.setContentsMargins(4, 4, 4, 4)
         self._list_layout.setSpacing(8)
         self._list_layout.addStretch(1)
 
+        self._drop_line = _JobQueueDropLine(self._scroll.viewport())
+
         self._scroll.setWidget(self._list_host)
+        self._scroll.verticalScrollBar().valueChanged.connect(
+            self._on_job_list_scrolled
+        )
         self._panel_layout = layout
         layout.addWidget(self._active_job_strip)
+        layout.addWidget(self._action_bar)
         layout.addWidget(self._empty_label)
         layout.addWidget(self._scroll, 0)
         _disable_tab_focus(self)
@@ -910,9 +1331,12 @@ class JobQueuePanelWidget(QWidget):
             apply_scroll_area_viewport_background(
                 self._scroll, t.sidebar_background_color_hex
             )
-        card_ss = _job_card_stylesheet()
         for card in self._job_cards:
-            card.setStyleSheet(card_ss)
+            card.setStyleSheet(
+                _job_card_stylesheet(selected=card._selected)
+            )
+        if hasattr(self, "_action_bar"):
+            self._action_bar.refresh_theme_styles()
         self._active_job_strip.refresh_theme_styles()
 
     def resizeEvent(self, event) -> None:
@@ -982,6 +1406,51 @@ class JobQueuePanelWidget(QWidget):
         ):
             self._schedule_reflow()
             self._refresh_active_job_strip(force=True)
+            if self._drop_indicator_index is not None:
+                self._show_drop_indicator(self._drop_indicator_index)
+        if (
+            hasattr(self, "_scroll")
+            and obj is self._scroll.viewport()
+            and event.type() in (QEvent.Type.DragEnter, QEvent.Type.DragMove)
+        ):
+            mime = event.mimeData()  # type: ignore[union-attr]
+            if mime.hasFormat(_JOB_QUEUE_DRAG_MIME):
+                mouse = event  # type: ignore[assignment]
+                host_pos = self._list_host.mapFrom(
+                    self._scroll.viewport(), mouse.position().toPoint()
+                )
+                self._show_drop_indicator(
+                    self._insert_index_at_list_y(int(host_pos.y()))
+                )
+                event.acceptProposedAction()
+                return True
+        if hasattr(self, "_list_host") and obj is self._list_host:
+            if event.type() == QEvent.Type.DragEnter:
+                if event.mimeData().hasFormat(_JOB_QUEUE_DRAG_MIME):
+                    mouse = event  # type: ignore[assignment]
+                    self._show_drop_indicator(
+                        self._insert_index_at_list_y(int(mouse.position().y()))
+                    )
+                    event.acceptProposedAction()
+                    return True
+            if event.type() == QEvent.Type.DragMove:
+                if event.mimeData().hasFormat(_JOB_QUEUE_DRAG_MIME):
+                    mouse = event  # type: ignore[assignment]
+                    self._show_drop_indicator(
+                        self._insert_index_at_list_y(int(mouse.position().y()))
+                    )
+                    event.acceptProposedAction()
+                    return True
+            if event.type() == QEvent.Type.Drop:
+                if event.mimeData().hasFormat(_JOB_QUEUE_DRAG_MIME):
+                    payload = bytes(
+                        event.mimeData().data(_JOB_QUEUE_DRAG_MIME)
+                    ).decode("utf-8")
+                    if payload:
+                        self._clear_drop_indicator()
+                        self._on_job_reorder_drop(payload, len(self._job_cards))
+                    event.acceptProposedAction()
+                    return True
         return super().eventFilter(obj, event)
 
     def _schedule_reflow(self) -> None:
@@ -1007,7 +1476,7 @@ class JobQueuePanelWidget(QWidget):
         return max(80, w - 8)
 
     def _info_content_width(self) -> int:
-        return max(80, self._viewport_width() - _ACTION_COL_WIDTH - 20)
+        return max(80, self._viewport_width() - _CARD_CONTENT_MARGIN)
 
     def _refresh_active_job_strip(self, *, force: bool = False) -> None:
         if not hasattr(self, "_active_job_strip"):
@@ -1121,6 +1590,13 @@ class JobQueuePanelWidget(QWidget):
         has_rows = bool(self._job_cards)
         mode = self._queue_size_mode
         self._apply_panel_layout_stretch()
+        if self._should_show_action_bar():
+            self._action_bar.show()
+            self._action_bar.update_for_row(
+                self._controller.resolve_selected_row_index()
+            )
+        else:
+            self._action_bar.hide()
 
         if mode == QUEUE_SIZE_STRIP:
             self._scroll.hide()
@@ -1218,7 +1694,13 @@ class JobQueuePanelWidget(QWidget):
         if not self._job_cards:
             return total + self.empty_state_height_hint()
         margins = self._list_layout.contentsMargins()
-        return total + margins.top() + margins.bottom() + self._measure_first_job_card_height()
+        return (
+            total
+            + self._action_bar_block_height()
+            + margins.top()
+            + margins.bottom()
+            + self._measure_first_job_card_height()
+        )
 
     def content_height_for_size_mode(self, mode: str | None = None) -> int:
         mode = mode or self._queue_size_mode
@@ -1314,6 +1796,7 @@ class JobQueuePanelWidget(QWidget):
             total += strip_h if strip_h > 0 else self._active_job_strip.sizeHint().height()
         if not self._job_cards:
             return total + self.empty_state_height_hint()
+        total += self._action_bar_block_height()
         info_w = self._info_content_width()
         width = self._viewport_width()
         rows = self._controller.queue_snapshot()
@@ -1342,14 +1825,15 @@ class JobQueuePanelWidget(QWidget):
                     )
             else:
                 card.reflow_refs(width)
-                total += card.minimumHeight()
+                total += self._card_layout_height(card)
                 continue
             card.reflow_refs(width)
-            total += card.minimumHeight()
+            total += self._card_layout_height(card)
         return total
 
     def refresh_table(self) -> None:
         rows = self._controller.queue_snapshot()
+        self._clear_drop_indicator()
         self._clear_job_cards()
 
         info_w = self._info_content_width()
@@ -1362,7 +1846,12 @@ class JobQueuePanelWidget(QWidget):
                 self.main_window,
                 self._controller,
                 row_idx,
+                job_id=row.job_id,
                 is_active=row.is_active,
+                on_select=self._on_job_selected,
+                on_reorder_drop=self._on_job_reorder_drop,
+                on_drop_hover=self._show_drop_indicator,
+                on_drop_hover_clear=self._clear_drop_indicator,
             )
             card.set_row_content(
                 info_html=info_html,
@@ -1376,8 +1865,10 @@ class JobQueuePanelWidget(QWidget):
             self._job_cards.append(card)
             _disable_tab_focus(card)
 
+        self._controller.resolve_selected_row_index()
         self._reflow_all()
         _disable_tab_focus(self)
+        self._sync_selection_ui()
         self._update_header_status()
         self._refresh_active_job_strip(force=True)
         self._apply_queue_size_layout()

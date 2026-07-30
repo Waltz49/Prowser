@@ -432,6 +432,7 @@ class ImageBrowserConfig:
             'preview_visible': True,  # Default to showing preview panel
             'chat_visible': False,  # Default to hiding chat pane
             'jobs_visible': True,  # Default to showing jobs pane in right combined sidebar
+            'jobs_display_mode': 'pane',  # 'pane' (sidebar) or 'panel' (floating dialog)
             'sidebar_width': 300,  # Default width for combined sidebar (tree + preview)
             'right_sidebar_width': 300,  # Default width for right sidebar (info panel)
             'right_sidebar_visible': True,  # Derived from information/shortcuts/jobs; all open by default except chat

@@ -6,7 +6,7 @@ from __future__ import annotations
 import os
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QLabel, QPushButton, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
 
 from imagegen_plugins.image_gen_dialog import connect_import_button_with_option_modifier
 from imagegen_plugins.image_gen_source_nav import open_image_in_browse
@@ -18,8 +18,9 @@ from config import (
 from theme.theme_base import asset_path
 from theme.theme_service import get_active_theme
 
-_ACTION_COL_WIDTH = 36
+_ACTION_COL_WIDTH = 36  # legacy export; cards no longer use side action column
 _ICON_BTN_SIZE = 22
+_ACTION_BAR_HEIGHT = 28
 
 
 def _job_queue_cell_background_stylesheet() -> str:
@@ -111,6 +112,141 @@ def job_queue_cancel_row(
         controller.cancel_jobs_from_row_and_subsequent(row)
     else:
         controller.confirm_cancel_job_at_row(main_window, row)
+
+
+class JobQueueActionBar(QWidget):
+    """Shared horizontal action bar for the selected queue row."""
+
+    def __init__(self, main_window, controller, parent=None):
+        super().__init__(parent)
+        self._main_window = main_window
+        self._controller = controller
+        self._row_idx = -1
+        _apply_job_queue_action_bar_background(self)
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(4, 2, 4, 2)
+        layout.setSpacing(4)
+        self._layout = layout
+
+        self._plus_btn = QPushButton()
+        self._plus_btn.setToolTip("Add another image to this series")
+        self._plus_btn.setStyleSheet(_series_plus_button_stylesheet())
+        self._plus_btn.clicked.connect(self._on_plus)
+
+        self._minus_btn = QPushButton()
+        self._minus_btn.setToolTip(
+            "Remove one pending image from the series.\n"
+            "Option+click to remove all remaining images."
+        )
+        self._minus_btn.setStyleSheet(_series_minus_button_stylesheet())
+        connect_import_button_with_option_modifier(
+            self._minus_btn, self._on_minus
+        )
+
+        self._refine_btn = QPushButton()
+        self._refine_btn.setCheckable(True)
+        self._refine_btn.setToolTip(
+            "Image Based Refinement:\n\n"
+            "Base subsequent image copies on previous result image.\n\n"
+            "Other source images keep their order."
+        )
+        self._refine_btn.setStyleSheet(_series_refinement_button_stylesheet())
+        self._refine_btn.toggled.connect(self._on_refine_toggled)
+
+        self._edit_btn = QPushButton()
+        self._edit_btn.setToolTip(
+            "Replicate job settings…\n"
+            "For a pending job, use Replace in the dialog to update it in place.\n"
+            "For a running batch job, use Update to change remaining copies."
+        )
+        self._edit_btn.setStyleSheet(_edit_button_stylesheet())
+        self._edit_btn.clicked.connect(self._on_edit)
+
+        self._cancel_btn = QPushButton()
+        self._cancel_btn.setToolTip(
+            "Cancel job\n"
+            "Option+click to cancel this job and all jobs after it (no confirmation)."
+        )
+        self._cancel_btn.setStyleSheet(_trash_button_stylesheet())
+        connect_import_button_with_option_modifier(
+            self._cancel_btn, self._on_cancel
+        )
+
+        layout.addStretch(1)
+        for btn in (
+            self._plus_btn,
+            self._minus_btn,
+            self._refine_btn,
+            self._edit_btn,
+            self._cancel_btn,
+        ):
+            layout.addWidget(btn, 0, Qt.AlignmentFlag.AlignCenter)
+        self.setFixedHeight(_ACTION_BAR_HEIGHT)
+
+    def _on_plus(self, _checked: bool = False) -> None:
+        if self._row_idx >= 0:
+            self._controller.add_series_cycle_for_row(self._row_idx)
+
+    def _on_minus(self, option_held: bool = False) -> None:
+        if self._row_idx < 0:
+            return
+        if option_held:
+            self._controller.clear_series_remaining_for_row(self._row_idx)
+        else:
+            self._controller.subtract_series_remaining_for_row(self._row_idx)
+
+    def _on_refine_toggled(self, checked: bool) -> None:
+        if self._row_idx >= 0:
+            self._controller.set_series_refinement_for_row(self._row_idx, checked)
+
+    def _on_edit(self, _checked: bool = False) -> None:
+        if self._row_idx >= 0:
+            job_queue_edit_row(self._main_window, self._controller, self._row_idx)
+
+    def _on_cancel(self, option_held: bool = False) -> None:
+        if self._row_idx >= 0:
+            job_queue_cancel_row(
+                self._main_window,
+                self._controller,
+                self._row_idx,
+                option_held=option_held,
+            )
+
+    def update_for_row(self, row_idx: int) -> None:
+        self._row_idx = row_idx
+        controller = self._controller
+        has_row = row_idx >= 0
+        self._plus_btn.setEnabled(
+            has_row and controller.can_add_series_cycle_for_row(row_idx)
+        )
+        remaining = (
+            controller.series_remaining_after_for_row(row_idx) if has_row else 0
+        )
+        self._minus_btn.setEnabled(has_row and remaining > 0)
+        refine_ok = (
+            has_row
+            and remaining > 0
+            and controller.job_row_supports_image_refinement(row_idx)
+        )
+        self._refine_btn.blockSignals(True)
+        self._refine_btn.setEnabled(refine_ok)
+        if refine_ok:
+            self._refine_btn.setChecked(
+                controller.series_refinement_enabled_for_row(row_idx)
+            )
+        else:
+            self._refine_btn.setChecked(False)
+        self._refine_btn.blockSignals(False)
+        self._edit_btn.setEnabled(has_row)
+        self._cancel_btn.setEnabled(has_row)
+
+    def refresh_theme_styles(self) -> None:
+        _apply_job_queue_action_bar_background(self)
+        self._plus_btn.setStyleSheet(_series_plus_button_stylesheet())
+        self._minus_btn.setStyleSheet(_series_minus_button_stylesheet())
+        self._refine_btn.setStyleSheet(_series_refinement_button_stylesheet())
+        self._edit_btn.setStyleSheet(_edit_button_stylesheet())
+        self._cancel_btn.setStyleSheet(_trash_button_stylesheet())
 
 
 def build_job_queue_action_widget(

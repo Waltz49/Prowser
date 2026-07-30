@@ -27,7 +27,7 @@ from imagegen_plugins.image_gen_active_model import (
     set_active_plugin_for_function,
 )
 from imagegen_plugins.image_gen_controller import get_imagegen_controller
-from imagegen_plugins.image_gen_job_queue_dialog import show_imagegen_job_queue_dialog
+from imagegen_plugins.jobs_display_mode import show_jobs_panel
 from imagegen_plugins.image_gen_edit_dialog import (
     MAX_EDIT_SOURCE_IMAGES,
     active_image_paths_for_edit,
@@ -909,7 +909,7 @@ def setup_create_menu(menubar, main_window) -> None:
     queue_action = QAction("Job Queue...", main_window)
     queue_action.setShortcut(QKeySequence("Ctrl+J"))
     queue_action.triggered.connect(
-        lambda: show_imagegen_job_queue_dialog(main_window)
+        lambda: show_jobs_panel(main_window)
     )
     create_menu.addAction(queue_action)
 

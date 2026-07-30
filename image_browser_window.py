@@ -1193,6 +1193,15 @@ class ImageBrowserWindow(QMainWindow):
     def ensure_cleanup_before_exit(self):
         """Ensure all resources are cleaned up before application exit"""
         try:
+            from imagegen_plugins.image_gen_job_queue_dialog import (
+                dismiss_job_queue_dialog_for_quit,
+            )
+
+            dismiss_job_queue_dialog_for_quit(self)
+        except ImportError:
+            pass
+
+        try:
             tmp_trashes = self.TMP_TRASHES_DIR
             if os.path.exists(tmp_trashes):
                 shutil.rmtree(tmp_trashes)
@@ -1361,6 +1370,15 @@ class ImageBrowserWindow(QMainWindow):
             pass
 
         try:
+            from imagegen_plugins.image_gen_job_queue_dialog import (
+                dismiss_job_queue_dialog_for_quit,
+            )
+
+            dismiss_job_queue_dialog_for_quit(self)
+        except ImportError:
+            pass
+
+        try:
             self._persist_chrome_visibility_to_config()
         except Exception:
             pass
@@ -1388,6 +1406,7 @@ class ImageBrowserWindow(QMainWindow):
         # Load preview visibility setting
         self.preview_visible = saved_settings.get('preview_visible', False)
         self.jobs_visible = saved_settings.get('jobs_visible', False)
+        self.jobs_display_mode = saved_settings.get('jobs_display_mode', 'pane')
         try:
             from bundle_capabilities import chat_ui_enabled
             _chat_ui_enabled = chat_ui_enabled()
@@ -1694,6 +1713,9 @@ class ImageBrowserWindow(QMainWindow):
             if hasattr(self.combined_sidebar, "set_chat_visible"):
                 self.combined_sidebar.set_chat_visible(desired_chat_visible)
             self.right_sidebar.set_jobs_visible(self.jobs_visible)
+            from imagegen_plugins.jobs_display_mode import apply_saved_jobs_display_mode
+
+            apply_saved_jobs_display_mode(self)
             self.right_sidebar_visible = (
                 self.right_sidebar.is_information_visible()
                 or self.right_sidebar.is_shortcuts_visible()
@@ -2268,15 +2290,13 @@ class ImageBrowserWindow(QMainWindow):
                 QTimer.singleShot(100, lambda: self.list_view_container.canvas.setFocus())
 
     def toggle_jobs(self):
-        """Toggle the jobs pane in the right combined sidebar."""
+        """Force jobs sidebar pane mode (J key)."""
         if hasattr(self, "sidebar_manager"):
             return self.sidebar_manager.toggle_jobs()
-        if hasattr(self, "right_sidebar"):
-            rs = self.right_sidebar
-            return self._toggle_pane_with_chrome_restore(
-                rs.is_jobs_visible, rs.set_jobs_visible, 'right_jobs_visible', 'right'
-            )
-        return False
+        from imagegen_plugins.jobs_display_mode import show_jobs_pane
+
+        show_jobs_pane(self)
+        return True
 
     def toggle_chat(self):
         """Toggle the chat pane in the left combined sidebar (F9)."""
@@ -9398,10 +9418,15 @@ class ImageBrowserWindow(QMainWindow):
                     'Hide Organize Sidebar' if shortcuts_vis else 'Show Organize Sidebar'
                 )
             if hasattr(self, 'toggle_jobs_action'):
-                jobs_vis = self.right_sidebar.is_jobs_visible()
-                self.toggle_jobs_action.setChecked(jobs_vis)
+                from imagegen_plugins.jobs_display_mode import (
+                    JOBS_DISPLAY_PANE,
+                    get_jobs_display_mode,
+                )
+
+                jobs_pane_mode = get_jobs_display_mode(self) == JOBS_DISPLAY_PANE
+                self.toggle_jobs_action.setChecked(jobs_pane_mode)
                 self.toggle_jobs_action.setText(
-                    'Hide Jobs' if jobs_vis else 'Show Jobs'
+                    'Jobs Pane' if jobs_pane_mode else 'Show Jobs Pane'
                 )
         if hasattr(self, 'toggle_chat_action') and hasattr(self, 'combined_sidebar'):
             chat_vis = (
@@ -9538,8 +9563,16 @@ class ImageBrowserWindow(QMainWindow):
             self.toggle_shortcuts_sidebar_action.setText(
                 'Hide Organize Sidebar' if self.right_sidebar.is_shortcuts_visible() else 'Show Organize Sidebar')
         if hasattr(self, 'toggle_jobs_action'):
-            self.toggle_jobs_action.setChecked(self.jobs_visible)
-            self.toggle_jobs_action.setText('Hide Jobs' if self.jobs_visible else 'Show Jobs')
+            from imagegen_plugins.jobs_display_mode import (
+                JOBS_DISPLAY_PANE,
+                get_jobs_display_mode,
+            )
+
+            jobs_pane_mode = get_jobs_display_mode(self) == JOBS_DISPLAY_PANE
+            self.toggle_jobs_action.setChecked(jobs_pane_mode)
+            self.toggle_jobs_action.setText(
+                'Jobs Pane' if jobs_pane_mode else 'Show Jobs Pane'
+            )
         self.config.update_setting('jobs_visible', self.jobs_visible)
 
         if self.current_view_mode == 'browse':

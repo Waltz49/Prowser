@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import os
 from typing import Any, Dict, List
 
 from imagegen_plugins.image_gen_registry import ImageGenModelPlugin
@@ -90,6 +91,41 @@ def _snapshot_lora_for_job(values: Dict[str, Any], pipeline_id: str) -> None:
         values.pop("sdxl_lora_scales", None)
 
 
+def _normalize_job_source_paths(
+    plugin: ImageGenModelPlugin, values: Dict[str, Any]
+) -> None:
+    """Keep queued job source paths consistent with the dialog function."""
+    from imagegen_plugins.image_gen_active_model import (
+        FUNCTION_EDIT,
+        FUNCTION_EXPAND,
+        FUNCTION_INFILL_PAINT,
+    )
+    from imagegen_plugins.image_gen_naming import resolve_source_image_paths
+
+    function = plugin.function
+    if function in (FUNCTION_EXPAND, FUNCTION_INFILL_PAINT):
+        primary = str(values.get("source_image_path") or "").strip()
+        if primary and os.path.isfile(primary):
+            ap = os.path.normpath(os.path.abspath(primary))
+            values["source_image_path"] = ap
+            values["source_image_paths"] = [ap]
+        else:
+            values.pop("source_image_path", None)
+            values.pop("source_image_paths", None)
+        values.pop("_canonical_source_image_paths", None)
+        return
+    if function == FUNCTION_EDIT:
+        paths = resolve_source_image_paths(values)
+        if paths:
+            values["source_image_paths"] = list(paths)
+            values["source_image_path"] = paths[0]
+            values["_canonical_source_image_paths"] = list(paths)
+        else:
+            values.pop("source_image_path", None)
+            values.pop("source_image_paths", None)
+            values.pop("_canonical_source_image_paths", None)
+
+
 def snapshot_job_values_at_submit(
     plugin: ImageGenModelPlugin, values: Dict[str, Any]
 ) -> Dict[str, Any]:
@@ -101,6 +137,7 @@ def snapshot_job_values_at_submit(
     out = dict(values)
     pipeline_id = plugin.pipeline_id
     out["pipeline_id"] = pipeline_id
+    _normalize_job_source_paths(plugin, out)
     _snapshot_lora_for_job(out, pipeline_id)
 
     mode = get_pipeline(pipeline_id)

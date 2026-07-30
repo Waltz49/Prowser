@@ -686,6 +686,13 @@ class ImageGenUnifiedDialog(QDialog):
             )
         elif function == FUNCTION_EXPAND:
             source_path = active_image_path_for_expand(self._main_window)
+            pending = self._session.get(function)
+            if (
+                pending is not None
+                and pending.source_path
+                and os.path.isfile(pending.source_path)
+            ):
+                source_path = pending.source_path
             panel = ImageGenExpandDialog(
                 registered,
                 function,
