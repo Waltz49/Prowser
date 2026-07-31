@@ -17,24 +17,26 @@ Enhanced Features:
 # Standard library imports
 import os
 import subprocess
-import tempfile
 import threading
 import time
-from typing import List, Optional
+from typing import List, Optional, Tuple
 import traceback
 import psutil
 from PySide6.QtCore import QMutexLocker
 from macos_process import open_document_with_app
+from prowser_temp_files import prowser_mkstemp_path, remove_file_if_exists
 from utils import get_main_window, show_styled_critical
 from config import get_config
 
 _PIXELMATOR_PRO_EDITOR_NAME = "Pixelmator Pro"
 
 _PIXELMATOR_MULTI_APPLESCRIPT = """on run argv
+  set maxWidth to (item 1 of argv) as integer
+  set maxHeight to (item 2 of argv) as integer
   -- Resolve paths before telling Pixelmator (it can't coerce POSIX file itself)
-  set firstPath to POSIX file (item 1 of argv)
+  set firstPath to POSIX file (item 3 of argv)
   set extraFiles to {}
-  repeat with i from 2 to count of argv
+  repeat with i from 4 to count of argv
     set end of extraFiles to POSIX file (item i of argv)
   end repeat
 
@@ -45,9 +47,14 @@ _PIXELMATOR_MULTI_APPLESCRIPT = """on run argv
       delay 0.2
     end repeat
     set docRef to front document
+    if maxWidth > 0 and maxHeight > 0 then
+      tell docRef
+        resize canvas width maxWidth height maxHeight anchor position middle center
+      end tell
+    end if
     repeat with f in extraFiles
       tell docRef
-        make new image layer with properties {file:contents of f, preserve transparency:true}
+        make new image layer at the end of layers with properties {file:contents of f, preserve transparency:true}
       end tell
     end repeat
   end tell
@@ -58,6 +65,24 @@ end run
 def is_pixelmator_pro_editor(editor_app: str) -> bool:
     """Return True when the configured external editor is Pixelmator Pro."""
     return editor_app.strip().lower() == _PIXELMATOR_PRO_EDITOR_NAME.lower()
+
+
+def _max_pixelmator_canvas_size(file_paths: List[str]) -> Optional[Tuple[int, int]]:
+    """Return width/height of the largest image (EXIF-oriented dimensions)."""
+    from exif.exif_image_loader import get_image_dimensions_fast_metadata
+
+    max_width = 0
+    max_height = 0
+    for path in file_paths:
+        dims = get_image_dimensions_fast_metadata(path)
+        if not dims:
+            return None
+        width, height = dims
+        max_width = max(max_width, int(width))
+        max_height = max(max_height, int(height))
+    if max_width <= 0 or max_height <= 0:
+        return None
+    return max_width, max_height
 
 
 class TimestampPreservingEditor:
@@ -591,21 +616,29 @@ def _launch_pixelmator_pro_files(file_paths: List[str]) -> tuple[bool, Optional[
                 timeout=60,
             )
         else:
-            fd, tmp_path = tempfile.mkstemp(prefix="pixelmator_import_")
+            canvas_size = _max_pixelmator_canvas_size(abs_paths)
+            if canvas_size is None:
+                max_width, max_height = 0, 0
+            else:
+                max_width, max_height = canvas_size
+            tmp_path = prowser_mkstemp_path(prefix="pixelmator_import_")
             try:
-                with os.fdopen(fd, "w", encoding="utf-8") as script_file:
+                with open(tmp_path, "w", encoding="utf-8") as script_file:
                     script_file.write(_PIXELMATOR_MULTI_APPLESCRIPT)
                 result = subprocess.run(
-                    ["osascript", tmp_path, *abs_paths],
+                    [
+                        "osascript",
+                        tmp_path,
+                        str(max_width),
+                        str(max_height),
+                        *abs_paths,
+                    ],
                     capture_output=True,
                     text=True,
                     timeout=60,
                 )
             finally:
-                try:
-                    os.remove(tmp_path)
-                except OSError:
-                    pass
+                remove_file_if_exists(tmp_path)
 
         if result.returncode != 0:
             return (True, existing_pid) if existing_pid else (False, None)
