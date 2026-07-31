@@ -238,7 +238,7 @@ class HeaderWidget(QFrame):
 
     def _titlebar_click_excludes_chrome_buttons(self, event: QMouseEvent) -> bool:
         pos = event.position().toPoint()
-        for btn in (self.tools_button, self.hide_button):
+        for btn in (self.tools_button, self.flyout_button, self.hide_button):
             if btn is not None and btn.geometry().contains(pos):
                 return True
         return False

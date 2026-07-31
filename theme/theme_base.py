@@ -25,57 +25,7 @@ def asset_path(filename: str) -> str:
 
 def invalid_job_preview_path() -> str:
     """X'd-out preview graphic for queue jobs with missing reference files."""
-    for name in ("job_invalid_ref_preview.png", "job_invalid_ref_preview.svg"):
-        path = asset_path(name)
-        if os.path.isfile(path):
-            return path
     return asset_path("job_invalid_ref_preview.svg")
-
-
-def job_pane_tools_icon_path() -> str:
-    """Titlebar tools menu icon for the Job Control pane."""
-    for name in ("job_pane_tools_icon.png", "job_pane_tools_icon.svg"):
-        path = asset_path(name)
-        if os.path.isfile(path):
-            return path
-    return asset_path("job_pane_tools_icon.svg")
-
-
-def job_pane_flyout_icon_path() -> str:
-    """Fly out to floating panel (pane mode titlebar)."""
-    for name in ("flyout.png", "flyout.jpg"):
-        path = asset_path(name)
-        if os.path.isfile(path):
-            return path
-    return asset_path("flyout.png")
-
-
-def job_pane_flyout_hover_icon_path() -> str:
-    for name in ("flyout_hover.png", "flyout_hover.jpg"):
-        path = asset_path(name)
-        if os.path.isfile(path):
-            return path
-    return asset_path("flyout_hover.png")
-
-
-def job_pane_flyin_icon_path() -> str:
-    """Fly in to sidebar pane (panel mode titlebar)."""
-    for name in ("flyin.png", "flyin.jpg"):
-        path = asset_path(name)
-        if os.path.isfile(path):
-            return path
-    return asset_path("flyin.png")
-
-
-def job_pane_flyin_hover_icon_path() -> str:
-    for name in ("flyin_hover.png", "flyin_hover.jpg", "flyin_hover.jpg"):
-        path = asset_path(name)
-        if os.path.isfile(path):
-            return path
-    hover = asset_path("flyin_hover.png")
-    if os.path.isfile(hover):
-        return hover
-    return job_pane_flyin_icon_path()
 
 
 def asset_file_url(filename: str) -> str:

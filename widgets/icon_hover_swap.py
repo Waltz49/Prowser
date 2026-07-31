@@ -30,7 +30,10 @@ class IconHoverSwap(QObject):
         """Update icon pair (e.g. when toggle state changes)."""
         self._normal_icon = normal_icon
         self._hover_icon = hover_icon
-        self._button.setIcon(self._normal_icon)
+        if self._button.underMouse():
+            self._button.setIcon(self._hover_icon)
+        else:
+            self._button.setIcon(self._normal_icon)
 
     def eventFilter(self, obj: QObject, event: QEvent) -> bool:
         if obj is self._button:

@@ -1023,7 +1023,14 @@ class JobQueuePanelWidget(QWidget):
         if hasattr(header, "set_tools_button"):
             header.set_tools_button(btn)
 
+        from imagegen_plugins.jobs_display_mode import (
+            JOBS_DISPLAY_PANE,
+            get_jobs_display_mode,
+        )
+
+        pane_mode = get_jobs_display_mode(self.main_window) == JOBS_DISPLAY_PANE
         fly_btn = QPushButton()
+        fly_btn.setProperty("_titlebar_flyout_pane_mode", pane_mode)
         fly_btn.clicked.connect(self._on_flyout_clicked)
         if hasattr(header, "set_flyout_button"):
             header.set_flyout_button(fly_btn)
@@ -1330,7 +1337,6 @@ class JobQueuePanelWidget(QWidget):
             from theme.titlebar_icons import refresh_header_titlebar_icons
 
             refresh_header_titlebar_icons(header)
-        refresh_jobs_flyout_buttons(self.main_window)
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)

@@ -3466,6 +3466,11 @@ class ImageBrowserWindow(QMainWindow):
             and hasattr(exif_dlg, "refresh_theme_styles")
         ):
             exif_dlg.refresh_theme_styles()
+        job_dlg = getattr(self, "_imagegen_job_queue_dialog", None)
+        if job_dlg is not None and job_dlg.isVisible():
+            header = getattr(job_dlg, "_header", None)
+            if header is not None and hasattr(header, "refresh_theme_styles"):
+                header.refresh_theme_styles()
 
     def open_directory_dialog(self):
         """Open directory selection dialog"""
