@@ -60,7 +60,7 @@ _SCAN_RE = re.compile(
 _LITERAL_ASSET_RE = re.compile(r"""['"]([a-zA-Z0-9_]+\.(?:png|svg|webp))['"]""")
 
 # Constants not always visible to the scanner.
-_EXTRA_NAMES = frozenset({"expansion_template.webp"})
+_EXTRA_NAMES = frozenset({"expansion_template.webp", "noimage.png"})
 
 
 def _imports_in(path: Path) -> list[str]:

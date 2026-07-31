@@ -81,6 +81,7 @@ REQUIRED_PATHS=(
     run.sh
     browser_window/__init__.py
     chat_plugins/__init__.py
+    assets/noimage.png
 )
 
 # Required for ./pyInstallerBuild.sh (including --min minimal bundles).
@@ -92,6 +93,7 @@ PYINSTALLER_BUILD_PATHS=(
     pyinstaller_frozen_support.py
     pyinstaller_imagegen_paths.py
     pyinstaller_runtime_hook.py
+    pyinstaller_whisper_models.py
     bundle_capabilities.py
     list_runtime_assets.py
     requirements_min.txt
