@@ -2290,12 +2290,12 @@ class ImageBrowserWindow(QMainWindow):
                 QTimer.singleShot(100, lambda: self.list_view_container.canvas.setFocus())
 
     def toggle_jobs(self):
-        """Force jobs sidebar pane mode (J key)."""
+        """Toggle jobs sidebar pane (J key)."""
         if hasattr(self, "sidebar_manager"):
             return self.sidebar_manager.toggle_jobs()
-        from imagegen_plugins.jobs_display_mode import show_jobs_pane
+        from imagegen_plugins.jobs_display_mode import toggle_jobs_pane
 
-        show_jobs_pane(self)
+        toggle_jobs_pane(self)
         return True
 
     def toggle_chat(self):
@@ -9418,15 +9418,12 @@ class ImageBrowserWindow(QMainWindow):
                     'Hide Organize Sidebar' if shortcuts_vis else 'Show Organize Sidebar'
                 )
             if hasattr(self, 'toggle_jobs_action'):
-                from imagegen_plugins.jobs_display_mode import (
-                    JOBS_DISPLAY_PANE,
-                    get_jobs_display_mode,
-                )
+                from imagegen_plugins.jobs_display_mode import is_jobs_pane_showing
 
-                jobs_pane_mode = get_jobs_display_mode(self) == JOBS_DISPLAY_PANE
-                self.toggle_jobs_action.setChecked(jobs_pane_mode)
+                jobs_pane_showing = is_jobs_pane_showing(self)
+                self.toggle_jobs_action.setChecked(jobs_pane_showing)
                 self.toggle_jobs_action.setText(
-                    'Jobs Pane' if jobs_pane_mode else 'Show Jobs Pane'
+                    'Hide Jobs Pane' if jobs_pane_showing else 'Show Jobs Pane'
                 )
         if hasattr(self, 'toggle_chat_action') and hasattr(self, 'combined_sidebar'):
             chat_vis = (
@@ -9563,15 +9560,12 @@ class ImageBrowserWindow(QMainWindow):
             self.toggle_shortcuts_sidebar_action.setText(
                 'Hide Organize Sidebar' if self.right_sidebar.is_shortcuts_visible() else 'Show Organize Sidebar')
         if hasattr(self, 'toggle_jobs_action'):
-            from imagegen_plugins.jobs_display_mode import (
-                JOBS_DISPLAY_PANE,
-                get_jobs_display_mode,
-            )
+            from imagegen_plugins.jobs_display_mode import is_jobs_pane_showing
 
-            jobs_pane_mode = get_jobs_display_mode(self) == JOBS_DISPLAY_PANE
-            self.toggle_jobs_action.setChecked(jobs_pane_mode)
+            jobs_pane_showing = is_jobs_pane_showing(self)
+            self.toggle_jobs_action.setChecked(jobs_pane_showing)
             self.toggle_jobs_action.setText(
-                'Jobs Pane' if jobs_pane_mode else 'Show Jobs Pane'
+                'Hide Jobs Pane' if jobs_pane_showing else 'Show Jobs Pane'
             )
         self.config.update_setting('jobs_visible', self.jobs_visible)
 

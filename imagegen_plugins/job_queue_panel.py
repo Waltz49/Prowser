@@ -44,13 +44,6 @@ from status_bar_config import (
     _apply_task_info_html_to_browser,
     configure_task_info_text_browser,
 )
-from theme.theme_base import (
-    job_pane_flyin_hover_icon_path,
-    job_pane_flyin_icon_path,
-    job_pane_flyout_hover_icon_path,
-    job_pane_flyout_icon_path,
-    job_pane_tools_icon_path,
-)
 from theme.theme_service import get_active_theme
 from browser_window.sidebar.sidebar_pane_chrome import apply_scroll_area_viewport_background
 from thumbnails.sidebar_pane_layout import MIN_JOBS_QUEUE_CONTENT_HEIGHT, pane_fit_height_tolerance
@@ -222,13 +215,12 @@ def refresh_jobs_flyout_buttons(main_window) -> None:
         get_jobs_display_mode,
     )
 
-    pane_mode = get_jobs_display_mode(main_window) == JOBS_DISPLAY_PANE
-    icon = job_pane_flyout_icon_path() if pane_mode else job_pane_flyin_icon_path()
-    hover = (
-        job_pane_flyout_hover_icon_path()
-        if pane_mode
-        else job_pane_flyin_hover_icon_path()
+    from theme.titlebar_icons import (
+        apply_titlebar_button_icons,
+        titlebar_flyout_icon_pair,
     )
+
+    pane_mode = get_jobs_display_mode(main_window) == JOBS_DISPLAY_PANE
     tooltip = (
         "Open job queue in floating panel"
         if pane_mode
@@ -247,9 +239,9 @@ def refresh_jobs_flyout_buttons(main_window) -> None:
         btn = getattr(panel, "_flyout_button", None)
         if btn is None:
             continue
-        btn.setIcon(QIcon(icon))
+        btn.setProperty("_titlebar_flyout_pane_mode", pane_mode)
         btn.setToolTip(tooltip)
-        btn.setProperty("_flyout_hover_icon", hover)
+        apply_titlebar_button_icons(btn, *titlebar_flyout_icon_pair(pane_mode))
 
 
 class _JobQueueDropLine(QWidget):
@@ -1015,8 +1007,6 @@ class JobQueuePanelWidget(QWidget):
         if header is None:
             return
         btn = QPushButton()
-        btn.setIcon(QIcon(job_pane_tools_icon_path()))
-        btn.setIconSize(QSize(14, 14))
         btn.setToolTip("Job queue tools")
         btn.clicked.connect(
             lambda: show_jobs_tools_menu(
@@ -1034,13 +1024,10 @@ class JobQueuePanelWidget(QWidget):
             header.set_tools_button(btn)
 
         fly_btn = QPushButton()
-        fly_btn.setIconSize(QSize(14, 14))
         fly_btn.clicked.connect(self._on_flyout_clicked)
         if hasattr(header, "set_flyout_button"):
             header.set_flyout_button(fly_btn)
         self._flyout_button = fly_btn
-        refresh_jobs_flyout_buttons(self.main_window)
-
         refresh_jobs_flyout_buttons(self.main_window)
 
     def _on_flyout_clicked(self) -> None:
@@ -1338,6 +1325,12 @@ class JobQueuePanelWidget(QWidget):
         if hasattr(self, "_action_bar"):
             self._action_bar.refresh_theme_styles()
         self._active_job_strip.refresh_theme_styles()
+        header = self._jobs_header()
+        if header is not None:
+            from theme.titlebar_icons import refresh_header_titlebar_icons
+
+            refresh_header_titlebar_icons(header)
+        refresh_jobs_flyout_buttons(self.main_window)
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)

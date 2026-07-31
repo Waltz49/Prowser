@@ -163,8 +163,8 @@ class RightSidebarCombinedWidget(QWidget):
         )
         self.splitter.addWidget(self.information_widget)
         self.information_widget.setVisible(self.information_visible)
-        self.information_widget.information_header.hide_button.setText(
-            "−" if self.information_visible else "+"
+        self.information_widget.information_header.set_hide_button_mode(
+            "minus" if self.information_visible else "plus"
         )
 
         self.jobs_section = self._create_section("Job Control", "jobs")
@@ -183,10 +183,12 @@ class RightSidebarCombinedWidget(QWidget):
         self.shortcuts_widget.show()
 
         self.shortcuts_content.setVisible(self.shortcuts_visible)
-        self.shortcuts_header.hide_button.setText("−" if self.shortcuts_visible else "+")
+        self.shortcuts_header.set_hide_button_mode(
+            "minus" if self.shortcuts_visible else "plus"
+        )
 
         self.jobs_content.setVisible(self.jobs_visible)
-        self.jobs_header.hide_button.setText("−" if self.jobs_visible else "+")
+        self.jobs_header.set_hide_button_mode("minus" if self.jobs_visible else "plus")
         self._wire_pane_titlebar_drag(
             self.information_widget.information_header,
             1,
@@ -574,8 +576,8 @@ class RightSidebarCombinedWidget(QWidget):
         """Toggle Information section visibility"""
         self.information_visible = not self.information_visible
         self.information_widget.setVisible(self.information_visible)
-        self.information_widget.information_header.hide_button.setText(
-            "−" if self.information_visible else "+"
+        self.information_widget.information_header.set_hide_button_mode(
+            "minus" if self.information_visible else "plus"
         )
         self.main_window.config.update_setting(
             'information_sidebar_visible', self.information_visible
@@ -588,7 +590,9 @@ class RightSidebarCombinedWidget(QWidget):
         """Toggle Shortcuts section visibility (also triggered by O key)"""
         self.shortcuts_visible = not self.shortcuts_visible
         self.shortcuts_content.setVisible(self.shortcuts_visible)
-        self.shortcuts_header.hide_button.setText("−" if self.shortcuts_visible else "+")
+        self.shortcuts_header.set_hide_button_mode(
+            "minus" if self.shortcuts_visible else "plus"
+        )
         self._update_splitter_sizes()
         self.main_window.config.update_setting('shortcuts_sidebar_visible', self.shortcuts_visible)
         self.visibility_changed.emit()
@@ -612,7 +616,7 @@ class RightSidebarCombinedWidget(QWidget):
         if self.shortcuts_visible != visible:
             self.shortcuts_visible = visible
             self.shortcuts_content.setVisible(visible)
-            self.shortcuts_header.hide_button.setText("−" if visible else "+")
+            self.shortcuts_header.set_hide_button_mode("minus" if visible else "plus")
             if visible and self.shortcuts_widget and hasattr(self.shortcuts_widget, 'refresh_shortcuts'):
                 self.shortcuts_widget.refresh_shortcuts()
             self._update_splitter_sizes()
@@ -630,7 +634,9 @@ class RightSidebarCombinedWidget(QWidget):
         if self.information_visible != visible:
             self.information_visible = visible
             self.information_widget.setVisible(visible)
-            self.information_widget.information_header.hide_button.setText("−" if visible else "+")
+            self.information_widget.information_header.set_hide_button_mode(
+                "minus" if visible else "plus"
+            )
             self._update_splitter_sizes()
             self.main_window.config.update_setting('information_sidebar_visible', visible)
             self.visibility_changed.emit()
@@ -666,7 +672,7 @@ class RightSidebarCombinedWidget(QWidget):
         if self.jobs_visible != visible:
             self.jobs_visible = visible
             self.jobs_content.setVisible(visible)
-            self.jobs_header.hide_button.setText("−" if visible else "+")
+            self.jobs_header.set_hide_button_mode("minus" if visible else "plus")
             if visible and self.jobs_widget and hasattr(self.jobs_widget, 'refresh_table'):
                 self.jobs_widget.refresh_table()
             self._update_splitter_sizes()

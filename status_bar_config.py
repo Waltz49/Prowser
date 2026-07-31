@@ -1110,9 +1110,9 @@ class ClickableImageGenIndicatorLabel(QLabel):
 
     def _toggle_job_queue_dialog(self) -> None:
         try:
-            from imagegen_plugins.jobs_display_mode import show_jobs_panel
+            from imagegen_plugins.jobs_display_mode import toggle_jobs_panel
 
-            show_jobs_panel(self.main_window)
+            toggle_jobs_panel(self.main_window)
         except ImportError:
             pass
 

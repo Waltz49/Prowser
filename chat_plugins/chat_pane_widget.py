@@ -76,7 +76,6 @@ from chat_plugins.chat_system_prompt_dialog import edit_chat_system_prompt
 from chat_plugins.chat_tools_menu import show_chat_context_menu, show_chat_tools_menu
 from chat_plugins.chat_worker import ChatLmStudioService
 from speech_utils import is_speaking, register_speech_state_listener, unregister_speech_state_listener
-from theme.theme_base import job_pane_tools_icon_path
 from theme.theme_service import get_active_theme
 from utils import get_button_style
 
@@ -305,8 +304,6 @@ class ChatPaneWidget(QWidget):
         if header is None:
             return
         btn = QPushButton()
-        btn.setIcon(QIcon(job_pane_tools_icon_path()))
-        btn.setIconSize(QSize(14, 14))
         btn.setToolTip("Chat tools")
         btn.clicked.connect(lambda: show_chat_tools_menu(self, btn))
         if hasattr(header, "set_tools_button"):

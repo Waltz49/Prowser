@@ -3863,16 +3863,11 @@ class FileTreeHandler(QObject):
         layout.addWidget(dir_label_container)
 
     def attach_titlebar_tools(self, header) -> None:
-        from PySide6.QtGui import QIcon
-        from PySide6.QtCore import QSize
-        from theme.theme_base import job_pane_tools_icon_path
         from files.tree_tools_menu import show_tree_tools_menu
 
         if header is None:
             return
         btn = QPushButton()
-        btn.setIcon(QIcon(job_pane_tools_icon_path()))
-        btn.setIconSize(QSize(14, 14))
         btn.setToolTip("File tree tools")
         btn.clicked.connect(lambda: show_tree_tools_menu(self, btn))
         if hasattr(header, "set_tools_button"):

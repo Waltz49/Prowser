@@ -27,6 +27,12 @@ from browser_window.sidebar.sidebar_pane_chrome import (
     apply_sidebar_pane_background,
 )
 from theme.theme_service import get_active_theme
+from theme.titlebar_icons import (
+    apply_titlebar_button_icons,
+    refresh_header_titlebar_icons,
+    titlebar_chip_stylesheet,
+    titlebar_hide_icon_pair,
+)
 
 class HeaderWidget(QFrame):
     """Header widget with title and hide button"""
@@ -51,6 +57,7 @@ class HeaderWidget(QFrame):
         self.hide_button = None
         self.tools_button = None
         self.flyout_button = None
+        self._hide_button_mode = "minus"
         self._header_layout = None
         self._single_click_timer = QTimer(self)
         self._single_click_timer.setSingleShot(True)
@@ -92,11 +99,22 @@ class HeaderWidget(QFrame):
         layout.addWidget(self.status_label)
         
         # Hide button
-        self.hide_button = QPushButton("−")
+        self.hide_button = QPushButton("")
         self.hide_button.setFixedSize(20, 20)
         self.hide_button.setFocusPolicy(Qt.NoFocus)
         layout.addWidget(self.hide_button)
+        self.set_hide_button_mode("minus")
         self.refresh_theme_styles()
+
+    def set_hide_button_mode(self, mode: str) -> None:
+        """Show minus (collapse), plus (expand), or close on the hide button."""
+        if mode not in ("minus", "plus", "close"):
+            mode = "minus"
+        self._hide_button_mode = mode
+        if self.hide_button is not None:
+            apply_titlebar_button_icons(
+                self.hide_button, *titlebar_hide_icon_pair(mode)
+            )
 
     def set_flyout_button(self, button: QPushButton | None) -> None:
         """Optional titlebar flyout/flyin control (inserted at far right)."""
@@ -137,36 +155,7 @@ class HeaderWidget(QFrame):
         self.refresh_theme_styles()
 
     def _titlebar_chip_stylesheet(self) -> str:
-        titlebar = QColor(tc.SIDEBAR_HEADER_BG_HEX)
-        if not titlebar.isValid():
-            titlebar = QColor("#2b2b2b")
-        hb_bg = titlebar.lighter(200).name()
-        hb_hover = titlebar.lighter(300).name()
-        hb_pressed = titlebar.lighter(160).name()
-        hb_border = titlebar.lighter(160).name()
-        hb_border_hover = titlebar.lighter(180).name()
-        return f"""
-            QPushButton {{
-                background-color: {hb_bg};
-                border: 1px solid {hb_border};
-                border-radius: 3px;
-                color: {tc.SIDEBAR_HEADER_TEXT_HEX};
-                font-weight: bold;
-                min-width: 20px;
-                padding: 0px;
-            }}
-            QPushButton:hover {{
-                background-color: {hb_hover};
-                border-color: {hb_border_hover};
-            }}
-            QPushButton:pressed {{
-                background-color: {hb_pressed};
-                border-color: {hb_border};
-            }}
-            QPushButton:disabled {{
-                color: #888888;
-            }}
-        """
+        return titlebar_chip_stylesheet()
 
     def _style_titlebar_chip(self, button: QPushButton) -> None:
         button.setStyleSheet(self._titlebar_chip_stylesheet())
@@ -245,6 +234,7 @@ class HeaderWidget(QFrame):
             self._style_titlebar_chip(self.tools_button)
         if self.flyout_button is not None:
             self._style_titlebar_chip(self.flyout_button)
+        refresh_header_titlebar_icons(self)
 
     def _titlebar_click_excludes_chrome_buttons(self, event: QMouseEvent) -> bool:
         pos = event.position().toPoint()
@@ -554,7 +544,9 @@ class CombinedSidebarWidget(QWidget):
         self.splitter.setSizes([200, 200, 200])
 
         self.chat_content.setVisible(self.chat_visible)
-        self.chat_header.hide_button.setText("−" if self.chat_visible else "+")
+        self.chat_header.set_hide_button_mode(
+            "minus" if self.chat_visible else "plus"
+        )
         
         # Connect splitter resize events
         self.splitter.splitterMoved.connect(self._on_splitter_moved)
@@ -848,11 +840,15 @@ class CombinedSidebarWidget(QWidget):
         if getattr(self, "chat_content", None):
             self.chat_content.setVisible(self.chat_visible)
         if getattr(self, "tree_header", None):
-            self.tree_header.hide_button.setText("−" if self.tree_visible else "+")
+            self.tree_header.set_hide_button_mode("minus" if self.tree_visible else "plus")
         if getattr(self, "preview_header", None):
-            self.preview_header.hide_button.setText("−" if self.preview_visible else "+")
+            self.preview_header.set_hide_button_mode(
+                "minus" if self.preview_visible else "plus"
+            )
         if getattr(self, "chat_header", None):
-            self.chat_header.hide_button.setText("−" if self.chat_visible else "+")
+            self.chat_header.set_hide_button_mode(
+            "minus" if self.chat_visible else "plus"
+        )
 
     def _notify_cover_changed(self) -> None:
         self.chat_cover_changed.emit(self.chat_covers_panes)
@@ -1280,7 +1276,7 @@ class CombinedSidebarWidget(QWidget):
             else:
                 self.chat_covers_panes = False
                 self._apply_display_sections()
-            self.chat_header.hide_button.setText("−" if visible else "+")
+            self.chat_header.set_hide_button_mode("minus" if visible else "plus")
             if visible and self.chat_widget and hasattr(self.chat_widget, "on_pane_activated"):
                 self._refresh_browse_cursor_for_pointer()
                 self.chat_widget.on_pane_activated()

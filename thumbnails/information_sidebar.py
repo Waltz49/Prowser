@@ -35,7 +35,6 @@ from thumbnails.information_action_nav import (
     InformationActionNavBar,
 )
 from thumbnails.thumbnail_constants import ALT_SYMBOL
-from theme.theme_base import job_pane_tools_icon_path
 from theme.theme_service import get_active_theme
 from utils import (
     format_file_size,
@@ -226,8 +225,6 @@ class InformationSidebar(QWidget):
         if header is None:
             return
         btn = QPushButton()
-        btn.setIcon(QIcon(job_pane_tools_icon_path()))
-        btn.setIconSize(QSize(14, 14))
         btn.setToolTip("File information tools")
         btn.clicked.connect(lambda: show_information_tools_menu(self, btn))
         if hasattr(header, "set_tools_button"):

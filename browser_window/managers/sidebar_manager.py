@@ -147,17 +147,46 @@ class SidebarManager:
             return self.main_window.preview_visible
 
     def toggle_jobs(self):
-        """Force jobs sidebar pane mode (J key)."""
-        from imagegen_plugins.jobs_display_mode import show_jobs_pane
+        """Toggle jobs sidebar pane (J key); switch from panel mode when needed."""
+        from imagegen_plugins.jobs_display_mode import (
+            JOBS_DISPLAY_PANE,
+            get_jobs_display_mode,
+            hide_jobs_pane,
+            is_jobs_pane_showing,
+            show_jobs_pane,
+            sync_jobs_menu_actions,
+        )
 
-        if self.main_window._should_reveal_sidebar_only('right'):
-            rs = self.main_window.right_sidebar
-            if rs is not None and not rs.is_jobs_visible():
-                rs.set_jobs_visible(True)
+        rs = getattr(self.main_window, "right_sidebar", None)
+        if get_jobs_display_mode(self.main_window) != JOBS_DISPLAY_PANE:
             show_jobs_pane(self.main_window)
             return True
+
+        if rs is None:
+            show_jobs_pane(self.main_window)
+            return True
+
+        if self.main_window._should_reveal_sidebar_only('right'):
+            if not rs.is_jobs_visible():
+                rs.set_jobs_visible(True)
+                show_jobs_pane(self.main_window)
+                return True
+            self.main_window._toggle_pane_with_chrome_restore(
+                rs.is_jobs_visible,
+                rs.set_jobs_visible,
+                'right_jobs_visible',
+                'right',
+            )
+            self.main_window.jobs_visible = rs.is_jobs_visible()
+            sync_jobs_menu_actions(self.main_window)
+            return rs.is_jobs_visible()
+
+        if is_jobs_pane_showing(self.main_window):
+            hide_jobs_pane(self.main_window)
+            return False
+
         show_jobs_pane(self.main_window)
-        return getattr(self.main_window, "jobs_display_mode", "pane") == "pane"
+        return True
 
     def set_jobs_display_mode(self, mode: str) -> str:
         from imagegen_plugins.jobs_display_mode import set_jobs_display_mode

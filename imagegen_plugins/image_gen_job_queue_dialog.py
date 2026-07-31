@@ -103,9 +103,9 @@ class _JobQueueKeyPassthroughFilter(QObject):
             return False
         key_event = event  # type: ignore[assignment]
         if _is_cmd_j(key_event):
-            from imagegen_plugins.jobs_display_mode import show_jobs_panel
+            from imagegen_plugins.jobs_display_mode import toggle_jobs_panel
 
-            show_jobs_panel(self._dialog.main_window)
+            toggle_jobs_panel(self._dialog.main_window)
             key_event.accept()
             return True
         main_window = self._dialog.main_window
@@ -181,7 +181,7 @@ class ImageGenJobQueueDialog(QDialog):
             omit_right_border=True,
             omit_top_border=True,
         )
-        self._header.hide_button.setText("×")
+        self._header.set_hide_button_mode("close")
         self._header.hide_button.setToolTip("Close job control dialog")
         self._header.hide_button.clicked.connect(self._close_to_pane_mode)
         self._header.title_double_clicked.connect(self._cycle_header_size)
@@ -596,7 +596,9 @@ class ImageGenJobQueueDialog(QDialog):
 
     def keyPressEvent(self, event: QKeyEvent) -> None:
         if _is_cmd_j(event):
-            self.hide()
+            from imagegen_plugins.jobs_display_mode import toggle_jobs_panel
+
+            toggle_jobs_panel(self.main_window)
             event.accept()
             return
         main_window = self.main_window
@@ -628,6 +630,6 @@ def open_imagegen_job_queue_dialog(main_window) -> None:
 
 
 def show_imagegen_job_queue_dialog(main_window) -> None:
-    from imagegen_plugins.jobs_display_mode import show_jobs_panel
+    from imagegen_plugins.jobs_display_mode import toggle_jobs_panel
 
-    show_jobs_panel(main_window)
+    toggle_jobs_panel(main_window)
