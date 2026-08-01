@@ -1355,6 +1355,11 @@ class SettingsDialog(QDialog):
                     if hasattr(self, 'imagegen_fast_open_action_combo')
                     else 'from_text'
                 ),
+                'imagegen_output_format': (
+                    self.imagegen_output_format_combo.currentData()
+                    if hasattr(self, 'imagegen_output_format_combo')
+                    else 'png'
+                ),
             }
         elif tab_widget == self.slideshow_settings_tab:
             return {
@@ -1877,6 +1882,11 @@ class SettingsDialog(QDialog):
                     if self.imagegen_fast_open_action_combo.itemData(i) == 'from_text':
                         self.imagegen_fast_open_action_combo.setCurrentIndex(i)
                         break
+            if hasattr(self, 'imagegen_output_format_combo'):
+                for i in range(self.imagegen_output_format_combo.count()):
+                    if self.imagegen_output_format_combo.itemData(i) == 'png':
+                        self.imagegen_output_format_combo.setCurrentIndex(i)
+                        break
         elif tab_widget == self.slideshow_settings_tab:
             self.slideshow_rate_spinbox.setValue(self.DEFAULT_SLIDESHOW_RATE)
             self.transition_speed_spinbox.setValue(self.DEFAULT_TRANSITION_SPEED)
@@ -2081,6 +2091,11 @@ class SettingsDialog(QDialog):
                 for i in range(self.imagegen_fast_open_action_combo.count()):
                     if self.imagegen_fast_open_action_combo.itemData(i) == 'from_text':
                         self.imagegen_fast_open_action_combo.setCurrentIndex(i)
+                        break
+            if hasattr(self, 'imagegen_output_format_combo'):
+                for i in range(self.imagegen_output_format_combo.count()):
+                    if self.imagegen_output_format_combo.itemData(i) == 'png':
+                        self.imagegen_output_format_combo.setCurrentIndex(i)
                         break
         elif tab_widget == self.slideshow_settings_tab:
             self.slideshow_rate_spinbox.setValue(self.DEFAULT_SLIDESHOW_RATE)
@@ -2568,6 +2583,26 @@ class SettingsDialog(QDialog):
                 "primed from the current image."
             ),
             subtitle="Opens image generation dialog\nprimed from the current image.",
+        )
+
+        from imagegen_plugins.image_gen_output_format import OUTPUT_FORMAT_CHOICES
+
+        self.imagegen_output_format_combo = SettingsListCombo()
+        for fmt in OUTPUT_FORMAT_CHOICES:
+            self.imagegen_output_format_combo.addItem(
+                fmt.upper(), userData=fmt
+            )
+        configure_settings_list_combo(self.imagegen_output_format_combo)
+        self.imagegen_output_format_combo.setToolTip(
+            "File format for generated images\n"
+            "(imagegen-NNNN in the image creation directory)."
+        )
+        self.imagegen_output_format_combo.setFixedHeight(28)
+        imagegen_panel.add_form_row(
+            "Output format",
+            self.imagegen_output_format_combo,
+            tooltip="PNG or WebP for generated image files.",
+            subtitle="Format for imagegen-NNNN output files.",
         )
 
         default_dim_index = (
@@ -3434,6 +3469,14 @@ class SettingsDialog(QDialog):
             for i in range(self.imagegen_fast_open_action_combo.count()):
                 if self.imagegen_fast_open_action_combo.itemData(i) == action:
                     self.imagegen_fast_open_action_combo.setCurrentIndex(i)
+                    break
+        if hasattr(self, 'imagegen_output_format_combo'):
+            from imagegen_plugins.image_gen_output_format import load_output_format
+
+            fmt = load_output_format(settings)
+            for i in range(self.imagegen_output_format_combo.count()):
+                if self.imagegen_output_format_combo.itemData(i) == fmt:
+                    self.imagegen_output_format_combo.setCurrentIndex(i)
                     break
 
     def _imagegen_max_generation_dimension_px(self) -> int:

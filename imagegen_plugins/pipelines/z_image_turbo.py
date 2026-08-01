@@ -176,7 +176,9 @@ def run_from_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     with PerfTimer("z_image_inference", steps=steps, seed=seed):
         out = pipe(**gen_kwargs)
     with PerfTimer("save_output", pipeline="z_image_turbo"):
-        out.images[0].save(output_path)
+        from imagegen_plugins.image_gen_output_format import save_generation_image
+
+        save_generation_image(out.images[0], output_path)
     generation_time_seconds = time.perf_counter() - t0
 
     return {

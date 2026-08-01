@@ -27,6 +27,7 @@ from imagegen_plugins.image_gen_naming import (
     resolve_generation_elapsed_seconds,
     write_exif_user_comment,
 )
+from imagegen_plugins.image_gen_output_format import output_extension_from_settings
 from imagegen_plugins.generation_timing_stats import (
     build_generation_timing_key,
     lookup_average,
@@ -978,7 +979,7 @@ class ImageGenController(QObject):
         self._set_gpu_cleanup_status(False)
         self._release_main_process_gpu_memory()
 
-        output_path = next_imagegen_path(ext=".png")
+        output_path = next_imagegen_path(ext=output_extension_from_settings())
         try:
             payload = plugin.build_payload(values, output_path)
             pad_temps = payload.pop("_aspect_pad_temp_paths", None)

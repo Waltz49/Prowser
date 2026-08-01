@@ -15,6 +15,7 @@ import sys
 import time
 from typing import Any, Dict, Optional
 
+from imagegen_plugins.image_gen_output_format import mflux_temp_suffix_for_output_path
 from imagegen_plugins.hf_model_ids import Z_IMAGE_TURBO_MFLUX_4BIT
 from imagegen_plugins.image_gen_dim_limits import payload_max_generation_dimension
 from imagegen_plugins.pipelines.z_image_turbo import align_z_image_dims
@@ -131,7 +132,10 @@ def run_from_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
 
     stepwise_dir, progressive_output_path = stepwise_dirs_for_run(steps, output_path)
 
-    mflux_output_path = prowser_mkstemp_path(prefix="imagegen-zimage-", suffix=".png")
+    mflux_output_path = prowser_mkstemp_path(
+        prefix="imagegen-zimage-",
+        suffix=mflux_temp_suffix_for_output_path(output_path),
+    )
     try:
         os.unlink(mflux_output_path)
     except OSError:

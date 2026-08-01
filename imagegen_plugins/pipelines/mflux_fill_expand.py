@@ -18,6 +18,7 @@ from typing import Any, Dict, Final
 from PIL import Image
 
 from imagegen_plugins.outpaint_mask import clamp_outpaint_dims, prepare_image_and_mask_at_rect
+from imagegen_plugins.image_gen_output_format import mflux_temp_suffix_for_output_path
 from imagegen_plugins.image_gen_dim_limits import payload_max_generation_dimension
 from imagegen_plugins.pixelmator_export import pixelmator_mask_to_mflux
 from imagegen_plugins.pipelines.mflux_schnell import align_mflux_dims
@@ -215,7 +216,8 @@ def _run_fill_generation(
         except OSError:
             pass
     mflux_output_path = prowser_mkstemp_path(
-        prefix="imagegen-mflux-fill-out-", suffix=".png"
+        prefix="imagegen-mflux-fill-out-",
+        suffix=mflux_temp_suffix_for_output_path(output_path),
     )
     try:
         os.unlink(mflux_output_path)

@@ -155,9 +155,10 @@ _EDIT_IMPORT_SIZE_TOOLTIP = (
 )
 
 _EDIT_IMPORT_ALL_TOOLTIP = (
-    "Load settings except prompt text and size\n"
+    "Load settings except prompt text, size and model\n"
     "saved in the EXIF user comment\n"
-    "of the selected image."
+    "of the selected image.\n\n"
+    "To load all parms except size,use the\nfile info pane buttons or ⇧⌥/ keys."
 )
 
 _EDIT_IMPORT_ALL_SETTINGS_TOOLTIP = (

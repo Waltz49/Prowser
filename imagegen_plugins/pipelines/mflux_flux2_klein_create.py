@@ -15,6 +15,7 @@ import time
 from typing import Any, Dict, Final, Tuple
 
 from imagegen_plugins.image_gen_dim_limits import payload_max_generation_dimension
+from imagegen_plugins.image_gen_output_format import mflux_temp_suffix_for_output_path
 from imagegen_plugins.image_gen_pipeline_modes import MFLUX_FLOW_MATCH_MIN_STEPS
 from imagegen_plugins.pipelines.mflux_stepwise_progress import (
     atomic_copy2,
@@ -132,7 +133,8 @@ def run_from_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
             pass
 
     mflux_output_path = prowser_mkstemp_path(
-        prefix="imagegen-mflux-klein-create-", suffix=".png"
+        prefix="imagegen-mflux-klein-create-",
+        suffix=mflux_temp_suffix_for_output_path(output_path),
     )
     try:
         os.unlink(mflux_output_path)

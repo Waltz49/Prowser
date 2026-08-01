@@ -17,6 +17,7 @@ from typing import Any, Dict, Final, Optional, Tuple
 
 from imagegen_plugins.hf_model_ids import FLUX1_SCHNELL
 from imagegen_plugins.image_gen_dim_limits import payload_max_generation_dimension
+from imagegen_plugins.image_gen_output_format import mflux_temp_suffix_for_output_path
 from imagegen_plugins.image_gen_pipeline_modes import MFLUX_FLOW_MATCH_MIN_STEPS
 from workers.model_tasks_worker import PerfTimer
 from imagegen_plugins.pipelines.mflux_stepwise_progress import (
@@ -292,7 +293,10 @@ def run_from_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
 
     stepwise_dir, progressive_output_path = stepwise_dirs_for_run(steps, output_path)
 
-    mflux_output_path = prowser_mkstemp_path(prefix="imagegen-mflux-", suffix=".png")
+    mflux_output_path = prowser_mkstemp_path(
+        prefix="imagegen-mflux-",
+        suffix=mflux_temp_suffix_for_output_path(output_path),
+    )
     try:
         os.unlink(mflux_output_path)
     except OSError:

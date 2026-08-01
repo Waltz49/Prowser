@@ -17,6 +17,7 @@ from typing import Any, Dict, Final
 from PIL import Image
 
 from imagegen_plugins.image_gen_pipeline_modes import MFLUX_FLOW_MATCH_MIN_STEPS
+from imagegen_plugins.image_gen_output_format import mflux_temp_suffix_for_output_path
 from imagegen_plugins.image_gen_dim_limits import payload_max_generation_dimension
 from imagegen_plugins.outpaint_mask import (
     composite_masked_regions_for_klein_edit,
@@ -213,7 +214,8 @@ def _run_klein_edit_from_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
             pass
 
     mflux_output_path = prowser_mkstemp_path(
-        prefix="imagegen-mflux-klein-out-", suffix=".png"
+        prefix="imagegen-mflux-klein-out-",
+        suffix=mflux_temp_suffix_for_output_path(output_path),
     )
     try:
         os.unlink(mflux_output_path)

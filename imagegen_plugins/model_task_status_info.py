@@ -196,12 +196,12 @@ def _task_menu_title_for_pipeline(pipeline_id: str) -> str:
     except KeyError:
         return "Generate an image from text"
     if mode.prompt_status_label == "Outfill:":
-        return "Expand Existing Image"
+        return "Expand Image"
     if mode.prompt_status_label == "Infill:":
         return "Infill image"
     if mode.requires_source_image and mode.prompt_label == "Edit prompt":
-        return "Edit an image with AI"
-    return "Generate an image from text"
+        return "Modify with AI"
+    return "Generate from text"
 
 
 
