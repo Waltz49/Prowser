@@ -5,9 +5,11 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, Tuple
 
-from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QDoubleValidator, QFontMetrics, QKeyEvent
+from PySide6.QtCore import QEvent, QObject, QPointF, Qt, Signal
+from PySide6.QtGui import QDoubleValidator, QFontMetrics, QKeyEvent, QMouseEvent
 from PySide6.QtWidgets import (
+    QApplication,
+    QAbstractButton,
     QCheckBox,
     QComboBox,
     QFrame,
@@ -83,6 +85,96 @@ def lora_stack_summary_text(
     return "Multiple LoRAs"
 
 
+def _click_target_widget(widget: QWidget) -> QWidget:
+    """Prefer the nearest QAbstractButton ancestor for forwarded clicks."""
+    target = widget
+    while target is not None:
+        if isinstance(target, QAbstractButton):
+            return target
+        target = target.parentWidget()
+    return widget
+
+
+def _forward_mouse_click(target: QWidget, source: QMouseEvent) -> None:
+    """Deliver a full click (press + release) to *target* at *source*'s global pos."""
+    local = QPointF(target.mapFromGlobal(source.globalPosition().toPoint()))
+    global_pos = source.globalPosition()
+    button = source.button()
+    modifiers = source.modifiers()
+    app = QApplication.instance()
+    if app is None:
+        return
+    press = QMouseEvent(
+        QEvent.Type.MouseButtonPress,
+        local,
+        global_pos,
+        button,
+        button,
+        modifiers,
+    )
+    release = QMouseEvent(
+        QEvent.Type.MouseButtonRelease,
+        local,
+        global_pos,
+        button,
+        Qt.MouseButton.NoButton,
+        modifiers,
+    )
+    app.sendEvent(target, press)
+    app.sendEvent(target, release)
+
+
+class _LoraPopupClickThroughFilter(QObject):
+    """Dismiss the LoRA popup on outside click and forward the click inside the host dialog."""
+
+    def __init__(
+        self,
+        popup: "LoraSelectionPopup",
+        *,
+        host_window: QWidget,
+        anchor: QWidget,
+    ) -> None:
+        super().__init__(popup)
+        self._popup = popup
+        self._host_window = host_window
+        self._anchor = anchor
+
+    def _is_popup_or_anchor(self, widget: QWidget) -> bool:
+        current: Optional[QWidget] = widget
+        while current is not None:
+            if current is self._popup or current is self._anchor:
+                return True
+            current = current.parentWidget()
+        return False
+
+    def eventFilter(self, obj: QObject, event: QEvent) -> bool:
+        if not self._popup.isVisible():
+            return False
+        if event.type() != QEvent.Type.MouseButtonPress:
+            return False
+        if not isinstance(event, QMouseEvent):
+            return False
+        if event.button() != Qt.MouseButton.LeftButton:
+            return False
+
+        global_pos = event.globalPosition().toPoint()
+        if self._popup.frameGeometry().contains(global_pos):
+            return False
+
+        host = self._host_window
+        if host is None or not host.isVisible():
+            return False
+        if not host.frameGeometry().contains(global_pos):
+            return False
+
+        self._popup._remove_click_through_filter()
+        self._popup.hide()
+        target = QApplication.widgetAt(global_pos)
+        if target is not None and not self._is_popup_or_anchor(target):
+            _forward_mouse_click(_click_target_widget(target), event)
+        return True
+
+
 class LoraSelectionPopup(QFrame):
     """Checkable LoRA list anchored below the summary combo; dismiss applies, Esc cancels."""
 
@@ -120,6 +212,9 @@ class LoraSelectionPopup(QFrame):
         self._empty_label: Optional[QLabel] = None
         self._preferred_width = _POPUP_MIN_WIDTH
         self._committed = False
+        self._click_through_filter: Optional[_LoraPopupClickThroughFilter] = None
+        self._anchor_widget: Optional[QWidget] = None
+        self._host_window: Optional[QWidget] = None
 
     def _apply_theme(self) -> None:
         t = get_active_theme()
@@ -172,10 +267,38 @@ class LoraSelectionPopup(QFrame):
         super().keyPressEvent(event)
 
     def hideEvent(self, event) -> None:
+        self._remove_click_through_filter()
         if not self._committed:
             self._committed = True
             self.accepted.emit(self._selected_ids())
         super().hideEvent(event)
+
+    def _install_click_through_filter(self) -> None:
+        self._remove_click_through_filter()
+        anchor = self._anchor_widget
+        host = self._host_window
+        if anchor is None or host is None:
+            return
+        filt = _LoraPopupClickThroughFilter(
+            self,
+            host_window=host,
+            anchor=anchor,
+        )
+        app = QApplication.instance()
+        if app is None:
+            return
+        app.installEventFilter(filt)
+        self._click_through_filter = filt
+
+    def _remove_click_through_filter(self) -> None:
+        filt = self._click_through_filter
+        if filt is None:
+            return
+        app = QApplication.instance()
+        if app is not None:
+            app.removeEventFilter(filt)
+        filt.deleteLater()
+        self._click_through_filter = None
 
     def _clear_checks(self) -> None:
         while self._grid.count():
@@ -333,6 +456,8 @@ class LoraSelectionPopup(QFrame):
 
     def show_below(self, anchor: QWidget) -> None:
         self._committed = False
+        self._anchor_widget = anchor
+        self._host_window = anchor.window()
         width = max(
             anchor.width(),
             getattr(self, "_preferred_width", _POPUP_MIN_WIDTH),
@@ -353,6 +478,7 @@ class LoraSelectionPopup(QFrame):
         self.show()
         self.raise_()
         self.activateWindow()
+        self._install_click_through_filter()
 
 
 class LoraSummaryCombo(QComboBox):
