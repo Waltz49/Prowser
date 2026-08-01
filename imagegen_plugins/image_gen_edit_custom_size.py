@@ -362,11 +362,22 @@ def _compact_custom_size_dim_slider_row(row: QWidget) -> None:
             btn.setIconSize(QSize(icon_px, icon_px))
 
 
+def _custom_size_dim_label_width(parent: QWidget, *label_texts: str) -> int:
+    """Shared label column width so width/height sliders align."""
+    probe = make_image_gen_field_label(label_texts[0], parent)
+    fm = probe.fontMetrics()
+    width = max(fm.horizontalAdvance(text) for text in label_texts)
+    probe.deleteLater()
+    return width
+
+
 def _add_labeled_slider_row(
     parent: QWidget,
     layout: QVBoxLayout,
     label_text: str,
     control: QWidget,
+    *,
+    label_width: Optional[int] = None,
 ) -> None:
     _compact_custom_size_dim_slider_row(control)
     row = QWidget(parent)
@@ -375,6 +386,8 @@ def _add_labeled_slider_row(
     hrow.setSpacing(6)
     label = make_image_gen_field_label(label_text, row)
     label.setWordWrap(False)
+    if label_width is not None:
+        label.setFixedWidth(label_width)
     hrow.addWidget(
         label,
         0,
@@ -442,8 +455,23 @@ def _build_custom_size_group_box(
     group_layout = QVBoxLayout(group_box)
     group_layout.setContentsMargins(6, 2, 6, 4)
     group_layout.setSpacing(0)
-    _add_labeled_slider_row(group_box, group_layout, width_spec.label, width_widget)
-    _add_labeled_slider_row(group_box, group_layout, height_spec.label, height_widget)
+    dim_label_width = _custom_size_dim_label_width(
+        group_box, width_spec.label, height_spec.label
+    )
+    _add_labeled_slider_row(
+        group_box,
+        group_layout,
+        width_spec.label,
+        width_widget,
+        label_width=dim_label_width,
+    )
+    _add_labeled_slider_row(
+        group_box,
+        group_layout,
+        height_spec.label,
+        height_widget,
+        label_width=dim_label_width,
+    )
 
     controls_row = QWidget(group_box)
     controls_layout = QHBoxLayout(controls_row)
