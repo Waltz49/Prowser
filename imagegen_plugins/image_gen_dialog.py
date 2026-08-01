@@ -216,16 +216,45 @@ def connect_import_button_with_option_modifier(
 
 
 def apply_import_extras_from_image_path(dialog: Any, image_path: str) -> None:
-    """Import seed/steps/quantization/LoRA/guidance from EXIF when present."""
+    """Import seed/steps/quantization/LoRA/guidance/model from EXIF when present."""
     if not image_path:
         return
     raw_bytes = get_usercomment_from_path(image_path)
     if not raw_bytes:
         return
     full_text = decode_usercomment(raw_bytes)
-    apply_exif_generation_params_to_dialog(
+    params = _gated_exif_params_for_dialog(
         dialog, parse_exif_generation_metadata(full_text)
     )
+    apply_exif_generation_params_to_dialog(dialog, params)
+
+
+def _gated_exif_params_for_dialog(
+    dialog: Any,
+    params: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Resolve model from EXIF; gate LoRA import per installed-model rules."""
+    if not params:
+        return {}
+    out = dict(params)
+    model_text = out.get("model")
+    plugins = getattr(dialog, "_plugins", None) or []
+    resolved = None
+    if model_text:
+        from imagegen_plugins.image_gen_model_selector import (
+            resolve_installed_plugin_for_exif_model,
+            switch_image_gen_dialog_plugin,
+        )
+
+        resolved = resolve_installed_plugin_for_exif_model(str(model_text), plugins)
+    if model_text and not resolved:
+        out.pop("lora", None)
+    elif resolved is not None:
+        switch_image_gen_dialog_plugin(dialog, resolved)
+    else:
+        out.pop("lora", None)
+    out.pop("model", None)
+    return out
 
 
 def apply_exif_generation_params_to_dialog(
@@ -316,6 +345,7 @@ def apply_exif_generation_params_to_dialog(
         stack_entry = widgets.get("mflux_lora_stack")
         lora_field = getattr(dialog, "_lora_field", None)
         target = str(params["lora"]).strip()
+        plugin = getattr(dialog, "plugin", None)
         if not target or target.lower() == "none":
             if lora_field is not None and lora_field.is_stack_mode():
                 lora_field.set_stack([])
@@ -328,66 +358,22 @@ def apply_exif_generation_params_to_dialog(
                         none_idx = combo.findData("none")
                         if none_idx >= 0:
                             combo.setCurrentIndex(none_idx)
-        elif lora_field is not None and lora_field.is_stack_mode():
-            from imagegen_plugins.flux_lora_catalog import get_lora_entry
-            from imagegen_plugins.lora_catalog import LORA_CATALOG
+        elif plugin is not None:
+            from imagegen_plugins.lora_catalog import match_exif_lora_names_to_ids
 
-            parts = [p.strip() for p in re.split(r"\s*\+\s*", target) if p.strip()]
-            if len(parts) <= 1:
-                parts = [target]
-            matched_ids: List[str] = []
-            lower_target = target.strip().lower()
-            for entry_obj in LORA_CATALOG.values():
-                if entry_obj.display_name.strip().lower() == lower_target:
-                    matched_ids.append(entry_obj.lora_id)
-                    break
-            if not matched_ids:
-                for part in parts:
-                    part_lower = part.lower()
-                    for entry_obj in LORA_CATALOG.values():
-                        if entry_obj.display_name.strip().lower() == part_lower:
-                            if entry_obj.lora_id not in matched_ids:
-                                matched_ids.append(entry_obj.lora_id)
-                            break
-            if matched_ids:
+            matched_ids = match_exif_lora_names_to_ids(target, plugin)
+            if matched_ids and lora_field is not None and lora_field.is_stack_mode():
                 lora_field.set_stack(matched_ids)
-        else:
-            entry = widgets.get("mflux_lora")
-            if entry is not None:
-                widget, _, spec = entry
-                if spec.kind == "choice":
-                    combo = choice_field_widget(widget)
-                    from imagegen_plugins.flux_lora_catalog import get_lora_entry
-
-                    target_lower = target.lower()
-                    if target_lower and target_lower != "none":
-                        for i in range(combo.count()):
-                            if combo.itemText(i).strip().lower() == target_lower:
-                                combo.setCurrentIndex(i)
-                                break
-                        else:
-                            for i in range(combo.count()):
-                                preset_id = combo.itemData(i)
-                                entry_obj = get_lora_entry(str(preset_id))
-                                if (
-                                    entry_obj is not None
-                                    and entry_obj.display_name.strip().lower()
-                                    == target_lower
-                                ):
-                                    combo.setCurrentIndex(i)
-                                    break
-                                if str(preset_id).strip().lower() == target_lower:
-                                    combo.setCurrentIndex(i)
-                                    break
-                            else:
-                                base_target = os.path.basename(target_lower)
-                                for i in range(combo.count()):
-                                    if (
-                                        combo.itemText(i).strip().lower()
-                                        == base_target
-                                    ):
-                                        combo.setCurrentIndex(i)
-                                        break
+            elif matched_ids:
+                entry = widgets.get("mflux_lora")
+                if entry is not None:
+                    widget, _, spec = entry
+                    if spec.kind == "choice":
+                        combo = choice_field_widget(widget)
+                        preset_id = matched_ids[0]
+                        idx = combo.findData(preset_id)
+                        if idx >= 0:
+                            combo.setCurrentIndex(idx)
 
     sync_random_seed_setting(dialog, True)
 

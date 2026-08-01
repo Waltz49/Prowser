@@ -25,9 +25,10 @@ class SidebarJobsWidget(JobQueuePanelWidget):
         """Wire the Job Control titlebar tools menu (after right sidebar exists)."""
         self.attach_header_tools()
 
-    def _sync_sidebar_compact_geometry(self) -> None:
-        if not self.is_queue_compact():
-            return
+    def _sync_sidebar_jobs_geometry(self) -> None:
         sidebar = getattr(self.main_window, "right_sidebar", None)
-        if sidebar is not None and getattr(sidebar, "_jobs_pane_compact", False):
-            sidebar._sync_jobs_compact_geometry()
+        if sidebar is not None and hasattr(sidebar, "ensure_jobs_pane_fits_content"):
+            sidebar.ensure_jobs_pane_fits_content()
+
+    def _sync_sidebar_compact_geometry(self) -> None:
+        self._sync_sidebar_jobs_geometry()

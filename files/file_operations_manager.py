@@ -6165,6 +6165,14 @@ class FileOperationsManager:
                     # Refresh thumbnail view - add the restored file at its original position
                     if hasattr(mw, 'thumbnail_display_manager') and mw.thumbnail_display_manager:
                         mw.thumbnail_display_manager.add_thumbnails_for_files([unique_path], [original_position] if original_position is not None else None)
+                    if show_status and mw.status_notification:
+                        restored_filename = os.path.basename(unique_path)
+                        if unique_path != original_path:
+                            mw.status_notification.show_file_operation_message(
+                                f"Restored: {restored_filename} (renamed to avoid overwrite)"
+                            )
+                        else:
+                            mw.status_notification.show_file_operation_message(f"Restored: {restored_filename}")
                     return True
                 else:
                     # Formatted mode: file was kept as slot, just clear placeholder and repaint
@@ -6273,7 +6281,16 @@ class FileOperationsManager:
                     mw.thumbnail_display_manager.add_thumbnails_for_files(restored_files, restored_positions)
 
             if mw.status_notification:
-                mw.status_notification.show_file_operation_message(f"Restored {restored_count} files from trash")
+                if restored_count == 1 and restored_files:
+                    mw.status_notification.show_file_operation_message(
+                        f"Restored: {os.path.basename(restored_files[0])}"
+                    )
+                elif restored_count == 1:
+                    mw.status_notification.show_file_operation_message("Restored 1 file from trash")
+                else:
+                    mw.status_notification.show_file_operation_message(
+                        f"Restored {restored_count} files from trash"
+                    )
         else:
             show_styled_warning(mw, "Undo Failed", "Failed to restore files from trash")
 
@@ -6297,7 +6314,7 @@ class FileOperationsManager:
                 mw.status_notification.show_file_operation_message(f"Restored: {filename}")
                 return
 
-            # Normal mode: add back to displayed images
+            # Normal mode: add back to displayed images when restore_file_from_trash_ did not already
             displayed = mw.get_displayed_images()
             if original_path not in displayed:
                 if original_position is not None and original_position <= len(displayed):
@@ -6317,6 +6334,7 @@ class FileOperationsManager:
                     if displayed:
                         mw.show_image(displayed[mw.image_indices[mw.current_index]], mw.current_index)
 
+            if mw.status_notification:
                 mw.status_notification.show_file_operation_message(f"Restored: {filename}")
 
         except Exception:

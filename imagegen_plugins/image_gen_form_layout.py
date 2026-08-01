@@ -1203,6 +1203,81 @@ def create_image_gen_prompt_clear_button(
     return _ImageGenPromptClearButton(edit, parent, object_name=object_name)
 
 
+class _ImageGenPromptSpeakButton(QObject):
+    """Read-aloud control for image-gen prompt label rows."""
+
+    def __init__(self, edit: QPlainTextEdit, btn: QPushButton) -> None:
+        super().__init__(btn)
+        self._edit = edit
+        self._btn = btn
+        self._highlighted = False
+        btn.clicked.connect(self._on_clicked)
+        edit.textChanged.connect(self._sync_enabled)
+        from speech_utils import register_speech_state_listener, unregister_speech_state_listener
+
+        self._unregister_speech_state_listener = unregister_speech_state_listener
+        register_speech_state_listener(self._on_speech_state_changed)
+        btn.destroyed.connect(self._unregister_listener)
+        self._sync_enabled()
+        self._sync_highlight()
+
+    def _speakable_text(self) -> str:
+        return self._edit.toPlainText().strip()
+
+    def _sync_enabled(self) -> None:
+        self._btn.setEnabled(bool(self._speakable_text()))
+
+    def _on_clicked(self) -> None:
+        text = self._speakable_text()
+        if not text:
+            return
+        from speech_utils import is_speaking, speak_or_stop
+
+        speak_or_stop(text)
+        self._sync_highlight(is_speaking())
+
+    def _on_speech_state_changed(self, _speaking: bool) -> None:
+        QTimer.singleShot(0, self._sync_highlight)
+
+    def _sync_highlight(self, highlighted: Optional[bool] = None) -> None:
+        from speech_utils import is_speaking
+
+        from chat_plugins.chat_ui_common import chat_speak_button_stylesheet
+
+        if highlighted is None:
+            highlighted = is_speaking()
+        highlighted = bool(highlighted)
+        if highlighted == self._highlighted:
+            return
+        self._highlighted = highlighted
+        self._btn.setStyleSheet(
+            chat_speak_button_stylesheet(highlighted=self._highlighted)
+        )
+
+    def _unregister_listener(self) -> None:
+        self._unregister_speech_state_listener(self._on_speech_state_changed)
+
+
+def create_image_gen_prompt_speak_button(
+    edit: QPlainTextEdit,
+    parent: Optional[QWidget] = None,
+    *,
+    object_name: str = "imageGenPromptSpeakBtn",
+) -> Optional[QPushButton]:
+    """Bullhorn read-aloud control (same as File Information pane)."""
+    from chat_plugins.chat_ui_common import (
+        chat_audio_output_ui_enabled,
+        create_chat_speak_button,
+    )
+
+    if not chat_audio_output_ui_enabled():
+        return None
+    btn = create_chat_speak_button(parent)
+    btn.setObjectName(object_name)
+    _ImageGenPromptSpeakButton(edit, btn)
+    return btn
+
+
 def make_image_gen_prompt_label_row(
     label_text: str,
     edit: QPlainTextEdit,
@@ -1210,8 +1285,9 @@ def make_image_gen_prompt_label_row(
     *,
     label_row_object_name: str = "imageGenPromptLabelRow",
     clear_object_name: str = "imageGenPromptClearBtn",
+    speak_object_name: str = "imageGenPromptSpeakBtn",
 ) -> QWidget:
-    """Field heading with a clear button to the right of the label."""
+    """Field heading with read-aloud and clear buttons to the right of the label."""
     row = QWidget(parent)
     row.setObjectName(label_row_object_name)
     row.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
@@ -1219,6 +1295,15 @@ def make_image_gen_prompt_label_row(
     layout.setContentsMargins(0, 8, 0, 0)
     layout.setSpacing(6)
     layout.addWidget(make_image_gen_field_label(label_text, row), 0)
+    speak_btn = create_image_gen_prompt_speak_button(
+        edit, row, object_name=speak_object_name
+    )
+    if speak_btn is not None:
+        layout.addWidget(
+            speak_btn,
+            0,
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+        )
     layout.addWidget(
         create_image_gen_prompt_clear_button(
             edit, row, object_name=clear_object_name

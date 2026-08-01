@@ -370,6 +370,41 @@ class RightSidebarCombinedWidget(QWidget):
         if persist and self._jobs_feature_enabled:
             self.main_window.config.update_setting('jobs_pane_compact', compact)
 
+    def _jobs_running_content_height(self) -> int:
+        if not self.jobs_visible or self.jobs_widget is None:
+            return 0
+        if self.jobs_widget.is_queue_compact():
+            return self.jobs_widget.compact_content_height()
+        if self.jobs_widget.should_shrink_wrap_client():
+            return self.jobs_widget.content_height_for_size_mode()
+        return self.jobs_widget.strip_only_content_height()
+
+    def ensure_jobs_pane_fits_content(self) -> None:
+        """Grow a collapsed jobs pane when the progress strip needs more room."""
+        if not self._pane_visibility()[2] or self.jobs_widget is None:
+            return
+        if not self.jobs_widget.has_active_generation():
+            if self._jobs_pane_compact:
+                self._sync_jobs_compact_geometry()
+            return
+        header_h = self._header_height_for_pane(2)
+        content_h = self._jobs_running_content_height()
+        if content_h <= 0:
+            return
+        needed = header_h + content_h
+        sizes = self.splitter.sizes()
+        current = sizes[2] if len(sizes) > 2 else 0
+        if self._jobs_pane_compact or (
+            self._jobs_strip_compact_available()
+            and current <= self._jobs_compact_pane_height() + 1
+        ):
+            if not self._jobs_pane_compact:
+                self._set_jobs_pane_compact(True, persist=False)
+            self._sync_jobs_compact_geometry()
+            return
+        if current + 1 < needed:
+            self._resize_pane_to_height(2, needed)
+
     def _sync_jobs_compact_geometry(self) -> None:
         """Pin jobs content and splitter to the progress strip height."""
         if not self._jobs_pane_compact or self.jobs_widget is None:
@@ -388,8 +423,23 @@ class RightSidebarCombinedWidget(QWidget):
         if not self._jobs_pane_compact or not self._pane_visibility()[2]:
             return
         compact = self._jobs_compact_pane_height()
+        strip_h = (
+            self.jobs_widget.compact_content_height()
+            if self.jobs_widget is not None
+            else 0
+        )
         sizes = list(self.splitter.sizes())
-        if len(sizes) < 3 or sizes[2] == compact:
+        if len(sizes) < 3:
+            return
+        content_mismatch = (
+            self.jobs_content is not None
+            and strip_h > 0
+            and (
+                self.jobs_content.minimumHeight() != strip_h
+                or self.jobs_content.maximumHeight() != strip_h
+            )
+        )
+        if sizes[2] == compact and not content_mismatch:
             return
         delta = sizes[2] - compact
         sizes[2] = compact

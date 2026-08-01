@@ -402,6 +402,58 @@ def resolve_initial_plugin(
     return installed[0]
 
 
+def _normalize_exif_model_token(model_text: str) -> str:
+    from imagegen_plugins.image_gen_naming import normalize_exif_model_name
+
+    return normalize_exif_model_name(model_text).lower()
+
+
+def _exif_model_match_keys(plugin: ImageGenModelPlugin) -> set[str]:
+    keys: set[str] = set()
+    for raw in (plugin.display_name, plugin.plugin_id):
+        token = _normalize_exif_model_token(raw)
+        if token:
+            keys.add(token)
+    hf_id = str(plugin.hf_model_id or "").strip()
+    if hf_id:
+        keys.add(_normalize_exif_model_token(hf_id))
+        if "/" in hf_id:
+            keys.add(_normalize_exif_model_token(hf_id.rsplit("/", 1)[-1]))
+    return keys
+
+
+def resolve_installed_plugin_for_exif_model(
+    model_text: str,
+    plugins: List[ImageGenModelPlugin],
+) -> Optional[ImageGenModelPlugin]:
+    """Match EXIF Image Model text to an installed plugin for this function."""
+    token = _normalize_exif_model_token(model_text)
+    if not token:
+        return None
+    for plugin in installed_plugins(plugins):
+        if token in _exif_model_match_keys(plugin):
+            return plugin
+    return None
+
+
+def switch_image_gen_dialog_plugin(
+    dialog: Any,
+    plugin: ImageGenModelPlugin,
+) -> bool:
+    """Select a model in the dialog combo (triggers persisted plugin switch)."""
+    combo = getattr(dialog, "_model_combo", None)
+    if combo is None:
+        return False
+    current = getattr(dialog, "plugin", None)
+    if current is not None and current.plugin_id == plugin.plugin_id:
+        return True
+    idx = combo.findData(plugin.plugin_id)
+    if idx < 0:
+        return False
+    combo.setCurrentIndex(idx)
+    return True
+
+
 
 def sync_image_gen_lora_field(dialog: Any) -> None:
     """Show the LoRA control and register it in ``_widgets`` for the active plugin."""

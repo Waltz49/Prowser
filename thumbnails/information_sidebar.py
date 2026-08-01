@@ -785,6 +785,7 @@ class InformationSidebar(QWidget):
         open_imagegen_create_from_text_dialog(
             self.main_window,
             user_comment=user_comment,
+            auto_import_exif=True,
         )
 
     def _on_edit_with_ai(self):

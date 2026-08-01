@@ -251,6 +251,7 @@ class LmStudioInstructionsPane:
                 IMAGE_GEN_FIELD_LABEL_SPACING,
                 build_image_gen_prompt_field_action_column,
                 create_image_gen_prompt_clear_button,
+                create_image_gen_prompt_speak_button,
                 create_image_gen_prompt_edit,
                 wrap_image_gen_bordered_field,
                 wrap_image_gen_field_control_indent,
@@ -308,6 +309,17 @@ class LmStudioInstructionsPane:
                 0,
                 Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
             )
+            speak_btn = create_image_gen_prompt_speak_button(
+                edit,
+                label_row,
+                object_name="imageGenSystemPromptSpeakBtn",
+            )
+            if speak_btn is not None:
+                label_row_layout.addWidget(
+                    speak_btn,
+                    0,
+                    Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+                )
             clear_btn = create_image_gen_prompt_clear_button(
                 edit,
                 label_row,

@@ -151,7 +151,7 @@ class ActiveJobStripWidget(QWidget):
         baseline_h = self._deferred_remeasure_baseline_h
         self._deferred_remeasure_baseline_h = 0
         self.refresh(force=True)
-        if self.height() != baseline_h:
+        if self.content_height() != baseline_h:
             self._emit_content_height_changed()
 
     def _setup_ui(self) -> None:
@@ -267,7 +267,13 @@ class ActiveJobStripWidget(QWidget):
             return
         if not force and not self._controller.task_status_display_needs_refresh():
             return
-        prev_h = self.height()
+        # Live height() lags setFixedHeight() until the event loop relayouts,
+        # so compare/cache computed target heights, never live geometry.
+        prev_h = (
+            self._cached_content_height
+            if self._cached_content_height > 0
+            else self.height()
+        )
         include_queue_jobs_row = self._include_queue_jobs_row()
         row_count = active_job_timing_progress_row_count(
             self._controller, include_queue_jobs_row=include_queue_jobs_row
@@ -297,33 +303,35 @@ class ActiveJobStripWidget(QWidget):
             body_html,
             content_width=browser_w,
         )
+        frame_h = browser_h + _ACTIVE_JOB_STRIP_FRAME_CHROME_V
         self._frame.setFixedWidth(frame_w)
         self._frame.setMinimumHeight(0)
-        self._frame.setFixedHeight(browser_h + _ACTIVE_JOB_STRIP_FRAME_CHROME_V)
+        self._frame.setFixedHeight(frame_h)
         layout = self.layout()
         margin_h = 0
         if layout is not None:
             margins = layout.contentsMargins()
             margin_h = margins.top() + margins.bottom()
+        target_h = frame_h + margin_h
         self.setMinimumHeight(0)
-        self.setFixedHeight(self._frame.height() + margin_h)
-        self._cached_content_height = self.height()
+        self.setFixedHeight(target_h)
+        self._cached_content_height = target_h
         self.show()
         _disable_tab_focus(self)
         if rows_changed:
             self._schedule_deferred_remeasure(before_height=prev_h)
             self._emit_content_height_changed()
-        elif self.height() != prev_h:
+        elif target_h != prev_h:
             self._emit_content_height_changed()
 
     def content_height(self) -> int:
-        """Height when visible, or last measured height for compact layout."""
+        """Last computed target height (live height() may lag pending relayout)."""
         if not self._controller.is_running():
             return 0
+        if self._cached_content_height > 0:
+            return self._cached_content_height
         if self.isVisible() and self.height() > 0:
             self._cached_content_height = self.height()
-            return self._cached_content_height
-        if self._cached_content_height > 0:
             return self._cached_content_height
         # Fallback before first refresh: chrome + one text line (no HTML rebuild).
         layout = self.layout()

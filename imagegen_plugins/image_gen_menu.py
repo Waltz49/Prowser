@@ -537,7 +537,11 @@ def _user_comment_for_active_image(main_window) -> str:
 
 
 def open_imagegen_create_from_text_dialog(
-    main_window, *, user_comment: Optional[str] = None, auto_generate: bool = False
+    main_window,
+    *,
+    user_comment: Optional[str] = None,
+    auto_generate: bool = False,
+    auto_import_exif: bool = False,
 ) -> None:
     """Open Create > Create an image from text..., optionally primed."""
     if not function_has_plugins(FUNCTION_CREATE):
@@ -549,6 +553,7 @@ def open_imagegen_create_from_text_dialog(
         controller,
         initial_prompt=_dialog_initial_prompt_from_user_comment(user_comment),
         auto_generate=auto_generate,
+        auto_import_available=auto_import_exif,
     )
 
 
@@ -825,7 +830,7 @@ def start_fast_imagegen_generation(main_window) -> None:
         open_imagegen_edit_dialog(main_window, user_comment=user_comment)
     else:
         open_imagegen_create_from_text_dialog(
-            main_window, user_comment=user_comment
+            main_window, user_comment=user_comment, auto_import_exif=True
         )
 
 

@@ -16,6 +16,7 @@ _EXIT_TIMEOUT_SEC = 30
 _AI_EXIT_ENV_VARS = (ENV_TEXT_AI_EXIT, ENV_IMAGE_AI_EXIT)
 _ANSI_RESET = "\033[0m"
 _ANSI_ORANGE = "\033[38;5;208m"
+newline_needed = True
 
 
 def _stdout_supports_color() -> bool:
@@ -25,7 +26,7 @@ def _stdout_supports_color() -> bool:
     return bool(term) and term.lower() != "dumb"
 
 
-def _status_suffix(label: str) -> str:
+def _status_prefix(label: str) -> str:
     if _stdout_supports_color():
         return f"[{_ANSI_ORANGE}{label}{_ANSI_RESET}]"
     return f"[{label}]"
@@ -78,19 +79,23 @@ def imagegen_values_for_dialog_save(values: dict, panel) -> dict:
 
 def describe_ai_exit_env(env_var: str) -> str:
     """One-line status for an exit env var (for ``prowser.py --env``)."""
+    global newline_needed
+    if newline_needed:
+        print('\n',flush=True) # two newlines
+        newline_needed = False
     raw = os.environ.get(env_var)
     if raw is None or not str(raw).strip():
         return f"{env_var}: No environment variable"
     display = str(raw).strip()
     path = os.path.expanduser(display)
     if not os.path.exists(path):
-        return f"{env_var}: {display} {_status_suffix('Not Found')}"
+        return f"{_status_prefix('Not Found')}\t{env_var}: {display}"
     if not os.path.isfile(path):
-        return f"{env_var}: {display} {_status_suffix('Not file')}"
+        return f"{_status_prefix('Not file')}\t{env_var}: {display}"
     issues = _exit_path_issues(path)
     if issues:
-        return f"{env_var}: {display} {_status_suffix('Exists; ' + '; '.join(issues))}"
-    return f"{env_var}: {display} {_status_suffix('Exists')}"
+        return f"{_status_prefix('Exists; ' + '; '.join(issues))}\t{env_var}: {display}"
+    return f"{_status_prefix('Exists')}\t{env_var}: {display}"
 
 
 def print_ai_exit_env_report() -> None:

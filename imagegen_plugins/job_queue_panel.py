@@ -1146,7 +1146,7 @@ class JobQueuePanelWidget(QWidget):
         if self._drop_indicator_index is not None:
             self._show_drop_indicator(self._drop_indicator_index)
 
-    def _sync_selection_ui(self) -> None:
+    def _sync_selection_ui(self, *, notify_geometry: bool = True) -> None:
         selected_id = self._controller.selected_job_id()
         row_idx = self._controller.resolve_selected_row_index()
         for card in self._job_cards:
@@ -1157,7 +1157,8 @@ class JobQueuePanelWidget(QWidget):
         else:
             self._action_bar.hide()
         self._reflow_all()
-        self._notify_shell_geometry_changed()
+        if notify_geometry:
+            self._notify_shell_geometry_changed()
 
     def schedule_refresh(self) -> None:
         """Defer table rebuild (safe during controller signal handlers)."""
@@ -1254,6 +1255,7 @@ class JobQueuePanelWidget(QWidget):
         self._controller.queue_changed.connect(self._update_header_status)
         self._controller.jobs_pane_title_changed.connect(self._update_header_status)
         self._controller.hold_job_queue_changed.connect(self._update_header_status)
+        self._controller.generation_started.connect(self._on_generation_started)
         self._signal_connected = True
         self._controller.task_status_info_changed.connect(
             lambda: self._refresh_active_row(force=True)
@@ -1272,13 +1274,13 @@ class JobQueuePanelWidget(QWidget):
             return
         prev_strip_h = 0
         if hasattr(self, "_active_job_strip") and self._active_job_strip.isVisible():
-            prev_strip_h = self._active_job_strip.height()
+            prev_strip_h = self._active_job_strip.content_height()
         self._refresh_active_row(force=True)
         self._active_job_strip.refresh(force=True)
         self._controller.mark_task_status_display_refreshed()
         if self._queue_size_mode in (QUEUE_SIZE_STRIP, QUEUE_SIZE_ONE):
             new_strip_h = (
-                self._active_job_strip.height()
+                self._active_job_strip.content_height()
                 if self._active_job_strip.isVisible()
                 else 0
             )
@@ -1477,6 +1479,36 @@ class JobQueuePanelWidget(QWidget):
     def _info_content_width(self) -> int:
         return max(80, self._viewport_width() - _CARD_CONTENT_MARGIN)
 
+    def _clear_expanded_layout_pin(self) -> None:
+        """Drop empty-queue shrink-wrap height once jobs or generation need space."""
+        if self._queue_size_mode != QUEUE_SIZE_ALL or self.should_shrink_wrap_client():
+            return
+        self.setMinimumHeight(0)
+        self.setMaximumHeight(16777215)
+        self.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
+        )
+        self.updateGeometry()
+
+    def _deferred_generation_geometry_sync(self) -> None:
+        """Re-measure after Qt applies strip/content layout from generation start."""
+        self._refresh_active_job_strip(force=True)
+        if self._queue_size_mode in (QUEUE_SIZE_STRIP, QUEUE_SIZE_ONE):
+            self._apply_queue_size_layout()
+        else:
+            self._clear_expanded_layout_pin()
+        self._notify_shell_geometry_changed()
+
+    def _on_generation_started(self) -> None:
+        """Resize compact / single-job views when the progress strip appears."""
+        self._refresh_active_job_strip(force=True)
+        if self._queue_size_mode in (QUEUE_SIZE_STRIP, QUEUE_SIZE_ONE):
+            self._apply_queue_size_layout()
+        else:
+            self._clear_expanded_layout_pin()
+        self._notify_shell_geometry_changed()
+        QTimer.singleShot(0, self._deferred_generation_geometry_sync)
+
     def _refresh_active_job_strip(self, *, force: bool = False) -> None:
         if not hasattr(self, "_active_job_strip"):
             return
@@ -1485,7 +1517,12 @@ class JobQueuePanelWidget(QWidget):
                 self._active_job_strip.hide()
             self._notify_shell_geometry_changed()
             return
+        prev_strip_h = self._active_job_strip.content_height()
         self._active_job_strip.refresh(force=force)
+        if self._queue_size_mode in (QUEUE_SIZE_STRIP, QUEUE_SIZE_ONE):
+            self._sync_fixed_panel_geometry()
+            if abs(self._active_job_strip.content_height() - prev_strip_h) > 1:
+                self._notify_shell_geometry_changed()
 
     def _on_active_strip_content_height_changed(self) -> None:
         if self._queue_size_mode == QUEUE_SIZE_ONE:
@@ -1545,7 +1582,12 @@ class JobQueuePanelWidget(QWidget):
         if self._queue_size_mode == QUEUE_SIZE_ALL and not self.should_shrink_wrap_client():
             return
         content_h = self.content_height_for_size_mode()
-        if self.height() == content_h:
+        # Compare applied constraints, not height(): live geometry lags
+        # setFixedHeight() until the parent layout runs.
+        if (
+            self.minimumHeight() == content_h
+            and self.maximumHeight() == content_h
+        ):
             return
         self.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
@@ -1621,6 +1663,7 @@ class JobQueuePanelWidget(QWidget):
                 self._scroll.setFixedHeight(0)
             self._sync_fixed_panel_geometry()
         else:
+            self._clear_expanded_layout_pin()
             self.setMinimumHeight(0)
             self.setMaximumHeight(16777215)
             self.setSizePolicy(
@@ -1642,18 +1685,15 @@ class JobQueuePanelWidget(QWidget):
     def _active_strip_block_height(self) -> int:
         if not self._controller.is_running():
             return 0
-        if self._active_job_strip.isVisible() and self._active_job_strip.height() > 0:
-            return self._active_job_strip.height()
-        return self._active_job_strip.content_height()
+        strip_h = self._active_job_strip.content_height()
+        if strip_h > 0:
+            return strip_h
+        return self._active_job_strip.height()
 
     def strip_only_content_height(self) -> int:
         """Client height for strip-only view (progress container)."""
         if self._controller.is_running():
             self._active_job_strip.refresh(force=True)
-            if self._active_job_strip.isVisible():
-                h = self._active_job_strip.height()
-                if h > 0:
-                    return h
         strip_h = self._active_job_strip.content_height()
         if strip_h > 0:
             return strip_h
@@ -1745,6 +1785,7 @@ class JobQueuePanelWidget(QWidget):
         if self._queue_size_mode == QUEUE_SIZE_ONE:
             self._apply_one_job_scroll_height()
             self._sync_fixed_panel_geometry()
+            self._notify_shell_geometry_changed()
 
     def _clear_job_cards(self) -> None:
         while self._list_layout.count() > 1:
@@ -1782,7 +1823,7 @@ class JobQueuePanelWidget(QWidget):
 
     def compact_content_height(self) -> int:
         """Client height for minimized view: active progress strip only."""
-        return self._active_job_strip.content_height()
+        return self.strip_only_content_height()
 
     def preferred_content_height(self) -> int:
         """Height needed to show all job rows without vertical scrolling."""
@@ -1791,7 +1832,9 @@ class JobQueuePanelWidget(QWidget):
             hasattr(self, "_active_job_strip")
             and self._active_job_strip.isVisible()
         ):
-            strip_h = self._active_job_strip.height()
+            strip_h = self._active_job_strip.content_height()
+            if strip_h <= 0:
+                strip_h = self._active_job_strip.height()
             total += strip_h if strip_h > 0 else self._active_job_strip.sizeHint().height()
         if not self._job_cards:
             return total + self.empty_state_height_hint()
@@ -1867,8 +1910,11 @@ class JobQueuePanelWidget(QWidget):
         self._controller.resolve_selected_row_index()
         self._reflow_all()
         _disable_tab_focus(self)
-        self._sync_selection_ui()
+        self._sync_selection_ui(notify_geometry=False)
         self._update_header_status()
         self._refresh_active_job_strip(force=True)
         self._apply_queue_size_layout()
         self._notify_shell_geometry_changed()
+        sidebar = getattr(self.main_window, "right_sidebar", None)
+        if sidebar is not None and hasattr(sidebar, "ensure_jobs_pane_fits_content"):
+            sidebar.ensure_jobs_pane_fits_content()

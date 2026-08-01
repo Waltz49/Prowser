@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import os
 import re
 from pathlib import Path
 from typing import Any, Dict, FrozenSet, List, Optional, Tuple, TYPE_CHECKING
@@ -534,6 +535,88 @@ def lora_choices_for_plugin(
         ):
             choices.append((lora_choice_label(entry, model_key=model_key), entry.lora_id))
     return tuple(choices)
+
+
+_EXIF_LORA_TRIGGER_SUFFIX_RE = re.compile(
+    r"\s*-\s*trigger\s*:\s*.+$", re.IGNORECASE
+)
+
+
+def _normalize_exif_lora_token(name: str) -> str:
+    text = str(name or "").strip()
+    text = _EXIF_LORA_TRIGGER_SUFFIX_RE.sub("", text).strip()
+    return text.lower()
+
+
+def _exif_lora_match_keys(
+    entry: FluxLoraEntry,
+    *,
+    model_key: str = "",
+) -> set[str]:
+    keys: set[str] = set()
+    for raw in (
+        entry.display_name,
+        lora_base_display_name(entry, model_key=model_key),
+        entry.lora_id,
+    ):
+        token = _normalize_exif_lora_token(raw)
+        if token:
+            keys.add(token)
+    repo_id = str(entry.repo_id or "").strip()
+    if repo_id:
+        keys.add(_normalize_exif_lora_token(repo_id))
+        if "/" in repo_id:
+            keys.add(_normalize_exif_lora_token(repo_id.rsplit("/", 1)[-1]))
+    filename = str(entry.filename or "").strip()
+    if filename:
+        stem = os.path.splitext(filename)[0]
+        token = _normalize_exif_lora_token(stem)
+        if token:
+            keys.add(token)
+    return keys
+
+
+def match_exif_lora_names_to_ids(
+    lora_text: str,
+    plugin: "ImageGenModelPlugin",
+    settings: Optional[Dict[str, Any]] = None,
+) -> List[str]:
+    """Map EXIF LoRA name(s) to installed catalog ids for the active plugin."""
+    target = str(lora_text or "").strip()
+    if not target or target.lower() == "none":
+        return []
+    from config import get_config
+
+    if settings is None:
+        settings = get_config().load_settings()
+    model_key = lora_model_key_for_plugin(plugin) or ""
+    choice_ids = {
+        lora_id
+        for _label, lora_id in lora_choices_for_plugin(plugin, settings)
+        if lora_id and lora_id != "none"
+    }
+    parts = [p.strip() for p in re.split(r"\s*\+\s*", target) if p.strip()]
+    if len(parts) <= 1:
+        parts = [target]
+    matched_ids: List[str] = []
+    host_id = getattr(plugin, "lora_host_id", None)
+    for part in parts:
+        part_token = _normalize_exif_lora_token(part)
+        if not part_token:
+            continue
+        found_id: Optional[str] = None
+        for entry in entries_for_host(host_id, settings) if host_id else ():
+            if entry.lora_id not in choice_ids:
+                continue
+            if not is_lora_installed(entry.lora_id):
+                continue
+            if part_token in _exif_lora_match_keys(entry, model_key=model_key):
+                found_id = entry.lora_id
+                break
+        if found_id is not None and found_id not in matched_ids:
+            matched_ids.append(found_id)
+    return matched_ids
+
 
 
 def lora_choices_for_pipeline(

@@ -170,7 +170,58 @@ _EXIF_PARAM_LINE_GUIDANCE = re.compile(
     r"^\s*Guidance\s*:\s*([\d.]+)\s*$", re.IGNORECASE
 )
 _EXIF_PARAM_LINE_LORA = re.compile(r"^\s*LoRA\s*:\s*(.+?)\s*$", re.IGNORECASE)
+_EXIF_PARAM_LINE_ELAPSED = re.compile(r"^\s*Elapsed\s*:", re.IGNORECASE)
 _EXIF_MODEL_STEPS_SUFFIX = re.compile(r"\[(\d+)\]\s*$")
+
+
+def _exif_line_is_model_param(stripped: str) -> bool:
+    """True when a line inside the Image Model block is a generation param, not the model name."""
+    if _EXIF_PARAM_LINE_INT.match(stripped):
+        return True
+    if _EXIF_PARAM_LINE_GUIDANCE.match(stripped):
+        return True
+    if _EXIF_PARAM_LINE_LORA.match(stripped):
+        return True
+    if _EXIF_PARAM_LINE_ELAPSED.match(stripped):
+        return True
+    return False
+
+
+def normalize_exif_model_name(model_text: str) -> str:
+    """Strip legacy suffixes and whitespace from an Image Model EXIF token."""
+    text = str(model_text or "").strip()
+    text = _strip_legacy_model_steps_suffix(_strip_legacy_model_quant_suffix(text))
+    return text.strip()
+
+
+def parse_exif_model_name(full_comment: str) -> Optional[str]:
+    """Parse Image Model name from EXIF UserComment (text layout or mflux JSON)."""
+    if not full_comment or not str(full_comment).strip():
+        return None
+    meta = parse_mflux_metadata_json(full_comment)
+    if meta is not None:
+        hf_id = str(meta.get("model_config") or meta.get("model") or "").strip()
+        if hf_id and hf_id.lower() != "none":
+            return hf_id
+    in_model_block = False
+    for line in full_comment.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        lower = stripped.lower().rstrip(":")
+        if lower in ("image model", "image model:"):
+            in_model_block = True
+            continue
+        if lower.startswith("prompt") or lower.startswith("references"):
+            in_model_block = False
+            continue
+        if not in_model_block:
+            continue
+        if _exif_line_is_model_param(stripped):
+            continue
+        name = normalize_exif_model_name(stripped)
+        return name or None
+    return None
 
 
 def parse_exif_generation_metadata(full_comment: str) -> Dict[str, Any]:
@@ -178,6 +229,10 @@ def parse_exif_generation_metadata(full_comment: str) -> Dict[str, Any]:
     out: Dict[str, Any] = {}
     if not full_comment or not str(full_comment).strip():
         return out
+
+    model_name = parse_exif_model_name(full_comment)
+    if model_name:
+        out["model"] = model_name
 
     in_model_block = False
     for line in full_comment.splitlines():

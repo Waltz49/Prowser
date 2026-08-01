@@ -35,7 +35,7 @@ def _stdout_supports_color() -> bool:
     return bool(term) and term.lower() != "dumb"
 
 
-def _status_suffix(label: str) -> str:
+def _status_prefix(label: str) -> str:
     if _stdout_supports_color():
         return f"[{_ANSI_ORANGE}{label}{_ANSI_RESET}]"
     return f"[{label}]"
@@ -136,31 +136,31 @@ def describe_say_exit_env() -> str:
     display = str(raw).strip()
     argv = parse_say_exit_command()
     if not argv:
-        return f"{ENV_SAY_EXIT}: {display} {_status_suffix('Invalid')}"
+        return f"{_status_prefix('Invalid')}\t{ENV_SAY_EXIT}: {display}"
 
     first = os.path.basename(argv[0]).lower()
     if _is_python_interpreter(argv[0]):
         if len(argv) < 2:
-            return f"{ENV_SAY_EXIT}: {display} {_status_suffix('Missing script')}"
+            return f"{_status_prefix('Missing script')}\t{ENV_SAY_EXIT}: {display}"
         script = _normalize_command_path(argv[1])
         if not os.path.isfile(script):
-            return f"{ENV_SAY_EXIT}: {display} {_status_suffix('Script not found')}"
+            return f"{_status_prefix('Script not found')}\t{ENV_SAY_EXIT}: {display}"
         issues = _script_path_issues(script)
         if issues:
-            return f"{ENV_SAY_EXIT}: {display} {_status_suffix('Exists; ' + '; '.join(issues))}"
+            return f"{_status_prefix('Exists; ' + '; '.join(issues))}\t{ENV_SAY_EXIT}: {display}"
     else:
         script = _normalize_command_path(argv[0])
         if os.path.isfile(script):
             issues = _script_path_issues(script)
             if issues:
-                return f"{ENV_SAY_EXIT}: {display} {_status_suffix('Exists; ' + '; '.join(issues))}"
+                return f"{_status_prefix('Exists; ' + '; '.join(issues))}\t{ENV_SAY_EXIT}: {display}"
         elif not shutil.which(argv[0]):
-            return f"{ENV_SAY_EXIT}: {display} {_status_suffix('Not Found')}"
+            return f"{_status_prefix('Not Found')}\t{ENV_SAY_EXIT}: {display}"
 
     voice = os.environ.get(ENV_SAY_VOICE, "").strip()
     if voice:
-        return f"{ENV_SAY_EXIT}: {display} {_status_suffix('Exists')} voice={voice}"
-    return f"{ENV_SAY_EXIT}: {display} {_status_suffix('Exists')}"
+        return f"{_status_prefix('Exists')}\t{ENV_SAY_EXIT}: {display} voice={voice}"
+    return f"{_status_prefix('Exists')}\t{ENV_SAY_EXIT}: {display}"
 
 
 def print_say_exit_env_report() -> None:
