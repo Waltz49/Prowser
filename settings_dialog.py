@@ -140,6 +140,7 @@ from settings.widgets.settings_dialog_theme import (
     settings_chrome_for_preset,
     settings_dialog_stylesheet,
     settings_dialog_tooltip_label_stylesheet,
+    settings_dialog_graphic_tooltip_stylesheet,
 )
 from settings.widgets.collapsible_theme_group import (
     CollapsibleThemeGroup,
@@ -837,6 +838,9 @@ class SettingsDialog(QDialog):
         install_settings_dialog_tooltip_filter(
             self,
             lambda: settings_dialog_tooltip_label_stylesheet(self._settings_chrome()),
+            graphic_stylesheet_fn=lambda: settings_dialog_graphic_tooltip_stylesheet(
+                self._settings_chrome()
+            ),
         )
 
     def _settings_chrome_preset_id(self) -> str:

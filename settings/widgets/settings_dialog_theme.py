@@ -319,3 +319,27 @@ def settings_dialog_tooltip_label_stylesheet(chrome: SettingsDialogChrome) -> st
         font-size: 12px;
     }}
     """
+
+
+def settings_dialog_graphic_tooltip_stylesheet(chrome: SettingsDialogChrome) -> str:
+    """Icon+text tooltip chrome matching settings text-only tooltips."""
+    c = chrome
+    return f"""
+        QWidget#graphicButtonTooltip {{
+            background-color: {c.control_bg_hex};
+            border: 1px solid {c.control_border_hex};
+            border-radius: 4px;
+        }}
+        QLabel#graphicButtonTooltipText {{
+            background: transparent;
+            border: none;
+            color: {c.control_text_hex};
+            font-size: 12px;
+            padding: 6px 8px 6px 0px;
+        }}
+        QLabel#graphicButtonTooltipIcon {{
+            background: transparent;
+            border: none;
+            padding: 6px 0px 6px 6px;
+        }}
+    """

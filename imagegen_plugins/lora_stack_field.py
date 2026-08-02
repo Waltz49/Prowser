@@ -16,7 +16,6 @@ from PySide6.QtWidgets import (
     QGridLayout,
     QLabel,
     QLineEdit,
-    QListView,
     QScrollArea,
     QSizePolicy,
     QStyle,

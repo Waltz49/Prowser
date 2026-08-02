@@ -130,7 +130,7 @@ class JobQueueActionBar(QWidget):
 
         self._plus_btn = QPushButton()
         self._plus_btn.setToolTip("Add another image to this series")
-        self._plus_btn.setStyleSheet(_series_plus_button_stylesheet())
+        _configure_icon_push_button(self._plus_btn, "series_plus_icon.png")
         self._plus_btn.clicked.connect(self._on_plus)
 
         self._minus_btn = QPushButton()
@@ -138,7 +138,7 @@ class JobQueueActionBar(QWidget):
             "Remove one pending image from the series.\n"
             "Option+click to remove all remaining images."
         )
-        self._minus_btn.setStyleSheet(_series_minus_button_stylesheet())
+        _configure_icon_push_button(self._minus_btn, "series_minus_icon.png")
         connect_import_button_with_option_modifier(
             self._minus_btn, self._on_minus
         )
@@ -151,6 +151,7 @@ class JobQueueActionBar(QWidget):
             "Other source images keep their order."
         )
         self._refine_btn.setStyleSheet(_series_refinement_button_stylesheet())
+        self._refine_btn.setProperty("_tooltip_icon_asset", "series_refinement_icon.png")
         self._refine_btn.toggled.connect(self._on_refine_toggled)
 
         self._edit_btn = QPushButton()
@@ -159,7 +160,7 @@ class JobQueueActionBar(QWidget):
             "For a pending job, use Replace in the dialog to update it in place.\n"
             "For a running batch job, use Update to change remaining copies."
         )
-        self._edit_btn.setStyleSheet(_edit_button_stylesheet())
+        _configure_icon_push_button(self._edit_btn, "edit_icon.png")
         self._edit_btn.clicked.connect(self._on_edit)
 
         self._cancel_btn = QPushButton()
@@ -167,7 +168,9 @@ class JobQueueActionBar(QWidget):
             "Cancel job\n"
             "Option+click to cancel this job and all jobs after it (no confirmation)."
         )
-        self._cancel_btn.setStyleSheet(_trash_button_stylesheet())
+        _configure_icon_push_button(
+            self._cancel_btn, "trash_icon.png", hover_icon_name="trash_icon_hover.png"
+        )
         connect_import_button_with_option_modifier(
             self._cancel_btn, self._on_cancel
         )
@@ -242,11 +245,14 @@ class JobQueueActionBar(QWidget):
 
     def refresh_theme_styles(self) -> None:
         _apply_job_queue_action_bar_background(self)
-        self._plus_btn.setStyleSheet(_series_plus_button_stylesheet())
-        self._minus_btn.setStyleSheet(_series_minus_button_stylesheet())
+        _configure_icon_push_button(self._plus_btn, "series_plus_icon.png")
+        _configure_icon_push_button(self._minus_btn, "series_minus_icon.png")
         self._refine_btn.setStyleSheet(_series_refinement_button_stylesheet())
-        self._edit_btn.setStyleSheet(_edit_button_stylesheet())
-        self._cancel_btn.setStyleSheet(_trash_button_stylesheet())
+        self._refine_btn.setProperty("_tooltip_icon_asset", "series_refinement_icon.png")
+        _configure_icon_push_button(self._edit_btn, "edit_icon.png")
+        _configure_icon_push_button(
+            self._cancel_btn, "trash_icon.png", hover_icon_name="trash_icon_hover.png"
+        )
 
 
 def build_job_queue_action_widget(
@@ -264,7 +270,7 @@ def build_job_queue_action_widget(
         "For a pending job, use Replace in the dialog to update it in place.\n"
         "For a running batch job, use Update to change remaining copies."
     )
-    edit_btn.setStyleSheet(_edit_button_stylesheet())
+    _configure_icon_push_button(edit_btn, "edit_icon.png")
     edit_btn.clicked.connect(
         lambda _checked=False, r=row_idx: job_queue_edit_row(main_window, controller, r)
     )
@@ -273,7 +279,9 @@ def build_job_queue_action_widget(
         "Cancel job\n"
         "Option+click to cancel this job and all jobs after it (no confirmation)."
     )
-    cancel_btn.setStyleSheet(_trash_button_stylesheet())
+    _configure_icon_push_button(
+        cancel_btn, "trash_icon.png", hover_icon_name="trash_icon_hover.png"
+    )
     connect_import_button_with_option_modifier(
         cancel_btn,
         lambda option_held=False, r=row_idx: job_queue_cancel_row(
@@ -288,7 +296,7 @@ def build_job_queue_action_widget(
 
     plus_btn = QPushButton()
     plus_btn.setToolTip("Add another image to this series")
-    plus_btn.setStyleSheet(_series_plus_button_stylesheet())
+    _configure_icon_push_button(plus_btn, "series_plus_icon.png")
     plus_btn.setEnabled(controller.can_add_series_cycle_for_row(row_idx))
     plus_btn.clicked.connect(
         lambda _checked=False, r=row_idx: controller.add_series_cycle_for_row(r)
@@ -301,7 +309,7 @@ def build_job_queue_action_widget(
             "Remove one pending image from the series.\n"
             "Option+click to remove all remaining images."
         )
-        minus_btn.setStyleSheet(_series_minus_button_stylesheet())
+        _configure_icon_push_button(minus_btn, "series_minus_icon.png")
         connect_import_button_with_option_modifier(
             minus_btn,
             lambda option_held=False, r=row_idx: (
@@ -318,6 +326,7 @@ def build_job_queue_action_widget(
             "Other source images keep their order."
         )
         refine_btn.setStyleSheet(_series_refinement_button_stylesheet())
+        refine_btn.setProperty("_tooltip_icon_asset", "series_refinement_icon.png")
         refine_btn.blockSignals(True)
         refine_btn.setChecked(controller.series_refinement_enabled_for_row(row_idx))
         refine_btn.blockSignals(False)
@@ -389,6 +398,13 @@ def _icon_push_button_stylesheet(icon_name: str, *, hover_icon_name: str | None 
             opacity: 0.35;
         }}
     """
+
+
+def _configure_icon_push_button(
+    btn: QPushButton, icon_name: str, *, hover_icon_name: str | None = None
+) -> None:
+    btn.setStyleSheet(_icon_push_button_stylesheet(icon_name, hover_icon_name=hover_icon_name))
+    btn.setProperty("_tooltip_icon_asset", icon_name)
 
 
 def _trash_button_stylesheet() -> str:

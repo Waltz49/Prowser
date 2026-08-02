@@ -1650,6 +1650,10 @@ class ImageBrowserWindow(QMainWindow):
         self._status_bar_peek_filter = StatusBarPeekFilter(self)
         QApplication.instance().installEventFilter(self._status_bar_peek_filter)
 
+        from tooltip_popup_utils import install_icon_graphic_tooltip_filter
+
+        self._icon_graphic_tooltip_filter = install_icon_graphic_tooltip_filter(self)
+
         self._chrome_saved_layout = None
         self._chrome_suppressed = False
         self._chrome_partial_side = None

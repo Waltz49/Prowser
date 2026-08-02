@@ -1447,6 +1447,28 @@ class ThemeStylesMixin:
             border-radius: 4px; padding: 4px 8px; font-size: 11pt; }}
         """
 
+    def graphic_button_tooltip_stylesheet(self) -> str:
+        t = self
+        return f"""
+            QWidget#graphicButtonTooltip {{
+                background-color: {t.qtooltip_bg_hex};
+                border: 1px solid {t.qtooltip_border_hex};
+                border-radius: 4px;
+            }}
+            QLabel#graphicButtonTooltipText {{
+                background: transparent;
+                border: none;
+                color: {t.qtooltip_fg_hex};
+                font-size: 11pt;
+                padding: 6px 8px 6px 0px;
+            }}
+            QLabel#graphicButtonTooltipIcon {{
+                background: transparent;
+                border: none;
+                padding: 6px 0px 6px 6px;
+            }}
+        """
+
     def right_sidebar_combined_stylesheet(self) -> str:
         return f"QWidget {{ background-color: {self.sidebar_background_color_hex}; }}"
 
