@@ -11,7 +11,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from PIL.ExifTags import GPSTAGS
 from PySide6.QtCore import QEvent, Qt, QTimer, QSize, QUrl
-from PySide6.QtGui import QIcon
+from PySide6.QtGui import QFont, QFontMetrics, QIcon
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
@@ -86,6 +86,11 @@ _INFO_IMAGE_MODEL_H4 = '<h4>Image model</h4>'
 _INFO_ELAPSED_IN_MODEL_RE = re.compile(
     r'(?i)Elapsed:\s*(\d+:\d{2}:\d{2})(?:\s*\((\d+:\d{2}:\d{2})/iter\))?'
 )
+_INFO_LORA_ROW_IN_HTML_RE = re.compile(
+    r'(?i)(^|<br>)((?:LoRA:\s*.+?)|(?:'
+    + "\u00a0{6}"
+    + r".+?))(?=<br>|$)"
+)
 # Table rows derived from file/dimensions only (not camera EXIF); user comment is separate below.
 _BASIC_INFO_TABLE_FIELDS = frozenset({'Directory', 'Image Size', 'File Size', 'File Date', 'Scale'})
 
@@ -106,6 +111,7 @@ class InformationSidebar(QWidget):
         self._info_section_expanded_cache: Optional[Dict[str, bool]] = None
         self._action_nav_bar: InformationActionNavBar | None = None
         self._metadata_refresh_timer: QTimer | None = None
+        self._last_info_elide_width_px: int = 0
         self._show_menu_bar = bool(
             main_window.config.load_settings().get("information_show_menu_bar", True)
         )
@@ -169,6 +175,21 @@ class InformationSidebar(QWidget):
 
         self.attach_titlebar_tools()
         self._subscribe_to_sidebar_events()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        width_px = self._info_content_width_px()
+        if (
+            width_px > 0
+            and width_px != self._last_info_elide_width_px
+            and getattr(self, "_last_overlay_data", None)
+        ):
+            self._last_info_elide_width_px = width_px
+            self._rebuild_overlay_from_cache(
+                hovered_anchor=getattr(self, "_hovered_anchor", None)
+            )
+        elif width_px > 0:
+            self._last_info_elide_width_px = width_px
 
     def _subscribe_to_sidebar_events(self) -> None:
         event_bus = getattr(self.main_window, 'event_bus', None)
@@ -1126,6 +1147,51 @@ class InformationSidebar(QWidget):
         middle = _INFO_ELAPSED_IN_MODEL_RE.sub(repl, middle)
         return disp[:body_start] + middle + disp[end:]
 
+    def _info_monospace_font_metrics(self) -> QFontMetrics:
+        font = QFont("Courier New", 12)
+        if self.info_text_edit is not None:
+            font = QFont(self.info_text_edit.font())
+            font.setPointSize(12)
+        return QFontMetrics(font)
+
+    def _elide_info_monospace_line(self, text: str, width_px: int) -> str:
+        width_px = max(40, int(width_px))
+        return self._info_monospace_font_metrics().elidedText(
+            text,
+            Qt.TextElideMode.ElideRight,
+            width_px,
+        )
+
+    def _wrap_elided_info_line_html(self, lead: str, plain_line: str, width_px: int) -> str:
+        elided = escape(self._elide_info_monospace_line(plain_line, width_px))
+        block = (
+            f'<div style="white-space: nowrap; overflow: hidden; '
+            f'text-overflow: ellipsis; max-width: {width_px}px;">{elided}</div>'
+        )
+        if lead.startswith("<br>"):
+            return block
+        return lead + block
+
+    def _elide_lora_lines_in_info_html(self, disp: str) -> str:
+        """Elide LoRA stack rows to the information pane content width."""
+        pos = disp.find(_INFO_IMAGE_MODEL_H4)
+        if pos < 0:
+            return disp
+        body_start = pos + len(_INFO_IMAGE_MODEL_H4)
+        next_h4 = disp.find("<h4>", body_start)
+        end = len(disp) if next_h4 < 0 else next_h4
+        middle = disp[body_start:end]
+        width_px = self._info_content_width_px()
+
+        def repl(match: re.Match[str]) -> str:
+            line_html = match.group(2)
+            plain = unescape(line_html)
+            return self._wrap_elided_info_line_html(match.group(1), plain, width_px)
+
+        middle = _INFO_LORA_ROW_IN_HTML_RE.sub(repl, middle)
+        self._last_info_elide_width_px = width_px
+        return disp[:body_start] + middle + disp[end:]
+
     def _update_overlay_image_model_flag(
         self, image_path: str, speakable_plain_text: Optional[str]
     ) -> None:
@@ -1424,6 +1490,7 @@ class InformationSidebar(QWidget):
         if description:
             description = description.replace('\x00', '')
             if description.strip() and not (description.strip().startswith("b'") or description.strip().startswith('b"')):
+                description = self._elide_lora_lines_in_info_html(description)
                 description = self._wrap_description_with_collapsible_sections(description)
                 html_parts.append(f'<div style="padding-top: 10px; padding-bottom: 6px; margin-top: 10px; border-top: 1px solid {bdr}; color: {text_hex}; font-size: 12pt;">{description}</div>')
             else:

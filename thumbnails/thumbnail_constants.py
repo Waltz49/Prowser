@@ -116,7 +116,7 @@ BROWSE_IMAGE_HISTORY_MAX = 60
 
 # Image generation: where auto-added LoRA trigger words are inserted in the prompt.
 # 0 = top, 1 = bottom, 2 = both (top and bottom).
-TRIGGER_POSITION = 0
+TRIGGER_POSITION = 1
 
 # Tree view auto-scroll during drag - narrow band (less than one node height), slow speeds
 TREE_DRAG_AUTO_SCROLL_TIMER_MS = 20  # ms - timer interval for auto-scroll of tree during drag

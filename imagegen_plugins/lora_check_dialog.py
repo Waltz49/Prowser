@@ -29,10 +29,10 @@ from imagegen_plugins.lora_compatibility_checker import (
     LoraCheckChange,
     LoraCheckResult,
     LoraCheckStats,
+    installed_probeable_models,
     plan_disk_lora_probes,
     run_lora_compatibility_check,
 )
-from imagegen_plugins.pipelines.mflux_schnell import mflux_is_installed
 from utils import (
     get_button_style,
     get_dialog_shell_stylesheet,
@@ -56,14 +56,25 @@ def _format_progress_html(
 ) -> str:
     lines: List[str] = []
     if phase == "scan":
-        lines.append("<b>Scanning on-disk LoRAs…</b>")
-        if stats.loras_total or stats.skipped_not_on_disk:
+        lines.append("<b>Scanning on-disk LoRAs and ~/Downloads…</b>")
+        if stats.loras_total or stats.skipped_not_on_disk or stats.downloads_scanned:
             lines.append(
-                f"On disk to test: <b>{stats.loras_total}</b> · "
+                f"To test: <b>{stats.loras_total}</b> · "
                 f"Not on disk (skipped): {stats.skipped_not_on_disk} · "
-                f"Installed models in plan: <b>{stats.models_total}</b>"
+                f"Installed models: <b>{stats.models_total}</b>"
             )
+            if stats.downloads_scanned:
+                lines.append(
+                    f"Downloads scanned: {stats.downloads_scanned} · "
+                    f"Duplicates removed: {stats.downloads_deduped}"
+                )
             lines.append(f"Total probes: <b>{stats.probes_total}</b>")
+    elif phase == "downloads":
+        lines.append("<b>Removing duplicate Downloads LoRAs…</b>")
+        lines.append(
+            f"Downloads scanned: {stats.downloads_scanned} · "
+            f"Duplicates removed: <b>{stats.downloads_deduped}</b>"
+        )
     else:
         lora_label = html.escape(_lora_label(lora_id)) if lora_id else "—"
         model_label = (
@@ -78,12 +89,12 @@ def _format_progress_html(
         current = stats.probe_current or max(1, stats.probes_done)
         probe_pos = f"{current}/{max(1, stats.probes_total)}"
         lines.append(
-            f"LoRA <b>{lora_pos}</b> · "
-            f"Model <b>{model_pos}</b> for this LoRA · "
+            f"Model <b>{model_pos}</b> · "
+            f"LoRA <b>{lora_pos}</b> on this model · "
             f"Probe <b>{probe_pos}</b> "
             f"({stats.probes_done} finished)"
         )
-        lines.append(f"Testing <b>{lora_label}</b> on <b>{model_label}</b>")
+        lines.append(f"Testing <b>{model_label}</b> with <b>{lora_label}</b>")
         if stats.last_result == "pass":
             lines.append("Last result: <span style='color:#1a7f37'>pass</span>")
         elif stats.last_result == "fail":
@@ -112,7 +123,7 @@ def _format_results_text_sections(result: LoraCheckResult) -> List[str]:
         "",
         "Summary",
         f"  On-disk LoRAs tested: {st.loras_done}/{st.loras_total}",
-        f"  Installed models in plan: {st.models_total}",
+        f"  Installed models: {st.models_total}",
         f"  Probes run: {st.probes_done}/{st.probes_total}",
         f"  LoRAs with at least one pass: {st.supported_loras}",
         f"  LoRAs with no pass: {st.removed_loras}",
@@ -122,9 +133,14 @@ def _format_results_text_sections(result: LoraCheckResult) -> List[str]:
         f"  Skipped (not on disk): {st.skipped_not_on_disk}",
         f"  Skipped (hidden — not enabled): {st.skipped_hidden_count}",
     ]
+    if st.downloads_scanned:
+        lines.append(f"  Downloads scanned: {st.downloads_scanned}")
+        lines.append(f"  Downloads duplicates removed: {st.downloads_deduped}")
+        lines.append(f"  Downloads registered: {st.downloads_registered}")
+        lines.append(f"  Downloads with no passing model: {st.downloads_failed}")
     if st.skipped_model_probes:
         lines.append(
-            f"  Skipped (base model not installed): {st.skipped_model_probes}"
+            f"  Base models not installed (not probed): {st.skipped_model_probes}"
         )
 
     newly_enabled = _changes_of(result, "newly_enabled")
@@ -133,6 +149,9 @@ def _format_results_text_sections(result: LoraCheckResult) -> List[str]:
     lost = _changes_of(result, "lost_support")
     hidden = _changes_of(result, "skipped_hidden")
     not_disk = _changes_of(result, "skipped_not_on_disk")
+    downloads_registered = _changes_of(result, "downloads_registered")
+    downloads_deduped = _changes_of(result, "downloads_deduped")
+    downloads_failed = _changes_of(result, "downloads_failed")
     enabled_keys = {(c.lora_id, c.model_key) for c in newly_enabled}
     hidden_keys = {(c.lora_id, c.model_key) for c in hidden}
     compat_only = [
@@ -162,17 +181,22 @@ def _format_results_text_sections(result: LoraCheckResult) -> List[str]:
             lines.append(f"  … and {len(items) - limit} more")
 
     add_section("Newly enabled", newly_enabled)
+    add_section("Downloads registered", downloads_registered)
     add_section("Newly compatible (not newly enabled)", compat_only)
     add_section("Failed probes", failed)
     add_section("Lost prior compatibility", lost)
     add_section("Passed but hidden (left disabled)", hidden)
+    add_section("Downloads duplicates removed", downloads_deduped, with_model=False)
+    add_section("Downloads with no passing model", downloads_failed, with_model=False)
     add_section("Skipped — weights not on disk", not_disk, with_model=False, limit=80)
 
     lines.extend(
         [
             "",
-            "Passing LoRAs are recorded for each supporting installed model and "
-            "enabled in Settings → LoRA (unless previously Hidden).",
+            "Each on-disk LoRA is probed against every installed base model. Passing "
+            "pairs are recorded and enabled in Settings → LoRA (unless previously Hidden).",
+            "Unregistered .safetensors in ~/Downloads are tested too; duplicates "
+            "(same md5 as an installed LoRA) are deleted from Downloads.",
             "Re-run after downloading new LoRA weights. Use Hide in Settings to "
             "keep a LoRA out of the menus.",
         ]
@@ -232,27 +256,29 @@ def _apply_check_result(parent, result: LoraCheckResult) -> None:
 
 
 def run_check_loras_dialog(parent) -> None:
-    """Tools > Debug > Check LoRAs — probe on-disk LoRAs; enable where they pass."""
-    if not mflux_is_installed():
+    """Tools > Debug > Check LoRAs — probe LoRAs; enable and register where they pass."""
+    if not installed_probeable_models():
         show_styled_warning(
             parent,
             "Check LoRAs",
-            "MFLUX is not installed. Install with: pip install mflux",
+            "No installed base models were found to probe LoRAs against.\n\n"
+            "Install at least one image-generation base model, then run Check LoRAs again.",
         )
         return
 
     settings = get_config().load_settings()
-    _candidates, plan, plan_stats = plan_disk_lora_probes(settings)
+    _candidates, plan, plan_stats = plan_disk_lora_probes(settings, dedupe=False)
     if not plan:
         show_styled_information(
             parent,
             "Check LoRAs",
-            "No on-disk LoRA weights found to probe against installed models.\n\n"
+            "Nothing to probe.\n\n"
             f"Catalog candidates considered: {len(_candidates)}\n"
             f"Skipped (not on disk): {plan_stats.skipped_not_on_disk}\n"
-            f"Skipped (no installed probeable model): {plan_stats.skipped_loras}\n\n"
-            "Download LoRA weights (or import a .safetensors) and install the "
-            "matching base model, then run Check LoRAs again.",
+            f"Downloads scanned: {plan_stats.downloads_scanned}\n"
+            f"Downloads duplicates removed: {plan_stats.downloads_deduped}\n\n"
+            "Download LoRA weights (or place .safetensors in ~/Downloads), install a "
+            "base model, then run Check LoRAs again.",
         )
         return
 

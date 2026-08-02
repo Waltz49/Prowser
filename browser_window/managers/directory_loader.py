@@ -290,6 +290,7 @@ class DirectoryLoader:
             # Note: Preserve list view mode - don't exit it
             if (
                 not getattr(self.main_window, '_defer_browse_restore', False)
+                and not getattr(self.main_window, 'restoring_from_history', False)
                 and self.main_window.current_view_mode != 'thumbnail'
                 and self.main_window.current_view_mode != 'list'
             ):

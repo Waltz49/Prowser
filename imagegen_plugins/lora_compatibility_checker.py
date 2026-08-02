@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
-"""Probe LoRA compatibility per model family (minimal MFLUX generation)."""
+"""Probe LoRA compatibility against all installed base models (minimal generation)."""
 
 from __future__ import annotations
 
+import hashlib
 import os
+from pathlib import Path
 from prowser_temp_files import prowser_mkstemp_path
 import time
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
 from imagegen_plugins.hf_model_ids import (
     FLUX1_DEV,
@@ -16,11 +18,13 @@ from imagegen_plugins.hf_model_ids import (
     FLUX2_KLEIN_4B,
     FLUX2_KLEIN_9B,
     FLUX2_KLEIN_9B_KV,
+    LORA_PROBE_MODEL_ORDER,
     REALISTIC_VISION_V4_NOVAE,
     SCENEWORKS_FLUX2_KLEIN_9B_KV_MLX,
     SD15_DEFAULT_VAE,
     SD15_LORA_MODEL_KEYS,
     SDXL_BASE_1_0,
+    Z_IMAGE_TURBO_MFLUX_4BIT,
     lora_model_display_name,
 )
 from imagegen_plugins.lora_catalog import (
@@ -30,13 +34,14 @@ from imagegen_plugins.lora_catalog import (
     lora_choice_label,
     lora_model_support,
     lora_probe_prompt,
-    probe_models_for_lora_entry,
 )
 from imagegen_plugins.lora_catalog_settings import model_state
-from imagegen_plugins.lora_host_registry import HOST_SD15, HOST_SDXL
+from imagegen_plugins.lora_host_registry import HOST_FLUX1_T2I
 
-_DIFFUSERS_LORA_HOSTS = frozenset({HOST_SD15, HOST_SDXL})
 from imagegen_plugins.lora_model_registry import lora_probe_model_is_local
+
+DOWNLOADS_LORA_DIR = Path.home() / "Downloads"
+_PENDING_DOWNLOAD_LORA_ID = "__pending_download__"
 
 # Models probe_lora_on_model can exercise.
 _PROBEABLE_MODEL_KEYS = frozenset(
@@ -48,6 +53,7 @@ _PROBEABLE_MODEL_KEYS = frozenset(
         FLUX2_KLEIN_9B,
         FLUX2_KLEIN_9B_KV,
         SCENEWORKS_FLUX2_KLEIN_9B_KV_MLX,
+        Z_IMAGE_TURBO_MFLUX_4BIT,
         SDXL_BASE_1_0,
         *SD15_LORA_MODEL_KEYS,
     }
@@ -74,12 +80,36 @@ class LoraCheckStats:
     newly_supported_count: int = 0
     failed_probe_count: int = 0
     skipped_hidden_count: int = 0
+    downloads_scanned: int = 0
+    downloads_deduped: int = 0
+    downloads_registered: int = 0
+    downloads_failed: int = 0
     last_result: str = ""  # pass | fail | skip | ""
 
 
 @dataclass
+class LoraProbePlanItem:
+    entry: FluxLoraEntry
+    models: List[str]
+    weights_path: Path
+    from_downloads: bool = False
+
+
+@dataclass
+class _LoraProbeState:
+    plan_item: LoraProbePlanItem
+    entry: FluxLoraEntry
+    lora_id: str
+    lora_label: str
+    lora_path: str
+    prev_models: Set[str]
+    supported: List[str]
+    probed: bool = False
+
+
+@dataclass
 class LoraCheckChange:
-    kind: str  # newly_supported | lost_support | newly_enabled | skipped_hidden | failed | skipped_not_on_disk
+    kind: str  # newly_supported | lost_support | newly_enabled | skipped_hidden | failed | skipped_not_on_disk | downloads_deduped | downloads_registered | downloads_failed
     lora_id: str
     lora_label: str
     model_key: str = ""
@@ -104,59 +134,217 @@ class LoraCheckResult:
         return sorted(set(out))
 
 
-def _probeable_local_models(entry: FluxLoraEntry) -> List[str]:
+def installed_probeable_models() -> List[str]:
+    """Installed base models that Check LoRAs can probe."""
     return [
         m
-        for m in probe_models_for_lora_entry(entry)
+        for m in LORA_PROBE_MODEL_ORDER
         if m in _PROBEABLE_MODEL_KEYS and lora_probe_model_is_local(m)
     ]
 
 
+def _probeable_local_models(_entry: FluxLoraEntry) -> List[str]:
+    return installed_probeable_models()
+
+
+def _md5_file(path: Path, *, chunk_size: int = 1024 * 1024) -> str:
+    digest = hashlib.md5()
+    with path.open("rb") as handle:
+        while True:
+            chunk = handle.read(chunk_size)
+            if not chunk:
+                break
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _downloads_safetensors_paths() -> List[Path]:
+    root = DOWNLOADS_LORA_DIR.expanduser()
+    if not root.is_dir():
+        return []
+    paths: List[Path] = []
+    for child in sorted(root.iterdir()):
+        if child.is_file() and child.suffix.lower() == ".safetensors":
+            paths.append(child.resolve())
+    return paths
+
+
+def _installed_lora_md5_index(
+    settings: Optional[Dict[str, Any]],
+    *,
+    cache: Optional[Dict[Path, str]] = None,
+) -> Dict[str, Path]:
+    """Map md5 hex digest -> installed LoRA weights path."""
+    digest_cache = cache if cache is not None else {}
+    out: Dict[str, Path] = {}
+    for entry in catalog_entries_sorted(settings):
+        path = local_lora_weights_path(entry.lora_id, settings)
+        if path is None:
+            continue
+        digest = digest_cache.get(path)
+        if digest is None:
+            try:
+                digest = _md5_file(path)
+            except OSError:
+                continue
+            digest_cache[path] = digest
+        out.setdefault(digest, path)
+    return out
+
+
+def _downloads_path_is_registered(
+    path: Path,
+    settings: Optional[Dict[str, Any]],
+) -> bool:
+    from imagegen_plugins.lora_host_registry import LORA_HOSTS
+    from imagegen_plugins.lora_user_entries import find_user_lora_for_source
+
+    for host_id in LORA_HOSTS:
+        if find_user_lora_for_source(path, host_id=host_id, settings=settings) is not None:
+            return True
+    return False
+
+
+def _primary_model_key(supported: List[str]) -> str:
+    order = {m: i for i, m in enumerate(LORA_PROBE_MODEL_ORDER)}
+    return sorted(supported, key=lambda m: order.get(m, 999))[0]
+
+
+def dedupe_downloads_loras(
+    settings: Optional[Dict[str, Any]],
+    *,
+    changes: Optional[List[LoraCheckChange]] = None,
+) -> Tuple[int, int]:
+    """
+    Delete duplicate .safetensors in ~/Downloads that match installed LoRAs (md5).
+    Returns (scanned_count, deleted_count).
+    """
+    paths = _downloads_safetensors_paths()
+    if not paths:
+        return 0, 0
+    digest_cache: Dict[Path, str] = {}
+    installed_by_md5 = _installed_lora_md5_index(settings, cache=digest_cache)
+    seen_download_md5: Set[str] = set()
+    deleted = 0
+    for path in paths:
+        try:
+            digest = digest_cache.get(path)
+            if digest is None:
+                digest = _md5_file(path)
+                digest_cache[path] = digest
+        except OSError:
+            continue
+        duplicate = digest in installed_by_md5 or digest in seen_download_md5
+        seen_download_md5.add(digest)
+        if not duplicate:
+            continue
+        try:
+            path.unlink()
+            deleted += 1
+            if changes is not None:
+                changes.append(
+                    LoraCheckChange(
+                        kind="downloads_deduped",
+                        lora_id="",
+                        lora_label=path.name,
+                    )
+                )
+            print(f"[Check LoRAs] Deleted duplicate download: {path}")
+        except OSError as exc:
+            print(f"[Check LoRAs] Could not delete duplicate download {path}: {exc}")
+    return len(paths), deleted
+
+
+def _downloads_probe_candidates(
+    settings: Optional[Dict[str, Any]],
+) -> List[Path]:
+    remaining: List[Path] = []
+    for path in _downloads_safetensors_paths():
+        if _downloads_path_is_registered(path, settings):
+            continue
+        remaining.append(path)
+    return remaining
+
+
 def count_local_lora_probes(entries: List[FluxLoraEntry]) -> int:
     """Probe count for progress UI (installed, probeable base models only)."""
-    return sum(len(_probeable_local_models(e)) for e in entries)
+    local_models = installed_probeable_models()
+    if not local_models:
+        return 0
+    return len(entries) * len(local_models)
 
 
 def plan_disk_lora_probes(
     settings: Optional[Dict[str, Any]],
-) -> Tuple[List[FluxLoraEntry], List[Tuple[FluxLoraEntry, List[str]]], LoraCheckStats]:
+    *,
+    dedupe: bool = True,
+    dedupe_changes: Optional[List[LoraCheckChange]] = None,
+) -> Tuple[List[FluxLoraEntry], List[LoraProbePlanItem], LoraCheckStats]:
     """
-    Catalog entries with on-disk weights and at least one local probeable model.
+    On-disk catalog LoRAs and unregistered ~/Downloads .safetensors against all
+    installed probeable base models.
     Returns (all_catalog_candidates, probe_plan, initial_stats).
     """
     stats = LoraCheckStats()
+    if dedupe:
+        stats.downloads_scanned, stats.downloads_deduped = dedupe_downloads_loras(
+            settings,
+            changes=dedupe_changes,
+        )
+    else:
+        stats.downloads_scanned = len(_downloads_safetensors_paths())
+
     candidates: List[FluxLoraEntry] = []
     for entry in catalog_entries_sorted(settings):
         if entry.mflux_compatible is False:
             continue
-        if entry.host_id in _DIFFUSERS_LORA_HOSTS:
-            continue
         candidates.append(entry)
 
-    plan: List[Tuple[FluxLoraEntry, List[str]]] = []
-    models_seen: set[str] = set()
-    for entry in candidates:
-        path = local_lora_weights_path(entry.lora_id, settings)
-        if path is None:
-            stats.skipped_not_on_disk += 1
-            continue
-        local_models = _probeable_local_models(entry)
-        family = [
-            m
-            for m in probe_models_for_lora_entry(entry)
-            if m in _PROBEABLE_MODEL_KEYS
-        ]
-        missing = [m for m in family if not lora_probe_model_is_local(m)]
-        stats.skipped_model_probes += len(missing)
-        if not local_models:
-            stats.skipped_loras += 1
-            continue
-        plan.append((entry, local_models))
-        models_seen.update(local_models)
+    local_models = installed_probeable_models()
+    not_installed = [
+        m
+        for m in LORA_PROBE_MODEL_ORDER
+        if m in _PROBEABLE_MODEL_KEYS and not lora_probe_model_is_local(m)
+    ]
+    stats.skipped_model_probes = len(not_installed)
+
+    plan: List[LoraProbePlanItem] = []
+    if local_models:
+        for entry in candidates:
+            path = local_lora_weights_path(entry.lora_id, settings)
+            if path is None:
+                stats.skipped_not_on_disk += 1
+                continue
+            plan.append(
+                LoraProbePlanItem(
+                    entry=entry,
+                    models=list(local_models),
+                    weights_path=path,
+                    from_downloads=False,
+                )
+            )
+
+        from imagegen_plugins.lora_user_entries import display_name_from_path
+
+        for path in _downloads_probe_candidates(settings):
+            plan.append(
+                LoraProbePlanItem(
+                    entry=FluxLoraEntry(
+                        host_id=HOST_FLUX1_T2I,
+                        lora_id=_PENDING_DOWNLOAD_LORA_ID,
+                        display_name=display_name_from_path(path),
+                        local_path=str(path),
+                        source_path=str(path),
+                    ),
+                    models=list(local_models),
+                    weights_path=path,
+                    from_downloads=True,
+                )
+            )
 
     stats.loras_total = len(plan)
-    stats.models_total = len(models_seen)
-    stats.probes_total = sum(len(models) for _, models in plan)
+    stats.models_total = len(local_models)
+    stats.probes_total = sum(len(item.models) for item in plan)
     return candidates, plan, stats
 
 
@@ -295,6 +483,51 @@ def _probe_fill(
                 pass
 
 
+def _probe_z_image_turbo(
+    *,
+    hf_model: str,
+    lora_path: str,
+    lora_scale: float,
+    cancel_check: Callable[[], bool],
+    prompt: str = "test",
+) -> bool:
+    from imagegen_plugins.pipelines.mflux_z_image_turbo import run_mflux_z_image_generate
+    from imagegen_plugins.pipelines.z_image_turbo import align_z_image_dims
+
+    if cancel_check():
+        return False
+    w, h = align_z_image_dims(256, 256)
+    out_path = prowser_mkstemp_path(prefix="lora-probe-zimage-", suffix=".png")
+    try:
+        try:
+            os.unlink(out_path)
+        except OSError:
+            pass
+        run_mflux_z_image_generate(
+            prompt=prompt,
+            width=w,
+            height=h,
+            steps=2,
+            seed=42,
+            model=hf_model,
+            mflux_output_path=out_path,
+            low_ram=True,
+            lora_paths=[lora_path],
+            lora_scales=[lora_scale],
+        )
+        return True
+    except Exception as e:
+        if is_lora_incompatibility_error(e):
+            return False
+        raise
+    finally:
+        try:
+            if os.path.isfile(out_path):
+                os.unlink(out_path)
+        except OSError:
+            pass
+
+
 def _probe_klein_edit(
     *,
     hf_model_id: str,
@@ -359,6 +592,7 @@ def _probe_diffusers(
     lora_scale: float,
     cancel_check: Callable[[], bool],
     vae_hf_model_id: str = "",
+    keep_pipeline_loaded: bool = False,
 ) -> bool:
     """Load diffusers SD 1.5 / SDXL pipeline + LoRA weights (no inference)."""
     if cancel_check():
@@ -388,17 +622,42 @@ def _probe_diffusers(
             return False
         raise
     finally:
-        try:
-            if pipeline == "sd15":
-                from imagegen_plugins.pipelines.sd15_diffusers import unload_pipeline
+        if not keep_pipeline_loaded:
+            try:
+                if pipeline == "sd15":
+                    from imagegen_plugins.pipelines.sd15_diffusers import unload_pipeline
 
-                unload_pipeline()
-            elif pipeline == "sdxl":
-                from imagegen_plugins.pipelines.sdxl_diffusers import unload_pipeline
+                    unload_pipeline()
+                elif pipeline == "sdxl":
+                    from imagegen_plugins.pipelines.sdxl_diffusers import unload_pipeline
 
-                unload_pipeline()
-        except Exception:
-            pass
+                    unload_pipeline()
+            except Exception:
+                pass
+
+
+def _release_probe_model(model_key: str) -> None:
+    """Unload a base model after finishing all LoRA probes for it."""
+    try:
+        if model_key in SD15_LORA_MODEL_KEYS:
+            from imagegen_plugins.pipelines.sd15_diffusers import unload_pipeline
+
+            unload_pipeline()
+        elif model_key == SDXL_BASE_1_0:
+            from imagegen_plugins.pipelines.sdxl_diffusers import unload_pipeline
+
+            unload_pipeline(force=True)
+        elif model_key in (
+            FLUX2_KLEIN_4B,
+            FLUX2_KLEIN_9B,
+            FLUX2_KLEIN_9B_KV,
+            SCENEWORKS_FLUX2_KLEIN_9B_KV_MLX,
+        ):
+            from imagegen_plugins.mflux_flux2_klein_session import release_flux2_klein_session
+
+            release_flux2_klein_session(reason="lora_check_model_done")
+    except Exception:
+        pass
 
 
 def probe_lora_on_model(
@@ -408,6 +667,7 @@ def probe_lora_on_model(
     cancel_check: Callable[[], bool],
     *,
     entry: Optional[FluxLoraEntry] = None,
+    keep_model_loaded: bool = False,
 ) -> bool:
     """Return True if a minimal probe succeeds with this LoRA on model_key."""
 
@@ -497,6 +757,7 @@ def probe_lora_on_model(
             lora_scale=lora_scale,
             cancel_check=cancel_check,
             vae_hf_model_id=vae,
+            keep_pipeline_loaded=keep_model_loaded,
         )
     if model_key == SDXL_BASE_1_0:
         return _probe_diffusers(
@@ -505,8 +766,221 @@ def probe_lora_on_model(
             lora_path=lora_path,
             lora_scale=lora_scale,
             cancel_check=cancel_check,
+            keep_pipeline_loaded=keep_model_loaded,
+        )
+    if model_key == Z_IMAGE_TURBO_MFLUX_4BIT:
+        return _probe_z_image_turbo(
+            hf_model=Z_IMAGE_TURBO_MFLUX_4BIT,
+            lora_path=lora_path,
+            lora_scale=lora_scale,
+            cancel_check=cancel_check,
+            prompt=prompt("test"),
         )
     raise ValueError(f"Unknown LoRA probe model: {model_key}")
+
+
+def _init_lora_probe_states(
+    plan: List[LoraProbePlanItem],
+    *,
+    not_installed_models: List[str],
+    previous_support: Dict[str, Any],
+) -> List[_LoraProbeState]:
+    states: List[_LoraProbeState] = []
+    for plan_item in plan:
+        entry = plan_item.entry
+        lora_id = entry.lora_id
+        lora_label = (
+            entry.display_name
+            if plan_item.from_downloads
+            else lora_choice_label(entry)
+        )
+        prev_models = (
+            set()
+            if plan_item.from_downloads
+            else set(previous_support.get(lora_id, ()))
+        )
+        states.append(
+            _LoraProbeState(
+                plan_item=plan_item,
+                entry=entry,
+                lora_id=lora_id,
+                lora_label=lora_label,
+                lora_path=str(plan_item.weights_path),
+                prev_models=prev_models,
+                supported=[m for m in not_installed_models if m in prev_models],
+            )
+        )
+    return states
+
+
+def _record_probe_result(
+    *,
+    state: _LoraProbeState,
+    model_key: str,
+    ok: bool,
+    result: LoraCheckResult,
+    stats: LoraCheckStats,
+    by_model_enabled: Dict[str, List[str]],
+    by_model_hidden: Dict[str, List[str]],
+) -> None:
+    model_label = lora_model_display_name(model_key)
+    was_supported = model_key in state.prev_models
+    lora_id = state.lora_id
+    lora_label = state.lora_label
+    plan_item = state.plan_item
+
+    if ok:
+        stats.last_result = "pass"
+        if model_key not in state.supported:
+            state.supported.append(model_key)
+        if not plan_item.from_downloads:
+            if not was_supported:
+                stats.newly_supported_count += 1
+                result.changes.append(
+                    LoraCheckChange(
+                        kind="newly_supported",
+                        lora_id=lora_id,
+                        lora_label=lora_label,
+                        model_key=model_key,
+                        model_label=model_label,
+                    )
+                )
+            hidden = set(by_model_hidden.get(model_key, ()))
+            enabled = by_model_enabled.setdefault(model_key, [])
+            if lora_id in hidden:
+                stats.skipped_hidden_count += 1
+                result.changes.append(
+                    LoraCheckChange(
+                        kind="skipped_hidden",
+                        lora_id=lora_id,
+                        lora_label=lora_label,
+                        model_key=model_key,
+                        model_label=model_label,
+                    )
+                )
+            elif lora_id not in enabled:
+                enabled.append(lora_id)
+                stats.newly_enabled_count += 1
+                result.changes.append(
+                    LoraCheckChange(
+                        kind="newly_enabled",
+                        lora_id=lora_id,
+                        lora_label=lora_label,
+                        model_key=model_key,
+                        model_label=model_label,
+                    )
+                )
+    else:
+        stats.last_result = "fail"
+        stats.failed_probe_count += 1
+        if not plan_item.from_downloads:
+            result.changes.append(
+                LoraCheckChange(
+                    kind="failed",
+                    lora_id=lora_id,
+                    lora_label=lora_label,
+                    model_key=model_key,
+                    model_label=model_label,
+                )
+            )
+            if was_supported:
+                result.changes.append(
+                    LoraCheckChange(
+                        kind="lost_support",
+                        lora_id=lora_id,
+                        lora_label=lora_label,
+                        model_key=model_key,
+                        model_label=model_label,
+                    )
+                )
+
+
+def _finalize_lora_probe_state(
+    state: _LoraProbeState,
+    *,
+    settings: Optional[Dict[str, Any]],
+    result: LoraCheckResult,
+    stats: LoraCheckStats,
+    model_support: Dict[str, List[str]],
+    by_model_enabled: Dict[str, List[str]],
+    by_model_hidden: Dict[str, List[str]],
+    cancelled: bool = False,
+) -> None:
+    plan_item = state.plan_item
+    supported = state.supported
+    lora_label = state.lora_label
+    registered_lora_id = state.lora_id
+
+    if plan_item.from_downloads:
+        if not state.probed:
+            return
+        if supported:
+            from imagegen_plugins.image_gen_persistence import register_user_lora
+            from imagegen_plugins.lora_user_entries import build_user_lora_entry
+
+            primary = _primary_model_key(supported)
+            try:
+                new_entry = build_user_lora_entry(
+                    source_path=plan_item.weights_path,
+                    display_name=state.entry.display_name,
+                    model_key=primary,
+                    settings=settings,
+                )
+                register_user_lora(
+                    new_entry,
+                    model_key=primary,
+                    supported_models=supported,
+                )
+                registered_lora_id = new_entry.lora_id
+                stats.downloads_registered += 1
+                result.changes.append(
+                    LoraCheckChange(
+                        kind="downloads_registered",
+                        lora_id=registered_lora_id,
+                        lora_label=new_entry.display_name,
+                        model_key=primary,
+                        model_label=lora_model_display_name(primary),
+                    )
+                )
+                for model_key in supported:
+                    hidden = set(by_model_hidden.get(model_key, ()))
+                    enabled = by_model_enabled.setdefault(model_key, [])
+                    if registered_lora_id in hidden:
+                        continue
+                    if registered_lora_id not in enabled:
+                        enabled.append(registered_lora_id)
+                        stats.newly_enabled_count += 1
+                stats.newly_supported_count += len(supported)
+            except Exception as exc:
+                print(
+                    f"[Check LoRAs] could not register download {lora_label!r}: {exc}"
+                )
+                stats.downloads_failed += 1
+                result.changes.append(
+                    LoraCheckChange(
+                        kind="downloads_failed",
+                        lora_id="",
+                        lora_label=lora_label,
+                    )
+                )
+                registered_lora_id = ""
+        elif not cancelled:
+            stats.downloads_failed += 1
+            result.changes.append(
+                LoraCheckChange(
+                    kind="downloads_failed",
+                    lora_id="",
+                    lora_label=lora_label,
+                )
+            )
+            registered_lora_id = ""
+
+    if registered_lora_id and registered_lora_id != _PENDING_DOWNLOAD_LORA_ID:
+        model_support[registered_lora_id] = supported
+        if supported:
+            stats.supported_loras += 1
+        elif not plan_item.from_downloads:
+            stats.removed_loras += 1
 
 
 def run_lora_compatibility_check(
@@ -519,10 +993,11 @@ def run_lora_compatibility_check(
     cancel_check: Callable[[], bool],
 ) -> LoraCheckResult:
     """
-    Probe on-disk catalog LoRAs against installed models in each LoRA's family.
+    Probe on-disk catalog LoRAs and ~/Downloads .safetensors against every
+    installed probeable base model. Registers passing Downloads files.
     Does not download missing weights. Enables passers (unless hidden).
     progress_callback(probe_index, probe_total, phase, lora_id, model_key, stats)
-    phase is 'scan' | 'probe'.
+    phase is 'scan' | 'downloads' | 'probe'.
     """
     result = LoraCheckResult()
     previous_support = lora_model_support(settings)
@@ -532,11 +1007,11 @@ def run_lora_compatibility_check(
     by_model_hidden: Dict[str, List[str]] = {}
 
     progress_callback(0, 1, "scan", "", "", LoraCheckStats())
-    _candidates, plan, stats = plan_disk_lora_probes(settings)
+    _candidates, plan, stats = plan_disk_lora_probes(settings, dedupe_changes=result.changes)
     result.stats = stats
 
-    for entry, _models in plan:
-        for model_key in _models:
+    for plan_item in plan:
+        for model_key in plan_item.models:
             if model_key not in by_model_enabled:
                 st = model_state(settings, model_key)
                 by_model_enabled[model_key] = list(st.get("enabled_ids") or [])
@@ -548,7 +1023,6 @@ def run_lora_compatibility_check(
         (e.lora_id, e)
         for e in _candidates
         if local_lora_weights_path(e.lora_id, settings) is None
-        and e.host_id not in _DIFFUSERS_LORA_HOSTS
         and e.mflux_compatible is not False
     ):
         result.changes.append(
@@ -559,140 +1033,89 @@ def run_lora_compatibility_check(
             )
         )
 
+    if stats.downloads_deduped:
+        progress_callback(0, max(1, stats.probes_total), "downloads", "", "", stats)
+
     progress_callback(0, max(1, stats.probes_total), "scan", "", "", stats)
     if not plan:
         result.model_support = model_support
         result.stats = stats
         return result
 
+    not_installed_models = [
+        m
+        for m in LORA_PROBE_MODEL_ORDER
+        if m in _PROBEABLE_MODEL_KEYS and not lora_probe_model_is_local(m)
+    ]
+
+    local_models = plan[0].models if plan else installed_probeable_models()
+    lora_states = _init_lora_probe_states(
+        plan,
+        not_installed_models=not_installed_models,
+        previous_support=previous_support,
+    )
+    loras_per_model = len(lora_states)
+    stats.loras_total = loras_per_model
+    stats.models_for_lora = len(local_models)
+
     probe_idx = 0
-    for lora_i, (entry, local_models) in enumerate(plan, start=1):
+    for model_i, model_key in enumerate(local_models, start=1):
         if cancel_check():
             result.cancelled = True
             break
 
-        lora_id = entry.lora_id
-        lora_label = lora_choice_label(entry)
-        path = local_lora_weights_path(lora_id, settings)
-        if path is None:
-            stats.skipped_loras += 1
-            stats.loras_done = lora_i
-            continue
-
-        lora_path = str(path)
-        prev_models = set(previous_support.get(lora_id, ()))
-        family = [
-            m
-            for m in probe_models_for_lora_entry(entry)
-            if m in _PROBEABLE_MODEL_KEYS
-        ]
-        missing_models = [m for m in family if not lora_probe_model_is_local(m)]
-        # Keep prior compatibility for base models not installed this run.
-        supported: List[str] = [m for m in missing_models if m in prev_models]
-
-        stats.lora_index = lora_i
-        stats.models_for_lora = len(local_models)
-        stats.model_index_for_lora = 0
+        stats.model_index_for_lora = model_i
         stats.last_result = ""
 
-        for model_i, model_key in enumerate(local_models, start=1):
+        for lora_i, state in enumerate(lora_states, start=1):
             if cancel_check():
                 result.cancelled = True
                 break
 
-            stats.model_index_for_lora = model_i
+            keep_model_loaded = lora_i < loras_per_model
+            stats.lora_index = lora_i
             stats.probe_current = probe_idx + 1
             stats.last_result = ""
             progress_callback(
                 probe_idx,
                 stats.probes_total,
                 "probe",
-                lora_id,
+                state.lora_id,
                 model_key,
                 stats,
             )
             print(
-                f"[Check LoRAs] LoRA {lora_i}/{stats.loras_total} "
-                f"«{lora_label}» · model {model_i}/{len(local_models)} "
-                f"{lora_model_display_name(model_key)} "
+                f"[Check LoRAs] Model {model_i}/{len(local_models)} "
+                f"{lora_model_display_name(model_key)} · "
+                f"LoRA {lora_i}/{loras_per_model} «{state.lora_label}» "
                 f"(probe {stats.probe_current}/{stats.probes_total})"
             )
             try:
                 ok = probe_lora_on_model(
                     model_key,
-                    lora_path,
-                    entry.scale,
+                    state.lora_path,
+                    state.entry.scale,
                     cancel_check,
-                    entry=entry,
+                    entry=state.entry,
+                    keep_model_loaded=keep_model_loaded,
                 )
             except Exception as e:
-                print(f"[Check LoRAs] probe error {lora_id!r} on {model_key!r}: {e}")
+                print(
+                    f"[Check LoRAs] probe error {state.lora_label!r} on "
+                    f"{model_key!r}: {e}"
+                )
                 ok = False
 
-            model_label = lora_model_display_name(model_key)
-            was_supported = model_key in prev_models
-            if ok:
-                stats.last_result = "pass"
-                if model_key not in supported:
-                    supported.append(model_key)
-                if not was_supported:
-                    stats.newly_supported_count += 1
-                    result.changes.append(
-                        LoraCheckChange(
-                            kind="newly_supported",
-                            lora_id=lora_id,
-                            lora_label=lora_label,
-                            model_key=model_key,
-                            model_label=model_label,
-                        )
-                    )
-                hidden = set(by_model_hidden.get(model_key, ()))
-                enabled = by_model_enabled.setdefault(model_key, [])
-                if lora_id in hidden:
-                    stats.skipped_hidden_count += 1
-                    result.changes.append(
-                        LoraCheckChange(
-                            kind="skipped_hidden",
-                            lora_id=lora_id,
-                            lora_label=lora_label,
-                            model_key=model_key,
-                            model_label=model_label,
-                        )
-                    )
-                elif lora_id not in enabled:
-                    enabled.append(lora_id)
-                    stats.newly_enabled_count += 1
-                    result.changes.append(
-                        LoraCheckChange(
-                            kind="newly_enabled",
-                            lora_id=lora_id,
-                            lora_label=lora_label,
-                            model_key=model_key,
-                            model_label=model_label,
-                        )
-                    )
-            else:
-                stats.last_result = "fail"
-                stats.failed_probe_count += 1
-                result.changes.append(
-                    LoraCheckChange(
-                        kind="failed",
-                        lora_id=lora_id,
-                        lora_label=lora_label,
-                        model_key=model_key,
-                        model_label=model_label,
-                    )
-                )
-                if was_supported:
-                    result.changes.append(
-                        LoraCheckChange(
-                            kind="lost_support",
-                            lora_id=lora_id,
-                            lora_label=lora_label,
-                            model_key=model_key,
-                            model_label=model_label,
-                        )
-                    )
+            _record_probe_result(
+                state=state,
+                model_key=model_key,
+                ok=ok,
+                result=result,
+                stats=stats,
+                by_model_enabled=by_model_enabled,
+                by_model_hidden=by_model_hidden,
+            )
+            state.probed = True
 
             probe_idx += 1
             stats.probes_done = probe_idx
@@ -700,23 +1123,29 @@ def run_lora_compatibility_check(
                 probe_idx,
                 stats.probes_total,
                 "probe",
-                lora_id,
+                state.lora_id,
                 model_key,
                 stats,
             )
             time.sleep(0)
 
+        _release_probe_model(model_key)
+
         if result.cancelled:
-            # Persist partial support for probes completed on this LoRA.
-            model_support[lora_id] = supported
             break
 
-        model_support[lora_id] = supported
-        if supported:
-            stats.supported_loras += 1
-        else:
-            stats.removed_loras += 1
-        stats.loras_done = lora_i
+    for state in lora_states:
+        _finalize_lora_probe_state(
+            state,
+            settings=settings,
+            result=result,
+            stats=stats,
+            model_support=model_support,
+            by_model_enabled=by_model_enabled,
+            by_model_hidden=by_model_hidden,
+            cancelled=result.cancelled,
+        )
+    stats.loras_done = len(lora_states)
 
     result.model_support = model_support
     result.by_model = {

@@ -172,6 +172,87 @@ _EXIF_PARAM_LINE_GUIDANCE = re.compile(
 _EXIF_PARAM_LINE_LORA = re.compile(r"^\s*LoRA\s*:\s*(.+?)\s*$", re.IGNORECASE)
 _EXIF_PARAM_LINE_ELAPSED = re.compile(r"^\s*Elapsed\s*:", re.IGNORECASE)
 _EXIF_MODEL_STEPS_SUFFIX = re.compile(r"\[(\d+)\]\s*$")
+_EXIF_LORA_STACK_SPLIT_RE = re.compile(r"\s*\+\s*")
+_EXIF_LORA_CONT_PREFIX = "\u00a0" * 6
+_EXIF_LORA_CONT_LINE = re.compile(
+    rf"^{_EXIF_LORA_CONT_PREFIX}(.+?)\s*$"
+)
+
+
+def _exif_line_is_lora_continuation(line: str) -> bool:
+    return _EXIF_LORA_CONT_LINE.match(line.rstrip()) is not None
+
+
+def _lora_names_from_exif_value(lora: str) -> List[str]:
+    text = str(lora or "").strip()
+    if not text:
+        return []
+    parts = [p.strip() for p in _EXIF_LORA_STACK_SPLIT_RE.split(text) if p.strip()]
+    return parts if parts else [text]
+
+
+def _format_lora_lines_for_exif(names: List[str], line_prefix: str = "") -> List[str]:
+    lines: List[str] = []
+    for i, name in enumerate(names):
+        if not name:
+            continue
+        if i == 0:
+            lines.append(f"{line_prefix}LoRA: {name}")
+        else:
+            lines.append(f"{line_prefix}{_EXIF_LORA_CONT_PREFIX}{name}")
+    return lines
+
+
+def _lora_param_lines_for_exif(lora: Optional[str]) -> List[str]:
+    if not _exif_scalar_present(lora):
+        return []
+    return _format_lora_lines_for_exif(_lora_names_from_exif_value(str(lora)))
+
+
+def _normalize_exif_lora_display_lines(text: str) -> str:
+    """One LoRA label line; continuations indented with six NBSP (info pane / display)."""
+    if not text or not str(text).strip():
+        return text
+    lines = text.splitlines()
+    out: List[str] = []
+    pending_names: List[str] = []
+    pending_prefix = ""
+
+    def flush_pending() -> None:
+        nonlocal pending_names, pending_prefix
+        if not pending_names:
+            return
+        out.extend(_format_lora_lines_for_exif(pending_names, pending_prefix))
+        pending_names = []
+        pending_prefix = ""
+
+    for line in lines:
+        stripped = line.strip()
+        m = _EXIF_PARAM_LINE_LORA.match(stripped)
+        if m is not None:
+            prefix = line[: len(line) - len(stripped)] if stripped else ""
+            names = _lora_names_from_exif_value(m.group(1))
+            if len(names) > 1:
+                flush_pending()
+                out.extend(_format_lora_lines_for_exif(names, prefix))
+                continue
+            if pending_names and prefix != pending_prefix:
+                flush_pending()
+            if not pending_names:
+                pending_prefix = prefix
+            pending_names.append(names[0] if names else m.group(1).strip())
+            continue
+        if _exif_line_is_lora_continuation(line):
+            m_cont = _EXIF_LORA_CONT_LINE.match(line.rstrip())
+            if m_cont is not None:
+                name = m_cont.group(1).strip()
+                if name:
+                    pending_names.append(name)
+            continue
+        flush_pending()
+        out.append(line)
+    flush_pending()
+    return "\n".join(out)
 
 
 def _exif_line_is_model_param(stripped: str) -> bool:
@@ -216,6 +297,8 @@ def parse_exif_model_name(full_comment: str) -> Optional[str]:
             in_model_block = False
             continue
         if not in_model_block:
+            continue
+        if _exif_line_is_lora_continuation(line):
             continue
         if _exif_line_is_model_param(stripped):
             continue
@@ -273,7 +356,16 @@ def parse_exif_generation_metadata(full_comment: str) -> Dict[str, Any]:
         if m_lora is not None:
             name = m_lora.group(1).strip()
             if name:
-                out["lora"] = name
+                prev = out.get("lora")
+                out["lora"] = f"{prev} + {name}" if prev else name
+            continue
+
+        m_lora_cont = _EXIF_LORA_CONT_LINE.match(line.rstrip())
+        if m_lora_cont is not None:
+            name = m_lora_cont.group(1).strip()
+            if name:
+                prev = out.get("lora")
+                out["lora"] = f"{prev} + {name}" if prev else name
 
     return out
 
@@ -307,8 +399,7 @@ def format_image_exif_prompt(
             param_lines.append(f"Quantization: {int(quantization)}")
         except (TypeError, ValueError):
             pass
-    if _exif_scalar_present(lora):
-        param_lines.append(f"LoRA: {str(lora).strip()}")
+    param_lines.extend(_lora_param_lines_for_exif(lora))
     if _exif_scalar_present(guidance):
         try:
             param_lines.append(f"Guidance: {float(guidance):g}")
@@ -642,7 +733,7 @@ def _exif_steps_line_insert_index(lines: List[str], model_line_idx: int) -> int:
             return j
         if _EXIF_PARAM_LINE_GUIDANCE.match(stripped) or _EXIF_PARAM_LINE_LORA.match(
             stripped
-        ):
+        ) or _exif_line_is_lora_continuation(lines[j]):
             return j
     return insert_idx
 
@@ -800,11 +891,15 @@ def format_user_comment_text_for_display(
     """Show mflux JSON UserComment using the same layout as finished EXIF."""
     meta = parse_mflux_metadata_json(text)
     if meta is None:
-        return _strip_quant_from_image_model_block(text)
-    return format_exif_comment_from_mflux_metadata(
-        meta,
-        model_name=model_name,
-        values=values,
+        return _normalize_exif_lora_display_lines(
+            _strip_quant_from_image_model_block(text)
+        )
+    return _normalize_exif_lora_display_lines(
+        format_exif_comment_from_mflux_metadata(
+            meta,
+            model_name=model_name,
+            values=values,
+        )
     )
 
 

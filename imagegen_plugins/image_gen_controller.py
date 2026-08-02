@@ -1989,7 +1989,7 @@ class ImageGenController(QObject):
     def _deferred_quit_toggle_button_label(self) -> str:
         if self._deferred_quit_wait_all_jobs:
             return "Quit after current copy"
-        return "Wait for all jobs"
+        return "Wait for all"
 
     def _refresh_deferred_quit_dialog(self) -> None:
         label = self._deferred_quit_status_label

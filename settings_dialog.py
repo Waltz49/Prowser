@@ -6397,6 +6397,19 @@ class SettingsDialog(QDialog):
             lora_id, model_key=model_key, do_uninstall=do_uninstall
         )
 
+    def _lora_settings_choice_label(self, entry, *, model_key: str = "") -> str:
+        """LoRA settings row label; elides trigger words longer than 30 characters."""
+        from imagegen_plugins.lora_catalog import lora_base_display_name
+
+        base = lora_base_display_name(entry, model_key=model_key)
+        trigger = (entry.trigger_word or "").strip()
+        if not trigger:
+            return base
+        max_len = 30
+        if len(trigger) > max_len:
+            trigger = f"{trigger[: max_len - 3]}..."
+        return f"{base} - Trigger: {trigger}"
+
     def _rebuild_lora_settings_grid(self) -> None:
         """Rebuild LoRA rows for the selected base model."""
         if not hasattr(self, "_lora_rows_layout"):
@@ -6453,8 +6466,11 @@ class SettingsDialog(QDialog):
                 cb.setCursor(Qt.CursorShape.ArrowCursor)
             self._lora_checkboxes[entry.lora_id] = cb
 
-            name_lbl = QLabel(lora_choice_label(entry, model_key=model_key))
-            name_lbl.setToolTip(entry.lora_id)
+            name_lbl = QLabel(self._lora_settings_choice_label(entry, model_key=model_key))
+            full_label = lora_choice_label(entry, model_key=model_key)
+            name_lbl.setToolTip(
+                full_label if full_label != name_lbl.text() else entry.lora_id
+            )
             if installed:
                 font = QFont(name_lbl.font())
                 base_pt = font.pointSize()
