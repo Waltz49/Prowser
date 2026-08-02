@@ -45,6 +45,7 @@ from status_bar_config import (
     configure_task_info_text_browser,
 )
 from theme.theme_service import get_active_theme
+from theme.titlebar_icons import titlebar_chip_colors
 from browser_window.sidebar.sidebar_pane_chrome import apply_scroll_area_viewport_background
 from thumbnails.sidebar_pane_layout import MIN_JOBS_QUEUE_CONTENT_HEIGHT, pane_fit_height_tolerance
 from thumbnails import thumbnail_constants as tc
@@ -172,11 +173,8 @@ def _disable_tab_focus(root: QWidget) -> None:
 
 
 def _job_selection_border_hex() -> str:
-    """Active thumbnail index highlight (Settings → current image border)."""
-    hex_val = (tc.CURRENT_IMAGE_BORDER_COLOR_HEX or "").strip()
-    if hex_val:
-        return hex_val
-    return get_active_theme().current_image_border_color_hex
+    """Titlebar chip button background (hide/tools/flyout)."""
+    return titlebar_chip_colors()[0]
 
 
 def _job_selection_border_width_px() -> int:

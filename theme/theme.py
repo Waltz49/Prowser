@@ -7,6 +7,16 @@ from PySide6.QtGui import QColor
 from theme.theme_base import asset_url
 
 
+def sidebar_header_focus_bg_hex(base_hex: str, *, theme_id: str) -> str:
+    """Active pane title bar: brighten on dark/user themes, darken on light."""
+    c = QColor(base_hex)
+    if not c.isValid():
+        return base_hex
+    if theme_id == "light":
+        return c.darker(130).name()
+    return c.lighter(180).name()
+
+
 def macos_scrollbar_handle_hex(track_hex: str, *, theme_id: str, chrome_handle_hex: str) -> str:
     """Contrasting oblong handle color for a scrollbar track."""
     c = QColor(track_hex)

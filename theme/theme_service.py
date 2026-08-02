@@ -12,7 +12,7 @@ from PySide6.QtGui import QColor, QGuiApplication
 from PySide6.QtWidgets import QApplication
 
 from theme.dark_theme_definitions import DEFAULT_DARK_THEME, DarkTheme
-from theme.theme import ThemeStylesMixin
+from theme.theme import ThemeStylesMixin, sidebar_header_focus_bg_hex
 from theme.theme_defaults import (
     default_dark_theme_colors,
     default_light_theme_colors,
@@ -882,7 +882,9 @@ def sync_to_thumbnail_constants(theme: ThemeType) -> None:
     tc.SIDEBAR_HEADER_BORDER_HEX = t.sidebar_header_border_hex
     tc.SIDEBAR_HEADER_TEXT_HEX = t.sidebar_header_text_hex
     tc.SIDEBAR_SPLITTER_HANDLE_HEX = t.sidebar_splitter_handle_hex
-    tc.TREE_HEADER_FOCUS_BG_HEX = t.tree_header_focus_bg_hex
+    tc.TREE_HEADER_FOCUS_BG_HEX = sidebar_header_focus_bg_hex(
+        t.sidebar_header_bg_hex, theme_id=t.theme_id
+    )
 
     tc.ERROR_COLOR_HEX = t.error_color_hex
     tc.VALIDATION_SUCCESS_COLOR_HEX = t.validation_success_color_hex
