@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from PySide6.QtCore import QEvent, QObject, QPointF, Qt, Signal
 from PySide6.QtGui import QDoubleValidator, QFontMetrics, QKeyEvent, QMouseEvent
@@ -492,6 +492,21 @@ class LoraSummaryCombo(QComboBox):
             return
         super().showPopup()
 
+    def mousePressEvent(self, event: QMouseEvent) -> None:
+        parent = self.parent()
+        if (
+            isinstance(parent, LoraStackField)
+            and self.isEnabled()
+            and event.button() == Qt.MouseButton.LeftButton
+        ):
+            if parent._stack_mode:
+                parent._open_popup()
+            else:
+                self.showPopup()
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
 
 class LoraStackField(QWidget):
     """
@@ -524,8 +539,36 @@ class LoraStackField(QWidget):
         )
         layout.addWidget(self.summary_combo)
 
-        self.summary_combo.installEventFilter(self)
-        self._line_edit_filter_installed = False
+        self._click_filter_widgets: Set[QWidget] = set()
+        self._sync_combo_click_filters()
+
+    def _combo_click_filter_widgets(self) -> List[QWidget]:
+        combo = self.summary_combo
+        return [combo, *combo.findChildren(QWidget)]
+
+    def _sync_combo_click_filters(self) -> None:
+        """Ensure left-clicks on combo text, arrow, and chrome all open the list."""
+        targets = set(self._combo_click_filter_widgets())
+        for widget in targets:
+            if widget not in self._click_filter_widgets:
+                widget.installEventFilter(self)
+                self._click_filter_widgets.add(widget)
+        for widget in list(self._click_filter_widgets):
+            if widget not in targets:
+                widget.removeEventFilter(self)
+                self._click_filter_widgets.discard(widget)
+
+    def _is_combo_surface_widget(self, obj: Any) -> bool:
+        if obj is self.summary_combo:
+            return True
+        if not isinstance(obj, QWidget):
+            return False
+        current: Optional[QWidget] = obj
+        while current is not None:
+            if current is self.summary_combo:
+                return True
+            current = current.parentWidget()
+        return False
 
     @property
     def combo(self) -> QComboBox:
@@ -563,6 +606,7 @@ class LoraStackField(QWidget):
             le.setText(text)
         self.summary_combo.blockSignals(False)
         finalize_lora_combo_display(self.summary_combo)
+        self._sync_combo_click_filters()
 
     def _configure_stack_mode_combo(self) -> None:
         self.summary_combo.setEditable(True)
@@ -571,18 +615,21 @@ class LoraStackField(QWidget):
             le.setReadOnly(True)
             le.setCursor(Qt.CursorShape.PointingHandCursor)
             le.setFrame(False)
-            if not self._line_edit_filter_installed:
-                le.installEventFilter(self)
-                self._line_edit_filter_installed = True
+            le.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         combo_h = self.summary_combo.fontMetrics().height() + 10
         self.summary_combo.setFixedHeight(combo_h)
         self.summary_combo.setMaxVisibleItems(0)
+        self._sync_combo_click_filters()
 
     def _configure_single_mode_combo(self) -> None:
         self.summary_combo.setEditable(False)
+        le = self.summary_combo.lineEdit()
+        if le is not None:
+            le.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, False)
         self.summary_combo.setMinimumHeight(0)
         self.summary_combo.setMaximumHeight(16777215)
         self.summary_combo.setMaxVisibleItems(12)
+        self._sync_combo_click_filters()
 
     def populate(
         self,
@@ -643,19 +690,22 @@ class LoraStackField(QWidget):
             plugin,
             current_preset_id=current_preset_id,
         )
+        self._sync_combo_click_filters()
 
     def eventFilter(self, obj: Any, event: Any) -> bool:
-        if not self._stack_mode or not self.summary_combo.isEnabled():
+        if not self.summary_combo.isEnabled():
             return super().eventFilter(obj, event)
-        if event.type() != event.Type.MouseButtonPress:
+        if event.type() != QEvent.Type.MouseButtonPress:
             return super().eventFilter(obj, event)
         if event.button() != Qt.MouseButton.LeftButton:
             return super().eventFilter(obj, event)
-        le = self.summary_combo.lineEdit()
-        if obj is self.summary_combo or (le is not None and obj is le):
+        if not self._is_combo_surface_widget(obj):
+            return super().eventFilter(obj, event)
+        if self._stack_mode:
             self._open_popup()
-            return True
-        return super().eventFilter(obj, event)
+        else:
+            self.summary_combo.showPopup()
+        return True
 
     def _open_popup(self) -> None:
         if not self._stack_mode or not self.summary_combo.isEnabled():
