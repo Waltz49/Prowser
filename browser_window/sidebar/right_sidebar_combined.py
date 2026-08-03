@@ -290,8 +290,6 @@ class RightSidebarCombinedWidget(QWidget):
 
     def _sync_jobs_compact_from_splitter_size(self) -> None:
         if not self._jobs_strip_compact_available():
-            if self._jobs_pane_compact:
-                self._set_jobs_pane_compact(False)
             return
         sizes = self.splitter.sizes()
         if len(sizes) < 3:
@@ -708,6 +706,9 @@ class RightSidebarCombinedWidget(QWidget):
             layout.addWidget(self.jobs_widget)
             want_compact = self._jobs_pane_compact and self._jobs_strip_compact_available()
             self._set_jobs_pane_compact(want_compact, persist=False)
+            self._maybe_restore_jobs_compact_from_sizes()
+            if self._jobs_pane_compact:
+                self._sync_jobs_compact_geometry()
             self.jobs_widget.show()
             if hasattr(self.jobs_widget, "attach_titlebar_tools"):
                 self.jobs_widget.attach_titlebar_tools()
@@ -767,7 +768,6 @@ class RightSidebarCombinedWidget(QWidget):
                     scaled[visible_indices[-1]] += current_height - total_scaled
                 self._set_splitter_sizes_safe(scaled)
                 self._ensure_pane_headers_visible()
-                self._maybe_restore_jobs_compact_from_sizes()
                 if self._jobs_pane_compact:
                     self._sync_jobs_compact_geometry()
                 return
@@ -781,7 +781,6 @@ class RightSidebarCombinedWidget(QWidget):
             sizes[visible_indices[-1]] += remainder
         self._set_splitter_sizes_safe(sizes)
         self._ensure_pane_headers_visible()
-        self._maybe_restore_jobs_compact_from_sizes()
         if self._jobs_pane_compact:
             self._sync_jobs_compact_geometry()
 

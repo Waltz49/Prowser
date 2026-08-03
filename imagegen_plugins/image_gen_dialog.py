@@ -180,7 +180,7 @@ def sync_random_seed_setting(parent, value: bool) -> None:
 def validate_copies_require_random_seed(parent, values: Dict[str, Any]) -> bool:
     """Return False when copies > 1, random seed is off, and user cancels."""
     copies = int(values.get("copies", 1) or 1)
-    if copies <= 1 or values.get("random_seed") or values.get("series_refinement"):
+    if copies <= 1 or values.get("random_seed") or values.get("series_refinement") or values.get("series_prompt_refinement"):
         return True
     if not prompt_enable_random_seed_for_copies(parent):
         return False

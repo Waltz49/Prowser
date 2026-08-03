@@ -256,3 +256,111 @@ def apply_flux_prompt_job_to_prepare_run_values(
         return True
     attach_flux_prompt_ai_job_to_values(owner, values, force=False)
     return True
+
+
+def resolve_flux_prompt_refine_image_paths_for_job(
+    plugin: Any, values: Dict[str, Any]
+) -> List[str]:
+    """Resolve reference image(s) for queued-job AI prompt refinement."""
+    from imagegen_plugins.image_gen_active_model import (
+        FUNCTION_CREATE,
+        FUNCTION_EDIT,
+        FUNCTION_EXPAND,
+        FUNCTION_INFILL_PAINT,
+    )
+    from imagegen_plugins.image_gen_naming import resolve_source_image_paths
+    from imagegen_plugins.image_gen_persistence import load_pass_image_to_ai_with_prompt
+
+    function = getattr(plugin, "function", None)
+    paths: List[str] = []
+
+    if function in (FUNCTION_EDIT, FUNCTION_EXPAND, FUNCTION_INFILL_PAINT):
+        for src in resolve_source_image_paths(values):
+            _append_existing_image_path(src, paths)
+        return paths
+
+    if function == FUNCTION_CREATE:
+        if load_pass_image_to_ai_with_prompt():
+            for src in flux_prompt_ai_reference_image_paths(values):
+                _append_existing_image_path(src, paths)
+        return paths
+
+    for src in resolve_source_image_paths(values):
+        _append_existing_image_path(src, paths)
+    return paths
+
+
+def build_flux_prompt_ai_job_meta_from_job(
+    plugin: Any,
+    values: Dict[str, Any],
+    *,
+    series_chain_only: bool = False,
+) -> dict[str, Any] | None:
+    """Build AI stage metadata from a queued/active job record (no dialog owner)."""
+    from imagegen_plugins.image_gen_persistence import load_flux_prompt_system_prompt_settings
+    from workers.model_tasks_worker import flux_prompt_system_message
+
+    task_kind = str(getattr(plugin, "function", "") or "")
+    if not task_kind:
+        return None
+    user_prompt = str(values.get("prompt") or "").strip()
+    image_paths = resolve_flux_prompt_refine_image_paths_for_job(plugin, values)
+    override_text, _, _, _ = load_flux_prompt_system_prompt_settings()
+    override = (override_text or "").strip() or None
+    if override:
+        system_prompt = override
+    else:
+        system_prompt = flux_prompt_system_message(
+            task_kind,
+            with_image=bool(image_paths),
+            image_count=len(image_paths),
+        )
+    meta: dict[str, Any] = {
+        "system_prompt": system_prompt,
+        "user_prompt": user_prompt,
+        "image_paths": list(image_paths),
+        "task_kind": task_kind,
+    }
+    if series_chain_only:
+        meta["series_chain_only"] = True
+    return meta
+
+
+def ensure_flux_prompt_ai_job_for_series(plugin: Any, values: Dict[str, Any]) -> bool:
+    """Attach flux_prompt_ai_job for series text refinement when missing."""
+    if has_flux_prompt_ai_job(values):
+        return True
+    meta = build_flux_prompt_ai_job_meta_from_job(
+        plugin, values, series_chain_only=True
+    )
+    if meta is None:
+        return False
+    set_flux_prompt_ai_job(values, meta)
+    return True
+
+
+def clear_series_chain_flux_prompt_ai_job(values: Dict[str, Any]) -> None:
+    """Remove toolbar-only AI meta; leave dialog-submitted job AI intact."""
+    meta = flux_prompt_ai_job_meta(values)
+    if meta is not None and meta.get("series_chain_only"):
+        clear_flux_prompt_ai_job(values)
+
+
+def sync_flux_prompt_ai_user_prompt_for_next_copy(values: Dict[str, Any]) -> None:
+    """Before the next series copy, feed the last prompt into the AI stage."""
+    meta = flux_prompt_ai_job_meta(values)
+    if meta is None:
+        return
+    prompt = str(values.get("prompt") or "").strip()
+    if prompt:
+        meta["user_prompt"] = prompt
+    if meta.get("image_paths") is not None:
+        from imagegen_plugins.image_gen_naming import resolve_source_image_paths
+
+        refreshed = [
+            p
+            for p in resolve_source_image_paths(values)
+            if p and os.path.isfile(str(p))
+        ]
+        if refreshed:
+            meta["image_paths"] = list(refreshed)

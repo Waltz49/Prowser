@@ -9049,12 +9049,42 @@ class ImageBrowserWindow(QMainWindow):
             return True
         return False
 
+    def _sidebar_container_visible(self, side: str) -> bool:
+        """True when the left or right combined sidebar widget is on screen."""
+        if side == 'left':
+            cs = getattr(self, 'combined_sidebar', None)
+            return cs is not None and cs.isVisible()
+        rs = getattr(self, 'right_sidebar', None)
+        return rs is not None and rs.isVisible()
+
+    def _exit_partial_chrome_for_side(self, side: str) -> None:
+        partial = getattr(self, '_chrome_partial_side', None)
+        if partial is not None and partial != side:
+            self._chrome_partial_side = None
+
+    def _show_sidebar_container_if_pane_active(
+        self, side: str, is_pane_visible_fn
+    ) -> bool:
+        """Show a hidden sidebar when its pane is already on (leaving partial-chrome mode)."""
+        if self._sidebar_container_visible(side) or not is_pane_visible_fn():
+            return False
+        if side == 'right':
+            self._apply_right_sidebar_visibility()
+        else:
+            self.manage_sidebar_visibility_for_view_mode(self.current_view_mode)
+        return True
+
     def _should_reveal_sidebar_only(self, side: str) -> bool:
         """True when a pane shortcut should reveal one sidebar, not toggle or full-restore chrome."""
         if getattr(self, '_chrome_suppressed', False):
             return True
         partial = getattr(self, '_chrome_partial_side', None)
-        return partial is not None and partial != side
+        if partial is None or partial == side:
+            return False
+        # After F4, allow exclusive reveal only when the opposite sidebar is hidden.
+        if side == 'right':
+            return not self._sidebar_container_visible('left')
+        return not self._sidebar_container_visible('right')
 
     def _apply_left_pane_layout(self, layout: dict) -> None:
         cs = self.combined_sidebar
@@ -9193,6 +9223,15 @@ class ImageBrowserWindow(QMainWindow):
         """Toggle a pane, or reveal only its sidebar when chrome was hidden via F4."""
         if self._should_reveal_sidebar_only(side):
             return self._show_sidebar_pane_only(side, layout_key, is_visible_fn, set_visible_fn)
+
+        self._exit_partial_chrome_for_side(side)
+        if self._show_sidebar_container_if_pane_active(side, is_visible_fn):
+            return is_visible_fn()
+
+        if not self._sidebar_container_visible(side) and not is_visible_fn():
+            set_visible_fn(True)
+            return is_visible_fn()
+
         cs = getattr(self, 'combined_sidebar', None)
         if cs is not None:
             if layout_key == 'left_tree_visible':
@@ -9517,8 +9556,12 @@ class ImageBrowserWindow(QMainWindow):
 
     def _apply_right_sidebar_visibility(self):
         """Apply right sidebar visibility based on Organize, Information, or Jobs panes."""
-        if getattr(self, '_chrome_partial_side', None) == 'left':
-            return
+        partial = getattr(self, '_chrome_partial_side', None)
+        if partial == 'left':
+            if self._sidebar_container_visible('left'):
+                self._chrome_partial_side = None
+            else:
+                return
         self.jobs_visible = self.right_sidebar.is_jobs_visible()
         self.right_sidebar_visible = (
             self.right_sidebar.is_information_visible()

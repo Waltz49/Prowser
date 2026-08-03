@@ -79,10 +79,14 @@ class SidebarManager:
         """Toggle the visibility of the file tree and resize canvas accordingly"""
         if hasattr(self.main_window, 'combined_sidebar'):
             cs = self.main_window.combined_sidebar
-            if self.main_window._should_reveal_sidebar_only('left'):
-                return self.main_window._toggle_pane_with_chrome_restore(
+            mw = self.main_window
+            if mw._should_reveal_sidebar_only('left'):
+                return mw._toggle_pane_with_chrome_restore(
                     cs.is_tree_visible, cs.set_tree_visible, 'left_tree_visible', 'left'
                 )
+            mw._exit_partial_chrome_for_side('left')
+            if mw._show_sidebar_container_if_pane_active('left', cs.is_tree_visible):
+                return cs.is_tree_visible()
             self._leave_browse_then_toggle_pane(
                 cs.is_tree_displayed,
                 cs.set_tree_visible,
@@ -98,10 +102,14 @@ class SidebarManager:
         """Toggle the visibility of the preview widget and resize canvas accordingly"""
         if hasattr(self.main_window, 'combined_sidebar'):
             cs = self.main_window.combined_sidebar
-            if self.main_window._should_reveal_sidebar_only('left'):
-                return self.main_window._toggle_pane_with_chrome_restore(
+            mw = self.main_window
+            if mw._should_reveal_sidebar_only('left'):
+                return mw._toggle_pane_with_chrome_restore(
                     cs.is_preview_visible, cs.set_preview_visible, 'left_preview_visible', 'left'
                 )
+            mw._exit_partial_chrome_for_side('left')
+            if mw._show_sidebar_container_if_pane_active('left', cs.is_preview_visible):
+                return cs.is_preview_visible()
             self._leave_browse_then_toggle_pane(
                 cs.is_preview_displayed,
                 cs.set_preview_visible,
@@ -181,6 +189,14 @@ class SidebarManager:
             sync_jobs_menu_actions(self.main_window)
             return rs.is_jobs_visible()
 
+        self.main_window._exit_partial_chrome_for_side('right')
+        if self.main_window._show_sidebar_container_if_pane_active(
+            'right', rs.is_jobs_visible
+        ):
+            self.main_window.jobs_visible = rs.is_jobs_visible()
+            sync_jobs_menu_actions(self.main_window)
+            return rs.is_jobs_visible()
+
         if is_jobs_pane_showing(self.main_window):
             hide_jobs_pane(self.main_window)
             return False
@@ -202,10 +218,14 @@ class SidebarManager:
         """Toggle the visibility of the chat pane in the left combined sidebar."""
         if hasattr(self.main_window, "combined_sidebar"):
             cs = self.main_window.combined_sidebar
-            if self.main_window._should_reveal_sidebar_only('left'):
-                return self.main_window._toggle_pane_with_chrome_restore(
+            mw = self.main_window
+            if mw._should_reveal_sidebar_only('left'):
+                return mw._toggle_pane_with_chrome_restore(
                     cs.is_chat_visible, cs.set_chat_visible, 'left_chat_visible', 'left'
                 )
+            mw._exit_partial_chrome_for_side('left')
+            if mw._show_sidebar_container_if_pane_active('left', cs.is_chat_visible):
+                return cs.is_chat_visible()
             cs.set_chat_visible(not cs.is_chat_visible())
             return cs.is_chat_visible()
         return False

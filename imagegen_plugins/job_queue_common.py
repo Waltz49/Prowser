@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import os
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QSize
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
 
 from imagegen_plugins.image_gen_dialog import connect_import_button_with_option_modifier
@@ -15,12 +15,14 @@ from config import (
     job_queue_action_bar_background_qcolor,
     job_queue_cell_background_hex,
 )
-from theme.theme_base import asset_path
 from theme.theme_service import get_active_theme
+from theme.titlebar_icons import titlebar_chip_colors
+from widgets.icon_hover_swap import attach_icon_hover_swap, icon_pair_from_assets
 
 _ACTION_COL_WIDTH = 36  # legacy export; cards no longer use side action column
 _ICON_BTN_SIZE = 22
 _ACTION_BAR_HEIGHT = 28
+_ACTION_BAR_OBJECT_NAME = "jobQueueActionBar"
 
 
 def _job_queue_cell_background_stylesheet() -> str:
@@ -30,7 +32,7 @@ def _job_queue_cell_background_stylesheet() -> str:
 
 def _job_queue_action_bar_background_stylesheet() -> str:
     bg = job_queue_action_bar_background_hex()
-    return f"background-color: {bg};"
+    return f"QWidget#{_ACTION_BAR_OBJECT_NAME} {{ background-color: {bg}; }}"
 
 
 def _apply_job_queue_cell_background(widget: QWidget) -> None:
@@ -119,6 +121,7 @@ class JobQueueActionBar(QWidget):
 
     def __init__(self, main_window, controller, parent=None):
         super().__init__(parent)
+        self.setObjectName(_ACTION_BAR_OBJECT_NAME)
         self._main_window = main_window
         self._controller = controller
         self._row_idx = -1
@@ -143,16 +146,37 @@ class JobQueueActionBar(QWidget):
             self._minus_btn, self._on_minus
         )
 
-        self._refine_btn = QPushButton()
-        self._refine_btn.setCheckable(True)
-        self._refine_btn.setToolTip(
+        self._image_refine_btn = QPushButton()
+        self._image_refine_btn.setToolTip(
             "Image Based Refinement:\n\n"
             "Base subsequent image copies on previous result image.\n\n"
             "Other source images keep their order."
         )
-        self._refine_btn.setStyleSheet(_series_refinement_button_stylesheet())
-        self._refine_btn.setProperty("_tooltip_icon_asset", "series_refinement_icon.png")
-        self._refine_btn.toggled.connect(self._on_refine_toggled)
+        _configure_series_toggle_push_button(
+            self._image_refine_btn, "series_image_refinement_icon.png"
+        )
+        self._image_refine_btn.toggled.connect(self._on_image_refine_toggled)
+        self._image_refine_btn.toggled.connect(
+            lambda _checked: _sync_series_toggle_button_style(
+                self._image_refine_btn, "series_image_refinement_icon.png"
+            )
+        )
+
+        self._text_refine_btn = QPushButton()
+        self._text_refine_btn.setToolTip(
+            "Text Based Refinement:\n\n"
+            "Re-run the previous prompt through Gen Prompt AI before each\n"
+            "subsequent copy in the series."
+        )
+        _configure_series_toggle_push_button(
+            self._text_refine_btn, "series_text_refinement_icon.png"
+        )
+        self._text_refine_btn.toggled.connect(self._on_text_refine_toggled)
+        self._text_refine_btn.toggled.connect(
+            lambda _checked: _sync_series_toggle_button_style(
+                self._text_refine_btn, "series_text_refinement_icon.png"
+            )
+        )
 
         self._edit_btn = QPushButton()
         self._edit_btn.setToolTip(
@@ -179,7 +203,8 @@ class JobQueueActionBar(QWidget):
         for btn in (
             self._plus_btn,
             self._minus_btn,
-            self._refine_btn,
+            self._image_refine_btn,
+            self._text_refine_btn,
             self._edit_btn,
             self._cancel_btn,
         ):
@@ -198,9 +223,15 @@ class JobQueueActionBar(QWidget):
         else:
             self._controller.subtract_series_remaining_for_row(self._row_idx)
 
-    def _on_refine_toggled(self, checked: bool) -> None:
+    def _on_image_refine_toggled(self, checked: bool) -> None:
         if self._row_idx >= 0:
             self._controller.set_series_refinement_for_row(self._row_idx, checked)
+
+    def _on_text_refine_toggled(self, checked: bool) -> None:
+        if self._row_idx >= 0:
+            self._controller.set_series_prompt_refinement_for_row(
+                self._row_idx, checked
+            )
 
     def _on_edit(self, _checked: bool = False) -> None:
         if self._row_idx >= 0:
@@ -226,20 +257,40 @@ class JobQueueActionBar(QWidget):
             controller.series_remaining_after_for_row(row_idx) if has_row else 0
         )
         self._minus_btn.setEnabled(has_row and remaining > 0)
-        refine_ok = (
+        image_ok = (
             has_row
             and remaining > 0
-            and controller.job_row_supports_image_refinement(row_idx)
+            and controller.job_row_supports_image_series_refinement(row_idx)
         )
-        self._refine_btn.blockSignals(True)
-        self._refine_btn.setEnabled(refine_ok)
-        if refine_ok:
-            self._refine_btn.setChecked(
+        text_ok = (
+            has_row
+            and remaining > 0
+            and controller.job_row_supports_text_series_refinement(row_idx)
+        )
+        self._image_refine_btn.blockSignals(True)
+        self._image_refine_btn.setVisible(image_ok)
+        if image_ok:
+            self._image_refine_btn.setChecked(
                 controller.series_refinement_enabled_for_row(row_idx)
             )
         else:
-            self._refine_btn.setChecked(False)
-        self._refine_btn.blockSignals(False)
+            self._image_refine_btn.setChecked(False)
+        self._image_refine_btn.blockSignals(False)
+        _sync_series_toggle_button_style(
+            self._image_refine_btn, "series_image_refinement_icon.png"
+        )
+        self._text_refine_btn.blockSignals(True)
+        self._text_refine_btn.setVisible(text_ok)
+        if text_ok:
+            self._text_refine_btn.setChecked(
+                controller.series_prompt_refinement_enabled_for_row(row_idx)
+            )
+        else:
+            self._text_refine_btn.setChecked(False)
+        self._text_refine_btn.blockSignals(False)
+        _sync_series_toggle_button_style(
+            self._text_refine_btn, "series_text_refinement_icon.png"
+        )
         self._edit_btn.setEnabled(has_row)
         self._cancel_btn.setEnabled(has_row)
 
@@ -247,8 +298,18 @@ class JobQueueActionBar(QWidget):
         _apply_job_queue_action_bar_background(self)
         _configure_icon_push_button(self._plus_btn, "series_plus_icon.png")
         _configure_icon_push_button(self._minus_btn, "series_minus_icon.png")
-        self._refine_btn.setStyleSheet(_series_refinement_button_stylesheet())
-        self._refine_btn.setProperty("_tooltip_icon_asset", "series_refinement_icon.png")
+        _configure_series_toggle_push_button(
+            self._image_refine_btn, "series_image_refinement_icon.png"
+        )
+        _sync_series_toggle_button_style(
+            self._image_refine_btn, "series_image_refinement_icon.png"
+        )
+        _configure_series_toggle_push_button(
+            self._text_refine_btn, "series_text_refinement_icon.png"
+        )
+        _sync_series_toggle_button_style(
+            self._text_refine_btn, "series_text_refinement_icon.png"
+        )
         _configure_icon_push_button(self._edit_btn, "edit_icon.png")
         _configure_icon_push_button(
             self._cancel_btn, "trash_icon.png", hover_icon_name="trash_icon_hover.png"
@@ -289,6 +350,7 @@ def build_job_queue_action_widget(
         ),
     )
     action_wrap = QWidget()
+    action_wrap.setObjectName(_ACTION_BAR_OBJECT_NAME)
     _apply_job_queue_action_bar_background(action_wrap)
     action_layout = QVBoxLayout(action_wrap)
     action_layout.setContentsMargins(2, 0, 2, 0)
@@ -318,25 +380,71 @@ def build_job_queue_action_widget(
                 else controller.subtract_series_remaining_for_row(r)
             ),
         )
-        refine_btn = QPushButton()
-        refine_btn.setCheckable(True)
-        refine_btn.setToolTip(
-            "Image Based Refinement:\n\n"
-            "Base subsequent image copies on previous result image.\n\n"
-            "Other source images keep their order."
-        )
-        refine_btn.setStyleSheet(_series_refinement_button_stylesheet())
-        refine_btn.setProperty("_tooltip_icon_asset", "series_refinement_icon.png")
-        refine_btn.blockSignals(True)
-        refine_btn.setChecked(controller.series_refinement_enabled_for_row(row_idx))
-        refine_btn.blockSignals(False)
-        refine_btn.toggled.connect(
-            lambda checked, r=row_idx: controller.set_series_refinement_for_row(
-                r, checked
-            )
-        )
+        image_ok = controller.job_row_supports_image_series_refinement(row_idx)
+        text_ok = controller.job_row_supports_text_series_refinement(row_idx)
         action_layout.addWidget(minus_btn, alignment=Qt.AlignmentFlag.AlignCenter)
-        action_layout.addWidget(refine_btn, alignment=Qt.AlignmentFlag.AlignCenter)
+        if image_ok:
+            image_refine_btn = QPushButton()
+            image_refine_btn.setToolTip(
+                "Image Based Refinement:\n\n"
+                "Base subsequent image copies on previous result image.\n\n"
+                "Other source images keep their order."
+            )
+            _configure_series_toggle_push_button(
+                image_refine_btn, "series_image_refinement_icon.png"
+            )
+            image_refine_btn.blockSignals(True)
+            image_refine_btn.setChecked(
+                controller.series_refinement_enabled_for_row(row_idx)
+            )
+            image_refine_btn.blockSignals(False)
+            image_refine_btn.toggled.connect(
+                lambda checked, r=row_idx: controller.set_series_refinement_for_row(
+                    r, checked
+                )
+            )
+            image_refine_btn.toggled.connect(
+                lambda _checked, btn=image_refine_btn: _sync_series_toggle_button_style(
+                    btn, "series_image_refinement_icon.png"
+                )
+            )
+            _sync_series_toggle_button_style(
+                image_refine_btn, "series_image_refinement_icon.png"
+            )
+            action_layout.addWidget(
+                image_refine_btn, alignment=Qt.AlignmentFlag.AlignCenter
+            )
+        if text_ok:
+            text_refine_btn = QPushButton()
+            text_refine_btn.setToolTip(
+                "Text Based Refinement:\n\n"
+                "Re-run the previous prompt through Gen Prompt AI before each\n"
+                "subsequent copy in the series."
+            )
+            _configure_series_toggle_push_button(
+                text_refine_btn, "series_text_refinement_icon.png"
+            )
+            text_refine_btn.blockSignals(True)
+            text_refine_btn.setChecked(
+                controller.series_prompt_refinement_enabled_for_row(row_idx)
+            )
+            text_refine_btn.blockSignals(False)
+            text_refine_btn.toggled.connect(
+                lambda checked, r=row_idx: controller.set_series_prompt_refinement_for_row(
+                    r, checked
+                )
+            )
+            text_refine_btn.toggled.connect(
+                lambda _checked, btn=text_refine_btn: _sync_series_toggle_button_style(
+                    btn, "series_text_refinement_icon.png"
+                )
+            )
+            _sync_series_toggle_button_style(
+                text_refine_btn, "series_text_refinement_icon.png"
+            )
+            action_layout.addWidget(
+                text_refine_btn, alignment=Qt.AlignmentFlag.AlignCenter
+            )
     action_layout.addWidget(edit_btn, alignment=Qt.AlignmentFlag.AlignCenter)
     action_layout.addWidget(cancel_btn, alignment=Qt.AlignmentFlag.AlignCenter)
     action_wrap.setFixedWidth(_ACTION_COL_WIDTH)
@@ -361,38 +469,43 @@ def open_reference_thumbnail_paths(main_window, paths: list[str]) -> None:
         )
 
 
-def _icon_push_button_stylesheet(icon_name: str, *, hover_icon_name: str | None = None) -> str:
-    t = get_active_theme()
-    icon_url = f"url({asset_path(icon_name)})"
-    hover_name = hover_icon_name or icon_name.replace(".png", "_hover.png")
-    hover_url = f"url({asset_path(hover_name)})"
+def _job_queue_action_button_stylesheet(*, highlighted: bool = False) -> str:
+    """Match File Information action buttons: accent border on hover."""
+    th = get_active_theme()
     sz = _ICON_BTN_SIZE
-    btn_bg = job_queue_action_bar_background_hex()
-    btn_hover = job_queue_cell_background_hex()
-    btn_pressed = job_queue_action_bar_background_qcolor().darker(120).name()
+    hover_border = getattr(th, "button_border_hover_hex", th.accent_color_hex)
+    if highlighted:
+        chip_bg, chip_hover, _, chip_border, chip_border_hover = titlebar_chip_colors()
+        bg = chip_bg
+        border = chip_border
+        hover_bg = chip_hover
+        hover_border = chip_border_hover
+    else:
+        bg = job_queue_action_bar_background_hex()
+        border = th.information_icon_cell_border_muted_hex
+        hover_bg = job_queue_cell_background_hex()
+    pressed_bg = job_queue_action_bar_background_qcolor().darker(120).name()
     return f"""
         QPushButton {{
-            background-color: {btn_bg};
-            border: 1px solid {t.border_default_hex};
+            background-color: {bg};
+            border: 1px solid {border};
             border-radius: 3px;
             padding: 0px;
             min-width: {sz}px;
             max-width: {sz}px;
             min-height: {sz}px;
             max-height: {sz}px;
-            image: {icon_url};
-        }}
-        QPushButton:focus {{
-            border: 1px solid {t.current_image_border_color_hex};
-            outline: none;
         }}
         QPushButton:hover {{
-            background-color: {btn_hover};
-            border: 1px solid {t.border_default_hex};
-            image: {hover_url};
+            background-color: {hover_bg};
+            border: 1px solid {hover_border};
+        }}
+        QPushButton:focus {{
+            border: 1px solid {th.current_image_border_color_hex};
+            outline: none;
         }}
         QPushButton:pressed {{
-            background-color: {btn_pressed};
+            background-color: {pressed_bg};
         }}
         QPushButton:disabled {{
             opacity: 0.35;
@@ -400,42 +513,70 @@ def _icon_push_button_stylesheet(icon_name: str, *, hover_icon_name: str | None 
     """
 
 
+def _attach_icon_hover_swap(
+    btn: QPushButton, normal_name: str, hover_name: str | None = None
+) -> None:
+    normal, hover = icon_pair_from_assets(normal_name, hover_name)
+    swap = getattr(btn, "_icon_hover_swap", None)
+    if swap is None:
+        btn._icon_hover_swap = attach_icon_hover_swap(btn, normal, hover)
+    else:
+        swap.set_icons(normal, hover)
+
+
+def _prepare_job_queue_icon_button(btn: QPushButton) -> None:
+    btn.setAttribute(Qt.WidgetAttribute.WA_Hover, True)
+    btn.setFixedSize(_ICON_BTN_SIZE, _ICON_BTN_SIZE)
+    btn.setIconSize(QSize(_ICON_BTN_SIZE - 4, _ICON_BTN_SIZE - 4))
+    btn.setFlat(False)
+
+
 def _configure_icon_push_button(
     btn: QPushButton, icon_name: str, *, hover_icon_name: str | None = None
 ) -> None:
-    btn.setStyleSheet(_icon_push_button_stylesheet(icon_name, hover_icon_name=hover_icon_name))
+    _prepare_job_queue_icon_button(btn)
+    btn.setStyleSheet(_job_queue_action_button_stylesheet())
     btn.setProperty("_tooltip_icon_asset", icon_name)
+    _attach_icon_hover_swap(btn, icon_name, hover_icon_name)
+
+
+def _configure_series_toggle_push_button(btn: QPushButton, icon_name: str) -> None:
+    btn.setCheckable(True)
+    btn.setProperty("_series_toggle_icon", icon_name)
+    _prepare_job_queue_icon_button(btn)
+    _sync_series_toggle_button_style(btn, icon_name)
+
+
+def _sync_series_toggle_button_style(btn: QPushButton, icon_name: str) -> None:
+    highlighted = btn.isChecked()
+    btn.setStyleSheet(_job_queue_action_button_stylesheet(highlighted=highlighted))
+    btn.setProperty("_tooltip_icon_asset", icon_name)
+    base = icon_name.replace(".png", "")
+    if highlighted:
+        _attach_icon_hover_swap(
+            btn,
+            f"{base}_active.png",
+            f"{base}_active_hover.png",
+        )
+    else:
+        _attach_icon_hover_swap(btn, icon_name)
 
 
 def _trash_button_stylesheet() -> str:
-    return _icon_push_button_stylesheet(
-        "trash_icon.png", hover_icon_name="trash_icon_hover.png"
-    )
+    return _job_queue_action_button_stylesheet()
 
 
 def _edit_button_stylesheet() -> str:
-    return _icon_push_button_stylesheet("edit_icon.png")
+    return _job_queue_action_button_stylesheet()
 
 
 def _series_plus_button_stylesheet() -> str:
-    return _icon_push_button_stylesheet("series_plus_icon.png")
+    return _job_queue_action_button_stylesheet()
 
 
 def _series_minus_button_stylesheet() -> str:
-    return _icon_push_button_stylesheet("series_minus_icon.png")
+    return _job_queue_action_button_stylesheet()
 
 
 def _series_refinement_button_stylesheet() -> str:
-    active_url = f"url({asset_path('series_refinement_icon_active.png')})"
-    active_hover_url = f"url({asset_path('series_refinement_icon_active_hover.png')})"
-    btn_hover = job_queue_cell_background_hex()
-    return _icon_push_button_stylesheet("series_refinement_icon.png") + f"""
-        QPushButton:checked:hover {{
-            background-color: {btn_hover};
-            border: 1px solid {get_active_theme().border_default_hex};
-            image: {active_hover_url};
-        }}
-        QPushButton:checked {{
-            image: {active_url};
-        }}
-    """
+    return _job_queue_action_button_stylesheet()

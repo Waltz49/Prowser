@@ -739,6 +739,7 @@ def build_worker_payload(
     merged.pop("aspect_ratio_lock", None)
     merged.pop("_pixelmator_batch_dir", None)
     merged.pop("series_refinement", None)
+    merged.pop("series_prompt_refinement", None)
     merged.pop("aspect_ratio_test", None)
     merged.pop("use_custom_size", None)
     merged.pop("pass_image_to_ai_with_prompt", None)

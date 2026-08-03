@@ -369,13 +369,47 @@ class ImageGenController(QObject):
         self._selected_job_id = rows[0].job_id
         return 0
 
-    def job_row_supports_image_refinement(self, row: int) -> bool:
+    def job_row_supports_image_series_refinement(self, row: int) -> bool:
         record = self.job_record_for_row(row)
         if record is None:
             return False
-        _, values = record
+        plugin, values = record
+        if self._job_record_is_infill(plugin, values):
+            return False
+        from imagegen_plugins.image_gen_active_model import FUNCTION_EDIT
+
+        if plugin.function != FUNCTION_EDIT:
+            return False
         paths = resolve_source_image_paths(values)
         return bool(paths)
+
+    def job_row_supports_text_series_refinement(self, row: int) -> bool:
+        record = self.job_record_for_row(row)
+        if record is None:
+            return False
+        plugin, values = record
+        if self._job_record_is_infill(plugin, values):
+            return False
+        from imagegen_plugins.image_gen_active_model import (
+            FUNCTION_CREATE,
+            FUNCTION_EDIT,
+            FUNCTION_EXPAND,
+        )
+        from imagegen_plugins.lmstudio_caption import is_lmstudio_services_available
+
+        if not is_lmstudio_services_available():
+            return False
+        return plugin.function in (FUNCTION_CREATE, FUNCTION_EDIT, FUNCTION_EXPAND)
+
+    def _job_record_is_infill(self, plugin, values: dict) -> bool:
+        from imagegen_plugins.image_gen_active_model import (
+            FUNCTION_INFILL,
+            FUNCTION_INFILL_PAINT,
+        )
+
+        if plugin.function in (FUNCTION_INFILL, FUNCTION_INFILL_PAINT):
+            return True
+        return plugin.pipeline_id == "mflux_fill_infill"
 
     def move_queued_job(self, job_id: str, to_queue_index: int) -> bool:
         """Reorder a pending job within ``_queue`` (active job is not movable)."""
@@ -790,9 +824,20 @@ class ImageGenController(QObject):
         return result
 
     def _pending_job_needs_ai_stage(self) -> bool:
-        from imagegen_plugins.flux_prompt_job import has_flux_prompt_ai_job
+        from imagegen_plugins.flux_prompt_job import (
+            flux_prompt_ai_job_meta,
+            has_flux_prompt_ai_job,
+        )
 
-        return has_flux_prompt_ai_job(self._pending_values)
+        values = self._pending_values
+        if not has_flux_prompt_ai_job(values):
+            return False
+        if self._copies_done > 0:
+            return bool(values.get("series_prompt_refinement"))
+        meta = flux_prompt_ai_job_meta(values)
+        if meta is not None and meta.get("series_chain_only"):
+            return False
+        return True
 
     def active_job_timing_steps_label(self) -> str:
         return "AI:" if self._job_ai_stage_active else "Steps:"
@@ -1327,6 +1372,9 @@ class ImageGenController(QObject):
     def active_series_refinement_enabled(self) -> bool:
         return bool(self._pending_values.get("series_refinement", False))
 
+    def active_series_prompt_refinement_enabled(self) -> bool:
+        return bool(self._pending_values.get("series_prompt_refinement", False))
+
     def set_active_series_refinement(self, enabled: bool) -> bool:
         """Toggle whether remaining copies replace the first source with each result."""
         if not self._active_queue_job_id or self.active_series_remaining_after() <= 0:
@@ -1335,6 +1383,33 @@ class ImageGenController(QObject):
         if self.active_series_refinement_enabled() == enabled:
             return False
         self._pending_values["series_refinement"] = enabled
+        self.task_status_info_changed.emit()
+        self.queue_changed.emit()
+        self._schedule_persist_job_queue()
+        return True
+
+    def set_active_series_prompt_refinement(self, enabled: bool) -> bool:
+        """Toggle whether remaining copies re-run the previous prompt through AI."""
+        if not self._active_queue_job_id or self.active_series_remaining_after() <= 0:
+            return False
+        enabled = bool(enabled)
+        if self.active_series_prompt_refinement_enabled() == enabled:
+            return False
+        plugin = self._active_plugin
+        if plugin is None:
+            return False
+        from imagegen_plugins.flux_prompt_job import (
+            clear_series_chain_flux_prompt_ai_job,
+            ensure_flux_prompt_ai_job_for_series,
+        )
+
+        if enabled:
+            if not ensure_flux_prompt_ai_job_for_series(plugin, self._pending_values):
+                return False
+            self._pending_values["series_prompt_refinement"] = True
+        else:
+            self._pending_values["series_prompt_refinement"] = False
+            clear_series_chain_flux_prompt_ai_job(self._pending_values)
         self.task_status_info_changed.emit()
         self.queue_changed.emit()
         self._schedule_persist_job_queue()
@@ -1536,6 +1611,44 @@ class ImageGenController(QObject):
         if bool(job.values.get("series_refinement", False)) == enabled:
             return False
         job.values["series_refinement"] = enabled
+        refresh_queued_job_status(job)
+        self.queue_changed.emit()
+        self._schedule_persist_job_queue()
+        return True
+
+    def series_prompt_refinement_enabled_for_row(self, row: int) -> bool:
+        record = self.job_record_for_row(row)
+        if record is None:
+            return False
+        _, values = record
+        return bool(values.get("series_prompt_refinement", False))
+
+    def set_series_prompt_refinement_for_row(self, row: int, enabled: bool) -> bool:
+        rows = self.queue_snapshot()
+        if row < 0 or row >= len(rows):
+            return False
+        if rows[row].is_active:
+            return self.set_active_series_prompt_refinement(enabled)
+        if self.series_remaining_after_for_row(row) <= 0:
+            return False
+        job = self._queued_job_by_id(rows[row].job_id)
+        if job is None or job.plugin is None:
+            return False
+        enabled = bool(enabled)
+        if bool(job.values.get("series_prompt_refinement", False)) == enabled:
+            return False
+        from imagegen_plugins.flux_prompt_job import (
+            clear_series_chain_flux_prompt_ai_job,
+            ensure_flux_prompt_ai_job_for_series,
+        )
+
+        if enabled:
+            if not ensure_flux_prompt_ai_job_for_series(job.plugin, job.values):
+                return False
+            job.values["series_prompt_refinement"] = True
+        else:
+            job.values["series_prompt_refinement"] = False
+            clear_series_chain_flux_prompt_ai_job(job.values)
         refresh_queued_job_status(job)
         self.queue_changed.emit()
         self._schedule_persist_job_queue()
@@ -2500,6 +2613,14 @@ class ImageGenController(QObject):
                         self._active_thumbnail_paths = list(paths)
                         self.task_status_info_changed.emit()
                         self.queue_changed.emit()
+                if values.get("series_prompt_refinement"):
+                    from imagegen_plugins.flux_prompt_job import (
+                        sync_flux_prompt_ai_user_prompt_for_next_copy,
+                    )
+
+                    sync_flux_prompt_ai_user_prompt_for_next_copy(
+                        self._pending_values
+                    )
                 self._enter_copy_cooldown_after_success()
                 return
             self._finish_copy_batch()

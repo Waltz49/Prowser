@@ -179,10 +179,15 @@ def _series_queued_value(count: int) -> str:
 
 
 def _series_refinement_suffix(values: Dict[str, Any]) -> str:
-    """Suffix when refinement is enabled."""
-    if not values.get("series_refinement"):
+    """Suffix when image or text series refinement is enabled."""
+    parts: list[str] = []
+    if values.get("series_refinement"):
+        parts.append("Image Refinement")
+    if values.get("series_prompt_refinement"):
+        parts.append("Text Refinement")
+    if not parts:
         return ""
-    return "\u00A0\u00A0\u00A0\u00A0(Refinement)"
+    return "\u00A0\u00A0\u00A0\u00A0(" + ", ".join(parts) + ")"
 
 
 def format_series_line_value(base: str, values: Dict[str, Any]) -> str:
