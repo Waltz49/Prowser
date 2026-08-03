@@ -26,12 +26,26 @@ from thumbnails.sidebar_pane_layout import (
     pane_min_height,
     redistribute_for_target_pane,
 )
+from thumbnails.thumbnail_constants import (
+    JOBS_PANE_AUTO_RESIZE_ON_JOB_CHANGE,
+    JOBS_PANE_SIZE_CHANGE_TOLERANCE_PX,
+)
 from theme.theme_service import get_active_theme
 
 try:
-    from imagegen_plugins.job_queue_panel import MIN_JOBS_PANE_WIDTH
+    from imagegen_plugins.job_queue_panel import (
+        MIN_JOBS_PANE_WIDTH,
+        QUEUE_SIZE_ALL,
+        QUEUE_SIZE_ONE,
+        QUEUE_SIZE_STRIP,
+    )
 except ImportError:
     MIN_JOBS_PANE_WIDTH = 250
+    QUEUE_SIZE_ALL = "all"
+    QUEUE_SIZE_ONE = "one"
+    QUEUE_SIZE_STRIP = "strip"
+
+_JOBS_QUEUE_SIZE_MODES = (QUEUE_SIZE_ALL, QUEUE_SIZE_ONE, QUEUE_SIZE_STRIP)
 
 _RIGHT_SIDEBAR_MIN_WIDTH_NO_JOBS = 250
 _SHORTCUTS_PANE_MIN_WIDTH = 200
@@ -329,8 +343,15 @@ class RightSidebarCombinedWidget(QWidget):
         """Minimum splitter height so a pane's title bar stays visible."""
         if not self._pane_visibility()[pane_idx]:
             return 0
-        if pane_idx == 2 and not header_only and self._jobs_pane_compact:
-            return self._jobs_compact_pane_height()
+        if pane_idx == 2 and not header_only:
+            if self._jobs_pane_compact:
+                return self._jobs_compact_pane_height()
+            if self.jobs_widget is not None:
+                mode = self.jobs_widget.queue_size_mode()
+                if mode == QUEUE_SIZE_ONE:
+                    return self._jobs_pane_height_for_mode(QUEUE_SIZE_ONE)
+                if mode == QUEUE_SIZE_ALL and self.jobs_widget.should_shrink_wrap_client():
+                    return self._jobs_pane_height_for_mode(QUEUE_SIZE_ALL)
         if pane_idx == 1 and not header_only:
             return self._header_height_for_pane(1) + MIN_INFORMATION_CONTENT_HEIGHT
         return pane_min_height(
@@ -344,46 +365,152 @@ class RightSidebarCombinedWidget(QWidget):
         return header_h + self.jobs_widget.compact_content_height()
 
     def _set_jobs_pane_compact(self, compact: bool, *, persist: bool = True) -> None:
-        compact = bool(compact)
-        if compact == self._jobs_pane_compact:
-            if compact:
-                self._sync_jobs_compact_geometry()
+        """Enter/exit strip-only mode (drag floor, legacy compact flag)."""
+        mode = QUEUE_SIZE_STRIP if compact else QUEUE_SIZE_ALL
+        self._set_jobs_queue_size_mode(mode, persist=persist)
+
+    def _jobs_pane_height_for_mode(self, mode: str) -> int:
+        header_h = self._header_height_for_pane(2)
+        if not self.jobs_visible or self.jobs_widget is None:
+            return header_h
+        if mode == QUEUE_SIZE_ALL and self.jobs_widget.should_shrink_wrap_client():
+            return header_h + self.jobs_widget.empty_state_height_hint()
+        return header_h + self.jobs_widget.content_height_for_size_mode(mode)
+
+    def _set_jobs_queue_size_mode(self, mode: str, *, persist: bool = True) -> None:
+        if mode not in _JOBS_QUEUE_SIZE_MODES:
+            mode = QUEUE_SIZE_ALL
+        compact = mode == QUEUE_SIZE_STRIP
+        if (
+            self.jobs_widget is not None
+            and self.jobs_widget.queue_size_mode() == mode
+            and compact == self._jobs_pane_compact
+        ):
+            self._sync_jobs_mode_geometry(mode)
             return
         self._jobs_pane_compact = compact
         if self.jobs_widget is not None:
-            self.jobs_widget.set_queue_compact(compact)
+            self.jobs_widget.set_queue_size_mode(mode)
             self.jobs_widget.updateGeometry()
-        if self.jobs_content is None:
-            if persist and self._jobs_feature_enabled:
-                self.main_window.config.update_setting('jobs_pane_compact', compact)
-            return
-        if compact:
-            self._sync_jobs_compact_geometry()
-        else:
-            self.jobs_content.setMinimumHeight(0)
-            self.jobs_content.setMaximumHeight(16777215)
-            self.jobs_content.setSizePolicy(
-                QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
-            )
         if persist and self._jobs_feature_enabled:
             self.main_window.config.update_setting('jobs_pane_compact', compact)
+        self._sync_jobs_mode_geometry(mode)
+
+    def _sync_jobs_mode_geometry(self, mode: str | None = None) -> None:
+        """Pin jobs content height for fixed-height modes (strip, one, empty all)."""
+        if self.jobs_widget is None or self.jobs_content is None:
+            return
+        mode = mode or self.jobs_widget.queue_size_mode()
+        if mode == QUEUE_SIZE_STRIP:
+            self._sync_jobs_compact_geometry()
+            return
+        if mode == QUEUE_SIZE_ONE:
+            content_h = self.jobs_widget.content_height_for_size_mode(QUEUE_SIZE_ONE)
+            self.jobs_content.setSizePolicy(
+                QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
+            )
+            self.jobs_content.setFixedHeight(content_h)
+            needed = self._jobs_pane_height_for_mode(QUEUE_SIZE_ONE)
+            sizes = self.splitter.sizes()
+            current = sizes[2] if len(sizes) > 2 else 0
+            if current != needed:
+                self._resize_pane_to_height(2, needed)
+            return
+        if mode == QUEUE_SIZE_ALL and self.jobs_widget.should_shrink_wrap_client():
+            content_h = self.jobs_widget.empty_state_height_hint()
+            self.jobs_content.setSizePolicy(
+                QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
+            )
+            self.jobs_content.setFixedHeight(content_h)
+            needed = self._jobs_pane_height_for_mode(QUEUE_SIZE_ALL)
+            sizes = self.splitter.sizes()
+            current = sizes[2] if len(sizes) > 2 else 0
+            if current != needed:
+                self._resize_pane_to_height(2, needed)
+            return
+        self.jobs_content.setMinimumHeight(0)
+        self.jobs_content.setMaximumHeight(16777215)
+        self.jobs_content.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
+        )
+
+    def _apply_jobs_pane_size_mode(self, mode: str) -> int:
+        """Apply queue size mode and resize jobs pane; return splitter jobs slice height."""
+        if not self._pane_visibility()[2] or self.jobs_widget is None:
+            return 0
+        self._set_jobs_queue_size_mode(mode, persist=True)
+        prev_needed = -1
+        prev_current = -1
+        for _ in range(4):
+            self._prepare_pane_measure(2)
+            needed = self._jobs_pane_height_for_mode(mode)
+            sizes = self.splitter.sizes()
+            current = sizes[2] if len(sizes) > 2 else 0
+            if prev_needed >= 0 and abs(needed - prev_needed) <= 1 and current == prev_current:
+                break
+            self._resize_pane_to_height(2, needed)
+            prev_needed = needed
+            prev_current = self.splitter.sizes()[2]
+        self._sync_jobs_mode_geometry(mode)
+        sizes = self.splitter.sizes()
+        return sizes[2] if len(sizes) > 2 else 0
+
+    def _next_jobs_queue_size_mode(self, mode: str) -> str:
+        idx = _JOBS_QUEUE_SIZE_MODES.index(mode) if mode in _JOBS_QUEUE_SIZE_MODES else 0
+        return _JOBS_QUEUE_SIZE_MODES[(idx + 1) % len(_JOBS_QUEUE_SIZE_MODES)]
+
+    def _cycle_jobs_pane_size(self) -> None:
+        """Double-click: refit current mode, then advance if height unchanged."""
+        if not self.jobs_visible:
+            self.set_jobs_visible(True)
+        if not self._pane_visibility()[2] or self.jobs_widget is None:
+            return
+        start_mode = self.jobs_widget.queue_size_mode()
+        sizes = self.splitter.sizes()
+        start_height = sizes[2] if len(sizes) > 2 else 0
+        tolerance = JOBS_PANE_SIZE_CHANGE_TOLERANCE_PX
+
+        def height_changed(height: int) -> bool:
+            return abs(height - start_height) > tolerance
+
+        height = self._apply_jobs_pane_size_mode(start_mode)
+        if height_changed(height):
+            return
+        mode = self._next_jobs_queue_size_mode(start_mode)
+        while mode != start_mode:
+            height = self._apply_jobs_pane_size_mode(mode)
+            if height_changed(height):
+                return
+            mode = self._next_jobs_queue_size_mode(mode)
 
     def _jobs_running_content_height(self) -> int:
         if not self.jobs_visible or self.jobs_widget is None:
             return 0
-        if self.jobs_widget.is_queue_compact():
+        mode = self.jobs_widget.queue_size_mode()
+        if mode == QUEUE_SIZE_STRIP:
             return self.jobs_widget.compact_content_height()
+        if mode == QUEUE_SIZE_ONE:
+            return self.jobs_widget.content_height_for_size_mode(QUEUE_SIZE_ONE)
         if self.jobs_widget.should_shrink_wrap_client():
             return self.jobs_widget.content_height_for_size_mode()
         return self.jobs_widget.strip_only_content_height()
 
     def ensure_jobs_pane_fits_content(self) -> None:
-        """Grow a collapsed jobs pane when the progress strip needs more room."""
+        """Grow or refit the jobs pane when queue/strip content changes."""
         if not self._pane_visibility()[2] or self.jobs_widget is None:
+            return
+        mode = self.jobs_widget.queue_size_mode()
+        if JOBS_PANE_AUTO_RESIZE_ON_JOB_CHANGE:
+            self._apply_jobs_pane_size_mode(mode)
+            return
+        if mode == QUEUE_SIZE_ONE:
+            self._apply_jobs_pane_size_mode(QUEUE_SIZE_ONE)
             return
         if not self.jobs_widget.has_active_generation():
             if self._jobs_pane_compact:
                 self._sync_jobs_compact_geometry()
+            elif mode == QUEUE_SIZE_ALL and self.jobs_widget.should_shrink_wrap_client():
+                self._sync_jobs_mode_geometry(QUEUE_SIZE_ALL)
             return
         header_h = self._header_height_for_pane(2)
         content_h = self._jobs_running_content_height()
@@ -486,7 +613,7 @@ class RightSidebarCombinedWidget(QWidget):
         if pane_idx == 1 and self.information_widget:
             return header_h + self.information_widget.preferred_content_height()
         if pane_idx == 2 and self.jobs_widget:
-            return header_h + self.jobs_widget.preferred_content_height()
+            return self._jobs_pane_height_for_mode(self.jobs_widget.queue_size_mode())
         return header_h + MIN_PANE_CONTENT
 
     def _prepare_pane_measure(self, pane_idx: int) -> None:
@@ -512,14 +639,6 @@ class RightSidebarCombinedWidget(QWidget):
         )
 
     def _collapse_pane_from_fit(self, pane_idx: int) -> None:
-        if pane_idx == 2 and self._jobs_strip_compact_available():
-            compact = self._jobs_compact_pane_height()
-            self._set_jobs_pane_compact(True)
-            self._resize_pane_to_height(2, compact)
-            self._sync_jobs_compact_geometry()
-            return
-        if pane_idx == 2:
-            self._set_jobs_pane_compact(False)
         self._resize_pane_to_height(pane_idx, self._pane_min_height(pane_idx))
 
     def _expand_pane_to_fit_stabilized(self, pane_idx: int) -> None:
@@ -551,16 +670,9 @@ class RightSidebarCombinedWidget(QWidget):
             self.set_shortcuts_visible(True)
         elif pane_idx == 1 and not self.information_visible:
             self.set_information_visible(True)
-        elif pane_idx == 2 and not self.jobs_visible:
-            self.set_jobs_visible(True)
 
         vis = self._pane_visibility()
         if not vis[pane_idx]:
-            return
-
-        if pane_idx == 2 and self._jobs_pane_compact:
-            self._set_jobs_pane_compact(False)
-            self._expand_pane_to_fit_stabilized(2)
             return
 
         self._prepare_pane_measure(pane_idx)
@@ -572,8 +684,6 @@ class RightSidebarCombinedWidget(QWidget):
             self._collapse_pane_from_fit(pane_idx)
             self._pane_fit_targets.pop(pane_idx, None)
         else:
-            if pane_idx == 2:
-                self._set_jobs_pane_compact(False)
             self._expand_pane_to_fit_stabilized(pane_idx)
 
     def _resize_pane_to_height(self, pane_idx: int, target_height: int) -> None:
@@ -657,7 +767,7 @@ class RightSidebarCombinedWidget(QWidget):
         self._toggle_pane_fit(1)
 
     def _expand_jobs_pane_to_fit(self) -> None:
-        self._toggle_pane_fit(2)
+        self._cycle_jobs_pane_size()
 
     def set_shortcuts_visible(self, visible):
         """Set Shortcuts visibility programmatically (e.g. from O key)"""

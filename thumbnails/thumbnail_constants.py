@@ -118,6 +118,12 @@ BROWSE_IMAGE_HISTORY_MAX = 60
 # 0 = top, 1 = bottom, 2 = both (top and bottom).
 TRIGGER_POSITION = 1
 
+# Sidebar jobs pane: height-change tolerance for double-click mode cycle (px).
+JOBS_PANE_SIZE_CHANGE_TOLERANCE_PX = 10
+
+# When True, refit the jobs pane to the current size mode on job start/end.
+JOBS_PANE_AUTO_RESIZE_ON_JOB_CHANGE = False
+
 # Tree view auto-scroll during drag - narrow band (less than one node height), slow speeds
 TREE_DRAG_AUTO_SCROLL_TIMER_MS = 20  # ms - timer interval for auto-scroll of tree during drag
 
