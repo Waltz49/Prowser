@@ -8,7 +8,6 @@ import uuid
 from dataclasses import dataclass
 from typing import Any
 
-from imagegen_plugins.image_gen_pipeline_modes import get_pipeline
 from imagegen_plugins.image_gen_registry import ImageGenModelPlugin
 from imagegen_plugins.model_task_status_info import format_image_generation_queue_status_html
 from imagegen_plugins.flux_prompt_job import (
@@ -113,8 +112,9 @@ def thumbnail_paths_for_values(
             seen.add(normalized)
             paths.append(normalized)
 
-    pipeline = get_pipeline(plugin.pipeline_id)
-    if pipeline.requires_source_image:
+    from imagegen_plugins.image_gen_pipeline_modes import job_run_uses_source_image
+
+    if job_run_uses_source_image(plugin.pipeline_id, values):
         from imagegen_plugins.image_gen_naming import resolve_source_image_paths
 
         for src in resolve_source_image_paths(values):

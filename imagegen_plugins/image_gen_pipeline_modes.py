@@ -68,6 +68,7 @@ class PipelineMode:
     prompt_status_label: str = "Prompt:"
     prompt_required: bool = True
     requires_source_image: bool = False
+    supports_optional_source_image: bool = False
     includes_output_dimensions: bool = True
 
 
@@ -217,6 +218,7 @@ PIPELINE_MODES: Dict[str, PipelineMode] = {
         supports_progressive_images=True,
         prompt_required=True,
         requires_source_image=False,
+        supports_optional_source_image=True,
     ),
     "mflux_flux2_klein_edit": PipelineMode(
         pipeline_id="mflux_flux2_klein_edit",
@@ -264,6 +266,38 @@ def get_pipeline(pipeline_id: str) -> PipelineMode:
     if mode is None:
         raise KeyError(f"Unknown pipeline_id: {pipeline_id}")
     return mode
+
+
+def pipeline_supports_series_image_refinement(pipeline_id: str) -> bool:
+    """True when a multi-copy job may chain prior outputs as image input."""
+    mode = get_pipeline(pipeline_id)
+    if mode.requires_source_image:
+        return True
+    return mode.supports_optional_source_image
+
+
+def effective_pipeline_id_for_values(
+    pipeline_id: str, values: Dict[str, Any]
+) -> str:
+    """Worker pipeline when optional source images are present (e.g. create→edit)."""
+    if pipeline_id == "mflux_flux2_klein_create":
+        from imagegen_plugins.image_gen_naming import resolve_source_image_paths
+
+        if resolve_source_image_paths(values):
+            return "mflux_flux2_klein_edit"
+    return pipeline_id
+
+
+def job_run_uses_source_image(pipeline_id: str, values: Dict[str, Any]) -> bool:
+    """True when this run will condition on one or more source images."""
+    mode = get_pipeline(pipeline_id)
+    if mode.requires_source_image:
+        return True
+    if not mode.supports_optional_source_image:
+        return False
+    from imagegen_plugins.image_gen_naming import resolve_source_image_paths
+
+    return bool(resolve_source_image_paths(values))
 
 
 def align_dims_for_pipeline(
@@ -348,6 +382,7 @@ def generation_status_display_size(
     if payload:
         merged.update(payload)
     max_side = int(merged.get("max_generation_dimension") or effective_max_side)
+    pipeline_id = effective_pipeline_id_for_values(pipeline_id, merged)
 
     if pipeline_id == "mflux_flux2_klein_edit":
         from imagegen_plugins.image_gen_naming import resolve_source_image_paths
@@ -664,9 +699,13 @@ def build_worker_payload(
             merged["source_image_paths"] = source_paths
             merged["source_image_path"] = source_paths[0]
     if pipeline_id == "mflux_flux2_klein_create":
+        from imagegen_plugins.image_gen_naming import resolve_source_image_paths
         from imagegen_plugins.mflux_lora_presets import apply_lora_to_mflux_payload
 
         apply_lora_to_mflux_payload(merged, for_fill=False, for_klein=True)
+        if resolve_source_image_paths(merged):
+            pipeline_id = "mflux_flux2_klein_edit"
+            merged["pipeline_id"] = pipeline_id
     if pipeline_id == "sd15_diffusers":
         from imagegen_plugins.sd15_lora_presets import apply_lora_to_sd15_payload
 

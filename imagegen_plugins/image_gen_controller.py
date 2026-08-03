@@ -376,12 +376,17 @@ class ImageGenController(QObject):
         plugin, values = record
         if self._job_record_is_infill(plugin, values):
             return False
-        from imagegen_plugins.image_gen_active_model import FUNCTION_EDIT
+        from imagegen_plugins.image_gen_active_model import FUNCTION_CREATE, FUNCTION_EDIT
+        from imagegen_plugins.image_gen_pipeline_modes import (
+            pipeline_supports_series_image_refinement,
+        )
 
-        if plugin.function != FUNCTION_EDIT:
-            return False
-        paths = resolve_source_image_paths(values)
-        return bool(paths)
+        if plugin.function == FUNCTION_EDIT:
+            paths = resolve_source_image_paths(values)
+            return bool(paths)
+        if plugin.function == FUNCTION_CREATE:
+            return pipeline_supports_series_image_refinement(plugin.pipeline_id)
+        return False
 
     def job_row_supports_text_series_refinement(self, row: int) -> bool:
         record = self.job_record_for_row(row)
@@ -1067,7 +1072,9 @@ class ImageGenController(QObject):
                     if manage_batch_on_failure:
                         self._finish_copy_batch()
                     return False
-            if get_pipeline(plugin.pipeline_id).requires_source_image:
+            from imagegen_plugins.image_gen_pipeline_modes import job_run_uses_source_image
+
+            if job_run_uses_source_image(plugin.pipeline_id, values):
                 worker_source_paths = source_paths_for_generation_exif(payload)
                 if isinstance(canonical_from_payload, list) and canonical_from_payload:
                     canonical_source_paths = source_paths_for_generation_exif(
@@ -2564,7 +2571,14 @@ class ImageGenController(QObject):
                     output_path,
                     fallback_source_paths=self._exif_fallback_source_paths(),
                 )
-                if get_pipeline(plugin.pipeline_id).requires_source_image:
+                from imagegen_plugins.image_gen_pipeline_modes import (
+                    job_run_uses_source_image,
+                )
+
+                uses_source_image = job_run_uses_source_image(
+                    plugin.pipeline_id, values
+                )
+                if uses_source_image:
                     will_refine_next = (
                         self._copy_batch_active
                         and not self._copy_batch_cancelled
@@ -2735,13 +2749,16 @@ class ImageGenController(QObject):
             from imagegen_plugins.flux_prompt_job import (
                 flux_prompt_ai_reference_image_paths,
             )
+            from imagegen_plugins.image_gen_pipeline_modes import (
+                job_run_uses_source_image,
+            )
 
             extra_paths: List[str] = []
             if fallback_source_paths:
                 extra_paths.extend(fallback_source_paths)
             extra_paths.extend(flux_prompt_ai_reference_image_paths(values))
             if not (
-                get_pipeline(plugin.pipeline_id).requires_source_image
+                job_run_uses_source_image(plugin.pipeline_id, values)
                 or extra_paths
             ):
                 return ref_entries, allow_cross_dir
