@@ -473,26 +473,20 @@ def _shortcuts_sidebar_chrome_from_theme(bg: str, border: str, splitter_hover: s
 
 
 def _merge_border_width_indices(out: Dict[str, Any], stored: Optional[Dict[str, Any]]) -> None:
-    """Fill default/current/multiselect border width indices; migrate legacy image_border_width_index."""
-    legacy: Optional[int] = None
-    if stored and "image_border_width_index" in stored:
-        legacy = _coerce_image_border_width(stored.get("image_border_width_index"), 2)
-
-    def pick(key: str, fallback: int, use_legacy: bool) -> int:
+    """Fill default/current/multiselect border width indices."""
+    def pick(key: str, fallback: int) -> int:
         if stored and key in stored:
             return _coerce_image_border_width(stored.get(key), fallback)
-        if use_legacy and legacy is not None:
-            return legacy
         return fallback
 
     out["default_image_border_width_index"] = pick(
-        "default_image_border_width_index", int(out["default_image_border_width_index"]), False
+        "default_image_border_width_index", int(out["default_image_border_width_index"])
     )
     out["current_image_border_width_index"] = pick(
-        "current_image_border_width_index", int(out["current_image_border_width_index"]), True
+        "current_image_border_width_index", int(out["current_image_border_width_index"])
     )
     out["multiselect_border_width_index"] = pick(
-        "multiselect_border_width_index", int(out["multiselect_border_width_index"]), True
+        "multiselect_border_width_index", int(out["multiselect_border_width_index"])
     )
 
 

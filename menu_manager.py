@@ -1473,14 +1473,6 @@ class MenuManager:
 
         debug_menu.addSeparator()
 
-        self.main_window.normalize_exif_steps_action = QAction(
-            "Normalize EXIF Steps in Image Model...", self.main_window
-        )
-        self.main_window.normalize_exif_steps_action.triggered.connect(
-            self.main_window.normalize_exif_steps_suffix
-        )
-        debug_menu.addAction(self.main_window.normalize_exif_steps_action)
-
         try:
             from bundle_capabilities import imagegen_ui_enabled
 
@@ -2064,14 +2056,7 @@ class MenuManager:
         mw = self.main_window
         # Show tree if it's not visible (only in thumbnail view)
         if mw.current_view_mode == 'thumbnail' and not mw.file_tree_visible:
-            # Use combined_sidebar if available, otherwise use toggle_file_tree
-            if hasattr(mw, 'combined_sidebar') and mw.combined_sidebar:
-                mw.combined_sidebar.set_tree_visible(True)
-            elif hasattr(mw, 'toggle_file_tree_action'):
-                # Set the action to checked and trigger it
-                mw.toggle_file_tree_action.setChecked(True)
-                if hasattr(mw, 'toggle_file_tree'):
-                    mw.toggle_file_tree()
+            mw.combined_sidebar.set_tree_visible(True)
         # Update the filtered_tree setting
         mw.filtered_tree = mode
         # Apply to file tree handler
@@ -2667,17 +2652,6 @@ class MenuManager:
                 else:
                     mw.delete_exif_date_action.setText("Delete EXIF Date from File...")
 
-        # Update Normalize EXIF Steps action enabled state
-        if hasattr(mw, 'normalize_exif_steps_action'):
-            is_thumbnail_mode = (
-                hasattr(mw, 'current_view_mode')
-                and mw.current_view_mode == 'thumbnail'
-            )
-            is_specific_files_mode = getattr(mw, 'specific_files_active', False)
-            mw.normalize_exif_steps_action.setEnabled(
-                is_thumbnail_mode and not is_specific_files_mode
-            )
-        
         # Update Edit EXIF User Comment action enabled state
         if hasattr(mw, 'edit_exif_usercomment_action'):
             should_enable = False

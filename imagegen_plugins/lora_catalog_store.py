@@ -61,30 +61,27 @@ def save_lora_catalog_file(lc: Dict[str, Any]) -> None:
         _atomic_write_json(path, payload)
 
 
-def migrate_embedded_lora_catalog_if_needed(settings: dict) -> bool:
-    """Move imagegen.lora_catalog out of settings.json into lora_catalog.json."""
+def ensure_lora_catalog_file() -> None:
+    """Ensure lora_catalog.json exists; drop embedded catalog from settings if present."""
     from imagegen_plugins.lora_catalog_settings import migrate_lora_catalog
 
-    imagegen = settings.get("imagegen")
-    if not isinstance(imagegen, dict):
-        return False
-
-    embedded = imagegen.get("lora_catalog")
     path = lora_catalog_file_path()
-    changed = False
-
     with _lora_catalog_file_lock:
-        if isinstance(embedded, dict) and embedded:
-            if not path.is_file():
-                _atomic_write_json(path, migrate_lora_catalog(dict(embedded)))
-            del imagegen["lora_catalog"]
-            changed = True
-        elif "lora_catalog" in imagegen:
-            del imagegen["lora_catalog"]
-            changed = True
-
         if not path.is_file():
             _atomic_write_json(path, migrate_lora_catalog({}))
-            changed = True
 
+
+def migrate_embedded_lora_catalog_if_needed(settings: dict) -> bool:
+    """Remove imagegen.lora_catalog from settings.json if still present."""
+    imagegen = settings.get("imagegen")
+    if not isinstance(imagegen, dict):
+        ensure_lora_catalog_file()
+        return False
+
+    changed = False
+    if "lora_catalog" in imagegen:
+        del imagegen["lora_catalog"]
+        changed = True
+
+    ensure_lora_catalog_file()
     return changed

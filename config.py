@@ -36,10 +36,8 @@ def default_browse_transparency_settings() -> Dict[str, Dict[str, Any]]:
 
 def merge_browse_transparency_settings(
     raw: Optional[dict],
-    legacy_color: Optional[list] = None,
-    legacy_use_diamonds: Optional[bool] = None,
 ) -> Dict[str, Dict[str, Any]]:
-    """Per-ui_theme browse transparency (checkerboard vs solid). Migrates legacy top-level keys."""
+    """Per-ui_theme browse transparency (checkerboard vs solid)."""
     base = default_browse_transparency_settings()
     if isinstance(raw, dict) and raw:
         for tid in BROWSE_TRANSPARENCY_THEME_IDS:
@@ -64,19 +62,6 @@ def merge_browse_transparency_settings(
                     ]
                 except (TypeError, ValueError):
                     pass
-        return base
-    lc = legacy_color if isinstance(legacy_color, (list, tuple)) and len(legacy_color) >= 3 else [98, 98, 98]
-    try:
-        lc = [int(lc[0]), int(lc[1]), int(lc[2])]
-    except (TypeError, ValueError):
-        lc = [98, 98, 98]
-    ld = bool(legacy_use_diamonds) if legacy_use_diamonds is not None else True
-    for tid in BROWSE_TRANSPARENCY_THEME_IDS:
-        base[tid] = {
-            "transparency_color": list(lc),
-            "use_diamonds": ld,
-            "browse_border_color": [0, 0, 0],
-        }
     return base
 
 
@@ -89,8 +74,6 @@ def effective_browse_transparency(settings: dict) -> Tuple[List[int], bool]:
         ui = "dark"
     merged = merge_browse_transparency_settings(
         settings.get("browse_transparency_settings"),
-        settings.get("transparency_color"),
-        settings.get("use_diamonds"),
     )
     ent = merged[ui]
     return list(ent["transparency_color"]), bool(ent["use_diamonds"])
@@ -105,8 +88,6 @@ def effective_browse_border_color(settings: dict) -> List[int]:
         ui = "dark"
     merged = merge_browse_transparency_settings(
         settings.get("browse_transparency_settings"),
-        settings.get("transparency_color"),
-        settings.get("use_diamonds"),
     )
     ent = merged[ui]
     bc = ent.get("browse_border_color", [0, 0, 0])
@@ -196,9 +177,6 @@ class ImageBrowserConfig:
             return settings
         out = copy.deepcopy(settings)
         out["browse_transparency_settings"] = merge_browse_transparency_settings(prev)
-        tc, ud = effective_browse_transparency(out)
-        out["transparency_color"] = list(tc)
-        out["use_diamonds"] = ud
         return out
 
     @property
@@ -427,6 +405,8 @@ class ImageBrowserConfig:
             # Custom colors when ui_theme == 'light' (defaults match built-in light palette)
             'light_theme_colors': default_light_theme_colors(),
             'file_tree_visible': True,  # Default to showing file tree
+            'shift_cmd_depth': 4,  # File tree expansion depth (Shift+Cmd)
+            'search_depth': 4,  # Image discovery walk depth for tree expansion
             'file_tree_show_toolbar': True,  # File tree pane action toolbar
             'status_bar_visible': True,  # Default to showing status bar
             'thumbnail_filename_visible': False,  # Default to hiding thumbnail filenames
@@ -502,9 +482,6 @@ class ImageBrowserConfig:
             # Follow symbolic and hard links in tree view (default: False)
             'follow_symlinks': False,
             
-            # Use diamond checkerboard pattern for browse view background (default: True)
-            'use_diamonds': True,
-            
             # Always show directories named 'work' in file tree (default: False)
             'always_show_work': False,
             
@@ -528,9 +505,6 @@ class ImageBrowserConfig:
             
             # Date display settings
             'use_exif_date': True,  # Default: use EXIF date if available, otherwise use file date
-            
-            # Transparency color for browse view background (RGB tuple, default light gray)
-            'transparency_color': [98, 98, 98],  # Light gray RGB values — mirror of active ui_theme entry
             
             # Per-theme browse transparency (solid color vs checkerboard for transparent pixels)
             'browse_transparency_settings': default_browse_transparency_settings(),
@@ -634,19 +608,8 @@ class ImageBrowserConfig:
                 needs_save = True
         prev_bts = settings.get("browse_transparency_settings")
         raw_bts = prev_bts if isinstance(prev_bts, dict) and prev_bts else None
-        settings["browse_transparency_settings"] = merge_browse_transparency_settings(
-            raw_bts,
-            settings.get("transparency_color"),
-            settings.get("use_diamonds"),
-        )
-        tc, ud = effective_browse_transparency(settings)
-        if (
-            settings.get("transparency_color") != tc
-            or settings.get("use_diamonds") != ud
-            or prev_bts != settings["browse_transparency_settings"]
-        ):
-            settings["transparency_color"] = list(tc)
-            settings["use_diamonds"] = ud
+        settings["browse_transparency_settings"] = merge_browse_transparency_settings(raw_bts)
+        if prev_bts != settings["browse_transparency_settings"]:
             needs_save = True
         if save_merged and needs_save:
             self._save_settings_unlocked(settings)
@@ -720,15 +683,7 @@ class ImageBrowserConfig:
         if key == "browse_transparency_settings":
             settings["browse_transparency_settings"] = merge_browse_transparency_settings(
                 settings.get("browse_transparency_settings"),
-                None,
-                None,
             )
-
-    def _sync_browse_transparency_legacy_keys(self, settings: dict) -> None:
-        """Mirror active ui_theme browse transparency into legacy top-level keys."""
-        tc, ud = effective_browse_transparency(settings)
-        settings["transparency_color"] = list(tc)
-        settings["use_diamonds"] = ud
 
     def update_setting(self, key: str, value):
         """Update a single setting and save to file"""
@@ -736,8 +691,6 @@ class ImageBrowserConfig:
             self._browse_transparency_settings_preview = None
         settings = self.load_settings()
         self._apply_setting_in_memory(settings, key, value)
-        if key in ("browse_transparency_settings", "ui_theme"):
-            self._sync_browse_transparency_legacy_keys(settings)
         self.save_settings(settings)
 
     def update_settings(self, updates: Dict[str, Any]) -> None:
@@ -751,8 +704,6 @@ class ImageBrowserConfig:
             if key.startswith("_"):
                 continue
             self._apply_setting_in_memory(settings, key, value)
-        if "browse_transparency_settings" in updates or "ui_theme" in updates:
-            self._sync_browse_transparency_legacy_keys(settings)
         self.save_settings(settings)
     
     @staticmethod
@@ -815,12 +766,6 @@ class ImageBrowserConfig:
             self.clear_restore_state()
             return None
 
-        # Migrate legacy restore_state key (pre macOS display mode rename)
-        if restore_state.get('last_macos_space_mode') is None:
-            legacy = restore_state.get('last_os_fullscreen')
-            if legacy is not None:
-                restore_state['last_macos_space_mode'] = legacy
-        
         return restore_state
     
     def clear_restore_state(self):

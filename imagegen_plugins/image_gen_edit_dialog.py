@@ -53,7 +53,6 @@ from imagegen_plugins.image_gen_dialog import (
     wrap_image_gen_controls_with_side_buttons,
 )
 from imagegen_plugins.image_gen_edit_custom_size import (
-    migrate_edit_size_saved_values,
     mount_edit_custom_size_section,
 )
 from imagegen_plugins.image_gen_form_layout import (
@@ -988,9 +987,7 @@ class ImageGenEditDialog(ImageGenDimensionAspectMixin, QDialog):
             saved = load_plugin_dialog_settings(
                 self._function, self.plugin.plugin_id
             )
-        self._values = migrate_edit_size_saved_values(
-            self.plugin.merged_values(saved)
-        )
+        self._values = self.plugin.merged_values(saved)
         self._specs = self.plugin.field_specs(saved)
 
     def _save_geometry(self) -> None:

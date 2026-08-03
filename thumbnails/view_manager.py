@@ -10,19 +10,18 @@ import warnings
 from datetime import datetime
 from typing import List, Optional, Set, Tuple
 
-from PySide6.QtCore import QEvent, QObject, QMutexLocker, QPoint, Qt, QTimer, QSize, QRect
+from PySide6.QtCore import QEvent, QObject, QMutexLocker, QPoint, Qt, QTimer, QRect
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QMessageBox, QApplication,
-    QTextEdit, QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView,
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QApplication,
+    QTextEdit,
     QScrollArea, QPushButton,
 )
 from PySide6.QtGui import (
-    QPixmap, QPainter, QColor, QPen, QBrush, QStandardItemModel, QCursor,
+    QPixmap, QPainter, QColor, QPen, QBrush, QCursor,
     QMouseEvent, QFont, QPalette,
 )
 
 # Local imports
-from exif.exif_image_loader import load_image_with_exif_correction
 from theme.theme_base import asset_path
 from theme.theme_service import get_active_theme
 from thumbnails.thumbnail_canvas import ThumbnailCanvas
@@ -32,7 +31,6 @@ import thumbnails.thumbnail_constants as tc
 from thumbnails.thumbnail_constants import BASE_MARGIN
 from event_bus import THUMBNAIL_CLICKED
 from utils import (
-    entry_debug_wrapper,
     normalize_path_for_display,
     should_preserve_window_focus,
 )
@@ -2159,78 +2157,6 @@ class ViewManager:
             # the GIL to connect signals, which can deadlock when worker threads are waiting
             # to acquire the GIL. Batching into a single call reduces GIL contention.
             QTimer.singleShot(100, self._delayed_browse_view_cleanup)
-
-    def toggle_file_tree(self):
-        """Toggle the visibility of the file tree and resize canvas accordingly"""
-        if self.main_window.toggle_file_tree_action.isChecked():
-            # Hide preview if it's visible (they can't both be shown at the same time)
-            if hasattr(self.main_window, 'preview_widget') and self.main_window.preview_widget.is_visible():
-                self.main_window.preview_widget.hide()
-                self.main_window.preview_widget.preview_visible = False
-            
-            # Show file tree - initialize it if not already done
-            self.main_window.ensure_tree_initialized()
-            self.main_window.tree_container.show()
-            
-            # Restore splitter sizes using sidebar width
-            # Preserve right sidebar width - only update left sidebar and main content
-            total_width = self.main_window.main_splitter.width()
-            current_sizes = self.main_window.main_splitter.sizes()
-            right_width = current_sizes[2] if len(current_sizes) > 2 else (self.main_window.right_sidebar_width if hasattr(self.main_window, 'right_sidebar_visible') and self.main_window.right_sidebar_visible else 0)
-            left_width = self.main_window.sidebar_width
-            main_width = total_width - left_width - right_width
-            self.main_window.main_splitter.setSizes([left_width, main_width, right_width])
-            self.main_window.toggle_file_tree_action.setText('Hide File Tree')
-            self.main_window.file_tree_visible = True
-            # Give focus to the tree when it's shown - do this immediately and with a delay
-            self.main_window.focus_tree()
-            QTimer.singleShot(150, self.main_window.focus_tree)
-            
-            # Highlight current directory after tree is shown (delay to ensure tree is ready and thumbnails may be loaded)
-            def highlight_current():
-                if (hasattr(self.main_window, 'file_tree_handler') and 
-                    self.main_window.file_tree_handler and 
-                    self.main_window.file_tree_handler.is_tree_initialized()):
-                    # CRITICAL: Don't override user-requested directory selection
-                    if not self.main_window.file_tree_handler.user_requested_directory:
-                        self.main_window.file_tree_handler.highlight_current_directory()
-            QTimer.singleShot(200, highlight_current)
-        else:
-            # Hide file tree
-            self.main_window.tree_container.hide()
-            # Preserve right sidebar width - only update left sidebar and main content
-            total_width = self.main_window.main_splitter.width()
-            current_sizes = self.main_window.main_splitter.sizes()
-            right_width = current_sizes[2] if len(current_sizes) > 2 else (self.main_window.right_sidebar_width if hasattr(self.main_window, 'right_sidebar_visible') and self.main_window.right_sidebar_visible else 0)
-            main_width = total_width - right_width
-            self.main_window.main_splitter.setSizes([0, main_width, right_width])
-            self.main_window.toggle_file_tree_action.setText('Show File Tree')
-            self.main_window.file_tree_visible = False
-            # Give focus to the canvas when tree is hidden
-            QTimer.singleShot(150, self.main_window.focus_canvas)
-        
-        # Save the setting
-        self.main_window.config.update_setting('file_tree_visible', self.main_window.file_tree_visible)
-        
-        # Handle browse mode - resize image container when tree view visibility changes
-        if self.main_window.current_view_mode == 'browse':
-            if hasattr(self.main_window, 'image_container'):
-                mw = self.main_window
-                old_w = mw.cached_container_width
-                old_h = mw.cached_container_height
-                available_size = mw.get_effective_display_size()
-                mw.image_container.resize(available_size)
-                mw._handle_browse_viewport_resize_after_container_change(old_w, old_h)
-        
-        # Update MAX_THUMBNAIL_SIZE based on new container dimensions after tree show/hide
-        QTimer.singleShot(50, self.main_window.update_max_thumbnail_size)
-        
-        # Force canvas to recalculate layout after toggle
-        QTimer.singleShot(100, self.main_window.update_layout_after_splitter_resize)
-        
-        # Also force immediate update for better responsiveness
-        self.main_window.main_content_widget.updateGeometry()
-        self.main_window.main_content_widget.update()
 
     def _setup_cursor_manager(self):
         """Initialize and start cursor manager for browse mode"""

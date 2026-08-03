@@ -202,7 +202,7 @@ JOBS_PANE_AUTO_RESIZE_ON_JOB_CHANGE = False  # ucust: auto-resize jobs pane when
 # =============================================================================
 
 # File tree constants
-EXPANSION_LEVELS = 5          # Number of levels to expand the file tree  # ucust
+EXPANSION_LEVELS = 4          # Number of levels to expand the file tree  # ucust
 TREE_UPDATE_DEBOUNCE_TIMER = 130  # ms - debounce when holding scroll key to coalesce rapid updates
 
 # Excluded file extensions (system/bundle files that should not be shown in file tree)
@@ -230,9 +230,6 @@ TREE_DRAG_AUTO_SCROLL_SPEEDS: List[tuple] = [
     (30, 1.5),    # 30px from edge -> 1.5% scroll speed
     (20, 3.0),    # 20px from edge -> 3.0% scroll speed
     (10, 8.0),     # 10px from edge  -> 8.0% scroll speed
-    # (6, 3.2),    # 6px from edge  -> 3.2% scroll speed
-    # (4, 4.0),     # 4px from edge  -> 4% scroll speed
-    # (2, 4.8),     # 2px from edge  -> 4.8% scroll speed (max)
 ]
 
 
@@ -578,9 +575,3 @@ VIOLET = "\033[38;5;99m"
 PINK = "\033[38;5;205m"
 ROSE = "\033[38;5;198m"
 BEIGE = "\033[38;5;187m"
-
-#### Notes - do not delete below this line ###
-
-# current_func = inspect.currentframe().f_code.co_name
-# print(f"{CYAN}{current_func}{RESET}")
-# print("\n".join([("   " * (i+1)) + f"{CYAN}{frame.function}{RESET}" for i, frame in enumerate(inspect.stack())]))

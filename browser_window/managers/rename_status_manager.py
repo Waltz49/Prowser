@@ -162,10 +162,6 @@ class RenameStatusManager:
         # e.g. "imagegen" (no %d) -> "imagegen" (expects imagegen-0001.jpg)
         if '%d' in rename_prefix_template or '%D' in rename_prefix_template:
             prefix = rename_prefix_template.replace('%d', dirname).replace('%D', dirname)
-        elif '{number:' in rename_prefix_template:
-            # Legacy rename_prefix_template format: "image-{number:04d}" -> "image-<dirname>-"
-            base = rename_prefix_template.split('{number:')[0].rstrip('-')
-            prefix = base + '-' + dirname + '-'
         else:
             # Simple prefix without placeholders: "imagegen" -> "imagegen" (files: imagegen-0001.jpg)
             prefix = rename_prefix_template.rstrip('-') if rename_prefix_template else 'image'

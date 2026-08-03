@@ -269,20 +269,6 @@ def _mount_collapsible_custom_size_section(
     return section
 
 
-def migrate_edit_size_saved_values(values: Dict[str, Any]) -> Dict[str, Any]:
-    """Map legacy screen_size_experimental to use_custom_size + screen dimensions."""
-    out = dict(values)
-    if out.pop("screen_size_experimental", False):
-        out["use_custom_size"] = True
-        if "width" not in out or "height" not in out:
-            from imagegen_plugins.edit_aspect_pad import screen_size_edit_target_dimensions
-
-            w, h = screen_size_edit_target_dimensions()
-            out.setdefault("width", w)
-            out.setdefault("height", h)
-    return out
-
-
 def custom_size_width_height_specs(
     values: Dict[str, Any],
     *,

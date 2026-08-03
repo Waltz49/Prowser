@@ -55,15 +55,10 @@ def _mutate_imagegen_settings(mutator: Callable[[dict], None]) -> None:
         config.save_settings(copy.deepcopy(settings))
 
 
-def _normalize_plugin_id(plugin_id: str) -> str:
-    if plugin_id == "flux_fill_infil":
-        return "flux_fill_infill"
-    return plugin_id
-
-
 _DIALOGS_KEY = "dialogs"
-_LEGACY_MODELS_KEY = "models"
+_PLUGIN_SETTINGS_KEY = "plugin_settings"
 _LORA_STACKS_KEY = "lora_stacks"
+_STRUCTURAL_DIALOG_KEYS = frozenset({_PLUGIN_SETTINGS_KEY, _LORA_STACKS_KEY})
 
 # Not shared across models in a function dialog (come from plugin model_defaults).
 _PLUGIN_SPECIFIC_DIALOG_KEYS = frozenset(
@@ -108,8 +103,31 @@ def _sanitize_dialog_values(values: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def _shared_dialog_values(fn_entry: Dict[str, Any]) -> Dict[str, Any]:
+    """Function-level dialog fields only (exclude plugin_settings / lora_stacks)."""
+    return _sanitize_dialog_values(
+        {k: v for k, v in dict(fn_entry).items() if k not in _STRUCTURAL_DIALOG_KEYS}
+    )
+
+
 def _shared_function_values(values: Dict[str, Any]) -> Dict[str, Any]:
     return {k: values[k] for k in _SHARED_FUNCTION_KEYS if k in values}
+
+
+def _dialog_entry_parts(
+    dialogs: dict, function: str
+) -> Tuple[Dict[str, Any], Dict[str, Any], Dict[str, Any]]:
+    """Shared dialog fields, lora_stacks, and plugin_settings for a function entry."""
+    existing = dialogs.get(function)
+    existing = dict(existing) if isinstance(existing, dict) else {}
+    shared = _shared_dialog_values(existing)
+    stacks = existing.get(_LORA_STACKS_KEY)
+    stacks = dict(stacks) if isinstance(stacks, dict) else {}
+    plugin_settings = existing.get(_PLUGIN_SETTINGS_KEY)
+    plugin_settings = (
+        dict(plugin_settings) if isinstance(plugin_settings, dict) else {}
+    )
+    return shared, stacks, plugin_settings
 
 
 def _per_plugin_dialog_values(values: Dict[str, Any]) -> Dict[str, Any]:
@@ -142,7 +160,7 @@ def _plugin_uses_lora_stack(plugin_id: str) -> bool:
     """FLUX/mflux/Klein/SDXL use multi-LoRA stacks; SD15 keeps single ``mflux_lora``."""
     from imagegen_plugins.lora_host_registry import HOST_SD15
 
-    plugin_id = _normalize_plugin_id(plugin_id)
+    plugin_id = str(plugin_id)
     try:
         from imagegen_plugins import discover_plugins
 
@@ -159,7 +177,7 @@ def load_lora_stack_for_plugin(function: str, plugin_id: str) -> List[str]:
     """Per-function, per-plugin LoRA stack (preset ids). Migrates legacy ``mflux_lora``."""
     from imagegen_plugins.mflux_lora_presets import coerce_lora_preset_id
 
-    plugin_id = _normalize_plugin_id(plugin_id)
+    plugin_id = str(plugin_id)
     settings = get_config().load_settings()
     imagegen = settings.get("imagegen") or {}
     dialogs = imagegen.get(_DIALOGS_KEY) or {}
@@ -171,21 +189,20 @@ def load_lora_stack_for_plugin(function: str, plugin_id: str) -> List[str]:
         if stack:
             return stack
 
-    per_plugin = load_model_settings(plugin_id)
-    if _plugin_uses_lora_stack(plugin_id):
-        legacy = per_plugin.get("mflux_lora")
-        pid = coerce_lora_preset_id(legacy)
-        if pid != "none":
-            return [pid]
-        return []
+    return []
 
-    legacy = per_plugin.get("mflux_lora")
-    pid = coerce_lora_preset_id(legacy)
-    if pid != "none":
-        return [pid]
-    raw_stack = per_plugin.get("mflux_lora_stack")
-    return _coerce_lora_stack_list(raw_stack)
 
+def _load_per_plugin_settings(function: str, plugin_id: str) -> Dict[str, Any]:
+    plugin_id = str(plugin_id)
+    settings = get_config().load_settings()
+    imagegen = settings.get("imagegen") or {}
+    dialogs = imagegen.get(_DIALOGS_KEY) or {}
+    fn_entry = dialogs.get(function) or {}
+    plugin_settings = fn_entry.get(_PLUGIN_SETTINGS_KEY) or {}
+    if not isinstance(plugin_settings, dict):
+        return {}
+    saved = plugin_settings.get(plugin_id) or {}
+    return dict(saved) if isinstance(saved, dict) else {}
 
 
 def _merge_prompt_from_shared(
@@ -200,43 +217,6 @@ def _merge_prompt_from_shared(
     return None
 
 
-def _legacy_settings_for_function(function: str) -> Dict[str, Any]:
-    """Merge legacy per-plugin settings into one function-level dict (shared prompt)."""
-    from imagegen_plugins import plugins_for_function
-
-    merged: Dict[str, Any] = {}
-    for plugin in plugins_for_function(function):
-        legacy = _sanitize_dialog_values(load_model_settings(plugin.plugin_id))
-        if not legacy:
-            continue
-        prompt = (legacy.get("prompt") or "").strip()
-        if prompt:
-            merged["prompt"] = legacy["prompt"]
-        for key, value in legacy.items():
-            if key == "prompt":
-                continue
-            merged.setdefault(key, value)
-    return merged
-
-
-def _merge_shared_prompt_from_legacy(
-    saved: Dict[str, Any],
-    function: str,
-    *,
-    fallback_plugin_id: Optional[str],
-) -> Dict[str, Any]:
-    if (saved.get("prompt") or "").strip():
-        return saved
-    legacy = _legacy_settings_for_function(function)
-    prompt = (legacy.get("prompt") or "").strip()
-    if not prompt and fallback_plugin_id:
-        single = _sanitize_dialog_values(load_model_settings(fallback_plugin_id))
-        prompt = (single.get("prompt") or "").strip()
-    if prompt:
-        return {**saved, "prompt": prompt}
-    return saved
-
-
 def load_dialog_settings(
     function: str,
     *,
@@ -247,22 +227,14 @@ def load_dialog_settings(
     imagegen = settings.get("imagegen") or {}
     dialogs = imagegen.get(_DIALOGS_KEY) or {}
     saved = dict(dialogs.get(function) or {})
-    if not saved:
-        saved = _legacy_settings_for_function(function)
-        if not saved and fallback_plugin_id:
-            saved = _sanitize_dialog_values(load_model_settings(fallback_plugin_id))
-    else:
-        saved = _merge_shared_prompt_from_legacy(
-            saved, function, fallback_plugin_id=fallback_plugin_id
-        )
-    return _sanitize_dialog_values(saved)
+    return _shared_dialog_values(saved)
 
 
 def load_plugin_dialog_settings(function: str, plugin_id: str) -> Dict[str, Any]:
     """Per-plugin field values merged with function-level shared keys (prompt)."""
-    plugin_id = _normalize_plugin_id(plugin_id)
+    plugin_id = str(plugin_id)
     shared = load_dialog_settings(function, fallback_plugin_id=plugin_id)
-    per_plugin = _sanitize_dialog_values(load_model_settings(plugin_id))
+    per_plugin = _sanitize_dialog_values(_load_per_plugin_settings(function, plugin_id))
 
     if per_plugin:
         out = dict(per_plugin)
@@ -297,7 +269,7 @@ def save_plugin_dialog_settings(
     active_plugin_id: Optional[str] = None,
 ) -> None:
     """Persist model-specific settings per plugin; prompt stays function-level."""
-    plugin_id = _normalize_plugin_id(plugin_id)
+    plugin_id = str(plugin_id)
     sanitized, stack = _split_lora_stack_from_values(dict(values))
     persist_stack = _plugin_uses_lora_stack(plugin_id)
     if not persist_stack:
@@ -317,27 +289,19 @@ def save_plugin_dialog_settings(
         if not isinstance(dialogs, dict):
             dialogs = {}
             imagegen[_DIALOGS_KEY] = dialogs
-        prev_shared = dict(dialogs.get(function) or {})
-        prev_shared.update(_shared_function_values(sanitized))
-        fn_entry = dict(prev_shared)
-        stacks = fn_entry.get(_LORA_STACKS_KEY)
-        if not isinstance(stacks, dict):
-            stacks = {}
+        fn_entry, stacks, plugin_settings = _dialog_entry_parts(dialogs, function)
+        fn_entry.update(_shared_function_values(sanitized))
         if persist_stack:
             stacks[plugin_id] = stack
         else:
             stacks.pop(plugin_id, None)
         fn_entry[_LORA_STACKS_KEY] = stacks
-        dialogs[function] = fn_entry
-
-        models = imagegen.get(_LEGACY_MODELS_KEY)
-        if not isinstance(models, dict):
-            models = {}
-            imagegen[_LEGACY_MODELS_KEY] = models
         per_plugin = _per_plugin_dialog_values(sanitized)
         if persist_stack:
             per_plugin.pop("mflux_lora", None)
-        models[plugin_id] = per_plugin
+        plugin_settings[plugin_id] = per_plugin
+        fn_entry[_PLUGIN_SETTINGS_KEY] = plugin_settings
+        dialogs[function] = fn_entry
 
         aid = active_plugin_id or plugin_id
         apply_active_plugin_to_imagegen(imagegen, function, aid)
@@ -374,9 +338,7 @@ def save_dialog_sessions_batch(
     prepared: Dict[str, Tuple[Dict[str, Any], Optional[str], List[str]]] = {}
     for function, (values, plugin_id) in sessions.items():
         sanitized, stack = _split_lora_stack_from_values(dict(values))
-        if plugin_id is not None and not _plugin_uses_lora_stack(
-            _normalize_plugin_id(plugin_id)
-        ):
+        if plugin_id is not None and not _plugin_uses_lora_stack(str(plugin_id)):
             from imagegen_plugins.mflux_lora_presets import coerce_lora_preset_id
 
             sanitized.pop("mflux_lora_stack", None)
@@ -394,50 +356,33 @@ def save_dialog_sessions_batch(
         if not isinstance(dialogs, dict):
             dialogs = {}
             imagegen[_DIALOGS_KEY] = dialogs
-        models = imagegen.get(_LEGACY_MODELS_KEY)
-        if not isinstance(models, dict):
-            models = {}
-            imagegen[_LEGACY_MODELS_KEY] = models
         for function, (vals, plugin_id, stack) in prepared.items():
             persist_stack = (
-                _plugin_uses_lora_stack(_normalize_plugin_id(plugin_id))
+                _plugin_uses_lora_stack(str(plugin_id))
                 if plugin_id is not None
                 else False
             )
-            prev_shared = dict(dialogs.get(function) or {})
-            prev_shared.update(_shared_function_values(vals))
-            fn_entry = dict(prev_shared)
+            fn_entry, stacks, plugin_settings = _dialog_entry_parts(
+                dialogs, function
+            )
+            fn_entry.update(_shared_function_values(vals))
             if plugin_id is not None:
-                stacks = fn_entry.get(_LORA_STACKS_KEY)
-                if not isinstance(stacks, dict):
-                    stacks = {}
+                pid = str(plugin_id)
                 if persist_stack:
-                    stacks[_normalize_plugin_id(plugin_id)] = stack
+                    stacks[pid] = stack
                 else:
-                    stacks.pop(_normalize_plugin_id(plugin_id), None)
+                    stacks.pop(pid, None)
                 fn_entry[_LORA_STACKS_KEY] = stacks
-            dialogs[function] = fn_entry
-            if plugin_id is not None:
                 per_plugin = _per_plugin_dialog_values(vals)
                 if persist_stack:
                     per_plugin.pop("mflux_lora", None)
-                models[_normalize_plugin_id(plugin_id)] = per_plugin
+                plugin_settings[pid] = per_plugin
+                fn_entry[_PLUGIN_SETTINGS_KEY] = plugin_settings
+            dialogs[function] = fn_entry
+            if plugin_id is not None:
                 apply_active_plugin_to_imagegen(imagegen, function, plugin_id)
 
     _mutate_imagegen_settings(mutate)
-
-
-def load_model_settings(plugin_id: str) -> Dict[str, Any]:
-    """Per-plugin dialog field values (steps, LoRA, dimensions, …)."""
-    plugin_id = _normalize_plugin_id(plugin_id)
-    settings = get_config().load_settings()
-    imagegen = settings.get("imagegen") or {}
-    models = imagegen.get(_LEGACY_MODELS_KEY) or {}
-    saved = dict(models.get(plugin_id) or {})
-    if not saved and plugin_id == "flux_fill_infill":
-        saved = dict(models.get("flux_fill_infil") or {})
-    return saved
-
 
 
 def load_imagegen_dialog_geometry_hex() -> Optional[str]:
@@ -452,8 +397,7 @@ def load_imagegen_dialog_geometry_hex() -> Optional[str]:
         for value in geoms.values():
             if isinstance(value, str) and value:
                 return value
-    legacy_paint = imagegen.get("infill_paint_dialog_geometry")
-    return legacy_paint if isinstance(legacy_paint, str) and legacy_paint else None
+    return None
 
 
 def save_imagegen_dialog_geometry_hex(geom_hex: str) -> None:
@@ -477,94 +421,30 @@ def save_close_dialog_on_generate(enabled: bool) -> None:
     _mutate_imagegen_settings(mutate)
 
 
-def _legacy_pass_image_to_ai_from_imagegen(imagegen: dict) -> Optional[bool]:
-    dialogs = imagegen.get(_DIALOGS_KEY) or {}
-    for func_saved in dialogs.values():
-        if isinstance(func_saved, dict) and _PASS_IMAGE_TO_AI_KEY in func_saved:
-            return bool(func_saved[_PASS_IMAGE_TO_AI_KEY])
-    models = imagegen.get(_LEGACY_MODELS_KEY) or {}
-    for model_saved in models.values():
-        if isinstance(model_saved, dict) and _PASS_IMAGE_TO_AI_KEY in model_saved:
-            return bool(model_saved[_PASS_IMAGE_TO_AI_KEY])
-    return None
-
-
-def _strip_legacy_pass_image_to_ai_from_imagegen(imagegen: dict) -> None:
-    dialogs = imagegen.get(_DIALOGS_KEY)
-    if isinstance(dialogs, dict):
-        for func_saved in dialogs.values():
-            if isinstance(func_saved, dict):
-                func_saved.pop(_PASS_IMAGE_TO_AI_KEY, None)
-    models = imagegen.get(_LEGACY_MODELS_KEY)
-    if isinstance(models, dict):
-        for model_saved in models.values():
-            if isinstance(model_saved, dict):
-                model_saved.pop(_PASS_IMAGE_TO_AI_KEY, None)
-
-
 def load_pass_image_to_ai_with_prompt() -> bool:
     """Whether AI prompt refinement should include the source image (all gen dialogs)."""
     settings = get_config().load_settings()
     imagegen = settings.get("imagegen") or {}
-    if _PASS_IMAGE_TO_AI_KEY in imagegen:
-        return bool(imagegen[_PASS_IMAGE_TO_AI_KEY])
-    legacy = _legacy_pass_image_to_ai_from_imagegen(imagegen)
-    if legacy is not None:
-        save_pass_image_to_ai_with_prompt(legacy)
-        return legacy
-    return False
+    return bool(imagegen.get(_PASS_IMAGE_TO_AI_KEY, False))
 
 
 def save_pass_image_to_ai_with_prompt(enabled: bool) -> None:
     def mutate(imagegen: dict) -> None:
         imagegen[_PASS_IMAGE_TO_AI_KEY] = bool(enabled)
-        _strip_legacy_pass_image_to_ai_from_imagegen(imagegen)
 
     _mutate_imagegen_settings(mutate)
-
-
-def _legacy_show_progressive_images_from_imagegen(imagegen: dict) -> Optional[bool]:
-    dialogs = imagegen.get(_DIALOGS_KEY) or {}
-    for func_saved in dialogs.values():
-        if isinstance(func_saved, dict) and _SHOW_PROGRESSIVE_IMAGES_KEY in func_saved:
-            return bool(func_saved[_SHOW_PROGRESSIVE_IMAGES_KEY])
-    models = imagegen.get(_LEGACY_MODELS_KEY) or {}
-    for model_saved in models.values():
-        if isinstance(model_saved, dict) and _SHOW_PROGRESSIVE_IMAGES_KEY in model_saved:
-            return bool(model_saved[_SHOW_PROGRESSIVE_IMAGES_KEY])
-    return None
-
-
-def _strip_legacy_show_progressive_images_from_imagegen(imagegen: dict) -> None:
-    dialogs = imagegen.get(_DIALOGS_KEY)
-    if isinstance(dialogs, dict):
-        for func_saved in dialogs.values():
-            if isinstance(func_saved, dict):
-                func_saved.pop(_SHOW_PROGRESSIVE_IMAGES_KEY, None)
-    models = imagegen.get(_LEGACY_MODELS_KEY)
-    if isinstance(models, dict):
-        for model_saved in models.values():
-            if isinstance(model_saved, dict):
-                model_saved.pop(_SHOW_PROGRESSIVE_IMAGES_KEY, None)
 
 
 def load_show_progressive_images() -> bool:
     """Whether intermediate previews are shown during supported image generation."""
     settings = get_config().load_settings()
     imagegen = settings.get("imagegen") or {}
-    if _SHOW_PROGRESSIVE_IMAGES_KEY in imagegen:
-        return bool(imagegen[_SHOW_PROGRESSIVE_IMAGES_KEY])
-    legacy = _legacy_show_progressive_images_from_imagegen(imagegen)
-    if legacy is not None:
-        save_show_progressive_images(legacy)
-        return legacy
-    return False
+    return bool(imagegen.get(_SHOW_PROGRESSIVE_IMAGES_KEY, False))
 
 
 def save_show_progressive_images(enabled: bool) -> None:
     def mutate(imagegen: dict) -> None:
         imagegen[_SHOW_PROGRESSIVE_IMAGES_KEY] = bool(enabled)
-        _strip_legacy_show_progressive_images_from_imagegen(imagegen)
 
     _mutate_imagegen_settings(mutate)
 
@@ -646,10 +526,6 @@ def reset_all_gen_dialog_settings() -> None:
         if isinstance(dialogs, dict):
             for function in persist_functions:
                 dialogs.pop(function, None)
-
-        models = imagegen.get(_LEGACY_MODELS_KEY)
-        if isinstance(models, dict):
-            models.clear()
 
     _mutate_imagegen_settings(mutate)
 
@@ -940,23 +816,6 @@ def save_lora_catalog_state(
                 ]
             bm[model_id] = prev
             lc["by_model"] = bm
-
-        # Legacy flat keys (flux1_t2i only) for older readers.
-        if enabled_ids is not None and host_id in (None, "flux1_t2i"):
-            lc["enabled_ids"] = [
-                str(x)
-                for x in (enabled_ids if host_id else lc.get("by_host", {}).get("flux1_t2i", {}).get("enabled_ids", []))
-                if str(x) in catalog
-            ]
-        if removed is not None and host_id is None:
-            lc["deleted_ids"] = sorted(
-                {
-                    str(x)
-                    for hid, slice_ in (lc.get("by_host") or {}).items()
-                    for x in (slice_.get(DELETED_IDS_KEY) or slice_.get("hidden_ids") or [])
-                    if str(x) in catalog
-                }
-            )
 
         imagegen["lora_catalog"] = lc
 

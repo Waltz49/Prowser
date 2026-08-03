@@ -29,18 +29,6 @@ from imagegen_plugins.job_queue_panel import (
     QUEUE_SIZE_STRIP,
     job_control_dialog_outer_minimum_width,
 )
-# Re-export shared helpers for existing importers.
-from imagegen_plugins.job_queue_common import (  # noqa: F401
-    _ACTION_COL_WIDTH,
-    _apply_job_queue_cell_background,
-    _valid_preview_paths,
-    build_job_queue_action_widget,
-    create_invalid_job_preview_label,
-    info_html_for_queue_row,
-    job_queue_cancel_row,
-    job_queue_edit_row,
-    open_reference_thumbnail_paths,
-)
 from thumbnails.combined_sidebar_widget import HeaderWidget
 import thumbnails.thumbnail_constants as tc
 from theme.theme_service import get_active_theme

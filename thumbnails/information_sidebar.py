@@ -405,7 +405,6 @@ class InformationSidebar(QWidget):
         f"{OPTION_SYMBOL}+click to expand or collapse all sections."
     )
 
-    _LEGACY_REF_MD5_LINE = re.compile(r"^[0-9a-fA-F]{32}$")
     _REF_FILEDATE_LINE = re.compile(r"^\d+(?:\.\d+)?$")
     _REF_SECTION_STOP = re.compile(
         r"^(?:prompt|image model|title|description|negative prompt):$", re.IGNORECASE
@@ -449,16 +448,9 @@ class InformationSidebar(QWidget):
             if not fn_seg:
                 i += 1
                 continue
-            if self._LEGACY_REF_MD5_LINE.fullmatch(fn_seg):
-                i += 1
-                continue
             fname_raw = unescape(fn_seg)
             if i + 1 < len(segments):
                 nxt = segments[i + 1].strip()
-                if self._LEGACY_REF_MD5_LINE.fullmatch(nxt):
-                    entries.append((fname_raw, None))
-                    i += 2
-                    continue
                 if self._REF_FILEDATE_LINE.fullmatch(nxt):
                     try:
                         expected_mtime = float(nxt)
@@ -484,12 +476,9 @@ class InformationSidebar(QWidget):
                 new_segments.append(segments[j])
                 j += 1
                 continue
-            if self._LEGACY_REF_MD5_LINE.fullmatch(fn_seg):
-                j += 1
-                continue
             if j + 1 < len(segments):
                 nxt = segments[j + 1].strip()
-                if self._LEGACY_REF_MD5_LINE.fullmatch(nxt) or self._REF_FILEDATE_LINE.fullmatch(nxt):
+                if self._REF_FILEDATE_LINE.fullmatch(nxt):
                     fname_raw = unescape(fn_seg)
                     if resolve_reference_path(image_dir, fname_raw, None) and len(level_paths) > 1:
                         label = segments[j].strip()

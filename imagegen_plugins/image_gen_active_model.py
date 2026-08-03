@@ -25,17 +25,10 @@ IMAGEGEN_FUNCTIONS = (
 
 _ACTIVE_BY_FUNCTION_KEY = "active_plugin_by_function"
 _LAST_FUNCTION_KEY = "last_function"
-_LEGACY_ACTIVE_KEY = "active_plugin_id"
 
 
 def _plugins_by_id(plugins: List[ImageGenModelPlugin]) -> Dict[str, ImageGenModelPlugin]:
     return {p.plugin_id: p for p in plugins}
-
-
-def _normalize_plugin_id(plugin_id: str) -> str:
-    if plugin_id == "flux_fill_infil":
-        return "flux_fill_infill"
-    return plugin_id
 
 
 def _imagegen_settings() -> dict:
@@ -51,9 +44,6 @@ def _active_by_function_raw(imagegen: dict) -> dict:
     raw = imagegen.get(_ACTIVE_BY_FUNCTION_KEY)
     if isinstance(raw, dict):
         return dict(raw)
-    legacy = imagegen.get(_LEGACY_ACTIVE_KEY)
-    if isinstance(legacy, str):
-        return {FUNCTION_CREATE: _normalize_plugin_id(legacy)}
     return {}
 
 
@@ -68,7 +58,6 @@ def load_active_plugin_id_for_function(
     by_fn = _active_by_function_raw(_imagegen_settings())
     plugin_id = by_fn.get(function)
     if isinstance(plugin_id, str):
-        plugin_id = _normalize_plugin_id(plugin_id)
         plugin = known.get(plugin_id)
         if plugin is not None and plugin.is_available():
             return plugin_id
@@ -85,7 +74,6 @@ def apply_active_plugin_to_imagegen(
     imagegen: dict, function: str, plugin_id: str
 ) -> None:
     """Update active plugin id for a function inside an in-memory imagegen dict."""
-    plugin_id = _normalize_plugin_id(plugin_id)
     by_fn = _active_by_function_raw(imagegen)
     by_fn[function] = plugin_id
     imagegen[_ACTIVE_BY_FUNCTION_KEY] = by_fn

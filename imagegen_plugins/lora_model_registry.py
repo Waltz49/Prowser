@@ -329,12 +329,3 @@ def host_id_for_lora_model(model_key: str) -> Optional[str]:
     if model_key == Z_IMAGE_TURBO_MFLUX_4BIT:
         return HOST_Z_IMAGE_TURBO
     return None
-
-
-def legacy_host_id_to_model_key(host_id: str) -> str:
-    """Map old Settings → LoRA host dropdown to a default model key."""
-    if host_id == HOST_FLUX1_FILL:
-        return FLUX1_FILL_DEV
-    if host_id == HOST_FLUX2_KLEIN:
-        return FLUX2_KLEIN_4B
-    return FLUX1_DEV

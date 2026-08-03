@@ -3087,9 +3087,6 @@ class FileOperationsManager:
                 saved_sort_mode = settings.get('rename_sort_mode', 'date')
                 saved_date_change_mode = settings.get('rename_date_change_mode', 'none')
                 saved_order_direction = settings.get('rename_order_direction', 'top')
-                # Handle legacy boolean value for backward compatibility
-                if isinstance(saved_date_change_mode, bool):
-                    saved_date_change_mode = 'oldest' if saved_date_change_mode else 'none'
 
                 # Pass date_change_mode and order_direction to dialog and get its value back
                 prefix_template, increment_length, starting_number, sort_mode, date_change_mode, order_direction, ok = self._show_rename_prefix_dialog(
@@ -4880,9 +4877,6 @@ class FileOperationsManager:
             sort_mode = settings.get('rename_sort_mode', 'order')
             date_change_mode = settings.get('rename_date_change_mode', 'none')
             order_direction = settings.get('rename_order_direction', 'top')
-            # Handle legacy boolean value for backward compatibility
-            if isinstance(date_change_mode, bool):
-                date_change_mode = 'oldest' if date_change_mode else 'none'
         else:
             # Use hardcoded presets (will be saved to config)
             sort_mode = 'order'  # Sort by Current Order

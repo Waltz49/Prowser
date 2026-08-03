@@ -2372,10 +2372,6 @@ class CustomFileSystemFilter(QSortFilterProxyModel):
                             # Expand ~ to full path before adding to excluded set
                             expanded_path = os.path.expanduser(path.strip())
                             self._excluded_directories.add(expanded_path)
-                    elif ignore_dir and isinstance(ignore_dir, str) and ignore_dir.strip():
-                        # Backward compatibility: if it's just a string, treat as enabled
-                        expanded_path = os.path.expanduser(ignore_dir.strip())
-                        self._excluded_directories.add(expanded_path)
         except Exception:
             pass
         self._check_context: Optional[TreeImageCheckContext] = None
@@ -3369,10 +3365,6 @@ class FileTreeHandler(QObject):
                             if enabled and path and isinstance(path, str) and path.strip():
                                 expanded_path = os.path.expanduser(path.strip())
                                 self.filter_proxy._excluded_directories.add(expanded_path)
-                        elif ignore_dir and isinstance(ignore_dir, str) and ignore_dir.strip():
-                            # Backward compatibility: if it's just a string, treat as enabled
-                            expanded_path = os.path.expanduser(ignore_dir.strip())
-                            self.filter_proxy._excluded_directories.add(expanded_path)
             except Exception:
                 pass
 

@@ -35,9 +35,6 @@ MFLUX_LORA_UI_CHOICES: Tuple[Tuple[str, str], ...] = (("None", "none"),) + tuple
     for e in sorted(LORA_CATALOG.values(), key=lambda x: x.display_name.lower())
 )
 
-# Migrate saved UI settings from removed presets.
-_LEGACY_PRESET_IDS = {"anime": "mspaint1"}
-
 # Shown (disabled) when the active model does not support LoRAs.
 LORA_UNSUPPORTED_PRESET_ID = "__lora_unsupported__"
 LORA_UNSUPPORTED_LABEL = "not supported with this model"
@@ -71,8 +68,7 @@ def coerce_lora_preset_id(preset_id: Any) -> str:
 
 
 def _normalize_preset_id(preset_id: Any) -> str:
-    preset_id = coerce_lora_preset_id(preset_id)
-    return _LEGACY_PRESET_IDS.get(preset_id, preset_id)
+    return coerce_lora_preset_id(preset_id)
 
 
 def _assert_mflux_compatible_lora(path: str, *, host_id: str | None = None) -> None:

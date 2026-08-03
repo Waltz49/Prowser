@@ -1017,10 +1017,6 @@ class ThumbnailCanvas(QWidget):
     thumbnail_double_clicked = Signal(int)  # index
     thumbnail_hovered = Signal(int)  # index
     
-    # Custom MIME types for drag and drop (legacy, but no longer used for drag)
-    MIME_TYPE = 'application/x-imagebrowser-path'
-    MULTIPLE_MIME_TYPE = 'application/x-imagebrowser-multiple-paths'
-    
     # Separator dash length in characters (before label)
     SEPARATOR_DASH_LENGTH = 4
     

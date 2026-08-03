@@ -37,8 +37,6 @@ LORA_CATALOG = {
     **Z_IMAGE_TURBO_LORAS,
 }
 
-_LEGACY_ENABLED_KEY = "enabled_ids"
-_LEGACY_FLAT_DELETED_KEY = "deleted_ids"
 _LEGACY_HIDDEN_KEY = "hidden_ids"
 _BY_HOST_KEY = "by_host"
 _BY_MODEL_KEY = "by_model"
@@ -238,7 +236,7 @@ def _ensure_by_model(lc: Dict[str, Any], by_host: Dict[str, Dict[str, List[str]]
 
 
 def migrate_lora_catalog(lc: Dict[str, Any]) -> Dict[str, Any]:
-    """Ensure by_host + by_model exist; migrate legacy flat keys once."""
+    """Ensure by_host + by_model exist with normalized slices."""
     if not isinstance(lc, dict):
         lc = {}
 
@@ -247,46 +245,6 @@ def migrate_lora_catalog(lc: Dict[str, Any]) -> Dict[str, Any]:
         by_host = dict(lc[_BY_HOST_KEY])
     else:
         by_host = default_by_host()
-
-    legacy_enabled = lc.get(_LEGACY_ENABLED_KEY)
-    legacy_deleted = lc.get(_LEGACY_FLAT_DELETED_KEY)
-
-    if isinstance(legacy_enabled, list) and legacy_enabled:
-        if had_by_host:
-            t2i = dict(by_host.get("flux1_t2i") or _empty_slice())
-            if not t2i.get("enabled_ids"):
-                t2i["enabled_ids"] = [
-                    str(x)
-                    for x in legacy_enabled
-                    if str(x) in LORA_CATALOG and LORA_CATALOG[str(x)].host_id == "flux1_t2i"
-                ]
-                by_host["flux1_t2i"] = t2i
-        else:
-            for lid in legacy_enabled:
-                lid_s = str(lid)
-                entry = LORA_CATALOG.get(lid_s)
-                if entry is None:
-                    continue
-                host = entry.host_id
-                if host not in by_host:
-                    continue
-                enabled_list = by_host[host]["enabled_ids"]
-                if lid_s not in enabled_list:
-                    enabled_list.append(lid_s)
-
-    if isinstance(legacy_deleted, list):
-        for lid in legacy_deleted:
-            entry = LORA_CATALOG.get(str(lid))
-            if entry is None:
-                continue
-            host = entry.host_id
-            slice_ = dict(by_host.get(host) or _empty_slice())
-            deleted = list(_slice_deleted_ids(slice_))
-            lid_s = str(lid)
-            if lid_s not in deleted:
-                deleted.append(lid_s)
-            slice_[DELETED_IDS_KEY] = deleted
-            by_host[host] = slice_
 
     for host_id in LORA_HOST_ORDER:
         slice_ = by_host.get(host_id)

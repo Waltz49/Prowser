@@ -77,9 +77,6 @@ class RightSidebarCombinedWidget(QWidget):
             settings.get('jobs_visible', False) if self._jobs_feature_enabled else False
         )
         saved = settings.get('shortcuts_splitter_sizes', [150, 250, 120])
-        if isinstance(saved, list) and len(saved) == 2 and sum(saved) > 0:
-            # Legacy [information, shortcuts] -> [shortcuts, information, jobs]
-            saved = [saved[1], saved[0], 120]
         self.saved_splitter_sizes = (
             saved
             if isinstance(saved, list) and len(saved) == 3 and sum(saved) > 0
@@ -316,15 +313,6 @@ class RightSidebarCombinedWidget(QWidget):
             self._enforce_jobs_compact_splitter_size()
         elif self._jobs_pane_compact and jobs_h > compact + 1:
             self._set_jobs_pane_compact(False)
-
-    def _maybe_restore_jobs_compact_from_sizes(self) -> None:
-        """Legacy sessions saved compact height without the compact flag."""
-        if self._jobs_pane_compact or not self._jobs_strip_compact_available():
-            return
-        sizes = self.splitter.sizes()
-        if len(sizes) > 2 and sizes[2] <= self._jobs_compact_pane_height() + 1:
-            self._set_jobs_pane_compact(True)
-            self._enforce_jobs_compact_splitter_size()
 
     def _pane_visibility(self) -> list[bool]:
         jobs_vis = self.jobs_visible if self._jobs_feature_enabled else False
@@ -816,7 +804,6 @@ class RightSidebarCombinedWidget(QWidget):
             layout.addWidget(self.jobs_widget)
             want_compact = self._jobs_pane_compact and self._jobs_strip_compact_available()
             self._set_jobs_pane_compact(want_compact, persist=False)
-            self._maybe_restore_jobs_compact_from_sizes()
             if self._jobs_pane_compact:
                 self._sync_jobs_compact_geometry()
             self.jobs_widget.show()

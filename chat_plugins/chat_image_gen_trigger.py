@@ -8,9 +8,9 @@ from typing import Literal, Optional
 
 ImageGenChatCommand = Literal["create", "edit"]
 
-# Prefixes of "create" (min /cr) and legacy /image for saved chats.
+# Prefixes of "create" (min /cr).
 _CREATE_COMMAND_RE = re.compile(
-    r"(?<!\w)/(?:cr|cre|crea|creat|create|im|ima|imag|image)\b",
+    r"(?<!\w)/(?:cr|cre|crea|creat|create)\b",
     re.IGNORECASE,
 )
 
@@ -22,7 +22,7 @@ _SOURCE_COMMAND_RE = re.compile(
 
 _CHAT_TRIGGER_RE = re.compile(
     r"(?<!\w)/(?:"
-    r"cr|cre|crea|creat|create|im|ima|imag|image|"
+    r"cr|cre|crea|creat|create|"
     r"so|sou|sour|sourc|source|src"
     r")\b",
     re.IGNORECASE,
@@ -30,7 +30,7 @@ _CHAT_TRIGGER_RE = re.compile(
 
 
 def user_message_has_create_command(text: str) -> bool:
-    """True when *text* contains a /create (or legacy /image) abbreviation."""
+    """True when *text* contains a /create abbreviation."""
     return bool(_CREATE_COMMAND_RE.search(text or ""))
 
 

@@ -538,7 +538,7 @@ class BrowseViewHandler:
                     # Debounce status notification (pinch sends many updates)
                     if mw.status_notification:
                         self._zoom_gesture_notify_timer.start()
-                    if mw.filename_visible:
+                    if mw.right_sidebar_visible:
                         mw.right_sidebar.show_image_info_overlay()
             
             elif pinch.state() in (Qt.GestureFinished, Qt.GestureCanceled):
@@ -597,7 +597,7 @@ class BrowseViewHandler:
         mw.update_image_display()
         if hasattr(mw, 'update_status_bar_fit_mode'):
             mw.update_status_bar_fit_mode()
-        if mw.filename_visible:
+        if mw.right_sidebar_visible:
             mw.right_sidebar.show_image_info_overlay()
     
     def get_visible_source_rect(self):
@@ -882,7 +882,7 @@ class BrowseViewHandler:
         # Zoom at center of screen
         center_point = QPointF(mw.width() / 2, mw.height() / 2)
         self.zoom_at_point(new_scale, center_point)
-        if mw.filename_visible:
+        if mw.right_sidebar_visible:
             mw.right_sidebar.show_image_info_overlay()
 
     def zoom_out(self):
@@ -893,7 +893,7 @@ class BrowseViewHandler:
         # Zoom at center of screen
         center_point = QPointF(mw.width() / 2, mw.height() / 2)
         self.zoom_at_point(new_scale, center_point)
-        if mw.filename_visible:
+        if mw.right_sidebar_visible:
             mw.right_sidebar.show_image_info_overlay()
 
     def toggle_actual_size(self):
@@ -924,6 +924,6 @@ class BrowseViewHandler:
         # Update status bar sections
         if hasattr(mw, 'update_status_bar_fit_mode'):
             mw.update_status_bar_fit_mode()
-        if mw.filename_visible:
+        if mw.right_sidebar_visible:
             mw.right_sidebar.show_image_info_overlay()
 

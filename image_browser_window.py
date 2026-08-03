@@ -76,7 +76,6 @@ from config import (
     effective_browse_transparency,
     get_config,
 )
-from browser_window.managers.configuration_sync_manager import ConfigurationSyncManager
 from browser_window.managers.directory_history_handler import DirectoryHistoryHandler, DirectoryHistoryHandlerForMenu
 from browser_window.managers.directory_loader import DirectoryLoader
 from browser_window.managers.event_handler import EventHandler
@@ -444,11 +443,7 @@ class ImageBrowserWindow(QMainWindow):
         self.show_extensions = settings.get('show_extensions', True)
         self.show_image_size = settings.get('show_image_size', False)
         filtered_tree_setting = settings.get('filtered_tree', 'images')
-        # Convert boolean to string for backward compatibility
-        if isinstance(filtered_tree_setting, bool):
-            self.filtered_tree = 'use_filter' if filtered_tree_setting else 'images'
-        else:
-            self.filtered_tree = filtered_tree_setting
+        self.filtered_tree = filtered_tree_setting
         self.space_key_mode = settings.get('space_key_mode', 'exit')
         _bh_ms = settings.get('browse_image_history_save_after_ms', 3000)
         try:
@@ -505,7 +500,6 @@ class ImageBrowserWindow(QMainWindow):
         # After manual zoom (pinch / +/- / Ctrl+wheel), window resizes preserve scale and pan anchor
         self.browse_zoom_pinned = False
         self.current_pixmap = None
-        self.filename_visible = False
         self.number_overlay_visible = False
         # Thumbnail filename visibility state (loaded from config)
         self.thumbnail_filename_visible = settings.get('thumbnail_filename_visible', False)
@@ -560,7 +554,6 @@ class ImageBrowserWindow(QMainWindow):
         self.sidebar_manager = SidebarManager(self)
         self.view_mode_manager = ViewModeManager(self)
         self.event_handler = EventHandler(self)
-        self.configuration_sync_manager = ConfigurationSyncManager(self)
         self.lock_manager = LockManager(self)
         self.exif_operations_manager = ExifOperationsManager(self)
         self.browser_controller = BrowserController(self.file_data_model, self.event_bus, self)
@@ -1171,7 +1164,90 @@ class ImageBrowserWindow(QMainWindow):
 
     def _poll_message_queue(self):
         """Drain message queue and process each message. Called by QTimer on main thread."""
-        self.configuration_sync_manager.poll_message_queue()
+        for msg in self.message_handler.drain_messages():
+            self._handle_api_configuration(msg)
+            self.message_handler.invoke_handlers(msg)
+
+    def _handle_api_configuration(self, configuration: dict):
+        """Handle JSON configuration messages received from the named pipe."""
+        if getattr(self, '_processing_message', False):
+            return
+        try:
+            self._processing_message = True
+            message_type = configuration.get('type')
+            if message_type == 'ping':
+                return
+            elif message_type == 'activate':
+                from utils import activate_application_window, activate_macos_application
+
+                activate_macos_application(force=True)
+                activate_application_window(self, force=True)
+                return
+            elif message_type == 'quit':
+                if getattr(self, 'idle_detector', None):
+                    self.idle_detector.reset()
+                    time.sleep(0.3)
+                self._api_quit_in_progress = True
+                try:
+                    from imagegen_plugins.image_gen_controller import (
+                        get_imagegen_controller,
+                    )
+                    get_imagegen_controller(self).prepare_for_shutdown()
+                except ImportError:
+                    pass
+                self.close()
+                return
+            if getattr(self, 'idle_detector', None):
+                self.idle_detector.reset()
+            is_load_request = (
+                configuration.get('files') or configuration.get('directory') or
+                message_type in ('load_directory', 'load_files', 'load_file_with_thumbnails', 'load_file_with_window')
+            )
+            already_deferred = configuration.pop('_api_load_deferred', False)
+            if is_load_request and not already_deferred:
+                bl = getattr(getattr(self, 'cache_manager', None), 'background_loader', None)
+                if bl and bl.isRunning() and hasattr(self, '_interrupt_thumbnail_loading'):
+                    self._interrupt_thumbnail_loading()
+                    cfg = dict(configuration)
+                    cfg['_api_load_deferred'] = True
+                    QTimer.singleShot(50, lambda c=cfg: self._handle_api_configuration(c))
+                    return
+            converted_config = {}
+            if message_type == 'load_directory':
+                converted_config['directory'] = configuration.get('directory')
+                if 'filter_pattern' in configuration:
+                    converted_config['filter'] = configuration.get('filter_pattern')
+            elif message_type == 'load_files':
+                file_paths = configuration.get('file_paths', [])
+                converted_config['files'] = file_paths
+                if 'filter_pattern' in configuration:
+                    converted_config['filter'] = configuration.get('filter_pattern')
+                if 'fullscreen' in configuration:
+                    converted_config['fullscreen'] = configuration.get('fullscreen')
+            elif message_type == 'load_file_with_thumbnails':
+                target_file = configuration.get('target_file')
+                if target_file:
+                    converted_config['files'] = [target_file]
+                if 'filter_pattern' in configuration:
+                    converted_config['filter'] = configuration.get('filter_pattern')
+                if 'fullscreen' in configuration:
+                    converted_config['fullscreen'] = configuration.get('fullscreen')
+            elif message_type == 'load_file_with_window':
+                target_file = configuration.get('target_file')
+                if target_file:
+                    converted_config['files'] = [target_file]
+                if 'filter_pattern' in configuration:
+                    converted_config['filter'] = configuration.get('filter_pattern')
+            else:
+                converted_config = configuration
+            files_list = converted_config.get('files', [])
+            if files_list and len(files_list) > 0 and not getattr(self, 'restoring_from_history', False):
+                self.directory_stack_history_handler.save_current_state('image_browser_window._handle_api_configuration')
+            self.refresh_from_configuration(converted_config, from_api=True)
+        except Exception:
+            pass
+        finally:
+            self._processing_message = False
 
     def _get_current_directory_files(self):
         """Get current image files in directory efficiently"""
@@ -2484,16 +2560,6 @@ class ImageBrowserWindow(QMainWindow):
         left_width = 0
         right_width = 0
         
-        if view_mode == 'list':
-            # Hide sidebars in list view (similar to browse view)
-            self.combined_sidebar.hide()
-            if hasattr(self, 'right_sidebar'):
-                self.right_sidebar.hide()
-            # Set splitter sizes to give full width to list view
-            self._set_splitter_sizes_safe([0, total_width, 0])
-            self._sync_right_sidebar_chrome()
-            return
-        
         if view_mode == 'thumbnail':
             if self._any_left_sidebar_pane_visible():
                 self.combined_sidebar.show()
@@ -3038,7 +3104,7 @@ class ImageBrowserWindow(QMainWindow):
                 self.highlight_index = self.image_indices.index(file_index)
                 self.current_index = file_index
                 # Set current image path before opening browse view
-                self.configuration_sync_manager._set_current_image_path_with_sync(file_path)
+                self._set_current_image_path_with_sync(file_path)
                 
                 # If in browse mode, display the image
                 if self.current_view_mode == 'browse':
@@ -3222,7 +3288,7 @@ class ImageBrowserWindow(QMainWindow):
             fallback_index: Optional index to use if image_path is not found in displayed_images
         """
         if image_path:
-            self.configuration_sync_manager._set_current_image_path_with_sync(image_path)
+            self._set_current_image_path_with_sync(image_path)
             # Derive highlight_index and current_index from the file path
             displayed = self.get_displayed_images()
             if displayed and image_path in displayed:
@@ -3235,12 +3301,12 @@ class ImageBrowserWindow(QMainWindow):
                     if fallback_index is not None and 0 <= fallback_index < len(displayed):
                         self.highlight_index = fallback_index
                         self.current_index = fallback_index
-                        self.configuration_sync_manager._set_current_image_path_with_sync(displayed[fallback_index])
+                        self._set_current_image_path_with_sync(displayed[fallback_index])
                     elif displayed:
                         # Default to first image if no fallback
                         self.highlight_index = 0
                         self.current_index = 0
-                        self.configuration_sync_manager._set_current_image_path_with_sync(displayed[0])
+                        self._set_current_image_path_with_sync(displayed[0])
             elif fallback_index is not None:
                 # Path not in displayed_images, use fallback
                 displayed = self.get_displayed_images()
@@ -3331,10 +3397,6 @@ class ImageBrowserWindow(QMainWindow):
                 self.start_background_thumbnail_loading_if_needed, Qt.QueuedConnection
             )
     
-    def _sync_to_file_data_model(self):
-        """Sync current state to FileDataModel for consistency"""
-        return self.configuration_sync_manager._sync_to_file_data_model()
-    
     def _set_displayed_images_with_sync(self, images: List[str], sync: bool = True):
         """Set displayed_images and optionally sync with FileDataModel."""
         from window_sync import set_displayed_images_for_window
@@ -3360,11 +3422,10 @@ class ImageBrowserWindow(QMainWindow):
                     self._perform_pending_highlight(saved_selections)
             except (AttributeError, RuntimeError):
                 pass
-        return self.configuration_sync_manager._on_displayed_images_changed(images)
     
     def _on_current_image_changed(self, image_path: str):
         """Handle current_image_path change from FileDataModel - sync tree view"""
-        return self.configuration_sync_manager._on_current_image_changed(image_path)
+        pass
 
     def _on_directory_loaded(self, directory, displayed_count=None, external_load=None):
         """Handle DIRECTORY_LOADED event - reset tracking, activate window, start cache loader, simulate refresh"""
@@ -3393,7 +3454,7 @@ class ImageBrowserWindow(QMainWindow):
     
     def _on_directory_changed(self, directory: str):
         """Handle directory change from FileDataModel - sync tree view"""
-        return self.configuration_sync_manager._on_directory_changed(directory)
+        pass
 
     def refresh_thumbnail_theme_styles(self):
         """Repaint thumbnail grid after thumbnail-only palette changes (no global QSS)."""
@@ -3971,7 +4032,7 @@ class ImageBrowserWindow(QMainWindow):
             self.current_index = target_image_index
             # Set current_image_path for future windowing operations
             # Use sync method to ensure proper synchronization with FileDataModel
-            self.configuration_sync_manager._set_current_image_path_with_sync(target_file)
+            self._set_current_image_path_with_sync(target_file)
         except (ValueError, IndexError):
             self.highlight_index = 0
             self.current_index = 0
@@ -4912,7 +4973,7 @@ class ImageBrowserWindow(QMainWindow):
             if hasattr(self, "load_specific_files"):
                 self.load_specific_files(matching, external_load=True)
             else:
-                self.configuration_sync_manager._set_displayed_images_with_sync(matching, sync=True)
+                self._set_displayed_images_with_sync(matching, sync=True)
                 self.generate_thumbnails(force_refresh=False)
 
             if preserve and preserve in matching:
@@ -5856,12 +5917,7 @@ class ImageBrowserWindow(QMainWindow):
                 QTimer.singleShot(100, self.preview_widget.update_preview)
         
         if 'filtered_tree' in new_settings:
-            filtered_tree_setting = new_settings['filtered_tree']
-            # Convert boolean to string for backward compatibility
-            if isinstance(filtered_tree_setting, bool):
-                self.filtered_tree = 'use_filter' if filtered_tree_setting else 'images'
-            else:
-                self.filtered_tree = filtered_tree_setting
+            self.filtered_tree = new_settings['filtered_tree']
             # Apply filtered_tree setting to file tree
             if hasattr(self, 'file_tree_handler'):
                 if self.file_tree_handler.is_tree_initialized():
@@ -7241,8 +7297,6 @@ class ImageBrowserWindow(QMainWindow):
     def delete_exif_date(self):
         self.exif_operations_manager.delete_exif_date()
 
-    def normalize_exif_steps_suffix(self):
-        self.exif_operations_manager.normalize_exif_steps_suffix()
 
     def edit_exif_usercomment(self):
         """Open a dialog to view and edit the EXIF UserComment for the current image."""
@@ -8166,7 +8220,7 @@ class ImageBrowserWindow(QMainWindow):
             self.scroll_y = 0
         
         self.update_image_display()
-        if self.filename_visible:          
+        if self.right_sidebar_visible:
             self.right_sidebar.show_image_info_overlay() 
 
     def update_image_display(self):
@@ -9560,7 +9614,6 @@ class ImageBrowserWindow(QMainWindow):
             or self.right_sidebar.is_shortcuts_visible()
             or self.right_sidebar.is_jobs_visible()
         )
-        self.filename_visible = self.right_sidebar_visible  # Keep for backward compatibility
 
         sizes = self.main_splitter.sizes()
         total_width = sum(sizes)

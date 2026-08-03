@@ -318,10 +318,8 @@ def _refresh_index_stat_for_key(cache_key: str, st: os.stat_result) -> None:
 def has_cached_faces(image_path: str) -> bool:
     """Return True if image_path has cached face encodings and file unchanged.
 
-    With md5 in index: mtime may use a small float tolerance; if mtime still mismatches, md5 can
-    salvage the entry and refresh stored mtime/size (same file content, metadata drift).
-
-    Legacy entries (no md5): require exact mtime and size match.
+    Requires md5 in index; mtime may use a small float tolerance, with md5 salvage
+    when metadata drifts.
     """
     with _lock:
         index = _get_index()
@@ -343,24 +341,21 @@ def has_cached_faces(image_path: str) -> bool:
         return False
     es = entry.get("size")
     stored_md5 = entry.get("md5")
-    if st.st_size != es:
-        if stored_md5:
-            cur_md5 = _compute_file_md5(image_path)
-            if cur_md5 == stored_md5:
-                with _lock:
-                    _refresh_index_stat_for_key(key, st)
-                return True
+    if not stored_md5:
         return False
-    em = entry.get("mtime")
-    if stored_md5:
-        if _mtime_matches_index(st.st_mtime, em):
-            return True
+    if st.st_size != es:
         cur_md5 = _compute_file_md5(image_path)
         if cur_md5 == stored_md5:
             with _lock:
                 _refresh_index_stat_for_key(key, st)
             return True
         return False
-    if st.st_mtime == em:
+    em = entry.get("mtime")
+    if _mtime_matches_index(st.st_mtime, em):
+        return True
+    cur_md5 = _compute_file_md5(image_path)
+    if cur_md5 == stored_md5:
+        with _lock:
+            _refresh_index_stat_for_key(key, st)
         return True
     return False

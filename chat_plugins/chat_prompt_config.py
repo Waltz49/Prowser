@@ -18,13 +18,6 @@ _SYSTEM_FILE_NAME = "chat_system_prompts.json"
 _USER_FILE_NAME = "chat_user_prompts.json"
 _PREFIX_POSTFIX_FILE_NAME = "chat_prefix_postfix.json"
 _FAVORITE_IMAGES_DIR_NAME = "chat_favorite_images"
-_LEGACY_SETTINGS_KEYS = (
-    "chat_system_prompt",
-    "chat_named_system_prompts",
-    "chat_active_named_prompt_id",
-    "chat_favorite_user_prompts",
-)
-
 _system_prompt_lock = threading.Lock()
 _user_prompt_lock = threading.Lock()
 _prefix_postfix_lock = threading.Lock()
@@ -96,18 +89,6 @@ def persist_favorite_image_paths(
         stored.append(str(dest.resolve()))
     return stored
 
-
-def _cleanup_legacy_chat_prompt_settings_keys() -> None:
-    """Drop prompt-library keys from settings.json after dedicated files own them."""
-    config = get_config()
-    settings = config.load_settings()
-    changed = False
-    for key in _LEGACY_SETTINGS_KEYS:
-        if key in settings:
-            del settings[key]
-            changed = True
-    if changed:
-        config.save_settings(settings)
 
 
 def _default_system_prompt_config() -> dict[str, Any]:
@@ -215,29 +196,6 @@ def _normalize_favorite_prompts(raw: Any) -> list[dict[str, Any]]:
     return prompts
 
 
-def _migrate_system_prompt_config_from_settings() -> dict[str, Any]:
-    settings = get_config().load_settings()
-    config = _default_system_prompt_config()
-    prompt = settings.get("chat_system_prompt")
-    if isinstance(prompt, str) and prompt.strip():
-        config["system_prompt"] = prompt
-    active_id = settings.get("chat_active_named_prompt_id")
-    if isinstance(active_id, str):
-        config["active_named_prompt_id"] = active_id
-    config["named_prompts"] = _normalize_named_prompts(
-        settings.get("chat_named_system_prompts")
-    )
-    return config
-
-
-def _migrate_user_prompt_config_from_settings() -> dict[str, Any]:
-    settings = get_config().load_settings()
-    return {
-        "favorite_prompts": _normalize_favorite_prompts(
-            settings.get("chat_favorite_user_prompts")
-        ),
-    }
-
 
 def _normalize_system_prompt_config(raw: dict[str, Any]) -> dict[str, Any]:
     config = _default_system_prompt_config()
@@ -267,17 +225,15 @@ def _normalize_prefix_postfix_config(raw: dict[str, Any]) -> dict[str, Any]:
 
 
 def load_system_prompt_config() -> dict[str, Any]:
-    """Load ~/.prowser/data/chat_system_prompts.json (migrate from settings once)."""
+    """Load ~/.prowser/data/chat_system_prompts.json."""
     path = _system_prompts_path()
     with _system_prompt_lock:
         parsed = _parse_json_file(path)
         if parsed is not None:
-            _cleanup_legacy_chat_prompt_settings_keys()
             return _normalize_system_prompt_config(parsed)
-        migrated = _migrate_system_prompt_config_from_settings()
-        _save_json_file(path, migrated)
-        _cleanup_legacy_chat_prompt_settings_keys()
-        return migrated
+        default = _default_system_prompt_config()
+        _save_json_file(path, default)
+        return default
 
 
 def save_system_prompt_config(config: dict[str, Any]) -> None:
@@ -289,17 +245,15 @@ def save_system_prompt_config(config: dict[str, Any]) -> None:
 
 
 def load_user_prompt_config() -> dict[str, Any]:
-    """Load ~/.prowser/data/chat_user_prompts.json (migrate from settings once)."""
+    """Load ~/.prowser/data/chat_user_prompts.json."""
     path = _user_prompts_path()
     with _user_prompt_lock:
         parsed = _parse_json_file(path)
         if parsed is not None:
-            _cleanup_legacy_chat_prompt_settings_keys()
             return _normalize_user_prompt_config(parsed)
-        migrated = _migrate_user_prompt_config_from_settings()
-        _save_json_file(path, migrated)
-        _cleanup_legacy_chat_prompt_settings_keys()
-        return migrated
+        default = _default_user_prompt_config()
+        _save_json_file(path, default)
+        return default
 
 
 def save_user_prompt_config(config: dict[str, Any]) -> None:

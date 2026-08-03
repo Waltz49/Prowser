@@ -26,10 +26,6 @@ def _get_excluded_paths(config):
                         # Expand ~ to full path before adding to excluded list
                         expanded_path = os.path.expanduser(path.strip())
                         excluded.append(expanded_path)
-                elif ignore_dir and isinstance(ignore_dir, str) and ignore_dir.strip():
-                    # Backward compatibility: if it's just a string, treat as enabled
-                    expanded_path = os.path.expanduser(ignore_dir.strip())
-                    excluded.append(expanded_path)
     except Exception:
         pass
 

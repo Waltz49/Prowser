@@ -269,10 +269,8 @@ def _exif_line_is_model_param(stripped: str) -> bool:
 
 
 def normalize_exif_model_name(model_text: str) -> str:
-    """Strip legacy suffixes and whitespace from an Image Model EXIF token."""
-    text = str(model_text or "").strip()
-    text = _strip_legacy_model_steps_suffix(_strip_legacy_model_quant_suffix(text))
-    return text.strip()
+    """Normalize whitespace on an Image Model EXIF token."""
+    return str(model_text or "").strip()
 
 
 def parse_exif_model_name(full_comment: str) -> Optional[str]:
@@ -681,121 +679,6 @@ def parse_mflux_metadata_json(text: str) -> Optional[Dict[str, Any]]:
     return None
 
 
-_LEGACY_MODEL_QUANT_SUFFIX_RE = re.compile(r"\s*Q\d+")
-
-
-def _strip_legacy_model_quant_suffix(name: str) -> str:
-    """Old EXIF / labels used Q{n} in the model name; strip for display and lookup."""
-    return _LEGACY_MODEL_QUANT_SUFFIX_RE.sub("", name, count=1).strip()
-
-
-def _strip_legacy_model_steps_suffix(name: str) -> str:
-    """Old EXIF used [n] step count on the model name line; strip for display."""
-    return _EXIF_MODEL_STEPS_SUFFIX.sub("", name).strip()
-
-
-def _strip_quant_from_image_model_block(text: str) -> str:
-    """Remove legacy Q{n} and [n] from the model name line when displaying old EXIF."""
-    lines = text.splitlines()
-    result: List[str] = []
-    after_image_model = False
-    for line in lines:
-        if line.strip().lower().rstrip(":") == "image model":
-            result.append(line)
-            after_image_model = True
-            continue
-        if after_image_model and line.strip():
-            line = _strip_legacy_model_steps_suffix(
-                _strip_legacy_model_quant_suffix(line)
-            )
-            after_image_model = False
-        result.append(line)
-    return "\n".join(result)
-
-
-def _exif_steps_line_insert_index(lines: List[str], model_line_idx: int) -> int:
-    """Index for inserting Steps: after Seed when present, else before other params."""
-    insert_idx = model_line_idx + 1
-    for j in range(model_line_idx + 1, len(lines)):
-        stripped = lines[j].strip()
-        if not stripped:
-            continue
-        lower = stripped.lower()
-        if lower.startswith("prompt") or lower.startswith("references"):
-            break
-        if lower.startswith("elapsed:"):
-            return j
-        m_int = _EXIF_PARAM_LINE_INT.match(stripped)
-        if m_int is not None:
-            label = m_int.group(1).lower()
-            if label == "seed":
-                return j + 1
-            return j
-        if _EXIF_PARAM_LINE_GUIDANCE.match(stripped) or _EXIF_PARAM_LINE_LORA.match(
-            stripped
-        ) or _exif_line_is_lora_continuation(lines[j]):
-            return j
-    return insert_idx
-
-
-def normalize_legacy_exif_steps_suffix(text: str) -> Tuple[str, bool]:
-    """Strip trailing [N] from Image Model line; add Steps: N when missing.
-
-    Returns (new_text, changed). Skips mflux JSON UserComment.
-    """
-    if not text or not str(text).strip():
-        return text, False
-    if parse_mflux_metadata_json(text) is not None:
-        return text, False
-
-    lines = text.splitlines()
-    in_image_model = False
-    model_line_idx: Optional[int] = None
-    bracket_steps: Optional[int] = None
-
-    for i, line in enumerate(lines):
-        stripped = line.strip()
-        if not stripped:
-            continue
-        lower = stripped.lower().rstrip(":")
-        if lower in ("image model", "image model:"):
-            in_image_model = True
-            continue
-        if lower.startswith("prompt") or lower.startswith("references"):
-            in_image_model = False
-            continue
-        if in_image_model:
-            m_steps = _EXIF_MODEL_STEPS_SUFFIX.search(stripped)
-            if m_steps is not None:
-                model_line_idx = i
-                bracket_steps = int(m_steps.group(1))
-            break
-
-    if model_line_idx is None or bracket_steps is None:
-        return text, False
-
-    has_explicit_steps = False
-    for line in lines:
-        m_int = _EXIF_PARAM_LINE_INT.match(line.strip())
-        if m_int is not None and m_int.group(1).lower() == "steps":
-            has_explicit_steps = True
-            break
-
-    stripped_model = lines[model_line_idx].strip()
-    new_model_stripped = _strip_legacy_model_steps_suffix(stripped_model)
-    if new_model_stripped == stripped_model and has_explicit_steps:
-        return text, False
-
-    prefix = lines[model_line_idx][: len(lines[model_line_idx]) - len(stripped_model)]
-    lines[model_line_idx] = prefix + new_model_stripped
-
-    if not has_explicit_steps:
-        insert_idx = _exif_steps_line_insert_index(lines, model_line_idx)
-        lines.insert(insert_idx, f"Steps: {bracket_steps}")
-
-    return "\n".join(lines), True
-
-
 def menu_label_for_hf_model_id(
     model_id: str,
     values: Optional[Dict[str, Any]] = None,
@@ -804,7 +687,6 @@ def menu_label_for_hf_model_id(
     model_id = str(model_id or "").strip()
     if not model_id or model_id.lower() == "none":
         return ""
-    legacy_id = _strip_legacy_model_quant_suffix(model_id)
     try:
         from imagegen_plugins import discover_plugins
 
@@ -812,14 +694,13 @@ def menu_label_for_hf_model_id(
             if (
                 plugin.hf_model_id == model_id
                 or plugin.display_name == model_id
-                or plugin.display_name == legacy_id
             ):
                 return plugin.display_name
     except Exception:
         pass
     if "/" in model_id:
         return model_id.rsplit("/", 1)[-1]
-    return legacy_id
+    return model_id
 
 
 def format_exif_comment_from_mflux_metadata(
@@ -891,9 +772,7 @@ def format_user_comment_text_for_display(
     """Show mflux JSON UserComment using the same layout as finished EXIF."""
     meta = parse_mflux_metadata_json(text)
     if meta is None:
-        return _normalize_exif_lora_display_lines(
-            _strip_quant_from_image_model_block(text)
-        )
+        return _normalize_exif_lora_display_lines(text)
     return _normalize_exif_lora_display_lines(
         format_exif_comment_from_mflux_metadata(
             meta,

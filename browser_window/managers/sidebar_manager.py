@@ -77,82 +77,39 @@ class SidebarManager:
     
     def toggle_file_tree(self):
         """Toggle the visibility of the file tree and resize canvas accordingly"""
-        if hasattr(self.main_window, 'combined_sidebar'):
-            cs = self.main_window.combined_sidebar
-            mw = self.main_window
-            if mw._should_reveal_sidebar_only('left'):
-                return mw._toggle_pane_with_chrome_restore(
-                    cs.is_tree_visible, cs.set_tree_visible, 'left_tree_visible', 'left'
-                )
-            mw._exit_partial_chrome_for_side('left')
-            if mw._show_sidebar_container_if_pane_active('left', cs.is_tree_visible):
-                return cs.is_tree_visible()
-            self._leave_browse_then_toggle_pane(
-                cs.is_tree_displayed,
-                cs.set_tree_visible,
-                cs.toggle_tree_visibility,
+        cs = self.main_window.combined_sidebar
+        mw = self.main_window
+        if mw._should_reveal_sidebar_only('left'):
+            return mw._toggle_pane_with_chrome_restore(
+                cs.is_tree_visible, cs.set_tree_visible, 'left_tree_visible', 'left'
             )
+        mw._exit_partial_chrome_for_side('left')
+        if mw._show_sidebar_container_if_pane_active('left', cs.is_tree_visible):
             return cs.is_tree_visible()
-        def do_toggle():
-            self.main_window.view_manager.toggle_file_tree()
-        self._leave_browse_then(do_toggle)
-        return getattr(self.main_window, 'file_tree_visible', False)
+        self._leave_browse_then_toggle_pane(
+            cs.is_tree_displayed,
+            cs.set_tree_visible,
+            cs.toggle_tree_visibility,
+        )
+        return cs.is_tree_visible()
     
     def toggle_preview(self):
         """Toggle the visibility of the preview widget and resize canvas accordingly"""
-        if hasattr(self.main_window, 'combined_sidebar'):
-            cs = self.main_window.combined_sidebar
-            mw = self.main_window
-            if mw._should_reveal_sidebar_only('left'):
-                return mw._toggle_pane_with_chrome_restore(
-                    cs.is_preview_visible, cs.set_preview_visible, 'left_preview_visible', 'left'
-                )
-            mw._exit_partial_chrome_for_side('left')
-            if mw._show_sidebar_container_if_pane_active('left', cs.is_preview_visible):
-                return cs.is_preview_visible()
-            self._leave_browse_then_toggle_pane(
-                cs.is_preview_displayed,
-                cs.set_preview_visible,
-                cs.toggle_preview_visibility,
+        cs = self.main_window.combined_sidebar
+        mw = self.main_window
+        if mw._should_reveal_sidebar_only('left'):
+            return mw._toggle_pane_with_chrome_restore(
+                cs.is_preview_visible, cs.set_preview_visible, 'left_preview_visible', 'left'
             )
+        mw._exit_partial_chrome_for_side('left')
+        if mw._show_sidebar_container_if_pane_active('left', cs.is_preview_visible):
             return cs.is_preview_visible()
-        else:
-            # Fallback to old behavior if combined sidebar not available
-            if not hasattr(self.main_window, 'preview_widget'):
-                return False
-            
-            # Hide tree if it's visible (they can't both be shown at the same time)
-            if self.main_window.tree_container.isVisible():
-                self.main_window.tree_container.hide()
-                self.main_window.file_tree_visible = False
-                if hasattr(self.main_window, 'toggle_file_tree_action'):
-                    self.main_window.toggle_file_tree_action.setChecked(False)
-                    self.main_window.toggle_file_tree_action.setText('Show File Tree')
-                
-                # Handle browse mode - resize image container when tree view is hidden
-                if self.main_window.current_view_mode == 'browse':
-                    if hasattr(self.main_window, 'image_container'):
-                        available_size = self.main_window.get_effective_display_size()
-                        self.main_window.image_container.resize(available_size)
-            
-            # Toggle preview visibility
-            if self.main_window.preview_widget.isVisible():
-                self.main_window.preview_widget.hide()
-                self.main_window.preview_visible = False
-            else:
-                self.main_window.preview_widget.show()
-                self.main_window.preview_visible = True
-                self.main_window.preview_widget.update_preview()
-            
-            # Update menu action
-            if hasattr(self.main_window, 'toggle_preview_action'):
-                self.main_window.toggle_preview_action.setChecked(self.main_window.preview_visible)
-                self.main_window.toggle_preview_action.setText('Hide Preview' if self.main_window.preview_visible else 'Show Preview')
-            
-            # Save settings
-            self.main_window.config.update_setting('preview_visible', self.main_window.preview_visible)
-            
-            return self.main_window.preview_visible
+        self._leave_browse_then_toggle_pane(
+            cs.is_preview_displayed,
+            cs.set_preview_visible,
+            cs.toggle_preview_visibility,
+        )
+        return cs.is_preview_visible()
 
     def toggle_jobs(self):
         """Toggle jobs sidebar pane (J key); switch from panel mode when needed."""
@@ -473,35 +430,6 @@ class SidebarManager:
                 if hasattr(handler, 'file_tree'):
                     handler.file_tree.viewport().update()
     
-    def manage_sidebar_visibility_for_view_mode(self, view_mode):
-        """Manage sidebar visibility based on view mode"""
-        if view_mode == 'browse':
-            if hasattr(self.main_window, 'combined_sidebar'):
-                if (
-                    hasattr(self.main_window, '_browse_shows_chat_sidebar')
-                    and self.main_window._browse_shows_chat_sidebar()
-                ):
-                    self.main_window.combined_sidebar.show()
-                else:
-                    self.main_window.combined_sidebar.hide()
-                QApplication.processEvents()
-        elif view_mode == 'thumbnail':
-            # Show sidebar in thumbnail mode if it was visible before
-            if hasattr(self.main_window, 'combined_sidebar'):
-                if (
-                    self.main_window.file_tree_visible
-                    or self.main_window.preview_visible
-                    or getattr(self.main_window, 'chat_visible', False)
-                ):
-                    self.main_window.combined_sidebar.show()
-                    QApplication.processEvents()
-    
-    def update_sidebar_menu_actions_for_view_mode(self, view_mode):
-        """Update sidebar menu actions based on view mode"""
-        if hasattr(self.main_window, 'menu_manager') and self.main_window.menu_manager:
-            self.main_window.menu_manager.update_sidebar_menu_actions_for_view_mode(view_mode)
-    
-
     def _get_thumbnail_cell_width(self):
         """Get current thumbnail cell width including borders and spacing"""
         try:

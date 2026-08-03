@@ -1273,7 +1273,6 @@ class SettingsDialog(QDialog):
     def _resolve_lora_model_key(self, settings: dict) -> str:
         """Config model key, unless the user already picked one this session."""
         from imagegen_plugins.hf_model_ids import FLUX1_DEV
-        from imagegen_plugins.lora_model_registry import legacy_host_id_to_model_key
 
         session_key = SettingsDialog._last_lora_model_key
         if session_key:
@@ -1284,10 +1283,6 @@ class SettingsDialog(QDialog):
                 return str(session_key)
 
         model_key = settings.get("imagegen_lora_model_key")
-        if not model_key and settings.get("imagegen_lora_host_id"):
-            model_key = legacy_host_id_to_model_key(
-                str(settings.get("imagegen_lora_host_id"))
-            )
         if model_key:
             return str(model_key)
         return str(getattr(self, "_lora_model_key", None) or FLUX1_DEV)
@@ -7017,9 +7012,6 @@ class SettingsDialog(QDialog):
                 
                 # Set filtered tree setting (UI removed, value set from Tree Filtering menu and persisted)
                 filtered_tree = getattr(parent_window, 'filtered_tree', 'images')
-                # Convert boolean to string for backward compatibility
-                if isinstance(filtered_tree, bool):
-                    filtered_tree = 'use_filter' if filtered_tree else 'images'
                 self.original_settings['filtered_tree'] = filtered_tree
                 
                 # Set space key mode
@@ -7244,9 +7236,6 @@ class SettingsDialog(QDialog):
                 
                 # Load filtered tree setting (UI removed, value set from Tree Filtering menu and persisted)
                 filtered_tree = settings.get('filtered_tree', 'images')
-                # Convert boolean to string for backward compatibility
-                if isinstance(filtered_tree, bool):
-                    filtered_tree = 'use_filter' if filtered_tree else 'images'
                 self.original_settings['filtered_tree'] = filtered_tree
                 
                 # Enhanced image similarity settings
@@ -7509,8 +7498,7 @@ class SettingsDialog(QDialog):
                 path = exclude_dir.get('path')
                 enabled = exclude_dir.get('enabled', False)
             else:
-                # Backward compatibility: if it's just a string, treat as path with enabled=False
-                path = exclude_dir if exclude_dir else None
+                path = None
                 enabled = False
             
             if path:
@@ -7579,9 +7567,8 @@ class SettingsDialog(QDialog):
                 path = ignore_dir.get('path')
                 enabled = ignore_dir.get('enabled', False)
             else:
-                # Backward compatibility: if it's just a string, treat as path with enabled=True
-                path = ignore_dir if ignore_dir else None
-                enabled = True if path else False
+                path = None
+                enabled = False
             
             if path:
                 display_path = self._path_to_display(path)

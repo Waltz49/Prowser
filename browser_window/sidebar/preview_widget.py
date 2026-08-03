@@ -4,10 +4,9 @@ Preview Widget - Shows a preview of the currently active image
 """
 
 import os
-from typing import Optional
-from PySide6.QtCore import Qt, QSize, QRect, QTimer
-from PySide6.QtGui import QPainter, QPixmap, QImage, QFont, QColor, QPen, QMouseEvent
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QScrollArea
+from PySide6.QtCore import Qt, QSize, QTimer
+from PySide6.QtGui import QPixmap, QImage, QMouseEvent
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QScrollArea
 from theme.theme_service import get_active_theme
 from thumbnails.thumbnail_constants import HIGHLIGHT_BORDER_WIDTH, THUMBNAIL_SPACING
 

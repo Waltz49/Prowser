@@ -422,11 +422,7 @@ class RefreshManager:
             self.main_window.current_index = 0
             self.main_window.current_image_path = None
         self.main_window.populate_indices_arrays()
-        try:
-            self.main_window._sync_to_file_data_model()
-        except Exception:
-            pass
-
+        
         # Sync highlight_index from current_image_path (source of truth)
         self.main_window._sync_highlight_index_from_current_image_path()
         

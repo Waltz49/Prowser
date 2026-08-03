@@ -8,7 +8,6 @@ import re
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Set, Tuple
 
-_LEGACY_REF_MD5_LINE = re.compile(r"^[0-9a-fA-F]{32}$")
 _REF_FILEDATE_LINE = re.compile(r"^\d+(?:\.\d+)?$")
 _REF_SECTION_STOP = re.compile(
     r"^(?:prompt|image model|title|description):$", re.IGNORECASE
@@ -34,7 +33,7 @@ def _norm_path(path: str) -> str:
 def parse_reference_entries_from_lines(
     lines: List[str], start: int
 ) -> List[Tuple[str, Optional[float]]]:
-    """Parse (label, optional_mtime) from References body lines; skip legacy MD5 lines."""
+    """Parse (label, optional_mtime) from References body lines."""
     entries: List[Tuple[str, Optional[float]]] = []
     i = start
     while i < len(lines):
@@ -44,16 +43,9 @@ def parse_reference_entries_from_lines(
             continue
         if _REF_SECTION_STOP.match(label):
             break
-        if _LEGACY_REF_MD5_LINE.fullmatch(label):
-            i += 1
-            continue
         expected_mtime: Optional[float] = None
         if i + 1 < len(lines):
             nxt = lines[i + 1].strip()
-            if _LEGACY_REF_MD5_LINE.fullmatch(nxt):
-                entries.append((label, None))
-                i += 2
-                continue
             if _REF_FILEDATE_LINE.fullmatch(nxt):
                 try:
                     expected_mtime = float(nxt)
