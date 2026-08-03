@@ -33,7 +33,7 @@ from thumbnails.thumbnail_constants import (
     THUMBNAIL_SPACING, BASE_MARGIN, HIGHLIGHT_BORDER_WIDTH, BORDER_SPACE,
     CANVAS_TOP_MARGIN, CANVAS_BOTTOM_MARGIN, CANVAS_TOP_BORDER,
     CANVAS_TOTAL_TOP_MARGIN, CANVAS_TOTAL_BOTTOM_MARGIN,
-    HORIZONTAL_SPACING, VERTICAL_SPACING, MIN_THUMBNAIL_SIZE,  # Legacy constants for compatibility
+    MIN_THUMBNAIL_SIZE,
     RED, RESET, GREEN, DRAG_AUTO_SCROLL_SPEEDS,
     inset_rect_for_stroke, inset_corner_radius,
 )
@@ -885,7 +885,6 @@ def _path_basename_no_ext(path):
 
 # Color constants imported from thumbnail_constants.py
 
-SQUARE_IMAGE_BORDER_WIDTH = 7
 REGULAR_BORDER_RADIUS = 7
 def draw_message_with_icon(painter: QPainter, message: str, width: int, height: int, 
                            font_size: int = 20, icon_size: int = 64, icon_spacing: int = 20):
@@ -4976,7 +4975,7 @@ class ThumbnailCanvas(QWidget):
         if self.thumbnails:
             last_thumbnail = self.thumbnails[-1]
             if last_thumbnail.rect:
-                return len(self.thumbnails), last_thumbnail.rect.right() + HORIZONTAL_SPACING
+                return len(self.thumbnails), last_thumbnail.rect.right() + THUMBNAIL_SPACING
         
         return len(self.thumbnails), BASE_MARGIN
     

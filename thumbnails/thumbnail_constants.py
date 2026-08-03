@@ -2,6 +2,26 @@
 """
 Centralized constants for thumbnail layout calculations.
 All hardcoded layout values should be defined here to ensure consistency.
+
+Table of contents (sections below):
+  1. Global — keyboard symbols, re-exports from sibling modules
+  2. Thumbnail sizing — min/max size limits
+  3. Thumbnail generation — worker threads and batch queue tuning
+  4. Thumbnail grid layout — spacing, margins, canvas insets
+  5. Thumbnail borders & overlay — selection highlight, filename overlay metrics
+  6. Thumbnail drag auto-scroll — scroll speeds while dragging over the grid
+  7. Browse image history — in-memory recent-images cap
+  8. Image generation prompts — LoRA trigger-word placement
+  9. Sidebar jobs pane — size-mode cycling and auto-resize behavior
+ 10. File tree — expansion depth, debounce, excluded extensions
+ 11. File tree drag auto-scroll — scroll speeds while dragging over the tree
+ 12. Face scanning — downscale threshold for detection performance
+ 13. Chat & LM Studio — rejection phrases, vision errors, dialog helpers
+ 14. Context menus (QMenu) — shared menu item metrics for toolbar/status/tree
+ 15. Main-window chrome — splitter handles and status-bar border widths
+ 16. Theme border widths — slider/stored border width limits
+ 17. Theme colors & paint — synced palette, canvas paint extras, inset helpers
+ 18. Debug terminal colors — ANSI escape codes for log output
 """
 
 from typing import Set, List
@@ -18,14 +38,19 @@ from files.image_extensions_helpers import (
     get_image_extensions,
 )
 
-# macOS keyboard symbols (UI labels, shortcuts sidebar, help dialog, settings, etc.)
+
+# =============================================================================
+# GLOBAL — Keyboard symbols
+# -----------------------------------------------------------------------------
+# macOS modifier and action symbols used in UI labels, shortcuts sidebar,
+# help dialog, and settings.
+# =============================================================================
+
 CMD_SYMBOL = "⌘"
 OPTION_SYMBOL = "⌥"
-ALT_SYMBOL = OPTION_SYMBOL
 CTRL_SYMBOL = "⌃"
 SHIFT_SYMBOL = "⇧"
 ENTER_SYMBOL = "↩"
-RETURN_SYMBOL = ENTER_SYMBOL
 COPY_SYMBOL = "⧉"
 
 MODIFIER_SYMBOLS = {
@@ -33,14 +58,28 @@ MODIFIER_SYMBOLS = {
     "Shift": SHIFT_SYMBOL,
     "Ctrl": CTRL_SYMBOL,
     "Control": CTRL_SYMBOL,
-    "Alt": ALT_SYMBOL,
+    "Alt": OPTION_SYMBOL,
     "Option": OPTION_SYMBOL,
 }
 
-# Thumbnail sizing constraints
+
+# =============================================================================
+# THUMBNAIL SIZING — Size limits
+# -----------------------------------------------------------------------------
+# Upper bound for thumbnail cell size; MIN_THUMBNAIL_SIZE is imported from
+# files.image_extensions_helpers.
+# =============================================================================
+
 MAX_THUMBNAIL_SIZE = 450  # Default value, will be dynamically updated based on container size
 
-# Parallel thumbnail generation
+
+# =============================================================================
+# THUMBNAIL GENERATION — Worker threads and batch queue tuning
+# -----------------------------------------------------------------------------
+# Parallel thumbnail creation and UI-responsiveness batching for the queue
+# and worker thread.
+# =============================================================================
+
 # Cap at 4 to reduce GIL contention; 7+ worker threads competing for GIL can deadlock
 # when main thread drops GIL during Qt signal connections (e.g. QTimer.singleShot)
 THUMBNAIL_GENERATION_THREADS = min(4, max(1, (os.cpu_count() or 2) - 1))
@@ -51,13 +90,31 @@ THUMBNAIL_QUEUE_BATCH_PAUSE_MS = 10  # Milliseconds to pause between batches (al
 THUMBNAIL_WORKER_BATCH_SIZE = 10  # Number of thumbnails worker thread processes before pausing
 THUMBNAIL_WORKER_BATCH_PAUSE_MS = 5  # Milliseconds worker thread pauses between batches
 
+
+# =============================================================================
+# THUMBNAIL GRID LAYOUT — Spacing, margins, and canvas insets
+# -----------------------------------------------------------------------------
+# Grid cell spacing and container margin values used by layout calculations.
+# =============================================================================
+
 # Spacing constants for grid layout
 THUMBNAIL_SPACING = 4  # Space between thumbnails (both horizontal and vertical)
-HORIZONTAL_SPACING = THUMBNAIL_SPACING  # Legacy alias
-VERTICAL_SPACING = THUMBNAIL_SPACING    # Legacy alias
 
 # Margin constants for layout calculations
 BASE_MARGIN = 20  # Base margin for thumbnail container
+
+# Canvas layout margins
+CANVAS_TOP_MARGIN = 10  # Top margin for canvas
+CANVAS_BOTTOM_MARGIN = 10  # Bottom margin for canvas
+CANVAS_TOP_BORDER = 10  # Top border space
+
+
+# =============================================================================
+# THUMBNAIL BORDERS & OVERLAY — Selection highlight and filename overlay
+# -----------------------------------------------------------------------------
+# Per-cell border space, highlight width, and overlay text metrics for row
+# height calculation.
+# =============================================================================
 
 # Border and spacing constants for individual thumbnails
 BORDER_SPACE = 4  # Space around each thumbnail for borders/highlighting
@@ -70,27 +127,19 @@ OVERLAY_LINE_HEIGHT = 16
 OVERLAY_SPACING = 4  # Space between image and overlay box
 OVERLAY_PADDING = 4  # Padding inside overlay box (2px top/bottom)
 
-# Canvas layout margins
-CANVAS_TOP_MARGIN = 10  # Top margin for canvas
-CANVAS_BOTTOM_MARGIN = 10  # Bottom margin for canvas
-CANVAS_TOP_BORDER = 10  # Top border space
-
-# Calculated margin constants (derived from above)
+# Calculated margin constants (derived from grid layout and border space above)
 CANVAS_TOTAL_TOP_MARGIN = CANVAS_TOP_MARGIN + BORDER_SPACE  # 14px
 CANVAS_TOTAL_BOTTOM_MARGIN = CANVAS_BOTTOM_MARGIN  # 10px
 CANVAS_TOTAL_HEIGHT_MARGINS = CANVAS_TOTAL_TOP_MARGIN + CANVAS_TOTAL_BOTTOM_MARGIN  # 24px
 CANVAS_TOTAL_WIDTH_MARGINS = BASE_MARGIN * 2  # 40px
 
-# Border width constants
-SQUARE_IMAGE_BORDER_WIDTH = 7  # Legacy - not currently used
-REGULAR_BORDER_WIDTH = 2       # Legacy default; live value is IMAGE_BORDER_WIDTH_PX from theme
-# Theme sliders / stored border widths (px); strokes are drawn inset inside the cell rect
-MAX_THEME_BORDER_WIDTH_PX = 10
 
-# Main-window chrome: splitter handles + status bar top edge (synced from active theme)
-MIN_VIEW_CHROME_BORDER_WIDTH_PX = 0
-MAX_VIEW_CHROME_BORDER_WIDTH_PX = 8
-VIEW_BORDER_WIDTH_PX = 2
+# =============================================================================
+# THUMBNAIL DRAG AUTO-SCROLL — Grid viewport scroll while dragging
+# -----------------------------------------------------------------------------
+# Distance-from-edge thresholds and scroll speeds when dragging selections
+# over the thumbnail grid. Entries ordered largest distance to smallest.
+# =============================================================================
 
 # Auto-scroll during drag operations
 # Table of (distance_from_edge_px, scroll_speed_percent_of_screen_per_second)
@@ -110,21 +159,71 @@ DRAG_AUTO_SCROLL_SPEEDS = [
     (10, 256.0),   # 10px from edge  -> 256.0% scroll speed
 ]
 
-# Browse image history: in-memory recent browse images (File ▸ Image History / F3 specific-files view)
-BROWSE_IMAGE_HISTORY_MAX = 60
+
+# =============================================================================
+# BROWSE IMAGE HISTORY — In-memory recent browse images
+# -----------------------------------------------------------------------------
+# Cap for File ▸ Image History and the F3 specific-files view. Debounce delay
+# is separately user-configurable (Settings ▸ General ▸ Browse Settings).
+# =============================================================================
+
+BROWSE_IMAGE_HISTORY_MAX = 60  # ucust: max entries in browse image history
 # Debounce delay is user-configurable (Settings ▸ General ▸ Browse Settings: "Save to history after ms")
+
+
+# =============================================================================
+# IMAGE GENERATION PROMPTS — LoRA trigger-word placement
+# -----------------------------------------------------------------------------
+# Where auto-added LoRA trigger words are inserted in the generation prompt.
+# =============================================================================
 
 # Image generation: where auto-added LoRA trigger words are inserted in the prompt.
 # 0 = top, 1 = bottom, 2 = both (top and bottom).
 TRIGGER_POSITION = 1
 
+
+# =============================================================================
+# SIDEBAR JOBS PANE — Size-mode cycling and auto-resize
+# -----------------------------------------------------------------------------
+# Tolerance for double-click mode cycle and optional refit on job start/end.
+# =============================================================================
+
 # Sidebar jobs pane: height-change tolerance for double-click mode cycle (px).
 JOBS_PANE_SIZE_CHANGE_TOLERANCE_PX = 10
 
 # When True, refit the jobs pane to the current size mode on job start/end.
-JOBS_PANE_AUTO_RESIZE_ON_JOB_CHANGE = False
+JOBS_PANE_AUTO_RESIZE_ON_JOB_CHANGE = False  # ucust: auto-resize jobs pane when jobs start/end
 
-# Tree view auto-scroll during drag - narrow band (less than one node height), slow speeds
+
+# =============================================================================
+# FILE TREE — Expansion depth, debounce, and excluded extensions
+# -----------------------------------------------------------------------------
+# Navigation defaults and bundle/system filetypes hidden from the tree.
+# =============================================================================
+
+# File tree constants
+EXPANSION_LEVELS = 5          # Number of levels to expand the file tree  # ucust
+TREE_UPDATE_DEBOUNCE_TIMER = 130  # ms - debounce when holding scroll key to coalesce rapid updates
+
+# Excluded file extensions (system/bundle files that should not be shown in file tree)
+EXCLUDED_EXTENSIONS: Set[str] = {
+    '.app', '.pxd', '.framework', '.bundle', '.plugin', '.component',
+    '.pkg', '.egg', '.pages', '.whl', '.ipa', '.apk', '.deb', '.rpm'
+}
+
+# Skipped patterns for find command (excluded bundle/filetypes to skip)
+SKIPPED_PATTERNS: List[str] = [
+    '*.app', '*.framework', '*.bundle',
+    '*.pkg', '*.pages'
+]
+
+
+# =============================================================================
+# FILE TREE DRAG AUTO-SCROLL — Tree viewport scroll while dragging
+# -----------------------------------------------------------------------------
+# Narrow-band, slow scroll speeds when dragging over the file tree.
+# =============================================================================
+
 TREE_DRAG_AUTO_SCROLL_TIMER_MS = 20  # ms - timer interval for auto-scroll of tree during drag
 
 TREE_DRAG_AUTO_SCROLL_SPEEDS: List[tuple] = [
@@ -136,8 +235,23 @@ TREE_DRAG_AUTO_SCROLL_SPEEDS: List[tuple] = [
     # (2, 4.8),     # 2px from edge  -> 4.8% scroll speed (max)
 ]
 
+
+# =============================================================================
+# FACE SCANNING — Detection performance tuning
+# -----------------------------------------------------------------------------
+# Max image dimension before downscaling for face_engine detection.
+# =============================================================================
+
 # Face scanning (face_engine): max dimension; larger images are downscaled for faster detection
 FACE_SCANNING_DOWNSCALE_THRESHOLD = 2000
+
+
+# =============================================================================
+# CHAT & LM STUDIO — Rejection phrases, vision errors, dialog helpers
+# -----------------------------------------------------------------------------
+# Phrases that trigger chat retry, vision-model-required messaging, and
+# helpers to classify LM Studio exceptions and dialog text.
+# =============================================================================
 
 # Chat LM Studio: apology/refusal phrases that trigger response retry (case-insensitive match)
 CHAT_REJECTED_RESPONSE_PHRASES: List[str] = [
@@ -283,6 +397,13 @@ def is_lmstudio_error_dialog_message(message: str) -> bool:
     return any(marker in message for marker in _LMSTUDIO_ERROR_DIALOG_MARKERS)
 
 
+# =============================================================================
+# CONTEXT MENUS (QMenu) — Shared menu item metrics
+# -----------------------------------------------------------------------------
+# Dimensions and font size for toolbar, status bar, thumbnail, and file tree
+# menus (shared QMenu QSS).
+# =============================================================================
+
 # Context menu item metrics (toolbar, status bar, thumbnail, file tree — shared QMenu QSS)
 QMENU_ITEM_MIN_HEIGHT = 20
 QMENU_ITEM_PADDING_V = 0
@@ -292,23 +413,38 @@ QMENU_INDICATOR_SIZE = 14
 QMENU_INDICATOR_LEFT = 8
 QMENU_FONT_SIZE_PT = 13
 
-# File tree constants
-EXPANSION_LEVELS = 5          # Number of levels to expand the file tree
-TREE_UPDATE_DEBOUNCE_TIMER = 130  # ms - debounce when holding scroll key to coalesce rapid updates
 
-# Excluded file extensions (system/bundle files that should not be shown in file tree)
-EXCLUDED_EXTENSIONS: Set[str] = {
-    '.app', '.pxd', '.framework', '.bundle', '.plugin', '.component',
-    '.pkg', '.egg', '.pages', '.whl', '.ipa', '.apk', '.deb', '.rpm'
-}
+# =============================================================================
+# MAIN-WINDOW CHROME — Splitter handles and status-bar borders
+# -----------------------------------------------------------------------------
+# Border widths for splitter handles and status bar top edge, synced from the
+# active theme.
+# =============================================================================
 
-# Skipped patterns for find command (excluded bundle/filetypes to skip)
-SKIPPED_PATTERNS: List[str] = [
-    '*.app', '*.framework', '*.bundle',
-    '*.pkg', '*.pages'
-]
+MIN_VIEW_CHROME_BORDER_WIDTH_PX = 0
+MAX_VIEW_CHROME_BORDER_WIDTH_PX = 8
+VIEW_BORDER_WIDTH_PX = 2
 
-# Color constants for thumbnails (populated from active theme; default = dark)
+
+# =============================================================================
+# THEME BORDER WIDTHS — Slider and stored border width limits
+# -----------------------------------------------------------------------------
+# Max px for theme-controlled image/cell border strokes (drawn inset inside the
+# cell rect). Live widths are CURRENT_IMAGE_BORDER_WIDTH_PX and related synced
+# values below.
+# =============================================================================
+
+# Theme sliders / stored border widths (px); strokes are drawn inset inside the cell rect
+MAX_THEME_BORDER_WIDTH_PX = 10
+
+
+# =============================================================================
+# THEME COLORS & PAINT — Synced palette and canvas paint extras
+# -----------------------------------------------------------------------------
+# Module-level color names synced from the active theme dataclass via
+# sync_to_thumbnail_constants(). Includes inset stroke helpers for cell rects.
+# =============================================================================
+
 from PySide6.QtCore import QRect
 from PySide6.QtGui import QColor
 
@@ -331,6 +467,7 @@ def inset_corner_radius(base_radius: int, border_width: int) -> int:
     """Corner radius for an inset stroke so corners stay inside the cell."""
     return max(0, base_radius - border_width // 2)
 
+
 # Legacy module-level names — single source of truth is the active theme dataclass; sync keeps these updated.
 CURRENT_IMAGE_BACKGROUND_COLOR_HEX = ""
 CURRENT_IMAGE_BACKGROUND_COLOR = QColor()
@@ -339,7 +476,6 @@ CURRENT_IMAGE_BORDER_COLOR = QColor()
 DEFAULT_IMAGE_BORDER_WIDTH_PX = 1
 CURRENT_IMAGE_BORDER_WIDTH_PX = 2
 MULTISELECT_BORDER_WIDTH_PX = 2
-IMAGE_BORDER_WIDTH_PX = 2  # legacy alias for current/highlight width
 MULTISELECT_BACKGROUND_COLOR_HEX = ""
 MULTISELECT_BACKGROUND_COLOR = QColor()
 MULTISELECT_BORDER_COLOR_HEX = ""
@@ -406,6 +542,13 @@ THUMBNAIL_EMPTY_FILTER_BTN_TEXT_HOVER = QColor()
 
 sync_to_thumbnail_constants(DEFAULT_DARK_THEME)
 
+
+# =============================================================================
+# DEBUG TERMINAL COLORS — ANSI escape codes for log output
+# -----------------------------------------------------------------------------
+# Named color constants for terminal/debug print styling.
+# =============================================================================
+
 RED = "\033[91m"
 RESET = "\033[0m"
 GREEN = "\033[92m"
@@ -441,4 +584,3 @@ BEIGE = "\033[38;5;187m"
 # current_func = inspect.currentframe().f_code.co_name
 # print(f"{CYAN}{current_func}{RESET}")
 # print("\n".join([("   " * (i+1)) + f"{CYAN}{frame.function}{RESET}" for i, frame in enumerate(inspect.stack())]))
-

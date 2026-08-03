@@ -273,10 +273,11 @@ class UILayoutManager:
             return self.main_window.width() - 200  # Fallback if not initialized
         
         # Calculate width needed for one column of thumbnails
+        from thumbnails.thumbnail_constants import THUMBNAIL_SPACING
         border_space = 4  # Border space for highlighting
         one_column_width = (self.main_window.current_thumbnail_size + 
                            border_space + 
-                           self.main_window.thumbnail_container.HORIZONTAL_SPACING)
+                           THUMBNAIL_SPACING)
         
         # Account for right sidebar if visible
         right_sidebar_width = 0

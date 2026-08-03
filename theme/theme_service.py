@@ -817,8 +817,6 @@ def sync_to_thumbnail_constants(theme: ThemeType) -> None:
     tc.DEFAULT_IMAGE_BORDER_WIDTH_PX = max(0, min(_mw, int(getattr(t, "default_image_border_width_index", 1))))
     tc.CURRENT_IMAGE_BORDER_WIDTH_PX = max(0, min(_mw, int(getattr(t, "current_image_border_width_index", 2))))
     tc.MULTISELECT_BORDER_WIDTH_PX = max(0, min(_mw, int(getattr(t, "multiselect_border_width_index", 2))))
-    # Legacy alias: highlight width (same as current)
-    tc.IMAGE_BORDER_WIDTH_PX = tc.CURRENT_IMAGE_BORDER_WIDTH_PX
 
     tc.MULTISELECT_BACKGROUND_COLOR_HEX = t.multiselect_background_color_hex
     _ms = QColor(t.multiselect_background_color_hex)

@@ -174,11 +174,6 @@ class ImageBrowserWindow(QMainWindow):
     # macOS Space vs windowed display mode (set from module-level constant)
     MACOS_SPACE_MODE_AVAILABLE = MACOS_SPACE_MODE_AVAILABLE
 
-    # Spacing constants for thumbnail layout (imported from ThumbnailContainer)
-    # These will be set when the thumbnail container is created
-    HORIZONTAL_SPACING = None
-    VERTICAL_SPACING = None
-
     # Temporary trash directory - user-specific to avoid conflicts
     TMP_TRASHES_DIR = f"/tmp/trashes-{os.getenv('USER', 'unknown')}"
 
@@ -7408,7 +7403,7 @@ class ImageBrowserWindow(QMainWindow):
         # Use proper spacing constants from ThumbnailContainer
         # Add border space to thumbnail size calculation
         border_space = 4  # Border space for highlighting
-        columns = max(1, available_width // (self.current_thumbnail_size + border_space + self.thumbnail_container.HORIZONTAL_SPACING))
+        columns = max(1, available_width // (self.current_thumbnail_size + border_space + THUMBNAIL_SPACING))
         rows = (len(self.displayed_images) + columns - 1) // columns
         
         return {"columns": columns, "rows": rows}
@@ -7422,11 +7417,8 @@ class ImageBrowserWindow(QMainWindow):
         thumbnail_height = self.current_thumbnail_size
         # Use the same calculation as _set_container_size_for_grid
         border_space = 4  # Border space for highlighting
-        vertical_spacing = getattr(self, 'VERTICAL_SPACING', 9)
-        vertical_spacing -= 1
-        
         # Row height is thumbnail height plus border space plus vertical spacing
-        row_height = thumbnail_height + border_space + vertical_spacing
+        row_height = thumbnail_height + border_space + THUMBNAIL_SPACING
         
         # Calculate how many rows fit in the viewport
         # Use viewport height but account for the container's top margin

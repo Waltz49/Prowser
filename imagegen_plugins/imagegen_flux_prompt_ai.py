@@ -23,7 +23,7 @@ from imagegen_plugins.image_gen_form_layout import (
     image_gen_prompt_stream_session_begin,
     image_gen_prompt_stream_session_end,
 )
-from thumbnails.thumbnail_constants import ALT_SYMBOL, ENTER_SYMBOL, SHIFT_SYMBOL
+from thumbnails.thumbnail_constants import ENTER_SYMBOL, OPTION_SYMBOL, SHIFT_SYMBOL
 from imagegen_plugins.image_gen_persistence import (
     load_flux_prompt_job_with_generate,
     load_pass_image_to_ai_with_prompt,
@@ -145,21 +145,21 @@ def configure_flux_prompt_toolbar_checkbox(checkbox: QCheckBox) -> None:
 
 
 _FLUX_PROMPT_GEN_LABEL = "Gen Prompt"
-_FLUX_PROMPT_GEN_BUTTON_LABEL = f"{_FLUX_PROMPT_GEN_LABEL} {ALT_SYMBOL}{ENTER_SYMBOL}"
+_FLUX_PROMPT_GEN_BUTTON_LABEL = f"{_FLUX_PROMPT_GEN_LABEL} {OPTION_SYMBOL}{ENTER_SYMBOL}"
 _FLUX_PROMPT_CANCEL_LABEL = "Cancel"
 _FLUX_PROMPT_GEN_TOOLTIP = (
     "Refine the image prompt for FLUX using LMStudio\n"
-    f"({ALT_SYMBOL}{ENTER_SYMBOL})\n"
+    f"({OPTION_SYMBOL}{ENTER_SYMBOL})\n"
     "(requires a text model loaded in LM Studio)"
 )
 _FLUX_PROMPT_CANCEL_TOOLTIP = "Stop the in-progress prompt refinement"
 _FLUX_PROMPT_UNDO_TOOLTIP = (
     "Restore the prompt from before the last AI refinement\n"
-    f"({SHIFT_SYMBOL}{ALT_SYMBOL}{ENTER_SYMBOL})"
+    f"({SHIFT_SYMBOL}{OPTION_SYMBOL}{ENTER_SYMBOL})"
 )
 _FLUX_PROMPT_UNDO_LABEL = "Undo AI"
 _FLUX_PROMPT_UNDO_BUTTON_LABEL = (
-    f"{_FLUX_PROMPT_UNDO_LABEL} {SHIFT_SYMBOL}{ALT_SYMBOL}{ENTER_SYMBOL}"
+    f"{_FLUX_PROMPT_UNDO_LABEL} {SHIFT_SYMBOL}{OPTION_SYMBOL}{ENTER_SYMBOL}"
 )
 _FLUX_PROMPT_PRIMARY_BTN_WIDTH = 88
 

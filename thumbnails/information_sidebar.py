@@ -34,7 +34,7 @@ from thumbnails.information_action_nav import (
     INFO_NAV_ACTION_ORDER,
     InformationActionNavBar,
 )
-from thumbnails.thumbnail_constants import ALT_SYMBOL
+from thumbnails.thumbnail_constants import OPTION_SYMBOL
 from theme.theme_service import get_active_theme
 from utils import (
     format_file_size,
@@ -387,7 +387,7 @@ class InformationSidebar(QWidget):
         "speak://": "Read aloud (click again to stop)",
         "copy://": (
             f"Copy prompt to clipboard.\n"
-            f"{ALT_SYMBOL}+click to copy full user comment."
+            f"{OPTION_SYMBOL}+click to copy full user comment."
         ),
         "edit://": "Edit user comment",
         "create://": "Create image from this prompt",
@@ -397,12 +397,12 @@ class InformationSidebar(QWidget):
         "skipcooldown://": "Skip cooldown",
         "reflevel://": (
             "click: Show the reference graph for complete history.\n"
-            f"{ALT_SYMBOL}+click: Show only this image and its direct references "
+            f"{OPTION_SYMBOL}+click: Show only this image and its direct references "
         ),
     }
     _INFO_COLLAPSE_TOOLTIP = (
         "Click to expand or collapse this section.\n"
-        f"{ALT_SYMBOL}+click to expand or collapse all sections."
+        f"{OPTION_SYMBOL}+click to expand or collapse all sections."
     )
 
     _LEGACY_REF_MD5_LINE = re.compile(r"^[0-9a-fA-F]{32}$")

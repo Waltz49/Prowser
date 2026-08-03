@@ -389,12 +389,6 @@ class CanvasManager(QWidget):
         from PySide6.QtCore import QTimer
         QTimer.singleShot(0, self._update_black_overlay)
         
-        # Spacing constants (same as ThumbnailContainer)
-        self.HORIZONTAL_SPACING = 4
-        self.VERTICAL_SPACING = 9
-        self.BASE_MARGIN = 20
-        self.HIGHLIGHT_BORDER_WIDTH = 5
-        
     def _update_black_overlay(self):
         """Update the pink overlay to cover partial borders at the top"""
         # Always show the overlay as a static narrow band at the top of the scroll area
@@ -1579,10 +1573,6 @@ class ViewManager:
         # main_content_widget should be in the tab order.
         # ========================================================================
         self.main_window.thumbnail_container.setFocusPolicy(Qt.NoFocus)
-        
-        # Import spacing constants from CanvasManager
-        self.main_window.HORIZONTAL_SPACING = self.main_window.thumbnail_container.HORIZONTAL_SPACING
-        self.main_window.VERTICAL_SPACING = self.main_window.thumbnail_container.VERTICAL_SPACING
         
         # Get the scroll area from the canvas manager
         self.main_window.scroll_area = self.main_window.thumbnail_container.scroll_area

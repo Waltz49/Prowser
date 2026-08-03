@@ -9,6 +9,7 @@ from PySide6.QtCore import Qt, QSize, QRect, QTimer
 from PySide6.QtGui import QPainter, QPixmap, QImage, QFont, QColor, QPen, QMouseEvent
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QScrollArea
 from theme.theme_service import get_active_theme
+from thumbnails.thumbnail_constants import HIGHLIGHT_BORDER_WIDTH, THUMBNAIL_SPACING
 
 
 class ClickableImageLabel(QLabel):
@@ -52,7 +53,7 @@ class PreviewWidget(QWidget):
             main_width = self.main_window.width()
             # Check if thumbnail_container exists (it's created later in initialization)
             if hasattr(self.main_window, 'thumbnail_container'):
-                width_of_one_column_of_thumbnails = self.main_window.current_thumbnail_size + self.main_window.thumbnail_container.HORIZONTAL_SPACING + self.main_window.thumbnail_container.HIGHLIGHT_BORDER_WIDTH
+                width_of_one_column_of_thumbnails = self.main_window.current_thumbnail_size + THUMBNAIL_SPACING + HIGHLIGHT_BORDER_WIDTH
                 max_width = int((main_width - width_of_one_column_of_thumbnails) * 0.9)
             else:
                 # Fallback to 70% of main window width if thumbnail_container not yet created
@@ -246,7 +247,7 @@ class PreviewWidget(QWidget):
             main_width = self.main_window.width()
             # Check if thumbnail_container exists (it's created later in initialization)
             if hasattr(self.main_window, 'thumbnail_container'):
-                width_of_one_column_of_thumbnails = self.main_window.current_thumbnail_size + self.main_window.thumbnail_container.HORIZONTAL_SPACING + self.main_window.thumbnail_container.HIGHLIGHT_BORDER_WIDTH
+                width_of_one_column_of_thumbnails = self.main_window.current_thumbnail_size + THUMBNAIL_SPACING + HIGHLIGHT_BORDER_WIDTH
                 max_width = int((main_width - width_of_one_column_of_thumbnails) * 0.9)
             else:
                 # Fallback to 70% of main window width if thumbnail_container not yet created

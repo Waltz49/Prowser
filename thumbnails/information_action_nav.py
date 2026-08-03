@@ -9,7 +9,7 @@ from PySide6.QtCore import Qt, QSize, Signal
 from PySide6.QtWidgets import QHBoxLayout, QPushButton, QWidget
 
 from theme.theme_service import get_active_theme
-from thumbnails.thumbnail_constants import ALT_SYMBOL, COPY_SYMBOL
+from thumbnails.thumbnail_constants import COPY_SYMBOL, OPTION_SYMBOL
 from widgets.icon_hover_swap import (
     IconHoverSwap,
     attach_icon_hover_swap,
@@ -25,7 +25,7 @@ INFO_ACTION_TOOLTIPS = {
     "speak": "Read aloud (click again to stop)",
     "copy": (
         f"Copy prompt to clipboard.\n"
-        f"{ALT_SYMBOL}+click to copy full user comment."
+        f"{OPTION_SYMBOL}+click to copy full user comment."
     ),
     "edit": "Edit user comment",
     "create": "Create image from this prompt",
