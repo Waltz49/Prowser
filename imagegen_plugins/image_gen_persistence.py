@@ -690,9 +690,15 @@ def save_lora_catalog_state(
     by_host: Optional[Dict[str, Dict[str, list]]] = None,
     by_model: Optional[Dict[str, Dict[str, list]]] = None,
     model_support: Optional[dict] = None,
+    probe_history: Optional[dict] = None,
 ) -> None:
     from imagegen_plugins.lora_catalog import merged_lora_catalog
-    from imagegen_plugins.lora_catalog_settings import DELETED_IDS_KEY, migrate_lora_catalog
+    from imagegen_plugins.lora_catalog_settings import (
+        DELETED_IDS_KEY,
+        PROBE_HISTORY_KEY,
+        normalize_probe_history,
+        migrate_lora_catalog,
+    )
     from imagegen_plugins.hf_model_ids import LORA_PROBE_MODEL_ORDER
     from imagegen_plugins.lora_model_registry import entry_matches_lora_model
 
@@ -817,9 +823,41 @@ def save_lora_catalog_state(
             bm[model_id] = prev
             lc["by_model"] = bm
 
+        if probe_history is not None:
+            prev_ph = normalize_probe_history(lc.get(PROBE_HISTORY_KEY))
+            merged_ph = dict(prev_ph)
+            for key, slice_ in probe_history.items():
+                key_s = str(key).strip()
+                if not key_s or not isinstance(slice_, dict):
+                    continue
+                normalized = normalize_probe_history({key_s: slice_})
+                if key_s in normalized:
+                    merged_ph[key_s] = normalized[key_s]
+            lc[PROBE_HISTORY_KEY] = merged_ph
+
         imagegen["lora_catalog"] = lc
 
     _mutate_imagegen_settings(mutate)
+
+
+def clear_lora_probe_history() -> int:
+    """Clear Check LoRAs probe history (skip-unchanged fingerprint cache)."""
+    from imagegen_plugins.lora_catalog_settings import (
+        PROBE_HISTORY_KEY,
+        lora_catalog_from_settings,
+        probe_history_from_lc,
+    )
+
+    settings = get_config().load_settings()
+    count = len(probe_history_from_lc(lora_catalog_from_settings(settings)))
+
+    def mutate(imagegen: dict) -> None:
+        lc = dict(_imagegen_lora_catalog(imagegen))
+        lc[PROBE_HISTORY_KEY] = {}
+        imagegen["lora_catalog"] = lc
+
+    _mutate_imagegen_settings(mutate)
+    return count
 
 
 def register_user_lora(

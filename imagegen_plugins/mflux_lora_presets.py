@@ -71,18 +71,14 @@ def _normalize_preset_id(preset_id: Any) -> str:
     return coerce_lora_preset_id(preset_id)
 
 
-def _assert_mflux_compatible_lora(path: str, *, host_id: str | None = None) -> None:
-    """Reject FLUX.1 LoRA key layouts known to crash MFLUX (not used for FLUX.2 Klein or Z-Image)."""
-    if host_id in _DIFFUSERS_LORA_HOSTS or host_id in ("flux2_klein", HOST_Z_IMAGE_TURBO):
-        return
+def _scan_mflux_lora_keys(path: str) -> None:
+    """Reject FLUX/MFLUX LoRA key layouts known to crash MFLUX loaders."""
     try:
         from safetensors import safe_open
     except ImportError:
         return
     with safe_open(path, framework="pt") as f:
-        for i, key in enumerate(f.keys()):
-            if i >= 8:
-                break
+        for key in f.keys():
             if key.startswith("lora_unet_") or key.startswith("diffusion_model."):
                 raise RuntimeError(
                     "This LoRA file is not compatible with MFLUX (BFL/ComfyUI key layout). "
@@ -95,6 +91,48 @@ def _assert_mflux_compatible_lora(path: str, *, host_id: str | None = None) -> N
                     f"Example key: {key[:72]}. "
                     "Enable a verified LoRA in Settings → LoRA."
                 )
+
+
+def _assert_mflux_compatible_lora(path: str, *, host_id: str | None = None) -> None:
+    """Reject FLUX.1 LoRA key layouts known to crash MFLUX (not used for FLUX.2 Klein or Z-Image)."""
+    if host_id in _DIFFUSERS_LORA_HOSTS or host_id in ("flux2_klein", HOST_Z_IMAGE_TURBO):
+        return
+    _scan_mflux_lora_keys(path)
+
+
+def assert_lora_compatible_for_model(
+    path: str,
+    model_key: str,
+    *,
+    catalog_host_id: str | None = None,
+) -> None:
+    """Key-layout validation for the base model that will load this LoRA."""
+    from imagegen_plugins.hf_model_ids import (
+        FLUX1_DEV,
+        FLUX1_FILL_DEV,
+        FLUX1_SCHNELL,
+        FLUX2_KLEIN_4B,
+        FLUX2_KLEIN_9B,
+        FLUX2_KLEIN_9B_KV,
+        SCENEWORKS_FLUX2_KLEIN_9B_KV_MLX,
+        SD15_LORA_MODEL_KEYS,
+        SDXL_BASE_1_0,
+        Z_IMAGE_TURBO_MFLUX_4BIT,
+    )
+
+    if model_key in SD15_LORA_MODEL_KEYS or model_key == SDXL_BASE_1_0:
+        return
+    if model_key in (
+        FLUX2_KLEIN_4B,
+        FLUX2_KLEIN_9B,
+        FLUX2_KLEIN_9B_KV,
+        SCENEWORKS_FLUX2_KLEIN_9B_KV_MLX,
+    ):
+        return
+    if model_key == Z_IMAGE_TURBO_MFLUX_4BIT and catalog_host_id == HOST_Z_IMAGE_TURBO:
+        return
+    if model_key in (FLUX1_SCHNELL, FLUX1_DEV, FLUX1_FILL_DEV):
+        _scan_mflux_lora_keys(path)
 
 
 def _resolve_local_path(entry: FluxLoraEntry) -> str:
@@ -466,10 +504,11 @@ def apply_lora_to_mflux_payload(
                 "Select an SD 1.5 or SDXL model in Create, or pick a compatible LoRA."
             )
         if for_z_image and entry.host_id != HOST_Z_IMAGE_TURBO:
-            raise ValueError(
-                f"LoRA «{entry.display_name}» is not for Z-Image Turbo. "
-                "Pick a Z-Image LoRA in Settings → LoRA or the Create dialog."
-            )
+            if not lora_probe_passed_for_model(preset_id, model_key, settings):
+                raise ValueError(
+                    f"LoRA «{entry.display_name}» is not for Z-Image Turbo. "
+                    "Run Check LoRAs on Z-Image Turbo first, or pick a Z-Image LoRA."
+                )
         if not for_z_image and entry.host_id == HOST_Z_IMAGE_TURBO:
             raise ValueError(
                 f"LoRA «{entry.display_name}» is for Z-Image Turbo only. "

@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import gc
+import os
 import time
 from argparse import Namespace
 from typing import Any
@@ -19,7 +20,7 @@ def compute_z_image_model_key(
     lora_paths: list[str] | None,
     lora_scales: list[float] | None,
 ) -> tuple[Any, ...]:
-    paths = tuple(str(p) for p in (lora_paths or ()))
+    paths = tuple(os.path.abspath(str(p)) for p in (lora_paths or ()))
     scales = tuple(float(s) for s in (lora_scales or ()))
     return (model_path, paths, scales)
 
@@ -69,7 +70,11 @@ def get_z_image(
     lora_scales: list[float] | None,
 ) -> Any:
     global _z_image_model, _z_image_loaded_key
-    key = compute_z_image_model_key(model_path, lora_paths, lora_scales)
+    paths = [os.path.abspath(str(p)) for p in (lora_paths or [])]
+    scales = [float(s) for s in (lora_scales or [])]
+    lora_paths_arg = paths if paths else None
+    lora_scales_arg = scales if scales else None
+    key = compute_z_image_model_key(model_path, lora_paths_arg, lora_scales_arg)
     if _z_image_model is not None and _z_image_loaded_key == key:
         if _model_unusable_after_low_ram(_z_image_model):
             perf_log_kv("model_load", kind="z_image_turbo", cache="stale", model=model_path)
@@ -92,8 +97,8 @@ def get_z_image(
     _z_image_model = ZImage(
         model_config=ModelConfig.z_image_turbo(),
         model_path=model_path,
-        lora_paths=lora_paths,
-        lora_scales=lora_scales,
+        lora_paths=lora_paths_arg,
+        lora_scales=lora_scales_arg,
     )
     _z_image_loaded_key = key
     perf_log_kv(
@@ -115,6 +120,23 @@ def release_z_image_session(*, reason: str = "explicit") -> None:
     gc.collect()
 
 
+def z_image_applied_lora_count(model: Any) -> int:
+    """Count LoRA layers attached to a loaded Z-Image model."""
+    from mflux.models.common.lora.layer.fused_linear_lora_layer import FusedLoRALinear
+    from mflux.models.common.lora.layer.linear_lora_layer import LoRALinear
+
+    count = 0
+    modules = getattr(model, "modules", None)
+    if not callable(modules):
+        return 0
+    for module in model.modules():
+        if isinstance(module, LoRALinear):
+            count += 1
+        elif isinstance(module, FusedLoRALinear):
+            count += len(getattr(module, "loras", None) or [])
+    return count
+
+
 def generate_z_image(
     *,
     model_path: str,
@@ -127,17 +149,36 @@ def generate_z_image(
     height: int,
     low_ram: bool,
     stepwise_dir: str | None,
-) -> Any:
+    require_lora_layers: bool = False,
+) -> Any | None:
     from mflux.models.z_image.latent_creator.z_image_latent_creator import (
         ZImageLatentCreator,
     )
 
+    paths = [os.path.abspath(str(p)) for p in (lora_paths or [])]
+    scales = [float(s) for s in (lora_scales or [])]
+    if paths and len(scales) != len(paths):
+        raise ValueError(
+            f"Z-Image LoRA path/scale mismatch: {len(paths)} paths vs {len(scales)} scales"
+        )
+    lora_paths_arg = paths if paths else None
+    lora_scales_arg = scales if scales else None
+
     with PerfTimer("z_image_generate", seed=seed, steps=steps, width=width, height=height):
         model = get_z_image(
             model_path=model_path,
-            lora_paths=lora_paths,
-            lora_scales=lora_scales,
+            lora_paths=lora_paths_arg,
+            lora_scales=lora_scales_arg,
         )
+        if require_lora_layers and lora_paths_arg:
+            if z_image_applied_lora_count(model) <= 0:
+                perf_log_kv(
+                    "z_image_generate_skip",
+                    reason="no_lora_layers",
+                    model=model_path,
+                    lora_paths=len(lora_paths_arg),
+                )
+                return None
         _register_run_callbacks(
             model,
             stepwise_dir=stepwise_dir,

@@ -52,6 +52,8 @@ def run_mflux_z_image_generate(
     progressive_output_path: str | None = None,
     lora_paths: list[str] | None = None,
     lora_scales: list[float] | None = None,
+    isolate_session: bool = False,
+    require_lora_layers: bool = False,
 ) -> str:
     if not mflux_is_installed():
         raise RuntimeError(
@@ -63,7 +65,13 @@ def run_mflux_z_image_generate(
         )
 
     def _run_inprocess() -> None:
-        from imagegen_plugins.mflux_z_image_session import generate_z_image
+        from imagegen_plugins.mflux_z_image_session import (
+            generate_z_image,
+            release_z_image_session,
+        )
+
+        if isolate_session:
+            release_z_image_session(reason="z_image_probe_isolate")
 
         image = generate_z_image(
             model_path=str(model),
@@ -76,7 +84,10 @@ def run_mflux_z_image_generate(
             height=height,
             low_ram=low_ram,
             stepwise_dir=stepwise_image_output_dir,
+            require_lora_layers=require_lora_layers,
         )
+        if image is None:
+            raise RuntimeError("lora likely incompatible: no layers matched")
         image.save(path=mflux_output_path)
 
     run_with_stepwise_watcher(

@@ -225,11 +225,12 @@ class _ImportLoraWorker(QThread):
 
                         entry = replace(entry, source_path=self._recovery_source_path)
                     self._created_new_entry = True
-            from imagegen_plugins.mflux_lora_presets import _assert_mflux_compatible_lora
+            from imagegen_plugins.mflux_lora_presets import assert_lora_compatible_for_model
 
-            _assert_mflux_compatible_lora(
+            assert_lora_compatible_for_model(
                 entry.local_path or "",
-                host_id=entry.host_id,
+                self._model_key,
+                catalog_host_id=entry.host_id,
             )
             if not self._model_already_supported(entry.lora_id):
                 ok = probe_lora_on_model(

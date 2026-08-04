@@ -3088,19 +3088,20 @@ class KeyboardHandlerManager:
         if event.key() == Qt.Key_Z and (event.modifiers() & Qt.ControlModifier):
             return False  # Let menu action handle it
 
-        # Cmd+J (Ctrl+J in QAction) — job queue; do not treat as plain J
+        # ⌃J (Meta+J in Qt) — jobs pane titlebar double-click; ⌘J — job queue menu
         if event.key() == Qt.Key_J:
             event_mods = event.modifiers() & ~Qt.KeypadModifier
-            cmd_pressed = bool(
-                event_mods & (Qt.ControlModifier | Qt.MetaModifier)
-            )
             other_mods = event_mods & ~(
                 Qt.ControlModifier | Qt.MetaModifier | Qt.ShiftModifier | Qt.AltModifier
             )
-            if cmd_pressed and (
-                other_mods == Qt.NoModifier or other_mods == 0
-            ):
-                return False
+            if other_mods == Qt.NoModifier or other_mods == 0:
+                if (event_mods & Qt.MetaModifier) and not (
+                    event_mods & Qt.ControlModifier
+                ):
+                    if self._handle_ctrl_j_jobs_titlebar():
+                        return True
+                if event_mods & Qt.ControlModifier:
+                    return False
 
         # Determine which handler to use
         if mode is None:
@@ -3114,6 +3115,14 @@ class KeyboardHandlerManager:
                 return True
             return False
         return False
+
+    def _handle_ctrl_j_jobs_titlebar(self) -> bool:
+        """Simulate double-click on the jobs pane titlebar (⌃J on macOS)."""
+        rs = getattr(self.main_window, "right_sidebar", None)
+        if rs is None or not getattr(rs, "_jobs_feature_enabled", False):
+            return False
+        rs._expand_jobs_pane_to_fit()
+        return True
 
     def _imagegen_unified_dialog_visible(self) -> bool:
         dlg = getattr(self.main_window, "_imagegen_function_dialog", None)

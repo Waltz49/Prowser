@@ -1300,6 +1300,13 @@ class ImageBrowserWindow(QMainWindow):
             pass
 
         try:
+            from imagegen_plugins.lora_probe_effect import cleanup_lora_probe_temps
+
+            cleanup_lora_probe_temps()
+        except ImportError:
+            pass
+
+        try:
             if getattr(self, "file_tree_handler", None):
                 self.file_tree_handler.shutdown_image_discovery()
         except Exception:
@@ -1446,6 +1453,13 @@ class ImageBrowserWindow(QMainWindow):
             )
 
             dismiss_job_queue_dialog_for_quit(self)
+        except ImportError:
+            pass
+
+        try:
+            from imagegen_plugins.lora_probe_effect import cleanup_lora_probe_temps
+
+            cleanup_lora_probe_temps()
         except ImportError:
             pass
 

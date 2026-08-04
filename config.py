@@ -459,7 +459,7 @@ class ImageBrowserConfig:
             'move_keys_mode': 'not_links',
             
             # Favorite directories (9 items, None where empty) - accessible via Ctrl+1 through Ctrl+9
-            'favorite_directories': [None] * 9,
+            'favorite_directories': ["~/Downloads", None, None, None, None, None, None, None, None],
             
             # Exclude directories (list of dicts with 'path' and 'enabled' keys)
             'exclude_directories': [],
@@ -816,6 +816,14 @@ IMAGEGEN_DEFAULTS = {
         },
         "last_function": "edit",
         "show_progressive_images": False,
+        "check_loras": {
+            "model_scope": "all",
+            "selected_model_keys": [],
+            "registration_mode": "ignore_previous",
+            "probe_prompt": "test",
+            "skip_unchanged": True,
+            "cnn_identical_min_cosine": 0.98,
+        },
         "models": {
             "flux_schnell_mflux": {
                 "prompt": "",

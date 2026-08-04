@@ -203,6 +203,17 @@ def lora_models_for_entry(entry: FluxLoraEntry) -> Tuple[str, ...]:
         return (entry.base_hf_model_id,)
     if entry.host_id == HOST_FLUX1_FILL:
         return (FLUX1_FILL_DEV,)
+    if entry.host_id == HOST_FLUX1_T2I:
+        return (FLUX1_SCHNELL, FLUX1_DEV)
+    if entry.host_id == HOST_FLUX2_KLEIN:
+        return (
+            FLUX2_KLEIN_4B,
+            FLUX2_KLEIN_9B,
+            FLUX2_KLEIN_9B_KV,
+            SCENEWORKS_FLUX2_KLEIN_9B_KV_MLX,
+        )
+    if entry.host_id == HOST_Z_IMAGE_TURBO:
+        return (Z_IMAGE_TURBO_MFLUX_4BIT,)
     return ()
 
 
@@ -266,11 +277,12 @@ def _raw_model_support_dict(
     return {}
 
 
-def _user_lora_supported_on_model(
+def _probe_supported_on_model(
     entry: FluxLoraEntry,
     model_key: str,
     model_support: Dict[str, Any],
 ) -> bool:
+    """True when Check LoRAs recorded a pass for this LoRA on model_key."""
     raw = model_support.get(entry.lora_id, ())
     supported = raw if isinstance(raw, (list, tuple)) else ()
     if not supported:
@@ -278,6 +290,14 @@ def _user_lora_supported_on_model(
     supported_set = {str(x) for x in supported}
     aliases = klein_lora_model_aliases(model_key)
     return any(str(m) in supported_set for m in aliases)
+
+
+def _user_lora_supported_on_model(
+    entry: FluxLoraEntry,
+    model_key: str,
+    model_support: Dict[str, Any],
+) -> bool:
+    return _probe_supported_on_model(entry, model_key, model_support)
 
 
 def entry_matches_lora_model(
@@ -289,13 +309,15 @@ def entry_matches_lora_model(
 ) -> bool:
     from imagegen_plugins.lora_user_entries import is_user_lora_id
 
+    ms = _raw_model_support_dict(model_support=model_support, settings=settings)
+    if ms and _probe_supported_on_model(entry, model_key, ms):
+        return True
+
     if is_user_lora_id(entry.lora_id):
         expected_host = host_id_for_lora_model(model_key)
         if expected_host and entry.host_id != expected_host:
             return False
-        ms = _raw_model_support_dict(model_support=model_support, settings=settings)
-        if ms and _user_lora_supported_on_model(entry, model_key, ms):
-            return True
+        return False
     entry_models = lora_models_for_entry(entry)
     return any(m in entry_models for m in klein_lora_model_aliases(model_key))
 

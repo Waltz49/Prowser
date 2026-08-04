@@ -43,6 +43,7 @@ _BY_MODEL_KEY = "by_model"
 ENTRY_OVERRIDES_KEY = "entry_overrides"
 USER_PRESET_KEY = "lora_user_preset"
 DELETED_IDS_KEY = "deleted_ids"
+PROBE_HISTORY_KEY = "probe_history"
 
 
 def _empty_slice() -> Dict[str, List[str]]:
@@ -235,6 +236,61 @@ def _ensure_by_model(lc: Dict[str, Any], by_host: Dict[str, Dict[str, List[str]]
     lc[_BY_MODEL_KEY] = by_model
 
 
+def _normalize_probe_history_slice(raw: Dict[str, Any]) -> Dict[str, Any]:
+    md5 = str(raw.get("md5") or "").strip().lower()
+    if not md5:
+        return {}
+    try:
+        mtime = float(raw.get("mtime"))
+    except (TypeError, ValueError):
+        return {}
+    try:
+        size = int(raw.get("size"))
+    except (TypeError, ValueError):
+        return {}
+    path = str(raw.get("path") or "").strip()
+    models_raw = raw.get("model_support")
+    model_support = (
+        [str(m) for m in models_raw if str(m)]
+        if isinstance(models_raw, (list, tuple))
+        else []
+    )
+    complete = raw.get("complete")
+    models_probed_raw = raw.get("models_probed")
+    models_probed = (
+        [str(m) for m in models_probed_raw if str(m)]
+        if isinstance(models_probed_raw, (list, tuple))
+        else []
+    )
+    return {
+        "md5": md5,
+        "mtime": mtime,
+        "size": size,
+        "path": path,
+        "model_support": model_support,
+        "models_probed": models_probed,
+        "complete": complete is True,
+    }
+
+
+def normalize_probe_history(raw: Any) -> Dict[str, Dict[str, Any]]:
+    if not isinstance(raw, dict):
+        return {}
+    out: Dict[str, Dict[str, Any]] = {}
+    for key, slice_ in raw.items():
+        key_s = str(key).strip()
+        if not key_s or not isinstance(slice_, dict):
+            continue
+        normalized = _normalize_probe_history_slice(slice_)
+        if normalized:
+            out[key_s] = normalized
+    return out
+
+
+def probe_history_from_lc(lc: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
+    return normalize_probe_history(lc.get(PROBE_HISTORY_KEY))
+
+
 def migrate_lora_catalog(lc: Dict[str, Any]) -> Dict[str, Any]:
     """Ensure by_host + by_model exist with normalized slices."""
     if not isinstance(lc, dict):
@@ -263,6 +319,7 @@ def migrate_lora_catalog(lc: Dict[str, Any]) -> Dict[str, Any]:
         lc[ENTRY_OVERRIDES_KEY] = {}
     elif not isinstance(lc.get(ENTRY_OVERRIDES_KEY), dict):
         lc[ENTRY_OVERRIDES_KEY] = {}
+    lc[PROBE_HISTORY_KEY] = probe_history_from_lc(lc)
     return lc
 
 

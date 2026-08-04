@@ -388,6 +388,19 @@ def lora_model_support(settings: Optional[Dict[str, Any]] = None) -> Dict[str, T
     return out
 
 
+def lora_probe_history(
+    settings: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Dict[str, Any]]:
+    from imagegen_plugins.lora_catalog_settings import probe_history_from_lc
+
+    if settings is None:
+        from config import get_config
+
+        settings = get_config().load_settings()
+    lc = lora_catalog_from_settings(settings)
+    return probe_history_from_lc(lc)
+
+
 def lora_base_display_name(entry: FluxLoraEntry, *, model_key: str = "") -> str:
     """Display name without redundant model-size suffix when the UI already filters by model."""
     name = entry.display_name.strip()
@@ -412,14 +425,22 @@ def lora_choice_label(entry: FluxLoraEntry, *, model_key: str = "") -> str:
     return base
 
 
-def lora_probe_prompt(entry: FluxLoraEntry, *, fallback: str = "test") -> str:
-    """Prompt for Check LoRAs probes; includes the catalog trigger when defined."""
-    trigger = (entry.trigger_word or "").strip()
-    if not trigger:
-        return fallback
-    if entry.host_id == HOST_FLUX2_KLEIN:
-        return f"Transform into {trigger}"
-    return f"{trigger}, {fallback}"
+def lora_probe_prompt(
+    entry: FluxLoraEntry,
+    *,
+    fallback: str = "test",
+    weights_path: Optional[str | Path] = None,
+    allow_online: bool = False,
+) -> str:
+    """Prompt for Check LoRAs probes; resolves trigger from file when missing."""
+    from imagegen_plugins.lora_trigger_resolve import lora_probe_prompt_with_resolved_trigger
+
+    return lora_probe_prompt_with_resolved_trigger(
+        entry,
+        fallback=fallback,
+        weights_path=weights_path,
+        allow_online=allow_online,
+    )
 
 
 
@@ -512,7 +533,22 @@ def lora_visible_for_run(
         return False
     if lora_id not in enabled_lora_ids_for_model(model_key, settings):
         return False
-    return is_lora_installed(lora_id)
+    if not is_lora_installed(lora_id):
+        return False
+    weights_path = local_lora_weights_path(lora_id, settings)
+    if weights_path is None:
+        return False
+    try:
+        from imagegen_plugins.mflux_lora_presets import assert_lora_compatible_for_model
+
+        assert_lora_compatible_for_model(
+            str(weights_path),
+            model_key,
+            catalog_host_id=entry.host_id,
+        )
+    except RuntimeError:
+        return False
+    return True
 
 
 def lora_choices_for_plugin(
@@ -525,7 +561,7 @@ def lora_choices_for_plugin(
     if not host_id or not model_key:
         return (("None", "none"),)
     choices: List[Tuple[str, str]] = [("None", "none")]
-    for entry in entries_for_host(host_id, settings):
+    for entry in catalog_entries_sorted(settings):
         if lora_visible_for_run(
             entry.lora_id,
             entry,
@@ -605,7 +641,7 @@ def match_exif_lora_names_to_ids(
         if not part_token:
             continue
         found_id: Optional[str] = None
-        for entry in entries_for_host(host_id, settings) if host_id else ():
+        for entry in catalog_entries_sorted(settings):
             if entry.lora_id not in choice_ids:
                 continue
             if not is_lora_installed(entry.lora_id):
@@ -640,7 +676,7 @@ def lora_choices_for_pipeline(
     if not model_key:
         return (("None", "none"),)
     choices: List[Tuple[str, str]] = [("None", "none")]
-    for entry in entries_for_host(host_id, settings):
+    for entry in catalog_entries_sorted(settings):
         if lora_visible_for_run(
             entry.lora_id,
             entry,

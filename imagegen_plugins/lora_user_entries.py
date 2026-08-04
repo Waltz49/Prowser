@@ -201,8 +201,12 @@ def copy_lora_to_user_cache(source: Path, lora_id: str) -> Path:
     dest_dir = USER_LORA_CACHE_ROOT / lora_id
     dest_dir.mkdir(parents=True, exist_ok=True)
     dest = dest_dir / source.name
+    src = source.resolve()
+    dst = dest.resolve()
+    if src == dst:
+        return dst
     shutil.copy2(source, dest)
-    return dest.resolve()
+    return dst
 
 
 def build_user_lora_entry(
