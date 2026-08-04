@@ -11,6 +11,8 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 _lora_catalog_file_lock = threading.Lock()
+_lora_catalog_cache_mtime: Optional[float] = None
+_lora_catalog_cache_data: Optional[dict] = None
 
 
 def lora_catalog_file_path() -> Path:
@@ -42,33 +44,67 @@ def load_lora_catalog_file() -> Dict[str, Any]:
     """Load migrated LoRA catalog state from lora_catalog.json."""
     from imagegen_plugins.lora_catalog_settings import migrate_lora_catalog
 
+    global _lora_catalog_cache_mtime, _lora_catalog_cache_data
     path = lora_catalog_file_path()
     with _lora_catalog_file_lock:
+        try:
+            mtime = path.stat().st_mtime if path.is_file() else None
+        except OSError:
+            mtime = None
+        if (
+            mtime is not None
+            and _lora_catalog_cache_data is not None
+            and _lora_catalog_cache_mtime == mtime
+        ):
+            return copy.deepcopy(_lora_catalog_cache_data)
         if path.is_file():
             data = _read_json(path)
             if data is not None:
-                return migrate_lora_catalog(data)
-        return migrate_lora_catalog({})
+                migrated = migrate_lora_catalog(data)
+                _lora_catalog_cache_mtime = mtime
+                _lora_catalog_cache_data = migrated
+                return copy.deepcopy(migrated)
+        migrated = migrate_lora_catalog({})
+        _lora_catalog_cache_mtime = mtime
+        _lora_catalog_cache_data = migrated
+        return copy.deepcopy(migrated)
 
 
 def save_lora_catalog_file(lc: Dict[str, Any]) -> None:
     """Write LoRA catalog state to lora_catalog.json."""
     from imagegen_plugins.lora_catalog_settings import migrate_lora_catalog
 
+    global _lora_catalog_cache_mtime, _lora_catalog_cache_data
     path = lora_catalog_file_path()
     payload = migrate_lora_catalog(copy.deepcopy(lc))
     with _lora_catalog_file_lock:
         _atomic_write_json(path, payload)
+        try:
+            mtime = path.stat().st_mtime
+        except OSError:
+            mtime = None
+        _lora_catalog_cache_mtime = mtime
+        _lora_catalog_cache_data = payload
+
 
 
 def ensure_lora_catalog_file() -> None:
     """Ensure lora_catalog.json exists; drop embedded catalog from settings if present."""
     from imagegen_plugins.lora_catalog_settings import migrate_lora_catalog
 
+    global _lora_catalog_cache_mtime, _lora_catalog_cache_data
     path = lora_catalog_file_path()
     with _lora_catalog_file_lock:
-        if not path.is_file():
-            _atomic_write_json(path, migrate_lora_catalog({}))
+        if path.is_file():
+            return
+        payload = migrate_lora_catalog({})
+        _atomic_write_json(path, payload)
+        try:
+            mtime = path.stat().st_mtime
+        except OSError:
+            mtime = None
+        _lora_catalog_cache_mtime = mtime
+        _lora_catalog_cache_data = payload
 
 
 def migrate_embedded_lora_catalog_if_needed(settings: dict) -> bool:

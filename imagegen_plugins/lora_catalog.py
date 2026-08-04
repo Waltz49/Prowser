@@ -187,12 +187,14 @@ def lora_weights_file_is_valid(path: Path) -> bool:
 def local_lora_weights_path(
     lora_id: str,
     settings: Optional[Dict[str, Any]] = None,
+    *,
+    entry: Optional[FluxLoraEntry] = None,
 ) -> Optional[Path]:
     """Return on-disk weights path when present and valid; never downloads."""
-    entry = get_lora_entry(lora_id, settings)
-    if entry is None:
+    resolved = entry if entry is not None else get_lora_entry(lora_id, settings)
+    if resolved is None:
         return None
-    path = catalog_cache_path(entry)
+    path = catalog_cache_path(resolved)
     if path is None:
         return None
     if lora_weights_file_is_valid(path):
@@ -200,7 +202,7 @@ def local_lora_weights_path(
             return path.expanduser().resolve()
         except OSError:
             return path.expanduser()
-    if entry.local_path:
+    if resolved.local_path:
         alt = _ALT_CACHE / "paper-cutout" / path.name
         if lora_weights_file_is_valid(alt):
             try:
@@ -213,8 +215,10 @@ def local_lora_weights_path(
 def is_lora_installed(
     lora_id: str,
     settings: Optional[Dict[str, Any]] = None,
+    *,
+    entry: Optional[FluxLoraEntry] = None,
 ) -> bool:
-    return local_lora_weights_path(lora_id, settings) is not None
+    return local_lora_weights_path(lora_id, settings, entry=entry) is not None
 
 
 def has_recovery_source(entry: FluxLoraEntry) -> bool:
@@ -448,6 +452,9 @@ def lora_probe_passed_for_model(
     lora_id: str,
     model_key: str,
     settings: Optional[Dict[str, Any]] = None,
+    *,
+    entry: Optional[FluxLoraEntry] = None,
+    model_support: Optional[Dict[str, Any]] = None,
 ) -> bool:
     """
     Whether this LoRA may be shown for the base model.
@@ -456,13 +463,22 @@ def lora_probe_passed_for_model(
     Other entries: after Check LoRAs, only those with a successful probe on model_key;
     before any check, only mflux_compatible=True (same as above).
     """
-    entry = get_lora_entry(lora_id, settings)
-    if entry is None or entry.mflux_compatible is False:
+    resolved = entry if entry is not None else get_lora_entry(lora_id, settings)
+    if resolved is None or resolved.mflux_compatible is False:
         return False
-    if not entry_matches_lora_model(entry, model_key, settings=settings):
+    if not entry_matches_lora_model(
+        resolved,
+        model_key,
+        model_support=model_support,
+        settings=None if model_support is not None else settings,
+    ):
         return False
-    if entry.mflux_compatible is True:
+    if resolved.mflux_compatible is True:
         return True
+    if model_support is not None:
+        from imagegen_plugins.lora_model_registry import _probe_supported_on_model
+
+        return _probe_supported_on_model(resolved, model_key, model_support)
     support = lora_model_support(settings)
     if not support:
         return False
@@ -491,10 +507,15 @@ def catalog_entries_for_model(
     deleted = deleted_lora_ids_for_model(
         model_key, settings, draft_by_model=draft_by_model
     )
+    lc = lora_catalog_from_settings(settings)
+    raw = lc.get("model_support")
+    support = raw if isinstance(raw, dict) else None
     return tuple(
         e
         for e in catalog_entries_sorted(settings)
-        if lora_probe_passed_for_model(e.lora_id, model_key, settings)
+        if lora_probe_passed_for_model(
+            e.lora_id, model_key, settings, entry=e, model_support=support
+        )
         and (is_user_lora_id(e.lora_id) or e.lora_id not in deleted)
     )
 
@@ -523,19 +544,28 @@ def lora_visible_for_run(
     model_key: str,
     settings: Optional[Dict[str, Any]] = None,
     host_id: Optional[str] = None,
+    enabled_ids: Optional[FrozenSet[str]] = None,
+    model_support: Optional[Dict[str, Any]] = None,
 ) -> bool:
     _ = host_id
     if entry.mflux_compatible is False:
         return False
-    if not entry_matches_lora_model(entry, model_key, settings=settings):
+    enabled = (
+        enabled_ids
+        if enabled_ids is not None
+        else frozenset(enabled_lora_ids_for_model(model_key, settings))
+    )
+    if lora_id not in enabled:
         return False
-    if not lora_probe_passed_for_model(lora_id, model_key, settings):
+    if not lora_probe_passed_for_model(
+        lora_id,
+        model_key,
+        settings,
+        entry=entry,
+        model_support=model_support,
+    ):
         return False
-    if lora_id not in enabled_lora_ids_for_model(model_key, settings):
-        return False
-    if not is_lora_installed(lora_id):
-        return False
-    weights_path = local_lora_weights_path(lora_id, settings)
+    weights_path = local_lora_weights_path(lora_id, settings, entry=entry)
     if weights_path is None:
         return False
     try:
@@ -551,6 +581,34 @@ def lora_visible_for_run(
     return True
 
 
+def _lora_choice_context(
+    settings: Optional[Dict[str, Any]],
+    model_key: str,
+) -> Tuple[
+    Dict[str, Any],
+    FrozenSet[str],
+    Optional[Dict[str, Any]],
+    Tuple[FluxLoraEntry, ...],
+]:
+    """Load catalog once for building run-dialog LoRA choices."""
+    if settings is None:
+        from config import get_config
+
+        settings = get_config().load_settings()
+    # Prefer one migrated load via settings embedding so callers avoid repeated file I/O.
+    imagegen = settings.get("imagegen")
+    if not isinstance(imagegen, dict) or not isinstance(imagegen.get("lora_catalog"), dict):
+        lc = lora_catalog_from_settings(settings)
+        settings = dict(settings)
+        settings["imagegen"] = dict(imagegen or {})
+        settings["imagegen"]["lora_catalog"] = lc
+    enabled = frozenset(enabled_lora_ids_for_model(model_key, settings))
+    lc = lora_catalog_from_settings(settings)
+    raw = lc.get("model_support")
+    support = raw if isinstance(raw, dict) else None
+    return settings, enabled, support, catalog_entries_sorted(settings)
+
+
 def lora_choices_for_plugin(
     plugin: "ImageGenModelPlugin",
     settings: Optional[Dict[str, Any]] = None,
@@ -560,14 +618,21 @@ def lora_choices_for_plugin(
     model_key = lora_model_key_for_plugin(plugin)
     if not host_id or not model_key:
         return (("None", "none"),)
+    settings, enabled, support, entries = _lora_choice_context(settings, model_key)
     choices: List[Tuple[str, str]] = [("None", "none")]
-    for entry in catalog_entries_sorted(settings):
+    if not enabled:
+        return tuple(choices)
+    for entry in entries:
+        if entry.lora_id not in enabled:
+            continue
         if lora_visible_for_run(
             entry.lora_id,
             entry,
             model_key=model_key,
             host_id=host_id,
             settings=settings,
+            enabled_ids=enabled,
+            model_support=support,
         ):
             choices.append((lora_choice_label(entry, model_key=model_key), entry.lora_id))
     return tuple(choices)
@@ -675,14 +740,21 @@ def lora_choices_for_pipeline(
     model_key = lora_model_key_from_values(values)
     if not model_key:
         return (("None", "none"),)
+    settings, enabled, support, entries = _lora_choice_context(settings, model_key)
     choices: List[Tuple[str, str]] = [("None", "none")]
-    for entry in catalog_entries_sorted(settings):
+    if not enabled:
+        return tuple(choices)
+    for entry in entries:
+        if entry.lora_id not in enabled:
+            continue
         if lora_visible_for_run(
             entry.lora_id,
             entry,
             model_key=model_key,
             host_id=host_id,
             settings=settings,
+            enabled_ids=enabled,
+            model_support=support,
         ):
             choices.append((lora_choice_label(entry, model_key=model_key), entry.lora_id))
     return tuple(choices)

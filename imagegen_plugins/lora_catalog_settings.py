@@ -374,13 +374,20 @@ def enabled_lora_ids_for_model(
     model_key: str,
     settings: Optional[Dict[str, Any]] = None,
 ) -> Tuple[str, ...]:
-    st = model_state(settings, model_key)
-    catalog = _catalog_for_lc(lora_catalog_from_settings(settings))
+    lc = lora_catalog_from_settings(settings)
+    by_model = lc.get(_BY_MODEL_KEY) or {}
+    slice_ = by_model.get(model_key)
+    if not isinstance(slice_, dict):
+        return ()
+    catalog = _catalog_for_lc(lc)
+    ms = lc.get("model_support") if isinstance(lc.get("model_support"), dict) else {}
     return tuple(
-        x
-        for x in st["enabled_ids"]
-        if x in catalog
-        and entry_matches_lora_model(catalog[x], model_key, settings=settings)
+        str(x)
+        for x in (slice_.get("enabled_ids") or [])
+        if str(x) in catalog
+        and entry_matches_lora_model(
+            catalog[str(x)], model_key, model_support=ms
+        )
     )
 
 
