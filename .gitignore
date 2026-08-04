@@ -104,3 +104,4 @@ gemma4_voice_vision_demo.py
 find_u.py
 test-sdxl.py
 px.sh
+check_loras_last_run.txt
