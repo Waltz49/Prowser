@@ -240,6 +240,40 @@ def lora_probe_pipeline_id(model_key: str) -> Optional[str]:
     return None
 
 
+def lora_probe_default_steps(model_key: str) -> int:
+    """Default inference steps for Check LoRAs on model_key (plugin, else pipeline)."""
+    from imagegen_plugins.image_gen_pipeline_modes import get_pipeline
+
+    mk = (model_key or "").strip()
+    pipeline_id = lora_probe_pipeline_id(mk)
+    preferred: Optional[int] = None
+    fallback: Optional[int] = None
+    try:
+        from imagegen_plugins import discover_plugins
+
+        for plugin in discover_plugins():
+            if (plugin.hf_model_id or "").strip() != mk:
+                continue
+            raw = plugin.model_defaults.get("steps")
+            if raw is None:
+                continue
+            steps_i = int(raw)
+            if pipeline_id and plugin.pipeline_id == pipeline_id:
+                preferred = steps_i
+                break
+            if fallback is None:
+                fallback = steps_i
+    except Exception:
+        pass
+    if preferred is not None:
+        return preferred
+    if fallback is not None:
+        return fallback
+    if pipeline_id:
+        return int(get_pipeline(pipeline_id).steps_default)
+    return 4
+
+
 def lora_probe_model_is_local(model_key: str) -> bool:
     """True when the base model is present locally (no download during Check LoRAs)."""
     from imagegen_plugins.image_gen_model_availability import pipeline_model_is_local

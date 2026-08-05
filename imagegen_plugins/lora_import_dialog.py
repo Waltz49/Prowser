@@ -7,24 +7,30 @@ from pathlib import Path
 from typing import List, Optional
 
 from PySide6.QtCore import Qt, QThread, Signal
-from PySide6.QtGui import QDragEnterEvent, QDropEvent
+from PySide6.QtGui import QCursor, QDragEnterEvent, QDropEvent
 from PySide6.QtWidgets import (
     QApplication,
     QDialog,
     QDoubleSpinBox,
     QFormLayout,
+    QFrame,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QProgressDialog,
     QPushButton,
+    QScrollArea,
     QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
 
 from imagegen_plugins.hf_model_ids import lora_model_display_name
-from imagegen_plugins.lora_compatibility_checker import probe_lora_on_model
+from imagegen_plugins.lora_compatibility_checker import (
+    LoraProbeChoice,
+    discover_find_lora_choices,
+    probe_lora_on_model,
+)
 from imagegen_plugins.lora_model_registry import host_id_for_lora_model, klein_lora_model_aliases, lora_probe_model_is_local
 from imagegen_plugins.lora_user_entries import (
     build_user_lora_entry,
@@ -32,7 +38,9 @@ from imagegen_plugins.lora_user_entries import (
     find_user_lora_for_source,
     validate_safetensors_source,
 )
+from theme.theme_service import get_active_theme
 from utils import (
+    apply_standard_dialog_layout,
     display_to_path,
     get_button_style,
     get_dialog_shell_stylesheet,
@@ -41,7 +49,140 @@ from utils import (
     show_styled_warning,
 )
 
-_FORM_CONTROL_HEIGHT = 32
+_FORM_CONTROL_HEIGHT = 36
+
+
+class _LoraFindNameButton(QPushButton):
+    """Squared name button; double-click selects."""
+
+    double_activated = Signal()
+
+    def mouseDoubleClickEvent(self, event) -> None:  # noqa: N802
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.double_activated.emit()
+        super().mouseDoubleClickEvent(event)
+
+
+class LoraFindDialog(QDialog):
+    """Pick a known on-disk LoRA (lightweight path scan for Add LoRA)."""
+
+    def __init__(
+        self,
+        parent: Optional[QWidget] = None,
+        *,
+        choices: Optional[List[LoraProbeChoice]] = None,
+    ) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Find LoRA")
+        self.setWindowModality(Qt.WindowModality.WindowModal)
+        self.setMinimumSize(420, 360)
+        self.resize(520, 520)
+        self._selected: Optional[LoraProbeChoice] = None
+
+        if choices is None:
+            from config import get_config
+
+            # Lightweight path listing (no MD5) — still can take a moment on large caches.
+            scan_parent = parent if isinstance(parent, QWidget) else self
+            progress = QProgressDialog(
+                "Looking up on-disk LoRA files…",
+                None,
+                0,
+                0,
+                scan_parent,
+            )
+            progress.setWindowTitle("Find LoRA")
+            progress.setWindowModality(Qt.WindowModality.WindowModal)
+            progress.setMinimumDuration(0)
+            progress.setCancelButton(None)
+            progress.setMinimumWidth(360)
+            progress.show()
+            QApplication.processEvents()
+            try:
+                choices = discover_find_lora_choices(get_config().load_settings())
+            finally:
+                progress.close()
+        items = sorted(
+            choices or [],
+            key=lambda c: ((c.display_name or c.label or "").lower()),
+        )
+
+        th = get_active_theme()
+        item_style = (
+            f"QPushButton#loraFindNameButton {{"
+            f"  background-color: {th.dialog_background_hex};"
+            f"  color: {th.dialog_text_color_hex};"
+            f"  border: 1px solid {th.border_default_hex};"
+            f"  border-radius: 0px;"
+            f"  padding: 6px 10px;"
+            f"  text-align: left;"
+            f"  min-width: 0px;"
+            f"}}"
+            f"QPushButton#loraFindNameButton:hover {{"
+            f"  background-color: {th.dialog_background_hex};"
+            f"  border: 1px solid {th.border_hover_hex};"
+            f"}}"
+            f"QPushButton#loraFindNameButton:pressed {{"
+            f"  background-color: {th.dialog_background_hex};"
+            f"}}"
+        )
+        self.setStyleSheet(
+            get_dialog_shell_stylesheet() + get_button_style() + item_style
+        )
+        layout = QVBoxLayout(self)
+        apply_standard_dialog_layout(layout)
+
+        hint = QLabel("Double-click a LoRA name to fill the Add LoRA form.")
+        hint.setWordWrap(True)
+        layout.addWidget(hint)
+
+        host = QWidget()
+        host_layout = QVBoxLayout(host)
+        host_layout.setContentsMargins(0, 0, 0, 0)
+        host_layout.setSpacing(4)
+
+        if not items:
+            empty = QLabel("No LoRA weights found on disk.")
+            host_layout.addWidget(empty)
+        else:
+            for choice in items:
+                name = (choice.display_name or choice.label or choice.key).strip()
+                btn = _LoraFindNameButton(name)
+                btn.setObjectName("loraFindNameButton")
+                btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+                tips = []
+                if choice.from_downloads:
+                    tips.append("Unregistered .safetensors (cache or Downloads)")
+                trigger = (choice.trigger_word or "").strip()
+                if trigger:
+                    tips.append(f"Trigger: {trigger}")
+                if tips:
+                    btn.setToolTip("\n".join(tips))
+                btn.double_activated.connect(
+                    lambda c=choice: self._accept_choice(c)
+                )
+                host_layout.addWidget(btn)
+        host_layout.addStretch(1)
+
+        scroll = QScrollArea()
+        scroll.setWidget(host)
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.StyledPanel)
+        layout.addWidget(scroll, stretch=1)
+
+        btn_row = QHBoxLayout()
+        btn_row.addStretch(1)
+        cancel_btn = QPushButton("Cancel")
+        cancel_btn.clicked.connect(self.reject)
+        btn_row.addWidget(cancel_btn)
+        layout.addLayout(btn_row)
+
+    def selected_choice(self) -> Optional[LoraProbeChoice]:
+        return self._selected
+
+    def _accept_choice(self, choice: LoraProbeChoice) -> None:
+        self._selected = choice
+        self.accept()
 
 
 def _lora_path_for_display(path: str | Path) -> str:
@@ -57,7 +198,16 @@ def _lora_path_for_validation(path: str) -> str:
 
 def _pin_row_height(widget: QWidget, *, width_policy=QSizePolicy.Policy.Expanding) -> None:
     widget.setFixedHeight(_FORM_CONTROL_HEIGHT)
+    widget.setMinimumWidth(0)
     widget.setSizePolicy(width_policy, QSizePolicy.Policy.Fixed)
+
+
+def _pin_line_edit(edit: QLineEdit) -> None:
+    """Fixed row height; allow shrink so long text scrolls inside the field."""
+    _pin_row_height(edit)
+    # Qt sizeHint for long text can outgrow the dialog; without min-width 0 the
+    # field expands past the window and horizontal caret scrolling never runs.
+    edit.setMinimumWidth(0)
 
 
 class _SafetensorsPathLineEdit(QLineEdit):
@@ -66,7 +216,7 @@ class _SafetensorsPathLineEdit(QLineEdit):
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self.setAcceptDrops(True)
-        _pin_row_height(self)
+        _pin_line_edit(self)
         self.setPlaceholderText("Drop a .safetensors file here or paste a path…")
 
     def dragEnterEvent(self, event: QDragEnterEvent) -> None:
@@ -333,6 +483,9 @@ class LoraEntryDialog(QDialog):
             get_dialog_shell_stylesheet()
             + get_button_style()
             + "QPushButton#loraImportBrowseButton { min-width: 96px; padding: 4px 10px; }"
+            # Vertical padding + fixed height was crushing the content rect so
+            # long values could not scroll/caret to the start.
+            + "QDialog QLineEdit { padding: 2px 8px; }"
         )
 
         layout = QVBoxLayout(self)
@@ -365,24 +518,39 @@ class LoraEntryDialog(QDialog):
         self._browse_btn.setFixedWidth(96)
         _pin_row_height(self._browse_btn, width_policy=QSizePolicy.Policy.Fixed)
         self._browse_btn.clicked.connect(self._browse)
+        self._find_btn = None
         path_row = QHBoxLayout()
         path_row.setContentsMargins(0, 0, 0, 0)
         path_row.setSpacing(8)
         path_row.addWidget(self._path_edit, 1)
         path_row.addWidget(self._browse_btn)
+        if not is_edit:
+            self._find_btn = QPushButton("Find")
+            self._find_btn.setObjectName("loraImportBrowseButton")
+            self._find_btn.setFixedWidth(72)
+            _pin_row_height(self._find_btn, width_policy=QSizePolicy.Policy.Fixed)
+            self._find_btn.setToolTip(
+                "Pick a known on-disk LoRA from the catalog and cache/Downloads"
+            )
+            self._find_btn.clicked.connect(self._find_known_lora)
+            path_row.addWidget(self._find_btn)
         self._path_wrap = QWidget()
         self._path_wrap.setLayout(path_row)
+        self._path_wrap.setMinimumWidth(0)
         self._path_wrap.setFixedHeight(_FORM_CONTROL_HEIGHT)
+        self._path_wrap.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
+        )
         self._path_label = "File:"
         form.addRow(self._path_label, self._path_wrap)
 
         self._name_edit = QLineEdit()
-        _pin_row_height(self._name_edit)
+        _pin_line_edit(self._name_edit)
         self._name_edit.setPlaceholderText("Display name in LoRA menus")
         form.addRow("Name:", self._name_edit)
 
         self._trigger_edit = QLineEdit()
-        _pin_row_height(self._trigger_edit)
+        _pin_line_edit(self._trigger_edit)
         self._trigger_edit.setPlaceholderText("Optional trigger word for prompts")
         form.addRow("Trigger:", self._trigger_edit)
 
@@ -394,17 +562,17 @@ class LoraEntryDialog(QDialog):
         form.addRow("Scale:", self._scale_spin)
 
         self._comment_edit = QLineEdit()
-        _pin_row_height(self._comment_edit)
+        _pin_line_edit(self._comment_edit)
         self._comment_edit.setPlaceholderText("Optional notes (Settings tab only)")
         form.addRow("Comment:", self._comment_edit)
 
         self._repo_edit = QLineEdit()
-        _pin_row_height(self._repo_edit)
+        _pin_line_edit(self._repo_edit)
         self._repo_edit.setPlaceholderText("Optional Hugging Face repo for reinstall")
         form.addRow("HF repo:", self._repo_edit)
 
         self._filename_edit = QLineEdit()
-        _pin_row_height(self._filename_edit)
+        _pin_line_edit(self._filename_edit)
         self._filename_edit.setPlaceholderText("Optional .safetensors filename on Hugging Face")
         form.addRow("HF file:", self._filename_edit)
 
@@ -609,6 +777,48 @@ class LoraEntryDialog(QDialog):
         if path:
             self._path_edit.setText(_lora_path_for_display(path))
 
+    def _find_known_lora(self) -> None:
+        if self._mode != "add":
+            return
+        dialog = LoraFindDialog(self)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        choice = dialog.selected_choice()
+        if choice is None:
+            return
+        self._apply_found_lora(choice)
+
+    def _apply_found_lora(self, choice: LoraProbeChoice) -> None:
+        """Fill Add LoRA fields from a Check-LoRAs scan choice."""
+        path = (choice.weights_path or "").strip()
+        if path:
+            # Let path-change reuse detection run, then overlay known metadata.
+            self._path_edit.setText(_lora_path_for_display(path))
+        name = (choice.display_name or "").strip()
+        if name:
+            self._name_edit.setText(name)
+        elif path and not self._name_edit.text().strip():
+            try:
+                self._name_edit.setText(
+                    display_name_from_path(Path(_lora_path_for_validation(path)).expanduser())
+                )
+            except Exception:
+                pass
+        self._trigger_edit.setText((choice.trigger_word or "").strip())
+        try:
+            self._scale_spin.setValue(float(choice.scale))
+        except Exception:
+            self._scale_spin.setValue(1.0)
+        self._comment_edit.setText((choice.comment or "").strip())
+        self._repo_edit.setText((choice.repo_id or "").strip())
+        self._filename_edit.setText((choice.filename or "").strip())
+        recovery = (choice.source_path or choice.weights_path or "").strip()
+        if recovery:
+            self._recovery_path_edit.setText(_lora_path_for_display(recovery))
+        # Show the start of long paths (caret scrolling needs a constrained width).
+        self._path_edit.setCursorPosition(0)
+        self._recovery_path_edit.setCursorPosition(0)
+        self._name_edit.setCursorPosition(0)
     def _set_path_edit_text(self, text: str) -> None:
         self._path_edit.blockSignals(True)
         self._path_edit.setText(text)

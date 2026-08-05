@@ -436,7 +436,7 @@ def lora_probe_prompt(
     weights_path: Optional[str | Path] = None,
     allow_online: bool = False,
 ) -> str:
-    """Prompt for Check LoRAs probes; resolves trigger from file when missing."""
+    """Prompt for Check LoRAs probes; prepends a known trigger only (never guessed)."""
     from imagegen_plugins.lora_trigger_resolve import lora_probe_prompt_with_resolved_trigger
 
     return lora_probe_prompt_with_resolved_trigger(

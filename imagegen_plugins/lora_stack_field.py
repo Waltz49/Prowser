@@ -547,15 +547,26 @@ class LoraStackField(QWidget):
 
     def _sync_combo_click_filters(self) -> None:
         """Ensure left-clicks on combo text, arrow, and chrome all open the list."""
-        targets = set(self._combo_click_filter_widgets())
+        try:
+            from shiboken6 import isValid
+        except ImportError:
+            def isValid(obj):  # type: ignore[misc]
+                return obj is not None
+
+        targets = set()
+        for widget in self._combo_click_filter_widgets():
+            if isValid(widget):
+                targets.add(widget)
         for widget in targets:
             if widget not in self._click_filter_widgets:
                 widget.installEventFilter(self)
                 self._click_filter_widgets.add(widget)
         for widget in list(self._click_filter_widgets):
-            if widget not in targets:
+            if widget in targets:
+                continue
+            self._click_filter_widgets.discard(widget)
+            if isValid(widget):
                 widget.removeEventFilter(self)
-                self._click_filter_widgets.discard(widget)
 
     def _is_combo_surface_widget(self, obj: Any) -> bool:
         if obj is self.summary_combo:
@@ -718,6 +729,13 @@ class LoraStackField(QWidget):
         self._popup.show_below(self.summary_combo)
 
     def _on_popup_accepted(self, ids: List[str]) -> None:
+        try:
+            from shiboken6 import isValid
+
+            if not isValid(self) or not isValid(self.summary_combo):
+                return
+        except ImportError:
+            pass
         if self._popup is not None:
             self._persist_scale_changes(self._popup.scales_by_id())
         self._selected_ids = list(ids)

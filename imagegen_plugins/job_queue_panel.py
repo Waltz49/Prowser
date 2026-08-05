@@ -1196,9 +1196,12 @@ class JobQueuePanelWidget(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
+        layout.setAlignment(Qt.AlignmentFlag.AlignTop)
 
         self._empty_label = QLabel("No jobs in the queue.")
-        self._empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._empty_label.setAlignment(
+            Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignHCenter
+        )
         t = get_active_theme()
         _apply_empty_queue_label_style(
             self._empty_label, t.sidebar_text_color_hex
@@ -1216,6 +1219,9 @@ class JobQueuePanelWidget(QWidget):
 
         self._scroll = QScrollArea()
         self._scroll.setWidgetResizable(True)
+        self._scroll.setAlignment(
+            Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft
+        )
         self._scroll.setFrameShape(QScrollArea.Shape.NoFrame)
         self._scroll.setMinimumHeight(0)
         self._scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)

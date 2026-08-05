@@ -610,15 +610,17 @@ def pass_image_to_ai_checked(owner: Any) -> bool:
 
 
 def reset_image_gen_side_button_column_owner(owner: Any) -> None:
-    col = getattr(owner, "_side_btn_col", None)
-    if col is not None:
-        clear_image_gen_side_button_layout(col)
+    # Drop Python refs before deleteLater so deferred slots cannot touch
+    # destroyed C++ widgets (collect_values / dirty timer).
     if hasattr(owner, "_aspect_checkbox"):
         owner._aspect_checkbox = None
     if hasattr(owner, "_flux_prompt_ai"):
         owner._flux_prompt_ai = None
     if hasattr(owner, "_pass_image_to_ai_cb"):
         owner._pass_image_to_ai_cb = None
+    col = getattr(owner, "_side_btn_col", None)
+    if col is not None:
+        clear_image_gen_side_button_layout(col)
 
 
 def prepare_image_gen_side_button_column(
@@ -1006,8 +1008,18 @@ class ImageGenDimensionAspectMixin:
         self._sync_aspect_lock_prev_dims()
 
     def _stash_aspect_lock_in_values(self, out: Dict[str, Any]) -> None:
-        if self._aspect_checkbox is not None:
-            out["aspect_ratio_lock"] = self._aspect_checkbox.isChecked()
+        cb = self._aspect_checkbox
+        if cb is None:
+            return
+        try:
+            from shiboken6 import isValid
+
+            if not isValid(cb):
+                self._aspect_checkbox = None
+                return
+        except ImportError:
+            pass
+        out["aspect_ratio_lock"] = cb.isChecked()
 
     def _apply_import_dims_from_image(self, image_path: str) -> None:
         """Set width/height from image pixels; lock aspect if scaled to model max."""

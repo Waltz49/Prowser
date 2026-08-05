@@ -593,6 +593,16 @@ class ImageGenUnifiedDialog(QDialog):
         self._dirty_recheck_timer.stop()
 
     def _recheck_cancel_visibility(self) -> None:
+        try:
+            from shiboken6 import isValid
+
+            if not isValid(self):
+                return
+            panel = self._current_panel
+            if panel is not None and not isValid(panel):
+                return
+        except ImportError:
+            pass
         dirty = self._is_dirty()
         self._cancel_dirty_fast = dirty
         set_image_gen_cancel_visible(self._actions, dirty)
@@ -604,7 +614,11 @@ class ImageGenUnifiedDialog(QDialog):
         snapshot = getattr(self._current_panel, "snapshot_state", None)
         if snapshot is None or baseline is None:
             return False
-        return not snapshot().equals(baseline)
+        try:
+            return not snapshot().equals(baseline)
+        except RuntimeError:
+            # Panel controls may already be deleted during rebuild/close.
+            return False
 
     def _update_cancel_visibility(self) -> None:
         set_image_gen_cancel_visible(self._actions, self._is_dirty())

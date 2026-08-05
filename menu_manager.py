@@ -1488,6 +1488,10 @@ class MenuManager:
             check_loras_action.triggered.connect(self._debug_check_loras)
             debug_menu.addAction(check_loras_action)
 
+            map_loras_action = QAction("Map LoRAs", self.main_window)
+            map_loras_action.triggered.connect(self._debug_map_loras)
+            debug_menu.addAction(map_loras_action)
+
             reset_gen_settings_action = QAction("Reset All Gen Settings", self.main_window)
             reset_gen_settings_action.triggered.connect(self._debug_reset_all_gen_settings)
             debug_menu.addAction(reset_gen_settings_action)
@@ -1556,6 +1560,12 @@ class MenuManager:
         from imagegen_plugins.lora_check_dialog import run_check_loras_dialog
 
         run_check_loras_dialog(self.main_window)
+
+    def _debug_map_loras(self):
+        """Tools > Debug > Map LoRAs — HTML list of LoRAs and models that use them."""
+        from imagegen_plugins.lora_map_dialog import show_lora_map_dialog
+
+        show_lora_map_dialog(self.main_window)
 
     def _debug_reset_all_gen_settings(self):
         """Tools > Debug > Reset All Gen Settings — clear saved image-gen dialog field values."""

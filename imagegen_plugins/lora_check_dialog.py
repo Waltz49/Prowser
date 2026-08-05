@@ -9,7 +9,7 @@ import threading
 import time
 from typing import List, Optional
 
-from PySide6.QtCore import QObject, QThread, Signal, Qt
+from PySide6.QtCore import QObject, QThread, QTimer, Signal, Slot, Qt
 from PySide6.QtGui import QTextCursor
 from PySide6.QtWidgets import (
     QApplication,
@@ -82,6 +82,31 @@ class _LoraCheckWorkerBridge(QObject):
     finished_result = Signal(object)
 
 
+class _LoraCheckUiRelay(QObject):
+    """Main-thread receiver for worker signals (bare callables drop QueuedConnection)."""
+
+    def __init__(self, on_progress, on_finished, parent: QObject | None = None) -> None:
+        super().__init__(parent)
+        self._on_progress = on_progress
+        self._on_finished = on_finished
+
+    @Slot(int, int, str, str, str, object)
+    def handle_progress(
+        self,
+        probe_idx: int,
+        probe_total: int,
+        phase: str,
+        lora_id: str,
+        model_key: str,
+        stats: object,
+    ) -> None:
+        self._on_progress(probe_idx, probe_total, phase, lora_id, model_key, stats)
+
+    @Slot(object)
+    def handle_finished(self, result: object) -> None:
+        self._on_finished(result)
+
+
 class LoraCheckWorkerThread:
     """Runs Check LoRAs on threading.Thread — keeps MLX off Qt's QThread."""
 
@@ -99,6 +124,8 @@ class LoraCheckWorkerThread:
         self._prepared_plan = prepared_plan
         self._cancel_check = cancel_check
         self._thread: threading.Thread | None = None
+        self._result: object = None
+        self._finished_posted = False
 
     def isRunning(self) -> bool:
         return self._thread is not None and self._thread.is_alive()
@@ -106,6 +133,9 @@ class LoraCheckWorkerThread:
     def wait(self, msec: int = 300_000) -> bool:
         if self._thread is None:
             return True
+        # Never join the current thread (DirectConnection finished slots used to).
+        if threading.current_thread() is self._thread:
+            return not self.isRunning()
         self._thread.join(timeout=max(0, msec) / 1000.0)
         return not self.isRunning()
 
@@ -118,6 +148,7 @@ class LoraCheckWorkerThread:
         self._thread.start()
 
     def _run(self) -> None:
+        result = None
         try:
             if sys.platform == "darwin":
                 try:
@@ -159,13 +190,19 @@ class LoraCheckWorkerThread:
 
                 traceback.print_exc()
                 result = None
-            self._bridge.finished_result.emit(result)
         except Exception as e:
             print(f"[Check LoRAs] worker thread error: {e}")
             import traceback
 
             traceback.print_exc()
-            self._bridge.finished_result.emit(None)
+            result = None
+        finally:
+            self._result = result
+            self._finished_posted = True
+            try:
+                self._bridge.finished_result.emit(result)
+            except Exception as emit_exc:
+                print(f"[Check LoRAs] finished signal emit failed: {emit_exc}")
 
 
 def _lora_label(lora_id: str, *, display_label: str = "") -> str:
@@ -250,7 +287,7 @@ def _format_progress_html(
             if stats.models_for_lora
             else "—"
         )
-        current = stats.probe_current or max(1, stats.probes_done)
+        current = int(stats.probe_current or stats.probes_done or 0)
         work_total = max(1, lora_check_work_total(stats))
         probe_pos = f"{current}/{work_total}"
         lines.append(
@@ -428,9 +465,9 @@ class CheckLorasOptionsDialog(QDialog):
         self._probe_prompt_edit.setText(options.probe_prompt or "test")
         layout.addWidget(self._probe_prompt_edit)
         probe_hint = QLabel(
-            "Used verbatim for every probe render (baseline and with-LoRA). "
-            "One shared baseline (no LoRA) is generated per model; include "
-            "trigger words here when needed (e.g. ghibli style, …)."
+            "Used for every probe render (baseline and with-LoRA). "
+            "Known LoRA triggers are added automatically when available; "
+            "you can also include them here (e.g. ghibli style, …)."
         )
         probe_hint.setWordWrap(True)
         layout.addWidget(probe_hint)
@@ -792,7 +829,7 @@ def run_check_loras_dialog(parent) -> None:
     saved_options = check_loras_options_from_settings(settings)
 
     prescan_dialog = QProgressDialog(
-        "Scanning on-disk LoRA weights…",
+        "Looking up on-disk LoRA files…",
         "",
         0,
         0,
@@ -843,8 +880,19 @@ def run_check_loras_dialog(parent) -> None:
     prepare_dialog.setAutoClose(False)
     prepare_dialog.setAutoReset(False)
     prepare_dialog.setMinimumWidth(480)
+
+    prepare_finished = [False]
+
     def on_prepare_user_cancel() -> None:
+        if prepare_cancel[0]:
+            return
         prepare_cancel[0] = True
+        prepare_dialog.setLabelText(
+            "Cancelling… (finishing current prepare step)"
+        )
+        # Close immediately so WindowModal cannot trap the UI while hashing.
+        prepare_dialog.blockSignals(True)
+        prepare_dialog.close()
 
     prepare_dialog.canceled.connect(on_prepare_user_cancel)
     prepare_dialog.show()
@@ -881,6 +929,9 @@ def run_check_loras_dialog(parent) -> None:
             )
 
     def on_prepare_finished(payload: object) -> None:
+        if prepare_finished[0]:
+            return
+        prepare_finished[0] = True
         try:
             prepare_dialog.canceled.disconnect(on_prepare_user_cancel)
         except (TypeError, RuntimeError):
@@ -905,11 +956,134 @@ def run_check_loras_dialog(parent) -> None:
     prepare_worker.start()
 
 
+class _LoraCheckProgressDialog(QDialog):
+    """Progress UI with an always-visible scrollable pass log (not QProgressDialog)."""
+
+    canceled = Signal()
+
+    def __init__(self, parent, probes_total: int) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Check LoRAs")
+        self.setWindowModality(Qt.WindowModality.WindowModal)
+        self.setStyleSheet(get_dialog_shell_stylesheet() + get_button_style())
+        self.resize(580, 420)
+        self._closing = False
+        self._cancel_requested = False
+        # True when user dismissed UI before the worker finished (abandon apply).
+        self.abandoned = False
+
+        self.status_label = QLabel()
+        self.status_label.setAlignment(
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop
+        )
+        self.status_label.setTextFormat(Qt.TextFormat.RichText)
+        self.status_label.setWordWrap(True)
+        self.status_label.setMinimumWidth(520)
+
+        pass_heading = QLabel("Passed (registered or pending):")
+        self.pass_list = QPlainTextEdit()
+        self.pass_list.setReadOnly(True)
+        self.pass_list.setMinimumHeight(120)
+        self.pass_list.setMaximumHeight(180)
+        self.pass_list.setPlaceholderText("Passes will appear here…")
+
+        self.bar = QProgressBar()
+        self.bar.setRange(0, max(1, int(probes_total)))
+        self.bar.setValue(0)
+        self.bar.setTextVisible(True)
+        self.bar.setFormat("%v / %m")
+
+        self._cancel_btn = QPushButton("Cancel")
+        self._cancel_btn.clicked.connect(self._request_cancel)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(16, 14, 16, 14)
+        layout.setSpacing(10)
+        layout.addWidget(self.status_label)
+        layout.addWidget(pass_heading)
+        layout.addWidget(self.pass_list, stretch=1)
+        layout.addWidget(self.bar)
+        btn_row = QHBoxLayout()
+        btn_row.addStretch(1)
+        btn_row.addWidget(self._cancel_btn)
+        layout.addLayout(btn_row)
+
+    def set_status_html(self, html_text: str) -> None:
+        if self._cancel_requested and not self._closing:
+            self.status_label.setText(
+                "<b>Cancelling…</b> (Cancel again to close now)<br/>" + html_text
+            )
+            return
+        self.status_label.setText(html_text)
+
+    def setMaximum(self, total: int) -> None:
+        total = max(1, int(total))
+        self.bar.setMaximum(total)
+        if self.bar.value() > total:
+            self.bar.setValue(total)
+
+    def setValue(self, value: int) -> None:
+        self.bar.setValue(max(0, min(int(value), self.bar.maximum())))
+
+    def append_pass(self, line: str) -> None:
+        self.pass_list.appendPlainText(line)
+        self.pass_list.moveCursor(QTextCursor.MoveOperation.End)
+        self.pass_list.ensureCursorVisible()
+
+    def _request_cancel(self) -> None:
+        if self._closing:
+            return
+        if self._cancel_requested:
+            # Second Cancel: leave UI; worker is daemon and already cancelling.
+            print("[Check LoRAs] Abandoning progress dialog (worker still winding down)")
+            self.abandoned = True
+            self.finish_and_close()
+            return
+        self._cancel_requested = True
+        self._cancel_btn.setText("Close now")
+        self.set_status_html(self.status_label.text())
+        self.canceled.emit()
+
+    def reject(self) -> None:
+        # Must not call super().reject() here: Esc must cancel the run, not
+        # dismiss a WindowModal dialog while the worker is still on GPU.
+        self._request_cancel()
+
+    def closeEvent(self, event) -> None:  # noqa: N802
+        if self._closing:
+            event.accept()
+            return
+        self._request_cancel()
+        if self._closing:
+            event.accept()
+        else:
+            # First close request: keep dialog open with Cancelling… status.
+            event.ignore()
+
+    def finish_and_close(self) -> None:
+        if self._closing:
+            return
+        self._closing = True
+        self.blockSignals(True)
+        self.hide()
+        self.close()
+
+
 def _start_probe_run(
     parent,
     options: CheckLorasOptions,
     prepared: PreparedLoraProbePlan,
 ) -> None:
+    existing = getattr(parent, "_lora_check_worker", None)
+    if existing is not None and getattr(existing, "isRunning", lambda: False)():
+        show_styled_warning(
+            parent,
+            "Check LoRAs",
+            "A previous Check LoRAs run is still finishing.\n\n"
+            "Wait a moment (or restart the app), then try again.",
+        )
+        return
+
     plan_stats = prepared.stats
     if not prepared.plan or (
         plan_stats.probes_total == 0
@@ -935,20 +1109,11 @@ def _start_probe_run(
 
     probes_total = max(1, lora_check_work_total(plan_stats))
     start_time = time.monotonic()
-    progress_label = QLabel(
+    progress = _LoraCheckProgressDialog(parent, probes_total)
+    progress.set_status_html(
         _format_progress_html("scan", "", "", plan_stats, elapsed=0.0)
     )
-    progress_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
-    progress_label.setTextFormat(Qt.TextFormat.RichText)
-    progress_label.setWordWrap(True)
-    progress_label.setMinimumWidth(520)
-
-    pass_list_heading = QLabel("Passed (registered or pending):")
-    pass_list = QPlainTextEdit()
-    pass_list.setReadOnly(True)
-    pass_list.setMinimumHeight(100)
-    pass_list.setMaximumHeight(160)
-    pass_list.setPlaceholderText("Passes will appear here…")
+    progress.setValue(0)
 
     pass_lines_seen: set[tuple[str, str]] = set()
 
@@ -959,26 +1124,7 @@ def _start_probe_run(
             return
         pass_lines_seen.add(key)
         model_name = lora_model_display_name(model_key) if model_key else "—"
-        pass_list.appendPlainText(f"{model_name} → {label}")
-        pass_list.moveCursor(QTextCursor.MoveOperation.End)
-        pass_list.ensureCursorVisible()
-
-    progress = QProgressDialog("", "Cancel", 0, max(1, probes_total), parent)
-    progress.setLabel(progress_label)
-    progress_layout = progress.layout()
-    if progress_layout is not None:
-        progress_bar = progress.findChild(QProgressBar)
-        if progress_bar is not None:
-            bar_idx = progress_layout.indexOf(progress_bar)
-            progress_layout.insertWidget(bar_idx, pass_list_heading)
-            progress_layout.insertWidget(bar_idx + 1, pass_list)
-    progress.setWindowTitle("Check LoRAs")
-    progress.setWindowModality(Qt.WindowModality.WindowModal)
-    progress.setMinimumDuration(0)
-    progress.setAutoClose(False)
-    progress.setAutoReset(False)
-    progress.setValue(0)
-    progress.resize(580, 380)
+        progress.append_pass(f"{model_name} → {label}")
 
     cancel_flag: List[bool] = [False]
 
@@ -1006,7 +1152,7 @@ def _start_probe_run(
         eta: Optional[float] = None
         if stats.probes_done > 0 and work_total > stats.probes_done:
             eta = elapsed / stats.probes_done * (work_total - stats.probes_done)
-        progress_label.setText(
+        progress.set_status_html(
             _format_progress_html(
                 phase,
                 lora_id,
@@ -1026,23 +1172,39 @@ def _start_probe_run(
         total = max(1, probe_total)
         progress.setMaximum(total)
         if phase == "probe":
-            current = stats.probe_current or max(0, probe_idx)
-            val = min(max(0, current), total)
+            # probe_current is 1-based in-flight index; probe_idx is completed count
+            # before/after callbacks. Prefer finished count for the bar.
+            current = max(0, int(stats.probes_done or 0))
+            if stats.probe_current and stats.probes_done == 0:
+                current = max(0, int(stats.probe_current) - 1)
+            val = min(current, total)
         else:
             val = 0
         progress.setValue(val)
-        QApplication.processEvents()
+        # Do not processEvents here: progress runs via QueuedConnection on the
+        # GUI thread; pumping events from the worker thread can hang Qt/MLX.
+
+    finished_handled = [False]
+    worker_dead_ticks = [0]
 
     def on_finished(result: object) -> None:
+        if finished_handled[0]:
+            return
+        finished_handled[0] = True
+        watchdog.stop()
+        abandoned = bool(getattr(progress, "abandoned", False))
         try:
             progress.canceled.disconnect(on_probe_user_cancel)
         except (TypeError, RuntimeError):
             pass
-        progress.blockSignals(True)
-        progress.close()
+        progress.finish_and_close()
         if getattr(parent, "_lora_check_worker", None) is worker:
             parent._lora_check_worker = None  # type: ignore[attr-defined]
-        worker.wait()
+        # Short join only — never block the GUI on a stuck MLX probe.
+        worker.wait(500)
+        if abandoned:
+            print("[Check LoRAs] Ignoring result after abandoned progress dialog")
+            return
         if result is None:
             show_styled_warning(
                 parent,
@@ -1065,9 +1227,44 @@ def _start_probe_run(
         _apply_check_result(parent, result)
         _show_results_dialog(parent, result)
 
+    def on_worker_watchdog() -> None:
+        if finished_handled[0]:
+            watchdog.stop()
+            return
+        if worker.isRunning():
+            worker_dead_ticks[0] = 0
+            return
+        # Thread may exit before a QueuedConnection finished slot runs — wait.
+        # Keep watching even if the dialog was force-closed.
+        worker_dead_ticks[0] += 1
+        if worker_dead_ticks[0] < 3:
+            return
+        print(
+            "[Check LoRAs] worker thread exited while progress dialog still open"
+            + (
+                " (finished was posted; delivering stored result)"
+                if worker._finished_posted
+                else " (no finished post)"
+            )
+        )
+        on_finished(worker._result)
+
     worker = LoraCheckWorkerThread(options, prepared, cancel_check=cancel_check)
     parent._lora_check_worker = worker  # type: ignore[attr-defined]
     progress._lora_check_worker = worker  # type: ignore[attr-defined]
-    worker.progress_signal.connect(on_progress)
-    worker.finished_result.connect(on_finished)
+    # Route through a main-thread QObject: QueuedConnection to bare callables is unreliable.
+    ui_relay = _LoraCheckUiRelay(on_progress, on_finished, parent=progress)
+    # Keep bridge alive with the dialog for the life of queued signals.
+    worker._bridge.setParent(progress)
+    worker.progress_signal.connect(
+        ui_relay.handle_progress, Qt.ConnectionType.QueuedConnection
+    )
+    worker.finished_result.connect(
+        ui_relay.handle_finished, Qt.ConnectionType.QueuedConnection
+    )
+    watchdog = QTimer(progress)
+    watchdog.setInterval(2000)
+    watchdog.timeout.connect(on_worker_watchdog)
+    watchdog.start()
     worker.start()
+    print("[Check LoRAs] worker started")

@@ -1,36 +1,16 @@
 #!/usr/bin/env python3
-"""Best-effort LoRA trigger-word resolution (file metadata, heuristics, online)."""
+"""Resolve LoRA trigger words from known sources only (no heuristics)."""
 
 from __future__ import annotations
 
-import json
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Dict, Optional, Tuple
 
 from imagegen_plugins.lora_entry import FluxLoraEntry
 
 _TRIGGER_CACHE: Dict[str, Tuple[float, Optional[str], str]] = {}
-_GENERIC_TAGS = frozenset(
-    {
-        "1girl",
-        "1boy",
-        "solo",
-        "portrait",
-        "photo",
-        "image",
-        "picture",
-        "test",
-        "woman",
-        "man",
-        "girl",
-        "boy",
-    }
-)
-_FILENAME_NOISE_RE = re.compile(
-    r"(?i)(?:_lora|_flux|_sdxl|_sd15|aitoolkit|rank\d+|bf16|fp16|step\d+|v\d+)$"
-)
 _TRIGGER_LINE_RE = re.compile(
     r"(?im)^(?:trigger(?:\s*word)?s?|activation(?:\s*text)?|trained\s*words?)"
     r"\s*[:=-]\s*(.+?)\s*$"
@@ -40,7 +20,7 @@ _TRIGGER_LINE_RE = re.compile(
 @dataclass(frozen=True)
 class TriggerResolveResult:
     trigger: Optional[str]
-    source: str  # catalog | metadata | filename | online | ""
+    source: str  # catalog | metadata | online | ""
 
 
 def resolve_lora_trigger(
@@ -53,7 +33,8 @@ def resolve_lora_trigger(
     """
     Resolve a probe/generation trigger for a LoRA entry.
 
-    Order: catalog trigger → safetensors metadata → filename → online → none.
+    Order: catalog trigger → safetensors trigger metadata → online → none.
+    Does not invent triggers from filenames, display names, or tag stats.
     Network/parse failures are tolerated (returns empty trigger).
     """
     catalog = (entry.trigger_word or "").strip()
@@ -75,11 +56,6 @@ def resolve_lora_trigger(
         if trigger:
             source = "metadata"
 
-    if not trigger and path is not None:
-        trigger = _trigger_from_filename(path.stem)
-        if trigger:
-            source = "filename"
-
     if not trigger and allow_online:
         trigger = _trigger_from_online(entry, path=path, timeout_s=timeout_s)
         if trigger:
@@ -98,9 +74,7 @@ def lora_probe_prompt_with_resolved_trigger(
     weights_path: Optional[str | Path] = None,
     allow_online: bool = True,
 ) -> str:
-    """Build probe prompt: optional trigger + user fallback text."""
-    from imagegen_plugins.lora_host_registry import HOST_FLUX2_KLEIN
-
+    """Build probe prompt: known trigger (if any) + user fallback text."""
     fb = (fallback or "test").strip() or "test"
     trigger = (entry.trigger_word or "").strip()
     if not trigger:
@@ -112,12 +86,7 @@ def lora_probe_prompt_with_resolved_trigger(
         )
         trigger = (resolved.trigger or "").strip()
     if not trigger:
-        name = (entry.display_name or "").strip()
-        if name:
-            return f"{name}, {fb}"
         return fb
-    if entry.host_id == HOST_FLUX2_KLEIN:
-        return f"Transform into {trigger}"
     return f"{trigger}, {fb}"
 
 
@@ -197,107 +166,6 @@ def _trigger_from_safetensors_metadata(path: Path) -> Optional[str]:
         if trigger:
             return trigger
 
-    tag_freq = metadata.get("ss_tag_frequency")
-    if tag_freq:
-        trigger = _trigger_from_tag_frequency(str(tag_freq))
-        if trigger:
-            return trigger
-
-    return None
-
-
-def _trigger_from_tag_frequency(raw: str) -> Optional[str]:
-    try:
-        data = json.loads(raw)
-    except (json.JSONDecodeError, TypeError):
-        return _trigger_from_free_text(raw)
-    if not isinstance(data, dict) or not data:
-        return None
-
-    ranked: List[Tuple[int, str]] = []
-    for key, value in data.items():
-        if isinstance(value, dict):
-            for tag, count in value.items():
-                ranked.extend(_rank_tag_candidate(str(tag), count))
-        else:
-            ranked.extend(_rank_tag_candidate(str(key), value))
-
-    if not ranked:
-        return None
-    ranked.sort(key=lambda row: (-row[0], _tag_preference_score(row[1]), len(row[1])))
-    return ranked[0][1]
-
-
-def _rank_tag_candidate(tag: str, count: Any) -> List[Tuple[int, str]]:
-    text = _clean_trigger(tag)
-    if not text or text.lower() in _GENERIC_TAGS:
-        return []
-    if not _tag_looks_like_trigger(text):
-        return []
-    try:
-        weight = int(count)
-    except (TypeError, ValueError):
-        weight = 0
-    return [(weight, text)]
-
-
-def _tag_looks_like_trigger(text: str) -> bool:
-    if len(text) > 64:
-        return False
-    words = text.split()
-    if len(words) > 6:
-        return False
-    lowered = text.lower()
-    if lowered.startswith(("a ", "an ", "the ")):
-        return False
-    return True
-
-
-def _tag_preference_score(text: str) -> int:
-    """Lower is better: prefer short style-like tags over long captions."""
-    words = text.split()
-    if len(words) <= 3:
-        return 0
-    if len(words) <= 5:
-        return 1
-    return 2
-
-
-def _trigger_from_filename(stem: str) -> Optional[str]:
-    text = str(stem or "").strip()
-    if not text:
-        return None
-    text = text.replace("-", " ").replace("_", " ")
-    while True:
-        cleaned = _FILENAME_NOISE_RE.sub("", text).strip()
-        if cleaned == text:
-            break
-        text = cleaned
-    text = re.sub(r"\s+", " ", text).strip()
-    if len(text) < 3:
-        return None
-    if text.lower() in _GENERIC_TAGS:
-        return None
-    return text
-
-
-def _trigger_from_free_text(raw: str) -> Optional[str]:
-    text = str(raw or "").strip()
-    if not text:
-        return None
-    if text.startswith("{"):
-        try:
-            parsed = json.loads(text)
-        except json.JSONDecodeError:
-            parsed = None
-        if isinstance(parsed, dict) and parsed:
-            return _trigger_from_tag_frequency(text)
-    # First comma-separated token chunk or first line.
-    line = text.splitlines()[0].strip()
-    for part in re.split(r"[,;|]", line):
-        candidate = _clean_trigger(part)
-        if candidate and candidate.lower() not in _GENERIC_TAGS:
-            return candidate
     return None
 
 

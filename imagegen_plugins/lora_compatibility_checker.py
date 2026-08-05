@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Probe LoRA compatibility against all installed base models (minimal generation)."""
+"""Probe LoRA compatibility against all installed base models (512x512 generation)."""
 
 from __future__ import annotations
 
@@ -10,11 +10,10 @@ from pathlib import Path
 from prowser_temp_files import ensure_temporary_files_directory
 import time
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Optional, Set, Tuple
 
 from imagegen_plugins.hf_model_ids import (
     FLUX1_DEV,
-    FLUX1_FILL_DEV,
     FLUX1_SCHNELL,
     FLUX2_KLEIN_4B,
     FLUX2_KLEIN_9B,
@@ -42,11 +41,18 @@ from imagegen_plugins.lora_catalog_settings import model_state
 from imagegen_plugins.lora_entry import DEFAULT_CACHE, _ALT_CACHE
 from imagegen_plugins.lora_host_registry import HOST_FLUX1_T2I
 
-from imagegen_plugins.lora_model_registry import lora_probe_model_is_local
-from imagegen_plugins.lora_probe_effect import ZImageBaselineCache
+from imagegen_plugins.lora_model_registry import (
+    klein_lora_model_aliases,
+    lora_models_for_entry,
+    lora_probe_default_steps,
+    lora_probe_model_is_local,
+)
+from imagegen_plugins.lora_probe_effect import LoraProbeBaselineCache
 
 DOWNLOADS_LORA_DIR = Path.home() / "Downloads"
 _PENDING_DOWNLOAD_LORA_ID = "__pending_download__"
+# Check LoRAs always renders at this square size with each model's default steps.
+LORA_PROBE_SIZE = 512
 
 MODEL_SCOPE_ALL = "all"
 MODEL_SCOPE_SELECTED = "selected"
@@ -77,18 +83,26 @@ class CheckLorasOptions:
 
 @dataclass(frozen=True)
 class LoraProbeChoice:
-    """One on-disk LoRA weight file discoverable by Check LoRAs."""
+    """One on-disk LoRA weight file for Check LoRAs options or Add LoRA → Find."""
 
     key: str
     label: str
     from_downloads: bool = False
+    # Fill-in metadata for Add LoRA → Find.
+    weights_path: str = ""
+    display_name: str = ""
+    trigger_word: Optional[str] = None
+    scale: float = 1.0
+    comment: Optional[str] = None
+    repo_id: str = ""
+    filename: str = ""
+    source_path: Optional[str] = None
 
-# Models probe_lora_on_model can exercise.
+# Models probe_lora_on_model can exercise (T2I only — Fill is excluded).
 _PROBEABLE_MODEL_KEYS = frozenset(
     {
         FLUX1_SCHNELL,
         FLUX1_DEV,
-        FLUX1_FILL_DEV,
         FLUX2_KLEIN_4B,
         FLUX2_KLEIN_9B,
         FLUX2_KLEIN_9B_KV,
@@ -130,6 +144,8 @@ class LoraCheckStats:
     files_deduped: int = 0
     skipped_unchanged: int = 0
     skipped_unchanged_probes: int = 0
+    # All (lora, model) pairs visited in the run loop (GPU + history + reg skips).
+    progress_pairs_total: int = 0
     current_lora_label: str = ""
     last_result: str = ""  # pass | fail | skip | ""
 
@@ -208,7 +224,9 @@ class LoraCheckResult:
 
 
 def lora_check_work_total(stats: LoraCheckStats) -> int:
-    """Progress denominator: GPU renders plus history reuse steps."""
+    """Denominator for progress: every (lora, model) pair the run loop visits."""
+    if stats.progress_pairs_total > 0:
+        return stats.progress_pairs_total
     return stats.probes_total + stats.skipped_unchanged_probes
 
 
@@ -329,6 +347,41 @@ def _probeable_local_models(_entry: FluxLoraEntry) -> List[str]:
     return installed_probeable_models()
 
 
+def _probe_models_for_entry(
+    entry: FluxLoraEntry,
+    local_models: List[str],
+) -> List[str]:
+    """
+    Which selected base models to probe for this LoRA.
+
+    Curated ``mflux_compatible=True`` entries and orphan Downloads files keep
+    cross-host discovery (every selected installed model). Other entries are
+    limited to the same LoRA host family as ``entry.host_id``.
+    """
+    if (
+        entry.mflux_compatible is True
+        or entry.lora_id == _PENDING_DOWNLOAD_LORA_ID
+    ):
+        return list(local_models)
+    from imagegen_plugins.lora_model_registry import host_id_for_lora_model
+
+    host = (entry.host_id or "").strip()
+    if host:
+        matched = [
+            m for m in local_models if host_id_for_lora_model(m) == host
+        ]
+        if matched:
+            return matched
+    intended = lora_models_for_entry(entry)
+    if not intended:
+        return list(local_models)
+    allowed: Set[str] = set()
+    for model_key in intended:
+        allowed.update(klein_lora_model_aliases(model_key))
+    matched = [m for m in local_models if m in allowed]
+    return matched if matched else list(local_models)
+
+
 def _md5_file(path: Path, *, chunk_size: int = 1024 * 1024) -> str:
     digest = hashlib.md5()
     with path.open("rb") as handle:
@@ -338,6 +391,44 @@ def _md5_file(path: Path, *, chunk_size: int = 1024 * 1024) -> str:
                 break
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _size_conflict_set(paths: Iterable[Path]) -> Set[int]:
+    """Sizes that appear on more than one path (only these need MD5)."""
+    counts: Dict[int, int] = {}
+    for path in paths:
+        try:
+            size = int(path.stat().st_size)
+        except OSError:
+            continue
+        counts[size] = counts.get(size, 0) + 1
+    return {size for size, count in counts.items() if count > 1}
+
+
+def _content_digest_for_path(
+    path: Path,
+    digest_cache: Dict[Path, str],
+    *,
+    size: Optional[int] = None,
+    hash_sizes: Optional[Set[int]] = None,
+) -> Optional[str]:
+    """
+    Content id for dedupe/history: MD5 only when ``size`` is in ``hash_sizes``.
+
+    Unique sizes use ``size:<bytes>`` — files of different length cannot share an MD5.
+    """
+    try:
+        if size is None:
+            size = int(path.stat().st_size)
+        if hash_sizes is not None and size not in hash_sizes:
+            return f"size:{size}"
+        digest = digest_cache.get(path)
+        if digest is None:
+            digest = _md5_file(path)
+            digest_cache[path] = digest
+        return digest
+    except OSError:
+        return None
 
 
 def _downloads_safetensors_paths() -> List[Path]:
@@ -391,17 +482,24 @@ def _discover_safetensors_paths() -> List[Path]:
 def _fingerprint_for_path(
     path: Path,
     digest_cache: Dict[Path, str],
+    *,
+    hash_sizes: Optional[Set[int]] = None,
 ) -> Optional[LoraFileFingerprint]:
     try:
         st = path.stat()
-        digest = digest_cache.get(path)
+        size = int(st.st_size)
+        digest = _content_digest_for_path(
+            path,
+            digest_cache,
+            size=size,
+            hash_sizes=hash_sizes,
+        )
         if digest is None:
-            digest = _md5_file(path)
-            digest_cache[path] = digest
+            return None
         return LoraFileFingerprint(
             md5=digest,
             mtime=float(st.st_mtime),
-            size=int(st.st_size),
+            size=size,
             path=str(path),
         )
     except OSError:
@@ -478,35 +576,53 @@ def _history_support_models(
     return [str(m) for m in models_raw if str(m) in allowed]
 
 
+def _resolve_catalog_weight_path(
+    entry: FluxLoraEntry,
+    settings: Optional[Dict[str, Any]],
+) -> Optional[Path]:
+    path = local_lora_weights_path(entry.lora_id, settings, entry=entry)
+    if path is not None:
+        return path
+    for raw in (entry.source_path, entry.local_path):
+        text = str(raw or "").strip()
+        if not text:
+            continue
+        candidate = Path(text).expanduser()
+        if lora_weights_file_is_valid(candidate):
+            try:
+                return candidate.resolve()
+            except OSError:
+                return candidate
+    return None
+
+
+def _catalog_weight_paths(settings: Optional[Dict[str, Any]]) -> List[Path]:
+    paths: List[Path] = []
+    seen: Set[Path] = set()
+    for entry in catalog_entries_sorted(settings):
+        path = _resolve_catalog_weight_path(entry, settings)
+        if path is None or path in seen:
+            continue
+        seen.add(path)
+        paths.append(path)
+    return paths
+
+
 def _catalog_md5_index(
     settings: Optional[Dict[str, Any]],
     digest_cache: Dict[Path, str],
+    *,
+    hash_sizes: Optional[Set[int]] = None,
 ) -> Dict[str, str]:
-    """Map md5 hex digest -> catalog lora_id (first match)."""
+    """Map content digest -> catalog lora_id (first match)."""
     out: Dict[str, str] = {}
     for entry in catalog_entries_sorted(settings):
-        path = local_lora_weights_path(entry.lora_id, settings)
-        if path is None:
-            for raw in (entry.source_path, entry.local_path):
-                text = str(raw or "").strip()
-                if not text:
-                    continue
-                candidate = Path(text).expanduser()
-                if lora_weights_file_is_valid(candidate):
-                    try:
-                        path = candidate.resolve()
-                    except OSError:
-                        path = candidate
-                    break
+        path = _resolve_catalog_weight_path(entry, settings)
         if path is None:
             continue
-        digest = digest_cache.get(path)
+        digest = _content_digest_for_path(path, digest_cache, hash_sizes=hash_sizes)
         if digest is None:
-            try:
-                digest = _md5_file(path)
-            except OSError:
-                continue
-            digest_cache[path] = digest
+            continue
         out.setdefault(digest, entry.lora_id)
     return out
 
@@ -528,21 +644,18 @@ def _installed_lora_md5_index(
     settings: Optional[Dict[str, Any]],
     *,
     cache: Optional[Dict[Path, str]] = None,
+    hash_sizes: Optional[Set[int]] = None,
 ) -> Dict[str, Path]:
-    """Map md5 hex digest -> installed LoRA weights path."""
+    """Map content digest -> installed LoRA weights path."""
     digest_cache = cache if cache is not None else {}
     out: Dict[str, Path] = {}
     for entry in catalog_entries_sorted(settings):
         path = local_lora_weights_path(entry.lora_id, settings)
         if path is None:
             continue
-        digest = digest_cache.get(path)
+        digest = _content_digest_for_path(path, digest_cache, hash_sizes=hash_sizes)
         if digest is None:
-            try:
-                digest = _md5_file(path)
-            except OSError:
-                continue
-            digest_cache[path] = digest
+            continue
         out.setdefault(digest, path)
     return out
 
@@ -558,23 +671,31 @@ def dedupe_downloads_loras(
     changes: Optional[List[LoraCheckChange]] = None,
 ) -> Tuple[int, int]:
     """
-    Delete duplicate .safetensors in ~/Downloads that match installed LoRAs (md5).
+    Delete duplicate .safetensors in ~/Downloads that match installed LoRAs
+    (size-first; MD5 only when sizes collide).
     Returns (scanned_count, deleted_count).
     """
     paths = _downloads_safetensors_paths()
     if not paths:
         return 0, 0
     digest_cache: Dict[Path, str] = {}
-    installed_by_md5 = _installed_lora_md5_index(settings, cache=digest_cache)
+    installed_paths = [
+        path
+        for entry in catalog_entries_sorted(settings)
+        for path in (local_lora_weights_path(entry.lora_id, settings),)
+        if path is not None
+    ]
+    hash_sizes = _size_conflict_set([*installed_paths, *paths])
+    installed_by_md5 = _installed_lora_md5_index(
+        settings,
+        cache=digest_cache,
+        hash_sizes=hash_sizes,
+    )
     seen_download_md5: Set[str] = set()
     deleted = 0
     for path in paths:
-        try:
-            digest = digest_cache.get(path)
-            if digest is None:
-                digest = _md5_file(path)
-                digest_cache[path] = digest
-        except OSError:
+        digest = _content_digest_for_path(path, digest_cache, hash_sizes=hash_sizes)
+        if digest is None:
             continue
         duplicate = digest in installed_by_md5 or digest in seen_download_md5
         seen_download_md5.add(digest)
@@ -605,6 +726,7 @@ def _downloads_probe_candidates(
     digest_cache: Dict[Path, str],
     catalog_md5: Dict[str, str],
     stats: LoraCheckStats,
+    hash_sizes: Optional[Set[int]] = None,
 ) -> List[Path]:
     remaining: List[Path] = []
     seen_md5 = set(planned_md5)
@@ -613,12 +735,8 @@ def _downloads_probe_candidates(
             continue
         if _path_is_registered(path, settings):
             continue
-        try:
-            digest = digest_cache.get(path)
-            if digest is None:
-                digest = _md5_file(path)
-                digest_cache[path] = digest
-        except OSError:
+        digest = _content_digest_for_path(path, digest_cache, hash_sizes=hash_sizes)
+        if digest is None:
             continue
         if digest in catalog_md5:
             continue
@@ -646,6 +764,22 @@ def _probe_plan_item_choice_key(item: LoraProbePlanItem) -> str:
     return str(item.entry.lora_id or "")
 
 
+def _probe_plan_item_selection_keys(item: LoraProbePlanItem) -> Set[str]:
+    """Keys that may appear in Check LoRAs options (legacy history keys + find keys)."""
+    keys: Set[str] = set()
+    primary = _probe_plan_item_choice_key(item)
+    if primary:
+        keys.add(primary)
+    lora_id = str(item.entry.lora_id or "")
+    if lora_id and lora_id != _PENDING_DOWNLOAD_LORA_ID:
+        keys.add(lora_id)
+    path = str(item.weights_path or "")
+    if path:
+        keys.add(path)
+        keys.add(f"path:{path}")
+    return keys
+
+
 def _probe_plan_item_choice_label(item: LoraProbePlanItem) -> str:
     if item.from_downloads:
         return (item.entry.display_name or "").strip() or item.entry.lora_id
@@ -661,7 +795,11 @@ def _filter_plan_by_lora_scope(
     allowed = {str(k) for k in options.selected_lora_keys if str(k)}
     if not allowed:
         return plan
-    return [item for item in plan if _probe_plan_item_choice_key(item) in allowed]
+    return [
+        item
+        for item in plan
+        if _probe_plan_item_selection_keys(item) & allowed
+    ]
 
 
 def discover_check_lora_choices(
@@ -672,35 +810,101 @@ def discover_check_lora_choices(
     """
     Prescan on-disk LoRA weights for the Check LoRAs options dialog.
 
-    Lists catalog entries with local weights plus orphan .safetensors (cache +
-    Downloads). Uses the same discovery rules as plan_disk_lora_probes.
+    Uses the same lightweight path scan as Add LoRA → Find (no MD5 / probe plan).
+    ``dedupe_downloads`` is accepted for call-site compatibility and ignored here.
     """
-    list_opts = CheckLorasOptions(
-        model_scope=MODEL_SCOPE_ALL,
-        lora_scope=LORA_SCOPE_ALL,
-        registration_mode=REGISTRATION_IGNORE_PREVIOUS,
-        skip_unchanged=False,
-    )
-    _, plan, _ = plan_disk_lora_probes(
-        settings,
-        dedupe=dedupe_downloads,
-        options=list_opts,
-    )
+    del dedupe_downloads  # options listing does not delete or hash Downloads
+    choices = discover_find_lora_choices(settings)
+    # Catalog entries first, then orphans — matches prior Check LoRAs ordering.
+    choices.sort(key=lambda c: (c.from_downloads, (c.label or "").lower()))
+    return choices
+
+
+def discover_find_lora_choices(
+    settings: Optional[Dict[str, Any]],
+) -> List[LoraProbeChoice]:
+    """
+    Fast Add LoRA → Find listing: catalog entries with local weights plus orphan
+    .safetensors under cache/Downloads. Path-based only — no MD5 or probe plan.
+
+    Collapses same-name + same-size copies (catalog preferred over orphans).
+    """
+    from imagegen_plugins.lora_user_entries import display_name_from_path
+
     choices: List[LoraProbeChoice] = []
-    seen: Set[str] = set()
-    for item in plan:
-        key = _probe_plan_item_choice_key(item)
-        if not key or key in seen:
+    planned_paths: Set[Path] = set()
+    seen_keys: Set[str] = set()
+    # (display_name.lower(), size) — duplicate imports often share both.
+    seen_name_size: Set[Tuple[str, int]] = set()
+
+    def _remember_name_size(name: str, path: Path) -> bool:
+        """Return True if this name+size is new and should be listed."""
+        text = (name or "").strip().lower()
+        if not text:
+            return True
+        try:
+            key = (text, int(path.stat().st_size))
+        except OSError:
+            return True
+        if key in seen_name_size:
+            return False
+        seen_name_size.add(key)
+        return True
+
+    for entry in catalog_entries_sorted(settings):
+        if entry.mflux_compatible is False:
             continue
-        seen.add(key)
+        path = local_lora_weights_path(entry.lora_id, settings, entry=entry)
+        if path is None:
+            continue
+        planned_paths.add(path)
+        key = str(entry.lora_id or path)
+        if key in seen_keys:
+            continue
+        name = (entry.display_name or "").strip() or display_name_from_path(path)
+        if not _remember_name_size(name, path):
+            continue
+        seen_keys.add(key)
         choices.append(
             LoraProbeChoice(
                 key=key,
-                label=_probe_plan_item_choice_label(item),
-                from_downloads=item.from_downloads,
+                label=lora_choice_label(entry),
+                from_downloads=False,
+                weights_path=str(path),
+                display_name=name,
+                trigger_word=entry.trigger_word,
+                scale=float(entry.scale),
+                comment=entry.comment,
+                repo_id=entry.repo_id or "",
+                filename=entry.filename or "",
+                source_path=entry.source_path,
             )
         )
-    choices.sort(key=lambda c: (not c.from_downloads, c.label.lower()))
+
+    for path in _discover_safetensors_paths():
+        if path in planned_paths:
+            continue
+        if _path_is_registered(path, settings):
+            continue
+        key = f"path:{path}"
+        if key in seen_keys:
+            continue
+        name = display_name_from_path(path)
+        if not _remember_name_size(name, path):
+            continue
+        seen_keys.add(key)
+        choices.append(
+            LoraProbeChoice(
+                key=key,
+                label=name,
+                from_downloads=True,
+                weights_path=str(path),
+                display_name=name,
+                source_path=str(path),
+            )
+        )
+
+    choices.sort(key=lambda c: (c.display_name or c.label or "").lower())
     return choices
 
 
@@ -721,6 +925,8 @@ def plan_disk_lora_probes(
     digest_cache: Dict[Path, str] = {}
     discovered = _discover_safetensors_paths()
     stats.files_discovered = len(discovered)
+    catalog_paths = _catalog_weight_paths(settings)
+    hash_sizes = _size_conflict_set([*catalog_paths, *discovered])
 
     if dedupe:
         stats.downloads_scanned, stats.downloads_deduped = dedupe_downloads_loras(
@@ -746,7 +952,7 @@ def plan_disk_lora_probes(
     stats.skipped_model_probes = len(not_installed)
 
     probe_history = lora_probe_history(settings)
-    catalog_md5 = _catalog_md5_index(settings, digest_cache)
+    catalog_md5 = _catalog_md5_index(settings, digest_cache, hash_sizes=hash_sizes)
     plan: List[LoraProbePlanItem] = []
     planned_paths: Set[Path] = set()
     planned_md5: Set[str] = set()
@@ -758,12 +964,17 @@ def plan_disk_lora_probes(
             if path is None:
                 stats.skipped_not_on_disk += 1
                 continue
-            fingerprint = _fingerprint_for_path(path, digest_cache)
+            fingerprint = _fingerprint_for_path(
+                path, digest_cache, hash_sizes=hash_sizes
+            )
             if fingerprint is None:
                 stats.skipped_not_on_disk += 1
                 continue
             if fingerprint.md5 in planned_md5:
                 stats.files_deduped += 1
+                continue
+            probe_models = _probe_models_for_entry(entry, local_models)
+            if not probe_models:
                 continue
             planned_md5.add(fingerprint.md5)
             planned_paths.add(path)
@@ -774,7 +985,7 @@ def plan_disk_lora_probes(
                 fingerprint=fingerprint,
                 history_key=history_key,
                 hist=hist,
-                local_models=local_models,
+                local_models=probe_models,
                 skip_unchanged=opts.skip_unchanged,
             )
             if all_reused:
@@ -782,7 +993,7 @@ def plan_disk_lora_probes(
             plan.append(
                 LoraProbePlanItem(
                     entry=entry,
-                    models=list(local_models),
+                    models=probe_models,
                     weights_path=path,
                     from_downloads=False,
                     fingerprint=fingerprint,
@@ -801,15 +1012,21 @@ def plan_disk_lora_probes(
             digest_cache=digest_cache,
             catalog_md5=catalog_md5,
             stats=stats,
+            hash_sizes=hash_sizes,
         )
         for path in orphan_paths:
-            fingerprint = _fingerprint_for_path(path, digest_cache)
+            fingerprint = _fingerprint_for_path(
+                path, digest_cache, hash_sizes=hash_sizes
+            )
             if fingerprint is None:
                 continue
             catalog_id = catalog_md5.get(fingerprint.md5)
             if catalog_id and catalog_id not in planned_catalog_ids:
                 entry = get_lora_entry(catalog_id, settings)
                 if entry is not None:
+                    probe_models = _probe_models_for_entry(entry, local_models)
+                    if not probe_models:
+                        continue
                     planned_catalog_ids.add(catalog_id)
                     planned_paths.add(path)
                     planned_md5.add(fingerprint.md5)
@@ -819,7 +1036,7 @@ def plan_disk_lora_probes(
                         fingerprint=fingerprint,
                         history_key=history_key,
                         hist=hist,
-                        local_models=local_models,
+                        local_models=probe_models,
                         skip_unchanged=opts.skip_unchanged,
                     )
                     if all_reused:
@@ -827,7 +1044,7 @@ def plan_disk_lora_probes(
                     plan.append(
                         LoraProbePlanItem(
                             entry=entry,
-                            models=list(local_models),
+                            models=probe_models,
                             weights_path=path,
                             from_downloads=False,
                             fingerprint=fingerprint,
@@ -840,27 +1057,29 @@ def plan_disk_lora_probes(
 
             planned_paths.add(path)
             planned_md5.add(fingerprint.md5)
+            pending_entry = FluxLoraEntry(
+                host_id=HOST_FLUX1_T2I,
+                lora_id=_PENDING_DOWNLOAD_LORA_ID,
+                display_name=display_name_from_path(path),
+                local_path=str(path),
+                source_path=str(path),
+            )
+            probe_models = _probe_models_for_entry(pending_entry, local_models)
             history_key = _probe_history_key(_PENDING_DOWNLOAD_LORA_ID, fingerprint)
             hist = probe_history.get(history_key)
             probed_models, cached, all_reused = _plan_item_from_history(
                 fingerprint=fingerprint,
                 history_key=history_key,
                 hist=hist,
-                local_models=local_models,
+                local_models=probe_models,
                 skip_unchanged=opts.skip_unchanged,
             )
             if all_reused:
                 stats.skipped_unchanged += 1
             plan.append(
                 LoraProbePlanItem(
-                    entry=FluxLoraEntry(
-                        host_id=HOST_FLUX1_T2I,
-                        lora_id=_PENDING_DOWNLOAD_LORA_ID,
-                        display_name=display_name_from_path(path),
-                        local_path=str(path),
-                        source_path=str(path),
-                    ),
-                    models=list(local_models),
+                    entry=pending_entry,
+                    models=probe_models,
                     weights_path=path,
                     from_downloads=True,
                     fingerprint=fingerprint,
@@ -871,6 +1090,7 @@ def plan_disk_lora_probes(
             )
 
     plan = _filter_plan_by_lora_scope(plan, opts)
+    plan = [item for item in plan if item.models]
 
     stats.loras_total = len(plan)
     stats.models_total = len(local_models)
@@ -880,6 +1100,7 @@ def plan_disk_lora_probes(
         previous_support,
         opts.registration_mode,
     )
+    stats.progress_pairs_total = sum(len(item.models) for item in plan)
     if opts.skip_unchanged:
         for item in plan:
             for model_key in item.models:
@@ -941,6 +1162,219 @@ def _prepare_mflux_output_path(path: Optional[str]) -> None:
         pass
 
 
+def _write_probe_image_exif(
+    path: Optional[str],
+    *,
+    model_key: str,
+    prompt: str,
+    steps: int,
+    seed: int = 42,
+    lora: Optional[str] = None,
+    quantization: Optional[int] = None,
+    guidance: Optional[float] = None,
+) -> None:
+    """Write app-standard Image Model / Prompt / LoRA EXIF on a Check LoRAs probe PNG."""
+    if not path or not os.path.isfile(path) or os.path.getsize(path) < 64:
+        return
+    try:
+        from imagegen_plugins.image_gen_naming import (
+            format_image_exif_prompt,
+            menu_label_for_hf_model_id,
+            write_exif_user_comment,
+        )
+
+        model_name = menu_label_for_hf_model_id(model_key) or lora_model_display_name(
+            model_key
+        )
+        comment = format_image_exif_prompt(
+            model_name,
+            prompt,
+            seed=seed,
+            steps=steps,
+            quantization=quantization,
+            lora=lora,
+            guidance=guidance,
+        )
+        if not write_exif_user_comment(path, comment):
+            print(f"[Check LoRAs] Probe EXIF write returned False for {path}")
+    except Exception as exc:
+        print(f"[Check LoRAs] Could not write probe EXIF for {path}: {exc}")
+
+
+def _ensure_probe_baseline(
+    cache: LoraProbeBaselineCache,
+    *,
+    model_key: str,
+    prompt: str,
+    width: int,
+    height: int,
+    steps: int,
+    cancel_check: Callable[[], bool],
+    render_baseline: Callable[[str], None],
+) -> Tuple[Optional[str], bool]:
+    """
+    Return (baseline_path, generated_new).
+
+    Renders a no-LoRA image once per (model, prompt, size, steps) and caches it
+    for the rest of the Check LoRAs run.
+    """
+    existing = cache.lookup(
+        model_key=model_key,
+        prompt=prompt,
+        width=width,
+        height=height,
+        steps=steps,
+    )
+    if existing is not None:
+        return existing, False
+    if cancel_check():
+        return None, False
+    baseline_path = _probe_temp_path(model_key, "", role="baseline")
+    _prepare_mflux_output_path(baseline_path)
+    print(
+        f"[Check LoRAs] Baseline render {lora_model_display_name(model_key)} "
+        f"(prompt={prompt!r}, no LoRA)"
+    )
+    render_baseline(baseline_path)
+    cache.store(
+        model_key=model_key,
+        prompt=prompt,
+        width=width,
+        height=height,
+        steps=steps,
+        path=baseline_path,
+    )
+    print(f"[Check LoRAs] Baseline cached -> {baseline_path}")
+    return baseline_path, True
+
+
+def _lora_probe_has_effect(
+    *,
+    baseline_path: str,
+    out_path: str,
+    label: str,
+    model_key: str,
+    prompt: str,
+    width: int,
+    height: int,
+    steps: int,
+    generated_baseline: bool,
+) -> bool:
+    """True when with-LoRA render differs from baseline (LoRA had an effect)."""
+    from imagegen_plugins.lora_probe_effect import (
+        _probe_cnn_identical_min_cosine,
+        measure_probe_image_delta,
+        probe_images_effectively_identical,
+    )
+
+    if not os.path.isfile(out_path) or os.path.getsize(out_path) < 64:
+        return False
+    delta = measure_probe_image_delta(baseline_path, out_path)
+    cnn_threshold = _probe_cnn_identical_min_cosine()
+    if probe_images_effectively_identical(delta):
+        print(
+            f"[Check LoRAs] Probe: no effect for {label!r} on "
+            f"{lora_model_display_name(model_key)} "
+            f"(prompt={prompt!r} size={width}x{height} steps={steps} "
+            f"baseline_reused={not generated_baseline} "
+            f"mean={delta.mean_diff:.3f} max={delta.max_diff} "
+            f"phash={delta.phash_distance} "
+            f"cnn_cosine={delta.cnn_cosine} "
+            f"cnn_threshold={cnn_threshold})"
+        )
+        return False
+    return True
+
+
+def _run_baseline_vs_lora_probe(
+    *,
+    model_key: str,
+    lora_label: str,
+    prompt: str,
+    width: int,
+    height: int,
+    steps: int,
+    cancel_check: Callable[[], bool],
+    baseline_cache: Optional[LoraProbeBaselineCache],
+    generate: Callable[[str, bool], None],
+    seed: int = 42,
+    quantization: Optional[int] = None,
+    guidance: Optional[float] = None,
+) -> bool:
+    """
+    Shared Check LoRAs / import probe process for every T2I model:
+
+    1. Same prompt for baseline and with-LoRA (caller supplies trigger-aware text)
+    2. One cached no-LoRA baseline per (model, prompt, size, steps)
+    3. With-LoRA render
+    4. CNN/pixel compare — identical ⇒ fail (no effect)
+
+    Probe PNGs get the same EXIF UserComment layout as normal generations
+    (Image Model / Seed / Steps / LoRA / Prompt) for later manual verification.
+    """
+    render_prompt = (prompt or "test").strip() or "test"
+    cache = baseline_cache if baseline_cache is not None else LoraProbeBaselineCache()
+    out_path = _probe_temp_path(model_key, lora_label)
+    exif_lora = (lora_label or "").strip() or None
+
+    def _gen_baseline(path: str) -> None:
+        generate(path, False)
+
+    def _gen_with_lora(path: str) -> None:
+        generate(path, True)
+
+    try:
+        baseline_path, generated_baseline = _ensure_probe_baseline(
+            cache,
+            model_key=model_key,
+            prompt=render_prompt,
+            width=width,
+            height=height,
+            steps=steps,
+            cancel_check=cancel_check,
+            render_baseline=_gen_baseline,
+        )
+        if baseline_path is None or cancel_check():
+            return False
+        _gen_with_lora(out_path)
+        has_effect = _lora_probe_has_effect(
+            baseline_path=baseline_path,
+            out_path=out_path,
+            label=lora_label,
+            model_key=model_key,
+            prompt=render_prompt,
+            width=width,
+            height=height,
+            steps=steps,
+            generated_baseline=generated_baseline,
+        )
+        # After compare so EXIF rewrite cannot affect pixel/CNN probe results.
+        if generated_baseline:
+            _write_probe_image_exif(
+                baseline_path,
+                model_key=model_key,
+                prompt=render_prompt,
+                steps=steps,
+                seed=seed,
+                lora=None,
+                quantization=quantization,
+                guidance=guidance,
+            )
+        _write_probe_image_exif(
+            out_path,
+            model_key=model_key,
+            prompt=render_prompt,
+            steps=steps,
+            seed=seed,
+            lora=exif_lora,
+            quantization=quantization,
+            guidance=guidance,
+        )
+        return has_effect
+    finally:
+        _retain_probe_temps(out_path)
+
+
 def _compact_probe_label(text: str) -> str:
     """Strip spaces, punctuation, and separators for readable probe filenames."""
     compact = re.sub(r"[^a-zA-Z0-9]+", "", (text or "").strip())
@@ -999,6 +1433,7 @@ def _probe_t2i(
     cancel_check: Callable[[], bool],
     prompt: str = "test",
     lora_label: str = "lora",
+    baseline_cache: Optional[LoraProbeBaselineCache] = None,
 ) -> bool:
     from imagegen_plugins.pipelines.mflux_schnell import (
         align_mflux_dims,
@@ -1007,83 +1442,47 @@ def _probe_t2i(
 
     if cancel_check():
         return False
-    w, h = align_mflux_dims(256, 256)
-    out_path = _probe_temp_path(model_key, lora_label)
-    try:
-        _prepare_mflux_output_path(out_path)
+    w, h = align_mflux_dims(
+        LORA_PROBE_SIZE, LORA_PROBE_SIZE, max_side=LORA_PROBE_SIZE
+    )
+    steps = lora_probe_default_steps(model_key)
+
+    def _generate(output_path: str, with_lora: bool) -> None:
+        _prepare_mflux_output_path(output_path)
         run_mflux_flux_schnell_generate(
-            prompt=prompt,
+            prompt=(prompt or "test").strip() or "test",
             width=w,
             height=h,
-            steps=2,  # MFLUX scheduler divides by (steps - 1); steps=1 raises ZeroDivisionError
+            steps=steps,
             guidance=0.0,
             seed=42,
             model=hf_model,
             quantize=3,
-            mflux_output_path=out_path,
+            mflux_output_path=output_path,
             low_ram=True,
-            lora_paths=[lora_path],
-            lora_scales=[lora_scale],
+            lora_paths=[lora_path] if with_lora else None,
+            lora_scales=[lora_scale] if with_lora else None,
         )
-        return True
-    except Exception as e:
-        if is_lora_incompatibility_error(e):
-            return False
-        raise
-    finally:
-        _retain_probe_temps(out_path)
 
-
-def _probe_fill(
-    *,
-    model_key: str,
-    lora_path: str,
-    lora_scale: float,
-    cancel_check: Callable[[], bool],
-    prompt: str = "test",
-    lora_label: str = "lora",
-) -> bool:
-    from PIL import Image, ImageDraw
-
-    from imagegen_plugins.pipelines.mflux_fill_expand import _run_mflux_fill_cli
-
-    if cancel_check():
-        return False
-    w, h = 128, 128
-    img = Image.new("RGB", (w, h), (90, 90, 90))
-    mask = Image.new("L", (w, h), 0)
-    ImageDraw.Draw(mask).rectangle([w // 4, h // 4, 3 * w // 4, 3 * h // 4], fill=255)
-    img_path = _probe_temp_path(model_key, lora_label, role="fillsrc")
-    mask_path = _probe_temp_path(model_key, lora_label, role="fillmask")
-    out_path = _probe_temp_path(model_key, lora_label, role="fillout")
     try:
-        img.save(img_path)
-        mask.save(mask_path)
-        _prepare_mflux_output_path(out_path)
-        _run_mflux_fill_cli(
-            image_path=img_path,
-            mask_path=mask_path,
-            output_path=out_path,
+        return _run_baseline_vs_lora_probe(
+            model_key=model_key,
+            lora_label=lora_label,
             prompt=prompt,
             width=w,
             height=h,
-            steps=8,
-            guidance=30.0,
+            steps=steps,
+            cancel_check=cancel_check,
+            baseline_cache=baseline_cache,
+            generate=_generate,
             seed=42,
-            quantize=4,
-            low_ram=True,
-            lora_paths=[lora_path],
-            lora_scales=[lora_scale],
+            quantization=3,
+            guidance=0.0,
         )
-        return os.path.isfile(out_path) and os.path.getsize(out_path) >= 64
     except Exception as e:
         if is_lora_incompatibility_error(e):
             return False
         raise
-    finally:
-        img.close()
-        mask.close()
-        _retain_probe_temps(img_path, mask_path, out_path)
 
 
 def _resolved_probe_lora_weights(
@@ -1123,23 +1522,11 @@ def _probe_z_image_turbo(
     cancel_check: Callable[[], bool],
     prompt: str = "test",
     entry: Optional[FluxLoraEntry] = None,
-    baseline_cache: Optional[ZImageBaselineCache] = None,
+    baseline_cache: Optional[LoraProbeBaselineCache] = None,
     lora_label: str = "lora",
 ) -> bool:
-    """
-    Z-Image Turbo LoRA probe.
-
-    Native Z-Image LoRAs: smoke test (loads + one short render).
-    Cross-host LoRAs: same user probe prompt without vs with LoRA; one baseline
-    image is reused for every LoRA on this model during a Check LoRAs run.
-    """
+    """Z-Image Turbo T2I: shared no-LoRA baseline vs with-LoRA."""
     from imagegen_plugins.lora_host_registry import HOST_Z_IMAGE_TURBO
-    from imagegen_plugins.lora_probe_effect import (
-        ZImageBaselineCache,
-        measure_probe_image_delta,
-        probe_images_effectively_identical,
-        retain_lora_probe_temp,
-    )
     from imagegen_plugins.mflux_z_image_session import (
         compute_z_image_model_key,
         release_z_image_session,
@@ -1150,38 +1537,25 @@ def _probe_z_image_turbo(
     if cancel_check():
         return False
 
-    weights_path, lora_scale = _resolved_probe_lora_weights(entry, lora_path)
     cross_host = entry is not None and entry.host_id != HOST_Z_IMAGE_TURBO
-    probe_size = 512 if cross_host else 256
-    probe_steps = 8 if cross_host else 2
+    probe_steps = lora_probe_default_steps(model_key)
     probe_low_ram = not cross_host
-    w, h = align_z_image_dims(probe_size, probe_size)
+    w, h = align_z_image_dims(LORA_PROBE_SIZE, LORA_PROBE_SIZE, max_side=LORA_PROBE_SIZE)
     render_prompt = (prompt or "test").strip() or "test"
 
-    cache = baseline_cache if baseline_cache is not None else ZImageBaselineCache()
-    out_path = _probe_temp_path(model_key, lora_label)
-    baseline_path: Optional[str] = None
-    generated_baseline = False
-
-    def _generate(*, with_lora: bool, output_path: str, gen_prompt: str) -> None:
-        lora_paths = [weights_path] if with_lora else None
+    def _generate(output_path: str, with_lora: bool) -> None:
+        lora_paths = [lora_path] if with_lora else None
         lora_scales = [float(lora_scale)] if with_lora else None
         if with_lora:
             key = compute_z_image_model_key(str(hf_model), lora_paths, lora_scales)
-            label = entry.display_name if entry else weights_path
             print(
-                f"[Check LoRAs] Z-Image with LoRA «{label}» "
-                f"path={weights_path!r} scale={float(lora_scale)} "
+                f"[Check LoRAs] Z-Image with LoRA «{lora_label}» "
+                f"path={lora_path!r} scale={float(lora_scale)} "
                 f"session_key={key!r}"
-            )
-        else:
-            print(
-                f"[Check LoRAs] Z-Image baseline render "
-                f"(prompt={gen_prompt!r}, no LoRA)"
             )
         _prepare_mflux_output_path(output_path)
         run_mflux_z_image_generate(
-            prompt=gen_prompt,
+            prompt=render_prompt,
             width=w,
             height=h,
             steps=probe_steps,
@@ -1196,113 +1570,92 @@ def _probe_z_image_turbo(
         )
 
     try:
-        if cross_host:
-            baseline_path = cache.lookup(
-                model_key=model_key,
-                prompt=render_prompt,
-                width=w,
-                height=h,
-                steps=probe_steps,
-            )
-            if baseline_path is None:
-                baseline_path = _probe_temp_path(model_key, "", role="baseline")
-                _generate(
-                    with_lora=False,
-                    output_path=baseline_path,
-                    gen_prompt=render_prompt,
-                )
-                generated_baseline = True
-                cache.store(
-                    model_key=model_key,
-                    prompt=render_prompt,
-                    width=w,
-                    height=h,
-                    steps=probe_steps,
-                    path=baseline_path,
-                )
-                print(
-                    f"[Check LoRAs] Z-Image baseline cached -> {baseline_path}"
-                )
-                if cancel_check():
-                    return False
-
-        _generate(with_lora=True, output_path=out_path, gen_prompt=render_prompt)
-
-        if cross_host and baseline_path:
-            from imagegen_plugins.lora_probe_effect import _probe_cnn_identical_min_cosine
-
-            delta = measure_probe_image_delta(baseline_path, out_path)
-            cnn_threshold = _probe_cnn_identical_min_cosine()
-            if probe_images_effectively_identical(delta):
-                label = entry.display_name if entry else lora_path
-                print(
-                    f"[Check LoRAs] Z-Image probe: no effect for {label!r} "
-                    f"(prompt={render_prompt!r} size={w}x{h} steps={probe_steps} "
-                    f"baseline_reused={not generated_baseline} "
-                    f"mean={delta.mean_diff:.3f} max={delta.max_diff} "
-                    f"phash={delta.phash_distance} "
-                    f"cnn_cosine={delta.cnn_cosine} "
-                    f"cnn_threshold={cnn_threshold})"
-                )
-                return False
-        return True
+        return _run_baseline_vs_lora_probe(
+            model_key=model_key,
+            lora_label=lora_label,
+            prompt=render_prompt,
+            width=w,
+            height=h,
+            steps=probe_steps,
+            cancel_check=cancel_check,
+            baseline_cache=baseline_cache,
+            generate=_generate,
+            seed=42,
+            quantization=4,
+        )
     except Exception as e:
         if is_lora_incompatibility_error(e):
             return False
         raise
     finally:
         release_z_image_session(reason="lora_probe_zimage_done")
-        retain_lora_probe_temp(out_path)
 
 
-def _probe_klein_edit(
+def _probe_klein_create(
     *,
     model_key: str,
     hf_model_id: str,
     lora_path: str,
     lora_scale: float,
     cancel_check: Callable[[], bool],
-    prompt: str = "test edit",
+    prompt: str = "test",
     quantize: int | None = 4,
     model_path: str | None = None,
     lora_label: str = "lora",
+    baseline_cache: Optional[LoraProbeBaselineCache] = None,
 ) -> bool:
-    from PIL import Image
-
-    from imagegen_plugins.mflux_flux2_klein_session import generate_flux2_klein_edit
+    """Klein txt2img: shared no-LoRA baseline vs with-LoRA (prompt only)."""
+    from imagegen_plugins.mflux_flux2_klein_session import generate_flux2_klein_create
+    from imagegen_plugins.pipelines.mflux_flux2_klein_create import (
+        align_mflux_flux2_klein_dims,
+    )
 
     if cancel_check():
         return False
-    w, h = 256, 256
-    img_path = _probe_temp_path(model_key, lora_label, role="kleinsrc")
-    out_path = _probe_temp_path(model_key, lora_label, role="kleinout")
-    try:
-        Image.new("RGB", (w, h), (100, 120, 140)).save(img_path)
-        _prepare_mflux_output_path(out_path)
-        image = generate_flux2_klein_edit(
+    w, h = align_mflux_flux2_klein_dims(
+        LORA_PROBE_SIZE, LORA_PROBE_SIZE, max_side=LORA_PROBE_SIZE
+    )
+    steps = lora_probe_default_steps(model_key)
+    render_prompt = (prompt or "test").strip() or "test"
+
+    def _generate(output_path: str, with_lora: bool) -> None:
+        _prepare_mflux_output_path(output_path)
+        image = generate_flux2_klein_create(
             model_name=hf_model_id,
             quantize=quantize,
             model_path=model_path,
-            lora_paths=[lora_path],
-            lora_scales=[lora_scale],
-            prompt=prompt,
+            lora_paths=[lora_path] if with_lora else None,
+            lora_scales=[lora_scale] if with_lora else None,
+            prompt=render_prompt,
             seed=42,
-            steps=2,
+            steps=steps,
             width=w,
             height=h,
             guidance=1.0,
-            image_paths=[img_path],
             low_ram=True,
             stepwise_dir=None,
         )
-        image.save(path=out_path)
-        return os.path.isfile(out_path) and os.path.getsize(out_path) >= 64
+        image.save(path=output_path)
+
+    try:
+        return _run_baseline_vs_lora_probe(
+            model_key=model_key,
+            lora_label=lora_label,
+            prompt=render_prompt,
+            width=w,
+            height=h,
+            steps=steps,
+            cancel_check=cancel_check,
+            baseline_cache=baseline_cache,
+            generate=_generate,
+            seed=42,
+            quantization=quantize,
+            guidance=1.0,
+        )
     except Exception as e:
         if is_lora_incompatibility_error(e):
             return False
         raise
-    finally:
-        _retain_probe_temps(img_path, out_path)
 
 
 def _probe_diffusers(
@@ -1314,27 +1667,64 @@ def _probe_diffusers(
     cancel_check: Callable[[], bool],
     vae_hf_model_id: str = "",
     keep_pipeline_loaded: bool = False,
+    prompt: str = "test",
+    lora_label: str = "lora",
+    baseline_cache: Optional[LoraProbeBaselineCache] = None,
 ) -> bool:
-    """Load diffusers SD 1.5 / SDXL pipeline + LoRA weights (no inference)."""
+    """SD 1.5 / SDXL T2I: shared no-LoRA baseline vs with-LoRA."""
     if cancel_check():
         return False
-    try:
+    steps = lora_probe_default_steps(hf_model_id)
+    w = h = LORA_PROBE_SIZE
+    render_prompt = (prompt or "test").strip() or "test"
+
+    def _generate(output_path: str, with_lora: bool) -> None:
+        payload: Dict[str, Any] = {
+            "prompt": render_prompt,
+            "width": w,
+            "height": h,
+            "steps": steps,
+            "guidance_scale": 7.5,
+            "output_path": output_path,
+            "hf_model_id": hf_model_id,
+            "random_seed": False,
+            "seed": 42,
+            "show_progressive_images": False,
+        }
+        _prepare_mflux_output_path(output_path)
         if pipeline == "sd15":
-            from imagegen_plugins.pipelines.sd15_diffusers import probe_lora_weights
+            from imagegen_plugins.pipelines.sd15_diffusers import run_from_payload
 
-            probe_lora_weights(
-                hf_model_id,
-                lora_path,
-                lora_scale,
-                vae_hf_model_id=vae_hf_model_id,
-            )
+            if with_lora:
+                payload["sd15_lora_paths"] = [lora_path]
+                payload["sd15_lora_scales"] = [lora_scale]
+            if vae_hf_model_id:
+                payload["vae_hf_model_id"] = vae_hf_model_id
+            run_from_payload(payload)
         elif pipeline == "sdxl":
-            from imagegen_plugins.pipelines.sdxl_diffusers import probe_lora_weights
+            from imagegen_plugins.pipelines.sdxl_diffusers import run_from_payload
 
-            probe_lora_weights(hf_model_id, lora_path, lora_scale)
+            if with_lora:
+                payload["sdxl_lora_paths"] = [lora_path]
+                payload["sdxl_lora_scales"] = [lora_scale]
+            run_from_payload(payload)
         else:
             raise ValueError(f"Unknown diffusers probe pipeline: {pipeline}")
-        return True
+
+    try:
+        return _run_baseline_vs_lora_probe(
+            model_key=hf_model_id,
+            lora_label=lora_label,
+            prompt=render_prompt,
+            width=w,
+            height=h,
+            steps=steps,
+            cancel_check=cancel_check,
+            baseline_cache=baseline_cache,
+            generate=_generate,
+            seed=42,
+            guidance=7.5,
+        )
     except Exception as e:
         if is_lora_incompatibility_error(e):
             return False
@@ -1394,17 +1784,31 @@ def probe_lora_on_model(
     entry: Optional[FluxLoraEntry] = None,
     keep_model_loaded: bool = False,
     probe_prompt: str = "test",
-    baseline_cache: Optional[ZImageBaselineCache] = None,
+    baseline_cache: Optional[LoraProbeBaselineCache] = None,
 ) -> bool:
-    """Return True if a minimal probe succeeds with this LoRA on model_key."""
-    from imagegen_plugins.mflux_lora_presets import assert_lora_compatible_for_model
+    """
+    Return True if a 512x512 T2I probe shows a visual effect vs no-LoRA baseline.
 
-    render_prompt = (probe_prompt or "test").strip() or "test"
+    Prompt includes known trigger words when ``entry`` is provided.
+    """
+    from imagegen_plugins.mflux_lora_presets import assert_lora_compatible_for_model
 
     try:
         weights_path, lora_scale = _resolved_probe_lora_weights(entry, lora_path)
     except FileNotFoundError:
         return False
+
+    if entry is not None:
+        from imagegen_plugins.lora_catalog import lora_probe_prompt
+
+        render_prompt = lora_probe_prompt(
+            entry,
+            fallback=probe_prompt,
+            weights_path=weights_path,
+            allow_online=False,
+        )
+    else:
+        render_prompt = (probe_prompt or "test").strip() or "test"
 
     try:
         assert_lora_compatible_for_model(
@@ -1416,6 +1820,7 @@ def probe_lora_on_model(
         return False
 
     lora_label = _probe_lora_display_label(entry, weights_path)
+    cache = baseline_cache
 
     if model_key == FLUX1_SCHNELL:
         return _probe_t2i(
@@ -1426,6 +1831,7 @@ def probe_lora_on_model(
             cancel_check=cancel_check,
             prompt=render_prompt,
             lora_label=lora_label,
+            baseline_cache=cache,
         )
     if model_key == FLUX1_DEV:
         return _probe_t2i(
@@ -1436,18 +1842,10 @@ def probe_lora_on_model(
             cancel_check=cancel_check,
             prompt=render_prompt,
             lora_label=lora_label,
-        )
-    if model_key == FLUX1_FILL_DEV:
-        return _probe_fill(
-            model_key=model_key,
-            lora_path=weights_path,
-            lora_scale=lora_scale,
-            cancel_check=cancel_check,
-            prompt=render_prompt,
-            lora_label=lora_label,
+            baseline_cache=cache,
         )
     if model_key == FLUX2_KLEIN_4B:
-        return _probe_klein_edit(
+        return _probe_klein_create(
             model_key=model_key,
             hf_model_id=FLUX2_KLEIN_4B,
             lora_path=weights_path,
@@ -1455,9 +1853,10 @@ def probe_lora_on_model(
             cancel_check=cancel_check,
             prompt=render_prompt,
             lora_label=lora_label,
+            baseline_cache=cache,
         )
     if model_key == FLUX2_KLEIN_9B:
-        return _probe_klein_edit(
+        return _probe_klein_create(
             model_key=model_key,
             hf_model_id=FLUX2_KLEIN_9B,
             lora_path=weights_path,
@@ -1465,9 +1864,10 @@ def probe_lora_on_model(
             cancel_check=cancel_check,
             prompt=render_prompt,
             lora_label=lora_label,
+            baseline_cache=cache,
         )
     if model_key == FLUX2_KLEIN_9B_KV:
-        return _probe_klein_edit(
+        return _probe_klein_create(
             model_key=model_key,
             hf_model_id=FLUX2_KLEIN_9B_KV,
             lora_path=weights_path,
@@ -1475,6 +1875,7 @@ def probe_lora_on_model(
             cancel_check=cancel_check,
             prompt=render_prompt,
             lora_label=lora_label,
+            baseline_cache=cache,
         )
     if model_key == SCENEWORKS_FLUX2_KLEIN_9B_KV_MLX:
         from imagegen_plugins.sceneworks_klein_mlx import (
@@ -1488,7 +1889,7 @@ def probe_lora_on_model(
         )
         if not tier_path:
             return False
-        return _probe_klein_edit(
+        return _probe_klein_create(
             model_key=model_key,
             hf_model_id=SCENEWORKS_FLUX2_KLEIN_9B_KV_MLX,
             lora_path=weights_path,
@@ -1498,6 +1899,7 @@ def probe_lora_on_model(
             quantize=None,
             model_path=tier_path,
             lora_label=lora_label,
+            baseline_cache=cache,
         )
     if model_key in SD15_LORA_MODEL_KEYS:
         vae = (
@@ -1513,6 +1915,9 @@ def probe_lora_on_model(
             cancel_check=cancel_check,
             vae_hf_model_id=vae,
             keep_pipeline_loaded=keep_model_loaded,
+            prompt=render_prompt,
+            lora_label=lora_label,
+            baseline_cache=cache,
         )
     if model_key == SDXL_BASE_1_0:
         return _probe_diffusers(
@@ -1522,6 +1927,9 @@ def probe_lora_on_model(
             lora_scale=lora_scale,
             cancel_check=cancel_check,
             keep_pipeline_loaded=keep_model_loaded,
+            prompt=render_prompt,
+            lora_label=lora_label,
+            baseline_cache=cache,
         )
     if model_key == Z_IMAGE_TURBO_MFLUX_4BIT:
         return _probe_z_image_turbo(
@@ -1532,7 +1940,7 @@ def probe_lora_on_model(
             cancel_check=cancel_check,
             prompt=render_prompt,
             entry=entry,
-            baseline_cache=baseline_cache,
+            baseline_cache=cache,
             lora_label=lora_label,
         )
     raise ValueError(f"Unknown LoRA probe model: {model_key}")
@@ -1544,6 +1952,13 @@ def _init_lora_probe_states(
     not_installed_models: List[str],
     previous_support: Dict[str, Any],
 ) -> List[_LoraProbeState]:
+    """
+    Seed each LoRA's supported list with prior passes for models *outside*
+    this run's probe set. Models in ``plan_item.models`` start unset and are
+    re-added only on pass / history reuse — so a scoped re-run cannot wipe
+    unrelated model support.
+    """
+    _ = not_installed_models
     states: List[_LoraProbeState] = []
     for plan_item in plan:
         entry = plan_item.entry
@@ -1559,9 +1974,14 @@ def _init_lora_probe_states(
             else set(previous_support.get(lora_id, ()))
         )
         prev_models |= set(plan_item.cached_support)
-        supported = [m for m in not_installed_models if m in prev_models]
-        for model_key in plan_item.cached_support:
-            if model_key not in supported:
+        plan_models = set(plan_item.models)
+        # Preserve prior / cached passes for models not tested in this run
+        # (not-installed bases, unselected models, etc.).
+        supported: List[str] = [
+            m for m in LORA_PROBE_MODEL_ORDER if m in prev_models and m not in plan_models
+        ]
+        for model_key in prev_models:
+            if model_key not in plan_models and model_key not in supported:
                 supported.append(model_key)
         states.append(
             _LoraProbeState(
@@ -1769,6 +2189,13 @@ def _finalize_lora_probe_state(
     cancelled: bool = False,
 ) -> None:
     plan_item = state.plan_item
+    # On cancel, keep prior support for models we never finished testing.
+    if cancelled:
+        for model_key in plan_item.models:
+            if model_key in state.models_completed:
+                continue
+            if model_key in state.prev_models and model_key not in state.supported:
+                state.supported.append(model_key)
     supported = state.supported
     lora_label = state.lora_label
     registered_lora_id = state.lora_id
@@ -2005,7 +2432,14 @@ def run_lora_compatibility_check(
         if m in _PROBEABLE_MODEL_KEYS and not lora_probe_model_is_local(m)
     ]
 
-    local_models = plan[0].models if plan else installed_probeable_models()
+    # Preserve selection order; only models that appear on at least one plan item.
+    selected_models = opts.resolved_model_keys()
+    models_in_plan: Set[str] = set()
+    for plan_item in plan:
+        models_in_plan.update(plan_item.models)
+    local_models = [m for m in selected_models if m in models_in_plan]
+    if not local_models:
+        local_models = [m for m in LORA_PROBE_MODEL_ORDER if m in models_in_plan]
     lora_states = _init_lora_probe_states(
         plan,
         not_installed_models=not_installed_models,
@@ -2016,7 +2450,7 @@ def run_lora_compatibility_check(
     stats.models_for_lora = len(local_models)
 
     probe_idx = 0
-    z_image_baseline_cache = ZImageBaselineCache()
+    baseline_cache = LoraProbeBaselineCache()
     for model_i, model_key in enumerate(local_models, start=1):
         if cancel_check():
             result.cancelled = True
@@ -2028,7 +2462,8 @@ def run_lora_compatibility_check(
         gpu_lora_indices = [
             idx
             for idx, probe_state in enumerate(lora_states)
-            if _needs_gpu_probe(
+            if model_key in probe_state.plan_item.models
+            and _needs_gpu_probe(
                 probe_state,
                 model_key,
                 previous_support=previous_support,
@@ -2037,7 +2472,7 @@ def run_lora_compatibility_check(
             )
         ]
         if gpu_lora_indices:
-            z_image_baseline_cache.reset_for_model(model_key)
+            baseline_cache.reset_for_model(model_key)
         elif opts.skip_unchanged and any(
             model_key in probe_state.plan_item.probed_models_from_history
             for probe_state in lora_states
@@ -2051,6 +2486,9 @@ def run_lora_compatibility_check(
             if cancel_check():
                 result.cancelled = True
                 break
+
+            if model_key not in state.plan_item.models:
+                continue
 
             lora_idx = lora_i - 1
             stats.lora_index = lora_i
@@ -2073,6 +2511,7 @@ def run_lora_compatibility_check(
                     and model_key not in state.supported
                 ):
                     state.supported.append(model_key)
+                _mark_model_completed(state, model_key)
                 progress_callback(
                     probe_idx,
                     work_total,
@@ -2142,7 +2581,9 @@ def run_lora_compatibility_check(
                 f"[Check LoRAs] Model {model_i}/{len(local_models)} "
                 f"{lora_model_display_name(model_key)} · "
                 f"LoRA {lora_i}/{loras_per_model} «{state.lora_label}» "
-                f"(render {stats.gpu_probes_done + 1}/{stats.probes_total})"
+                f"(render {stats.gpu_probes_done + 1}/{stats.probes_total}, "
+                f"{LORA_PROBE_SIZE}x{LORA_PROBE_SIZE}, "
+                f"steps={lora_probe_default_steps(model_key)})"
             )
             try:
                 ok = probe_lora_on_model(
@@ -2153,7 +2594,7 @@ def run_lora_compatibility_check(
                     entry=state.entry,
                     keep_model_loaded=keep_model_loaded,
                     probe_prompt=opts.probe_prompt,
-                    baseline_cache=z_image_baseline_cache,
+                    baseline_cache=baseline_cache,
                 )
             except Exception as e:
                 print(
@@ -2161,6 +2602,12 @@ def run_lora_compatibility_check(
                     f"{model_key!r}: {e}"
                 )
                 ok = False
+
+            # Cancel mid-probe returns False from probe_lora_on_model — do not
+            # treat that as a real fail (would wipe support / write lost_support).
+            if cancel_check():
+                result.cancelled = True
+                break
 
             _record_probe_result(
                 state=state,

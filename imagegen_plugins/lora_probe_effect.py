@@ -169,7 +169,7 @@ def cleanup_lora_probe_temps() -> None:
 
 
 @dataclass
-class ZImageBaselineCache:
+class LoraProbeBaselineCache:
     """One shared no-LoRA baseline render per model + probe prompt per Check LoRAs run."""
 
     model_key: str = ""
@@ -226,3 +226,7 @@ class ZImageBaselineCache:
             self.height = 0
             self.steps = 0
             self.path = ""
+
+
+# Back-compat alias (Z-Image was the first consumer).
+ZImageBaselineCache = LoraProbeBaselineCache

@@ -213,15 +213,13 @@ def write_check_loras_report(
                 lines.append(f"  … and {len(missing) - 80} more")
 
     lines.extend(["", "=== Changes ==="])
-    for change in result.changes[:500]:
+    for change in result.changes:
         if change.model_label:
             lines.append(
                 f"  [{change.kind}] {change.model_label} → {change.lora_label}"
             )
         else:
             lines.append(f"  [{change.kind}] {change.lora_label}")
-    if len(result.changes) > 500:
-        lines.append(f"  … and {len(result.changes) - 500} more changes")
 
     lines.extend(probe_elapsed_footer_lines(result))
 
