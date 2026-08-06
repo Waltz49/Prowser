@@ -383,12 +383,20 @@ class _ImportLoraWorker(QThread):
                 catalog_host_id=entry.host_id,
             )
             if not self._model_already_supported(entry.lora_id):
+                from imagegen_plugins.lora_catalog import lora_probe_prompt
+
                 ok = probe_lora_on_model(
                     self._model_key,
                     entry.local_path or "",
                     entry.scale,
                     self._cancelled,
                     entry=entry,
+                    probe_prompt=lora_probe_prompt(
+                        entry,
+                        fallback="test",
+                        weights_path=entry.local_path or "",
+                        allow_online=False,
+                    ),
                 )
                 if self._cancelled():
                     self.finished_result.emit(False, "Cancelled", entry)

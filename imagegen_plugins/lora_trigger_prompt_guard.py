@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 import re
-from typing import Any, Dict, List
+from typing import Any, Dict, Iterable, List
 
 from imagegen_plugins.lora_catalog import get_lora_entry
 from imagegen_plugins.mflux_lora_presets import effective_lora_ids_from_values
@@ -40,13 +40,29 @@ def _format_prompt_with_triggers(prompt_s: str, trigger_block: str) -> str:
     return f"{prompt_s}\n\n{block}"
 
 
+def ensure_triggers_in_prompt(prompt: str, triggers: Iterable[str]) -> str:
+    """Return prompt with any missing trigger words added (TRIGGER_POSITION)."""
+    prompt_s = (prompt or "").strip()
+    missing: List[str] = []
+    seen = set()
+    for raw in triggers:
+        trigger = str(raw or "").strip()
+        if not trigger:
+            continue
+        key = trigger.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        if not prompt_contains_lora_trigger(prompt_s, trigger):
+            missing.append(trigger)
+    if not missing:
+        return prompt_s
+    return _format_prompt_with_triggers(prompt_s, "\n\n".join(missing))
+
+
 def prompt_with_lora_trigger_added(prompt: str, trigger: str) -> str:
     """Add the trigger to the prompt when it is missing (placement from TRIGGER_POSITION)."""
-    prompt_s = (prompt or "").strip()
-    trigger_s = (trigger or "").strip()
-    if not trigger_s or prompt_contains_lora_trigger(prompt_s, trigger_s):
-        return prompt_s
-    return _format_prompt_with_triggers(prompt_s, trigger_s)
+    return ensure_triggers_in_prompt(prompt, [trigger])
 
 
 def _missing_lora_trigger_words(values: Dict[str, Any]) -> List[str]:

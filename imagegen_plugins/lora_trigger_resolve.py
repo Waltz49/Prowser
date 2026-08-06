@@ -6,7 +6,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Optional, Tuple
+from typing import Dict, Iterable, List, Optional, Tuple
 
 from imagegen_plugins.lora_entry import FluxLoraEntry
 
@@ -67,6 +67,54 @@ def resolve_lora_trigger(
     return TriggerResolveResult(trigger=trigger, source=source)
 
 
+def known_trigger_for_lora_entry(
+    entry: FluxLoraEntry,
+    *,
+    weights_path: Optional[str | Path] = None,
+    allow_online: bool = True,
+) -> Optional[str]:
+    """Catalog / metadata / online trigger for one entry; None when unknown."""
+    trigger = (entry.trigger_word or "").strip()
+    if trigger:
+        return trigger
+    resolved = resolve_lora_trigger(
+        entry,
+        weights_path=weights_path,
+        allow_online=allow_online,
+        timeout_s=4.0,
+    )
+    trigger = (resolved.trigger or "").strip()
+    return trigger or None
+
+
+def collect_known_lora_triggers(
+    entries: Iterable[Tuple[FluxLoraEntry, Optional[str | Path]]],
+    *,
+    allow_online: bool = False,
+) -> List[str]:
+    """
+    Deduped known triggers for the given (entry, weights_path) pairs.
+
+    Order follows first appearance. Does not invent triggers.
+    """
+    out: List[str] = []
+    seen = set()
+    for entry, weights_path in entries:
+        trigger = known_trigger_for_lora_entry(
+            entry,
+            weights_path=weights_path,
+            allow_online=allow_online,
+        )
+        if not trigger:
+            continue
+        key = trigger.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(trigger)
+    return out
+
+
 def lora_probe_prompt_with_resolved_trigger(
     entry: FluxLoraEntry,
     *,
@@ -75,19 +123,36 @@ def lora_probe_prompt_with_resolved_trigger(
     allow_online: bool = True,
 ) -> str:
     """Build probe prompt: known trigger (if any) + user fallback text."""
+    from imagegen_plugins.lora_trigger_prompt_guard import ensure_triggers_in_prompt
+
     fb = (fallback or "test").strip() or "test"
-    trigger = (entry.trigger_word or "").strip()
-    if not trigger:
-        resolved = resolve_lora_trigger(
-            entry,
-            weights_path=weights_path,
-            allow_online=allow_online,
-            timeout_s=4.0,
-        )
-        trigger = (resolved.trigger or "").strip()
+    trigger = known_trigger_for_lora_entry(
+        entry,
+        weights_path=weights_path,
+        allow_online=allow_online,
+    )
     if not trigger:
         return fb
-    return f"{trigger}, {fb}"
+    return ensure_triggers_in_prompt(fb, [trigger])
+
+
+def check_loras_shared_probe_prompt(
+    user_prompt: str,
+    entries: Iterable[Tuple[FluxLoraEntry, Optional[str | Path]]],
+    *,
+    allow_online: bool = False,
+) -> Tuple[str, List[str]]:
+    """
+    One prompt for every Check LoRAs render (baseline + each LoRA).
+
+    Collects all known triggers, ensures each is present in the user prompt,
+    and returns (shared_prompt, triggers_used).
+    """
+    from imagegen_plugins.lora_trigger_prompt_guard import ensure_triggers_in_prompt
+
+    fb = (user_prompt or "test").strip() or "test"
+    triggers = collect_known_lora_triggers(entries, allow_online=allow_online)
+    return ensure_triggers_in_prompt(fb, triggers), triggers
 
 
 def _resolve_weights_path(

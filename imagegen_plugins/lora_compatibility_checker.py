@@ -133,6 +133,7 @@ class LoraCheckStats:
     skipped_model_probes: int = 0
     newly_enabled_count: int = 0
     newly_supported_count: int = 0
+    passed_probe_count: int = 0
     failed_probe_count: int = 0
     skipped_hidden_count: int = 0
     downloads_scanned: int = 0
@@ -194,7 +195,7 @@ class PreparedLoraProbePlan:
 
 @dataclass
 class LoraCheckChange:
-    kind: str  # newly_supported | lost_support | newly_enabled | skipped_hidden | failed | skipped_not_on_disk | downloads_deduped | downloads_registered | downloads_failed
+    kind: str  # newly_supported | lost_support | newly_enabled | skipped_hidden | failed | passed | skipped_not_on_disk | downloads_deduped | downloads_registered | downloads_failed
     lora_id: str
     lora_label: str
     model_key: str = ""
@@ -1789,7 +1790,8 @@ def probe_lora_on_model(
     """
     Return True if a 512x512 T2I probe shows a visual effect vs no-LoRA baseline.
 
-    Prompt includes known trigger words when ``entry`` is provided.
+    ``probe_prompt`` is used as-is for both the no-LoRA baseline and the
+    with-LoRA render (caller supplies any shared trigger text).
     """
     from imagegen_plugins.mflux_lora_presets import assert_lora_compatible_for_model
 
@@ -1798,17 +1800,7 @@ def probe_lora_on_model(
     except FileNotFoundError:
         return False
 
-    if entry is not None:
-        from imagegen_plugins.lora_catalog import lora_probe_prompt
-
-        render_prompt = lora_probe_prompt(
-            entry,
-            fallback=probe_prompt,
-            weights_path=weights_path,
-            allow_online=False,
-        )
-    else:
-        render_prompt = (probe_prompt or "test").strip() or "test"
+    render_prompt = (probe_prompt or "test").strip() or "test"
 
     try:
         assert_lora_compatible_for_model(
@@ -2111,9 +2103,19 @@ def _record_probe_result(
 
     if ok:
         stats.last_result = "pass"
+        stats.passed_probe_count += 1
         if model_key not in state.supported:
             state.supported.append(model_key)
         if not plan_item.from_downloads:
+            result.changes.append(
+                LoraCheckChange(
+                    kind="passed",
+                    lora_id=lora_id,
+                    lora_label=lora_label,
+                    model_key=model_key,
+                    model_label=model_label,
+                )
+            )
             if not was_supported:
                 stats.newly_supported_count += 1
                 result.changes.append(
@@ -2449,6 +2451,20 @@ def run_lora_compatibility_check(
     stats.loras_total = loras_per_model
     stats.models_for_lora = len(local_models)
 
+    from imagegen_plugins.lora_trigger_resolve import check_loras_shared_probe_prompt
+
+    shared_probe_prompt, shared_triggers = check_loras_shared_probe_prompt(
+        opts.probe_prompt,
+        [(state.entry, state.lora_path) for state in lora_states],
+        allow_online=False,
+    )
+    print(
+        f"[Check LoRAs] Shared probe prompt "
+        f"({len(shared_triggers)} known trigger"
+        f"{'' if len(shared_triggers) == 1 else 's'}): "
+        f"{shared_probe_prompt!r}"
+    )
+
     probe_idx = 0
     baseline_cache = LoraProbeBaselineCache()
     for model_i, model_key in enumerate(local_models, start=1):
@@ -2569,6 +2585,9 @@ def run_lora_compatibility_check(
 
             next_gpu_idx = next((i for i in gpu_lora_indices if i > lora_idx), None)
             keep_model_loaded = next_gpu_idx is not None
+            # Clear before pre-probe UI update so a prior pass is not attributed
+            # to this LoRA when the progress signal is delivered later.
+            stats.last_result = ""
             progress_callback(
                 probe_idx,
                 work_total,
@@ -2593,7 +2612,7 @@ def run_lora_compatibility_check(
                     cancel_check,
                     entry=state.entry,
                     keep_model_loaded=keep_model_loaded,
-                    probe_prompt=opts.probe_prompt,
+                    probe_prompt=shared_probe_prompt,
                     baseline_cache=baseline_cache,
                 )
             except Exception as e:
@@ -2603,9 +2622,11 @@ def run_lora_compatibility_check(
                 )
                 ok = False
 
-            # Cancel mid-probe returns False from probe_lora_on_model — do not
-            # treat that as a real fail (would wipe support / write lost_support).
-            if cancel_check():
+            cancelled_now = cancel_check()
+            # Cancel mid-probe returns False — do not record that as a real fail.
+            # A completed pass must still be recorded even if cancel was requested
+            # during the tail of the probe (EXIF write, etc.).
+            if cancelled_now and not ok:
                 result.cancelled = True
                 break
 
@@ -2633,6 +2654,9 @@ def run_lora_compatibility_check(
                 model_key,
                 stats,
             )
+            if cancelled_now:
+                result.cancelled = True
+                break
             time.sleep(0)
 
         if gpu_lora_indices:

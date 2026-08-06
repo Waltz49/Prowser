@@ -25,21 +25,45 @@ from utils import (
     apply_standard_dialog_layout,
     get_button_style,
     get_dialog_shell_stylesheet,
+    raise_dialog_without_space_hop,
     show_styled_warning,
 )
 
+_active_dialog: Optional["LoraMapDialog"] = None
+
 
 def _lora_map_rows() -> List[Tuple[str, List[str]]]:
-    """Return (lora_label, model_labels) sorted by LoRA display name."""
-    from imagegen_plugins.hf_model_ids import lora_model_display_name
-    from imagegen_plugins.lora_catalog import get_lora_entry, lora_model_support
+    """Return (lora_label, model_labels) sorted by LoRA display name.
 
-    support = lora_model_support()
+    Uses the same association rules as the LoRA combos / settings grid:
+    curated host models (e.g. Furry → SD1.5) plus Check LoRAs probe passes.
+    """
+    from config import get_config
+    from imagegen_plugins.hf_model_ids import LORA_PROBE_MODEL_ORDER, lora_model_display_name
+    from imagegen_plugins.lora_catalog import (
+        catalog_entries_sorted,
+        lora_probe_passed_for_model,
+    )
+    from imagegen_plugins.lora_catalog_settings import lora_catalog_from_settings
+
+    settings = get_config().load_settings()
+    lc = lora_catalog_from_settings(settings)
+    raw_ms = lc.get("model_support")
+    model_support = raw_ms if isinstance(raw_ms, dict) else {}
+
     rows: List[Tuple[str, List[str]]] = []
-    for lora_id, model_keys in support.items():
-        entry = get_lora_entry(lora_id)
-        label = (entry.display_name.strip() if entry else "") or lora_id
-        models = [lora_model_display_name(mk) for mk in model_keys]
+    for entry in catalog_entries_sorted(settings):
+        label = (entry.display_name.strip() if entry.display_name else "") or entry.lora_id
+        models = [
+            lora_model_display_name(mk)
+            for mk in LORA_PROBE_MODEL_ORDER
+            if lora_probe_passed_for_model(
+                entry.lora_id,
+                mk,
+                entry=entry,
+                model_support=model_support,
+            )
+        ]
         rows.append((label, models))
     rows.sort(key=lambda row: row[0].lower())
     return rows
@@ -98,11 +122,19 @@ class LoraMapDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Map LoRAs")
-        self.setModal(True)
+        self.setModal(False)
+        self.setWindowFlags(
+            Qt.WindowType.Window
+            | Qt.WindowType.WindowTitleHint
+            | Qt.WindowType.WindowSystemMenuHint
+            | Qt.WindowType.WindowCloseButtonHint
+            | Qt.WindowType.WindowMinMaxButtonsHint
+        )
         self.setMinimumSize(520, 400)
         self.resize(720, 640)
         self._html = build_lora_map_html()
         self._setup_ui()
+        self.finished.connect(self._on_finished)
 
     def _setup_ui(self) -> None:
         th = get_active_theme()
@@ -142,10 +174,15 @@ class LoraMapDialog(QDialog):
         btn_row.addWidget(save_btn)
         close_btn = QPushButton("Close")
         close_btn.setDefault(True)
-        close_btn.clicked.connect(self.accept)
+        close_btn.clicked.connect(self.reject)
         btn_row.addWidget(close_btn)
         btn_row.addStretch()
         layout.addLayout(btn_row)
+
+    def _on_finished(self, *_args) -> None:
+        global _active_dialog
+        if _active_dialog is self:
+            _active_dialog = None
 
     def _default_save_path(self) -> str:
         stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -180,6 +217,12 @@ class LoraMapDialog(QDialog):
 
 
 def show_lora_map_dialog(parent=None) -> None:
-    """Tools > Debug > Map LoRAs."""
+    """Tools > Debug > Map LoRAs (non-modal; raise if already open)."""
+    global _active_dialog
+    if _active_dialog is not None:
+        raise_dialog_without_space_hop(_active_dialog)
+        return
     dialog = LoraMapDialog(parent)
-    dialog.exec()
+    _active_dialog = dialog
+    dialog.show()
+    raise_dialog_without_space_hop(dialog)

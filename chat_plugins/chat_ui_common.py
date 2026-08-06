@@ -623,6 +623,9 @@ class ChatPromptLibraryPreview(QLabel):
         self._full_text = text
         self._refresh()
 
+    def prompt_text(self) -> str:
+        return self._full_text
+
     def resizeEvent(self, event) -> None:  # noqa: N802
         super().resizeEvent(event)
         self._refresh()

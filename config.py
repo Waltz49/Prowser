@@ -524,7 +524,8 @@ class ImageBrowserConfig:
             # Saved filter patterns list
             'saved_filters': [],
 
-            # Settings dialog window size [width, height] (restored on open; updated after resize / tab fit)
+            # Settings dialog window geometry (Qt saveGeometry hex) and size fallback [w, h]
+            'settings_dialog_geometry': '',
             'settings_dialog_size': [920, 680],
 
             # Theme tab collapsible section expanded state (False = collapsed)

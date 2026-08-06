@@ -492,16 +492,18 @@ class LoraSummaryCombo(QComboBox):
         super().showPopup()
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
+        # Stack mode: open the multi-select popup ourselves.
+        # Single-select (SD15): defer to QComboBox so show/hide pairing stays
+        # correct — manually calling showPopup() and consuming the press makes
+        # the repositioned list dismiss on the matching mouseup.
         parent = self.parent()
         if (
             isinstance(parent, LoraStackField)
+            and parent._stack_mode
             and self.isEnabled()
             and event.button() == Qt.MouseButton.LeftButton
         ):
-            if parent._stack_mode:
-                parent._open_popup()
-            else:
-                self.showPopup()
+            parent._open_popup()
             event.accept()
             return
         super().mousePressEvent(event)
@@ -703,7 +705,7 @@ class LoraStackField(QWidget):
         self._sync_combo_click_filters()
 
     def eventFilter(self, obj: Any, event: Any) -> bool:
-        if not self.summary_combo.isEnabled():
+        if not self._stack_mode or not self.summary_combo.isEnabled():
             return super().eventFilter(obj, event)
         if event.type() != QEvent.Type.MouseButtonPress:
             return super().eventFilter(obj, event)
@@ -711,10 +713,7 @@ class LoraStackField(QWidget):
             return super().eventFilter(obj, event)
         if not self._is_combo_surface_widget(obj):
             return super().eventFilter(obj, event)
-        if self._stack_mode:
-            self._open_popup()
-        else:
-            self.summary_combo.showPopup()
+        self._open_popup()
         return True
 
     def _open_popup(self) -> None:

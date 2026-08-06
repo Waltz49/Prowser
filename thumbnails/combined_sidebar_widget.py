@@ -506,6 +506,11 @@ class CombinedSidebarWidget(QWidget):
             self.tree_widget.setFocus()
         elif disp[1] and self.preview_widget:
             self.preview_widget.setFocus()
+
+    def enterEvent(self, event):
+        """Restore browse cursor when the pointer enters any sidebar pane."""
+        super().enterEvent(event)
+        self._refresh_browse_cursor_for_pointer()
         
     def setup_ui(self):
         """Setup the combined widget UI"""

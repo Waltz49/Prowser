@@ -7,6 +7,7 @@ import html
 import sys
 import threading
 import time
+from dataclasses import replace
 from typing import List, Optional
 
 from PySide6.QtCore import QObject, QThread, QTimer, Signal, Slot, Qt
@@ -167,13 +168,15 @@ class LoraCheckWorkerThread:
                 model_key: str,
                 stats: LoraCheckStats,
             ) -> None:
+                # Snapshot stats: QueuedConnection delivers later; the worker
+                # mutates the live object (e.g. pass → fail) before the UI runs.
                 self._bridge.progress_signal.emit(
                     probe_idx,
                     probe_total,
                     phase,
                     lora_id,
                     model_key,
-                    stats,
+                    replace(stats),
                 )
 
             try:
@@ -305,6 +308,7 @@ def _format_progress_html(
             lines.append("Last result: <span style='color:#888'>skipped (registered)</span>")
         lines.append(
             f"Installed models in plan: {stats.models_total} · "
+            f"Passed probes: {stats.passed_probe_count} · "
             f"Passed LoRAs: {stats.supported_loras} · "
             f"Newly enabled: {stats.newly_enabled_count} · "
             f"Failed probes: {stats.failed_probe_count}"
@@ -465,9 +469,10 @@ class CheckLorasOptionsDialog(QDialog):
         self._probe_prompt_edit.setText(options.probe_prompt or "test")
         layout.addWidget(self._probe_prompt_edit)
         probe_hint = QLabel(
-            "Used for every probe render (baseline and with-LoRA). "
-            "Known LoRA triggers are added automatically when available; "
-            "you can also include them here (e.g. ghibli style, …)."
+            "Used for every probe render (baseline and each LoRA). "
+            "All known triggers from the LoRAs in this run are gathered once "
+            "and ensured in this prompt so every render uses the same text; "
+            "you can also include triggers here yourself."
         )
         probe_hint.setWordWrap(True)
         layout.addWidget(probe_hint)
@@ -637,6 +642,7 @@ def _format_results_text_sections(result: LoraCheckResult) -> List[str]:
         f"  On-disk LoRAs tested: {st.loras_done}/{st.loras_total}",
         f"  Installed models: {st.models_total}",
         f"  GPU renders: {st.gpu_probes_done}/{st.probes_total}",
+        f"  Passed probes this run: {st.passed_probe_count}",
         f"  LoRAs with at least one pass: {st.supported_loras}",
         f"  LoRAs with no pass: {st.removed_loras}",
         f"  Newly compatible pairs: {st.newly_supported_count}",
@@ -666,6 +672,7 @@ def _format_results_text_sections(result: LoraCheckResult) -> List[str]:
 
     newly_enabled = _changes_of(result, "newly_enabled")
     newly_supported = _changes_of(result, "newly_supported")
+    passed = _changes_of(result, "passed")
     failed = _changes_of(result, "failed")
     lost = _changes_of(result, "lost_support")
     hidden = _changes_of(result, "skipped_hidden")
@@ -701,6 +708,7 @@ def _format_results_text_sections(result: LoraCheckResult) -> List[str]:
         if len(items) > limit:
             lines.append(f"  … and {len(items) - limit} more")
 
+    add_section("Passed probes", passed)
     add_section("Newly enabled", newly_enabled)
     add_section("Downloads registered", downloads_registered)
     add_section("Newly compatible (not newly enabled)", compat_only)
@@ -1203,7 +1211,12 @@ def _start_probe_run(
         # Short join only — never block the GUI on a stuck MLX probe.
         worker.wait(500)
         if abandoned:
-            print("[Check LoRAs] Ignoring result after abandoned progress dialog")
+            print(
+                "[Check LoRAs] Progress dialog abandoned; still applying "
+                "partial results if any"
+            )
+            if isinstance(result, LoraCheckResult) and result.stats.probes_done > 0:
+                _apply_check_result(parent, result)
             return
         if result is None:
             show_styled_warning(

@@ -76,7 +76,18 @@ from config import (
     merge_browse_transparency_settings,
 )
 from thumbnails.thumbnail_constants import get_image_extensions, clear_image_extensions_cache, DIALOG_TEXT_COLOR_HEX, asset_path
-from utils import format_file_size, styled_message_box, show_styled_warning, show_styled_information, show_styled_critical, show_styled_question, show_scrollable_text_dialog
+from utils import (
+    ensure_dialog_fits_screen,
+    format_file_size,
+    restore_dialog_geometry_hex,
+    save_dialog_geometry_hex,
+    show_scrollable_text_dialog,
+    show_styled_critical,
+    show_styled_information,
+    show_styled_question,
+    show_styled_warning,
+    styled_message_box,
+)
 from theme.theme_service import (
     apply_theme,
     default_dark_theme_colors,
@@ -779,7 +790,14 @@ class SettingsDialog(QDialog):
         super().__init__(parent)
         self.setObjectName("settingsDialog")
         self.setWindowTitle("Prowser Preferences")
-        self.setModal(True)
+        self.setModal(False)
+        self.setWindowFlags(
+            Qt.WindowType.Window
+            | Qt.WindowType.WindowTitleHint
+            | Qt.WindowType.WindowSystemMenuHint
+            | Qt.WindowType.WindowCloseButtonHint
+            | Qt.WindowType.WindowMinMaxButtonsHint
+        )
         self.setFocusPolicy(Qt.StrongFocus)
         self.setMinimumSize(400, 300)
         self._sync_theme_context()
@@ -819,10 +837,12 @@ class SettingsDialog(QDialog):
         self._browse_color_picker_active = None
         self._browse_color_picker_tid = None
 
+        self._geometry_hex_at_load: Optional[str] = None
         self._geometry_save_timer = QTimer(self)
         self._geometry_save_timer.setSingleShot(True)
         self._geometry_save_timer.setInterval(300)
         self._geometry_save_timer.timeout.connect(self._persist_settings_dialog_geometry)
+        self.finished.connect(self._persist_settings_dialog_geometry)
         
         # Install event filter to catch modifier key changes
         self.installEventFilter(self)
@@ -1135,31 +1155,55 @@ class SettingsDialog(QDialog):
         self._settings_dialog_initializing = False
 
     def _apply_saved_settings_dialog_geometry(self):
-        """Restore last saved dialog size from config (defaults merged in load_settings)."""
+        """Apply size fallback before first show (full pos+size restored in showEvent)."""
         w, h = 920, 680
         try:
-            sz = get_config().load_settings().get("settings_dialog_size")
+            settings = get_config().load_settings()
+            geom = settings.get("settings_dialog_geometry")
+            if isinstance(geom, str) and geom.strip():
+                # Full geometry is restored on first show; keep a sensible construction size.
+                self.resize(w, h)
+                return
+            sz = settings.get("settings_dialog_size")
             if isinstance(sz, (list, tuple)) and len(sz) >= 2:
                 w = max(400, min(3000, int(sz[0])))
                 h = max(300, min(2000, int(sz[1])))
         except (TypeError, ValueError):
             pass
         self.resize(w, h)
-        self._settings_dialog_geometry_at_load = [w, h]
 
-    def _persist_settings_dialog_geometry(self):
-        """Save current dialog size to config only when it changed."""
+    def _restore_saved_settings_dialog_geometry(self) -> None:
+        """Restore saved position/size before each show."""
         try:
-            size = [self.width(), self.height()]
-            if getattr(self, "_settings_dialog_geometry_at_load", None) == size:
+            geom_hex = get_config().load_settings().get("settings_dialog_geometry")
+            if isinstance(geom_hex, str) and geom_hex.strip():
+                restore_dialog_geometry_hex(self, geom_hex.strip(), self.parent())
+            else:
+                ensure_dialog_fits_screen(self, self.parent())
+            self._geometry_hex_at_load = save_dialog_geometry_hex(self)
+        except Exception:
+            pass
+
+    def _persist_settings_dialog_geometry(self, *_args) -> None:
+        """Save current dialog position and size when they changed."""
+        if getattr(self, "_settings_dialog_initializing", False):
+            return
+        try:
+            geom_hex = save_dialog_geometry_hex(self)
+            if geom_hex == getattr(self, "_geometry_hex_at_load", None):
                 return
-            get_config().update_setting("settings_dialog_size", size)
-            self._settings_dialog_geometry_at_load = list(size)
+            get_config().update_settings(
+                {
+                    "settings_dialog_geometry": geom_hex,
+                    "settings_dialog_size": [self.width(), self.height()],
+                }
+            )
+            self._geometry_hex_at_load = geom_hex
         except Exception:
             pass
 
     def _adjust_size_and_persist_geometry(self):
-        """Fit dialog to current tab content, then save size (used after tab change / Faces lazy load)."""
+        """Fit dialog to current tab content, then save geometry (after tab change / Faces lazy load)."""
         self.adjustSize()
         self._persist_settings_dialog_geometry()
 
@@ -8502,6 +8546,7 @@ class SettingsDialog(QDialog):
 
     def showEvent(self, event):
         """Handle show events to update button state"""
+        self._restore_saved_settings_dialog_geometry()
         super().showEvent(event)
         self._capture_theme_snapshot_at_open()
         combo_tid = (
@@ -8637,8 +8682,14 @@ class SettingsDialog(QDialog):
             self.reset_button.clicked.connect(self.reset_tab_to_defaults)
     
     def resizeEvent(self, event):
-        """Debounce-save dialog size when the user resizes."""
+        """Debounce-save dialog geometry when the user resizes."""
         super().resizeEvent(event)
+        if not getattr(self, "_settings_dialog_initializing", False):
+            self._geometry_save_timer.start()
+
+    def moveEvent(self, event):
+        """Debounce-save dialog geometry when the user moves the window."""
+        super().moveEvent(event)
         if not getattr(self, "_settings_dialog_initializing", False):
             self._geometry_save_timer.start()
 

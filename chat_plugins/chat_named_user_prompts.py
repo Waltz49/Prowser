@@ -38,13 +38,18 @@ from chat_plugins.chat_prompt_grammar import (
 )
 from chat_plugins.chat_ui_common import (
     ChatImageThumbRow,
-    ChatPromptLibraryPreview,
     _local_paths_from_mime,
     chat_library_edit_button_stylesheet,
     chat_library_trash_button_stylesheet,
     chat_prompt_edit_stylesheet,
     install_cmd_enter_accept,
+    prompt_library_preview_height_px,
 )
+from imagegen_plugins.image_gen_form_layout import (
+    IMAGE_GEN_FIELD_RESET_BTN_SIZE,
+    image_gen_prompt_copy_btn_stylesheet,
+)
+from thumbnails.thumbnail_constants import COPY_SYMBOL
 from utils import get_button_style, get_dialog_shell_stylesheet
 
 ICON_BTN_SIZE = 22
@@ -281,14 +286,45 @@ class ChatUserPromptLibraryDialog(QDialog):
         self._new_prompt_images = _existing_image_paths(new_prompt_images)
         self._main_window = main_window
         self._radio_by_id: dict[str, QRadioButton] = {}
+        self._preview_prompt_id: str | None = None
         self._button_group = QButtonGroup(self)
         self._button_group.setExclusive(True)
         self._button_group.buttonToggled.connect(self._on_prompt_radio_toggled)
 
         layout = QVBoxLayout(self)
-        layout.addWidget(QLabel("Select a favorite to use:"))
 
-        self._preview = ChatPromptLibraryPreview(self)
+        header_row = QWidget()
+        header_layout = QHBoxLayout(header_row)
+        header_layout.setContentsMargins(0, 0, 0, 0)
+        header_layout.setSpacing(6)
+        header_layout.addWidget(QLabel("Select a favorite to use:"))
+        copy_btn = QPushButton(COPY_SYMBOL)
+        copy_btn.setObjectName("favoriteUserPromptCopyBtn")
+        copy_btn.setToolTip("Copy to clipboard")
+        copy_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        copy_btn.setFixedSize(
+            IMAGE_GEN_FIELD_RESET_BTN_SIZE, IMAGE_GEN_FIELD_RESET_BTN_SIZE
+        )
+        copy_btn.setStyleSheet(
+            image_gen_prompt_copy_btn_stylesheet(
+                selector="QPushButton#favoriteUserPromptCopyBtn"
+            )
+        )
+        copy_btn.clicked.connect(self._copy_preview_text)
+        header_layout.addWidget(
+            copy_btn,
+            0,
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+        )
+        header_layout.addStretch(1)
+        layout.addWidget(header_row)
+
+        self._preview = QPlainTextEdit(self)
+        self._preview.setLineWrapMode(QPlainTextEdit.LineWrapMode.WidgetWidth)
+        self._preview.setStyleSheet(chat_prompt_edit_stylesheet())
+        self._preview.setMinimumHeight(
+            max(120, prompt_library_preview_height_px(self._preview.font(), 6))
+        )
         layout.addWidget(self._preview)
 
         scroll = QScrollArea()
@@ -319,6 +355,7 @@ class ChatUserPromptLibraryDialog(QDialog):
         return self._store
 
     def selected_entry(self) -> ChatUserPromptEntry | None:
+        self._commit_preview_edits()
         self._sync_selected_from_ui()
         entry = self._store.selected_entry()
         if entry is None:
@@ -332,20 +369,49 @@ class ChatUserPromptLibraryDialog(QDialog):
 
     def _on_prompt_radio_toggled(self, _button: QRadioButton, checked: bool) -> None:
         if checked:
+            self._commit_preview_edits()
             self._update_preview()
+
+    def _copy_preview_text(self) -> None:
+        from copy_feedback import copy_text_to_clipboard
+
+        if self._preview.isReadOnly():
+            copy_text_to_clipboard("", anchor=self._preview)
+            return
+        copy_text_to_clipboard(self._preview.toPlainText(), anchor=self._preview)
+
+    def _commit_preview_edits(self) -> None:
+        if not self._preview_prompt_id or self._preview.isReadOnly():
+            return
+        entry = self._store.find_prompt(self._preview_prompt_id)
+        if entry is None:
+            return
+        entry.text = self._preview.toPlainText()
 
     def _update_preview(self) -> None:
         if not self._store.prompts:
-            self._preview.set_prompt_text("No favorite user prompts yet.")
+            self._preview_prompt_id = None
+            self._preview.setReadOnly(True)
+            self._preview.setPlaceholderText("No favorite user prompts yet.")
+            self._preview.setPlainText("")
             return
+        self._preview.setReadOnly(False)
+        self._preview.setPlaceholderText("")
         for prompt_id, radio in self._radio_by_id.items():
             if radio.isChecked():
                 entry = self._store.find_prompt(prompt_id)
-                self._preview.set_prompt_text(entry.text if entry else "")
+                text = entry.text if entry else ""
+                self._preview_prompt_id = prompt_id
+                if self._preview.toPlainText() != text:
+                    self._preview.setPlainText(text)
                 return
-        self._preview.set_prompt_text("")
+        self._preview_prompt_id = None
+        self._preview.setPlainText("")
 
     def _rebuild_prompt_list(self) -> None:
+        # Drop preview binding so rebuild selection does not write stale editor text
+        # over store values already updated by add/edit/delete.
+        self._preview_prompt_id = None
         while self._list_layout.count():
             item = self._list_layout.takeAt(0)
             if item.widget():
@@ -413,6 +479,7 @@ class ChatUserPromptLibraryDialog(QDialog):
                 return
 
     def _add_prompt(self) -> None:
+        self._commit_preview_edits()
         dlg = ChatUserPromptEditDialog(
             self,
             title="New user prompt",
@@ -438,6 +505,7 @@ class ChatUserPromptLibraryDialog(QDialog):
         self._rebuild_prompt_list()
 
     def _edit_prompt(self, prompt_id: str) -> None:
+        self._commit_preview_edits()
         entry = self._store.find_prompt(prompt_id)
         if entry is None:
             return
@@ -463,6 +531,7 @@ class ChatUserPromptLibraryDialog(QDialog):
         self._rebuild_prompt_list()
 
     def _delete_prompt(self, prompt_id: str) -> None:
+        self._commit_preview_edits()
         entry = self._store.find_prompt(prompt_id)
         if entry is None:
             return
@@ -478,6 +547,8 @@ class ChatUserPromptLibraryDialog(QDialog):
         self._rebuild_prompt_list()
 
     def accept(self) -> None:
+        apply_chat_prompt_save_format_to_widget(self._preview)
+        self._commit_preview_edits()
         self._sync_selected_from_ui()
         super().accept()
 

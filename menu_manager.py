@@ -1243,6 +1243,14 @@ class MenuManager:
         miscellaneous_separator_action.setDefaultWidget(TextSeparator("Miscellaneous"))
         tools_menu.addAction(miscellaneous_separator_action)
 
+        self.main_window.favorite_prompts_action = QAction(
+            "Favorite prompts...", self.main_window
+        )
+        self.main_window.favorite_prompts_action.triggered.connect(
+            self._open_favorite_prompts
+        )
+        tools_menu.addAction(self.main_window.favorite_prompts_action)
+
         # Map Location (cmd-G)
         self.main_window.map_location_action = QAction("Show GPS Location on Map", self.main_window)
         self.main_window.map_location_action.setShortcut(QKeySequence("Ctrl+G"))
@@ -1518,6 +1526,19 @@ class MenuManager:
         from browser_window.managers.lmstudio_launcher import open_lmstudio_or_show_install_help
 
         open_lmstudio_or_show_install_help(self.main_window)
+
+    def _open_favorite_prompts(self):
+        """Tools > Miscellaneous > Favorite prompts…"""
+        chat = getattr(self.main_window, "sidebar_chat_widget", None)
+        if chat is not None and hasattr(chat, "open_favorite_user_prompts"):
+            chat.open_favorite_user_prompts()
+            return
+        from chat_plugins.chat_named_user_prompts import run_chat_user_prompt_library
+
+        run_chat_user_prompt_library(
+            self.main_window,
+            main_window=self.main_window,
+        )
 
     def _debug_list_models(self):
         """Tools > Debug > List Models — browse cached HF and LM Studio models."""
