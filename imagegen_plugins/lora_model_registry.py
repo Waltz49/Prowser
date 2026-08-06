@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Dict, Iterable, List, Optional, Tuple
 
 from imagegen_plugins.hf_model_ids import (
     FLUX1_DEV,
@@ -364,6 +364,30 @@ def lora_model_key_for_plugin(plugin: "ImageGenModelPlugin") -> Optional[str]:
 def lora_model_key_from_values(values: dict) -> Optional[str]:
     hf = str(values.get("hf_model_id") or "").strip()
     return hf or None
+
+
+def is_cross_family_lora_model(entry: FluxLoraEntry, model_key: str) -> bool:
+    """True when model_key belongs to a different LoRA host family than entry.host_id."""
+    mk = (model_key or "").strip()
+    if not mk:
+        return False
+    entry_host = (entry.host_id or "").strip()
+    model_host = host_id_for_lora_model(mk)
+    if not entry_host or not model_host:
+        return False
+    return entry_host != model_host
+
+
+def cross_family_models_for_entry(
+    entry: FluxLoraEntry,
+    supported_model_keys: Iterable[str],
+) -> Tuple[str, ...]:
+    """Model keys in supported_model_keys that are cross-family for this entry."""
+    return tuple(
+        mk
+        for mk in supported_model_keys
+        if is_cross_family_lora_model(entry, str(mk))
+    )
 
 
 def host_id_for_lora_model(model_key: str) -> Optional[str]:

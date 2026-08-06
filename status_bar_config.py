@@ -787,20 +787,9 @@ class ClickableFilterLabel(QLabel):
         else:
             normalized_pattern = ImageBrowserConfig.normalize_filter_pattern(pattern)
         
-        # Apply filter
-        if hasattr(self.main_window, 'filter_pattern'):
-            self.main_window.filter_pattern = normalized_pattern
-            # Update setting
-            config.update_setting('filter_pattern', normalized_pattern)
-            # Update status bar immediately to reflect filter change
-            if hasattr(self.main_window, 'status_bar_manager'):
-                self.main_window.status_bar_manager._update_filter_section(self.main_window)
-            # Sync filter pattern to file tree
-            if hasattr(self.main_window, 'file_tree_handler') and self.main_window.file_tree_handler:
-                self.main_window.file_tree_handler.sync_filter_pattern_from_main_window()
-            # Refresh directory to apply filter
-            if hasattr(self.main_window, 'refresh_directory'):
-                self.main_window.refresh_directory()
+        # Apply filter via model (single source of truth)
+        if hasattr(self.main_window, 'filter_settings_model') and self.main_window.filter_settings_model:
+            self.main_window.filter_settings_model.set_filter_pattern(normalized_pattern, persist=True, notify=True)
     
     def _show_filter_dialog(self):
         """Show the filter editing dialog"""

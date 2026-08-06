@@ -2340,8 +2340,6 @@ class CustomFileSystemFilter(QSortFilterProxyModel):
         super().__init__(parent)
         self.filter_callback: Optional[Callable[[str], bool]] = None
         self.canvas_images: Set[str] = set()
-        self.filter_pattern: Optional[str] = None
-        self.filtered_tree: str = 'images'  # 'all', 'images', or 'use_filter'
         self.priority_paths: Set[str] = set()
         # Cache for deep image discovery results
         self.has_images_cache: Dict[str, bool] = {}
@@ -2388,7 +2386,30 @@ class CustomFileSystemFilter(QSortFilterProxyModel):
         self._context_generation: int = 0
         self._expanded_dirs_cache: Optional[Set[str]] = None
         self._in_filter_accept_row: bool = False
+        self._cached_filter_pattern: Optional[str] = "*"
+        self._cached_filtered_tree_mode: str = "images"
         self.refresh_filter_settings()
+
+    def _refresh_filter_runtime_snapshot(self) -> None:
+        """Read filter settings from the model once per filter pass (hot path uses cache)."""
+        model = getattr(self.main_window, "filter_settings_model", None) if self.main_window else None
+        if model:
+            pattern = model.get_filter_pattern()
+            mode = model.get_filtered_tree()
+        else:
+            pattern = getattr(self.main_window, "filter_pattern", None) if self.main_window else None
+            mode = getattr(self.main_window, "filtered_tree", "images") if self.main_window else "images"
+        if isinstance(mode, bool):
+            mode = "use_filter" if mode else "images"
+        self._cached_filter_pattern = pattern
+        self._cached_filtered_tree_mode = mode
+
+    def invalidate_on_filter_settings_changed(self) -> None:
+        """Clear derived caches and re-filter after filter settings model changes."""
+        self._clear_image_caches()
+        self.refresh_filter_settings()
+        if self._batch_filter_updates == 0:
+            self._invalidate_filter_now()
 
     def attach_discovery_service(self, service: Optional[TreeImageDiscoveryService]) -> None:
         """Wire background image discovery (main thread only)."""
@@ -2419,10 +2440,11 @@ class CustomFileSystemFilter(QSortFilterProxyModel):
             self._cached_always_show_work = bool(settings.get("always_show_work", False))
         except Exception:
             self._cached_always_show_work = get_always_show_work()
-        mode = self.normalize_filtered_tree_mode()
+        self._refresh_filter_runtime_snapshot()
+        mode = self._cached_filtered_tree_mode
         self._check_context = build_tree_image_check_context(
             mode,
-            self.filter_pattern,
+            self._cached_filter_pattern,
             process_hidden=self._cached_show_hidden,
             follow_symlinks=self._cached_follow_symlinks,
             enabled_root_dirs=self._enabled_root_dirs,
@@ -2478,8 +2500,9 @@ class CustomFileSystemFilter(QSortFilterProxyModel):
     def _make_cache_key(self, dir_path: str) -> str:
         if self._check_context:
             return self._check_context.cache_key_for(dir_path)
-        mode = self.normalize_filtered_tree_mode()
-        filter_pattern_key = self.filter_pattern if (mode == "use_filter" and self.filter_pattern) else ""
+        mode = self._cached_filtered_tree_mode
+        filter_pattern = self._cached_filter_pattern
+        filter_pattern_key = filter_pattern if (mode == "use_filter" and filter_pattern) else ""
         return f"{dir_path}:4:{mode}:{filter_pattern_key}"
 
     def _get_cached_has_images(self, dir_path: str) -> Optional[bool]:
@@ -2651,40 +2674,20 @@ class CustomFileSystemFilter(QSortFilterProxyModel):
         return QIcon(pixmap)
 
     def normalize_filtered_tree_mode(self) -> str:
-        if isinstance(self.filtered_tree, bool):
-            self.filtered_tree = 'use_filter' if self.filtered_tree else 'images'
-        return self.filtered_tree
-
-    def set_filter_pattern(self, pattern: Optional[str], *, invalidate: bool = True) -> None:
-        normalized = ImageBrowserConfig.normalize_filter_pattern(pattern)
-        if normalized == self.filter_pattern:
-            return
-        self.filter_pattern = normalized
-        self._clear_image_caches()
-        self.refresh_filter_settings()
-        if invalidate and self._batch_filter_updates == 0:
-            self._invalidate_filter_now()
-
-    def set_filtered_tree(self, mode: str, *, invalidate: bool = True) -> None:
-        """Set tree filtering mode: 'all', 'images', or 'use_filter'"""
-        if isinstance(mode, bool):
-            mode = 'use_filter' if mode else 'images'
-
-        if self.filtered_tree == mode:
-            return
-        self.filtered_tree = mode
-        self._clear_image_caches()
-        self.refresh_filter_settings()
-        if invalidate and self._batch_filter_updates == 0:
-            self._invalidate_filter_now()
+        return self._cached_filtered_tree_mode
 
     def _filename_matches_filter_pattern(self, filename: str, mode: str) -> bool:
         """Match filename against filter_pattern (same rules as sorting_manager)."""
         if mode != "use_filter":
             return True
-        if not self.filter_pattern:
-            return True
-        match_pattern = ImageBrowserConfig.get_filter_pattern_for_matching(self.filter_pattern)
+        match_pattern = None
+        if self._check_context is not None:
+            match_pattern = self._check_context.match_pattern
+        if not match_pattern:
+            filter_pattern = self._cached_filter_pattern
+            if not filter_pattern:
+                return True
+            match_pattern = ImageBrowserConfig.get_filter_pattern_for_matching(filter_pattern)
         if not match_pattern or match_pattern == "*":
             return True
         return fnmatch.fnmatch(filename.lower(), match_pattern.lower())
@@ -2980,10 +2983,25 @@ class FileTreeHandler(QObject):
         self._image_discovery_service: Optional[TreeImageDiscoveryService] = None
         # Don't initialize tree immediately - wait for first access
         if hasattr(main_window, 'event_bus') and main_window.event_bus:
-            from event_bus import DIRECTORY_LOADED, CURRENT_IMAGE_CHANGED, DIRECTORY_CHANGED
+            from event_bus import (
+                DIRECTORY_LOADED,
+                CURRENT_IMAGE_CHANGED,
+                DIRECTORY_CHANGED,
+                FILTER_PATTERN_CHANGED,
+                FILTER_TREE_MODE_CHANGED,
+            )
             main_window.event_bus.subscribe(DIRECTORY_LOADED, self._on_directory_loaded)
             main_window.event_bus.subscribe(CURRENT_IMAGE_CHANGED, self._on_current_image_changed)
             main_window.event_bus.subscribe(DIRECTORY_CHANGED, self._on_directory_changed)
+            main_window.event_bus.subscribe(FILTER_PATTERN_CHANGED, self._on_filter_settings_changed)
+            main_window.event_bus.subscribe(FILTER_TREE_MODE_CHANGED, self._on_filter_settings_changed)
+
+    def _on_filter_settings_changed(self, _value=None) -> None:
+        """Invalidate tree filter caches when filter settings model changes."""
+        if self.filter_proxy:
+            self.filter_proxy.invalidate_on_filter_settings_changed()
+        if hasattr(self, '_filter_icon_redraw'):
+            self._filter_icon_redraw()
 
     def _on_current_image_changed(self, image_path: str):
         """Handle CURRENT_IMAGE_CHANGED event - highlight current file in tree"""
@@ -3023,7 +3041,6 @@ class FileTreeHandler(QObject):
                     if self.is_tree_initialized() and not self.user_requested_directory:
                         self._highlight_directory_in_tree(directory)
                 QTimer.singleShot(100, ensure_directory_highlighted)
-            self.sync_filter_pattern_from_main_window()
             if (
                 self.main_window.displayed_images
                 and self.main_window.highlight_index < len(self.main_window.displayed_images)
@@ -3216,10 +3233,7 @@ class FileTreeHandler(QObject):
         """Get normalized filtered_tree mode."""
         if not self.filter_proxy:
             return 'images'
-        filtered_tree_mode = self.filter_proxy.filtered_tree
-        if isinstance(filtered_tree_mode, bool):
-            return 'use_filter' if filtered_tree_mode else 'images'
-        return filtered_tree_mode
+        return self.filter_proxy.normalize_filtered_tree_mode()
 
     def _needs_priority_paths(self) -> bool:
         """Check if priority_paths are needed based on filtered_tree mode."""
@@ -3622,7 +3636,6 @@ class FileTreeHandler(QObject):
         self._ensure_image_discovery_service()
         if self._toolbar is not None:
             self._toolbar.redraw_filter_icons()
-        self.current_filter_pattern: Optional[str] = None
         self.file_tree = CustomTreeView()
         self.file_tree.set_main_window(self.main_window)
         self.file_tree.setModel(self.filter_proxy)
@@ -4806,52 +4819,6 @@ class FileTreeHandler(QObject):
         self.ensure_tree_initialized()
         return self.file_tree_widget
 
-    def apply_filter_pattern(self, filter_pattern: Optional[str], *, invalidate: bool = True) -> None:
-        if not self.is_tree_initialized():
-            return
-        if not self.filter_proxy:
-            return
-        normalized_pattern = ImageBrowserConfig.normalize_filter_pattern(filter_pattern)
-        self.current_filter_pattern = normalized_pattern
-        self.filter_proxy.set_filter_pattern(normalized_pattern, invalidate=invalidate)
-
-    def sync_filter_pattern_from_main_window(self, *, invalidate: bool = True) -> None:
-        """Push main_window.filter_pattern to the tree filter proxy."""
-        if not self.is_tree_initialized() or not self.filter_proxy:
-            return
-        pattern = getattr(self.main_window, "filter_pattern", None)
-        self.apply_filter_pattern(pattern, invalidate=invalidate)
-
-    def apply_filtered_tree(self, mode: str, *, invalidate: bool = True) -> None:
-        """Apply filtered_tree setting to the filter proxy"""
-        if not self.is_tree_initialized():
-            return
-        if not self.filter_proxy:
-            return
-        self.filter_proxy.set_filtered_tree(mode, invalidate=invalidate)
-        if invalidate and hasattr(self, '_filter_icon_redraw'):
-            self._filter_icon_redraw()
-
-    def synchronize_tree_filter_settings(
-        self,
-        filter_pattern: Optional[str],
-        filtered_tree: str,
-    ) -> None:
-        """Apply filter pattern and tree mode with a single filter invalidation."""
-        if not self.is_tree_initialized() or not self.filter_proxy:
-            return
-        proxy = self.filter_proxy
-        proxy.begin_batch_filter_update()
-        try:
-            normalized_pattern = ImageBrowserConfig.normalize_filter_pattern(filter_pattern)
-            self.current_filter_pattern = normalized_pattern
-            proxy.set_filter_pattern(normalized_pattern, invalidate=False)
-            proxy.set_filtered_tree(filtered_tree, invalidate=False)
-        finally:
-            proxy.end_batch_filter_update()
-        if hasattr(self, '_filter_icon_redraw'):
-            self._filter_icon_redraw()
-
     def navigate_to_file_directory(self, file_path: str) -> None:
         if not self.is_tree_initialized():
             return
@@ -5089,10 +5056,16 @@ class FileTreeHandler(QObject):
 
             # If mode is 'use_filter', we need to filter by pattern
             match_pattern = None
-            if filtered_tree_mode == 'use_filter' and filter_proxy.filter_pattern:
-                pattern = filter_proxy.filter_pattern.strip('*')
-                if pattern:
-                    match_pattern = ImageBrowserConfig.get_filter_pattern_for_matching(filter_proxy.filter_pattern)
+            if filtered_tree_mode == 'use_filter':
+                ctx = getattr(filter_proxy, "_check_context", None)
+                if ctx is not None and ctx.match_pattern:
+                    match_pattern = ctx.match_pattern
+                else:
+                    runtime_pattern = filter_proxy._cached_filter_pattern
+                    if runtime_pattern:
+                        pattern = runtime_pattern.strip('*')
+                        if pattern:
+                            match_pattern = ImageBrowserConfig.get_filter_pattern_for_matching(runtime_pattern)
 
             # Get cache directory to exclude
             try:

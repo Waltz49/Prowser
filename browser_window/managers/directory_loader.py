@@ -700,8 +700,6 @@ class DirectoryLoader:
             # Use current_directory which should be set by now (this is called after load_directory completes)
             if hasattr(self.main_window, 'current_directory') and self.main_window.current_directory:
                 self.main_window.file_tree_handler._highlight_directory_in_tree(self.main_window.current_directory)
-            # Apply current filter pattern to file tree
-            self.main_window.file_tree_handler.apply_filter_pattern(self.main_window.filter_pattern)
             
             # Update file tree root to show the directory of the first file
             if self.main_window.displayed_images:
@@ -820,9 +818,6 @@ class DirectoryLoader:
         # Update file tree highlighting when specific file is loaded
         if self.main_window.file_tree_handler.is_tree_initialized():
             self.main_window.file_tree_handler.highlight_current_file()
-            # Apply current filter pattern to file tree
-            self.main_window.file_tree_handler.apply_filter_pattern(self.main_window.filter_pattern)
-            
             # Update file tree root to show the directory of the target file
             self.main_window.file_tree_handler.update_root_directory(directory)
         

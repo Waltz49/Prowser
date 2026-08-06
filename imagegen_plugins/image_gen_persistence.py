@@ -690,10 +690,12 @@ def save_lora_catalog_state(
     by_host: Optional[Dict[str, Dict[str, list]]] = None,
     by_model: Optional[Dict[str, Dict[str, list]]] = None,
     model_support: Optional[dict] = None,
+    cross_family_models: Optional[dict] = None,
     probe_history: Optional[dict] = None,
 ) -> None:
     from imagegen_plugins.lora_catalog import merged_lora_catalog
     from imagegen_plugins.lora_catalog_settings import (
+        CROSS_FAMILY_MODELS_KEY,
         DELETED_IDS_KEY,
         PROBE_HISTORY_KEY,
         normalize_probe_history,
@@ -728,6 +730,25 @@ def save_lora_catalog_state(
                     continue
                 cleaned[lid_s] = [str(m) for m in models if str(m) in allowed]
             lc["model_support"] = cleaned
+
+        if cross_family_models is not None:
+            prev_cf = lc.get(CROSS_FAMILY_MODELS_KEY)
+            cleaned_cf: dict = {}
+            if isinstance(prev_cf, dict):
+                cleaned_cf = {
+                    str(k): list(v)
+                    for k, v in prev_cf.items()
+                    if str(k) in catalog and isinstance(v, (list, tuple))
+                }
+            allowed = set(LORA_PROBE_MODEL_ORDER)
+            for lid, models in cross_family_models.items():
+                lid_s = str(lid)
+                if lid_s not in catalog:
+                    continue
+                if not isinstance(models, (list, tuple)):
+                    continue
+                cleaned_cf[lid_s] = [str(m) for m in models if str(m) in allowed]
+            lc[CROSS_FAMILY_MODELS_KEY] = cleaned_cf
 
         ms = lc.get("model_support") if isinstance(lc.get("model_support"), dict) else {}
 
@@ -866,7 +887,11 @@ def register_user_lora(
     model_key: str,
     supported_models: list,
 ) -> None:
-    from imagegen_plugins.lora_catalog_settings import DELETED_IDS_KEY, migrate_lora_catalog
+    from imagegen_plugins.lora_catalog_settings import (
+        CROSS_FAMILY_MODELS_KEY,
+        DELETED_IDS_KEY,
+        migrate_lora_catalog,
+    )
     from imagegen_plugins.lora_user_entries import USER_ENTRIES_KEY, _entry_to_dict
 
     def mutate(imagegen: dict) -> None:
@@ -879,6 +904,11 @@ def register_user_lora(
         merged = list(dict.fromkeys([*(prev if isinstance(prev, list) else []), *supported_models]))
         ms[entry.lora_id] = merged
         lc["model_support"] = ms
+        from imagegen_plugins.lora_model_registry import cross_family_models_for_entry
+
+        cf = dict(lc.get(CROSS_FAMILY_MODELS_KEY) or {})
+        cf[entry.lora_id] = list(cross_family_models_for_entry(entry, merged))
+        lc[CROSS_FAMILY_MODELS_KEY] = cf
         bm = dict(lc.get("by_model") or {})
         slice_ = dict(bm.get(model_key) or {"enabled_ids": [], DELETED_IDS_KEY: []})
         enabled = list(slice_.get("enabled_ids") or [])

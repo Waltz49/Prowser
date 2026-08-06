@@ -2088,23 +2088,17 @@ class MenuManager:
         # Show tree if it's not visible (only in thumbnail view)
         if mw.current_view_mode == 'thumbnail' and not mw.file_tree_visible:
             mw.combined_sidebar.set_tree_visible(True)
-        # Update the filtered_tree setting
-        mw.filtered_tree = mode
-        # Apply to file tree handler (sync pattern + mode so use_filter respects filter)
+        # Update the filtered_tree setting via model (persists + notifies)
+        if hasattr(mw, 'filter_settings_model') and mw.filter_settings_model:
+            mw.filter_settings_model.set_filtered_tree(mode, persist=True, notify=True)
+        # Highlight current directory after filter is applied (delay to ensure tree updates)
         if hasattr(mw, 'file_tree_handler') and mw.file_tree_handler:
-            mw.file_tree_handler.synchronize_tree_filter_settings(mw.filter_pattern, mode)
-            # Highlight current directory after filter is applied (delay to ensure tree updates)
             def highlight_after_filter():
                 if hasattr(mw, 'file_tree_handler') and mw.file_tree_handler:
                     # CRITICAL: Don't override user-requested directory selection
                     if not mw.file_tree_handler.user_requested_directory:
                         mw.file_tree_handler.highlight_current_directory()
             QTimer.singleShot(100, highlight_after_filter)
-        # Save to config
-        if hasattr(mw, 'config') and mw.config:
-            settings = mw.config.load_settings()
-            settings['filtered_tree'] = mode
-            mw.config.save_settings(settings)
     
     def _setup_help_menu(self, menubar):
         """Setup Help menu"""

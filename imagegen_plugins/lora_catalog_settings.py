@@ -44,6 +44,7 @@ ENTRY_OVERRIDES_KEY = "entry_overrides"
 USER_PRESET_KEY = "lora_user_preset"
 DELETED_IDS_KEY = "deleted_ids"
 PROBE_HISTORY_KEY = "probe_history"
+CROSS_FAMILY_MODELS_KEY = "cross_family_models"
 
 
 def _empty_slice() -> Dict[str, List[str]]:
@@ -315,6 +316,10 @@ def migrate_lora_catalog(lc: Dict[str, Any]) -> Dict[str, Any]:
         lc[USER_ENTRIES_KEY] = {}
     elif not isinstance(lc.get(USER_ENTRIES_KEY), dict):
         lc[USER_ENTRIES_KEY] = {}
+    if CROSS_FAMILY_MODELS_KEY not in lc:
+        lc[CROSS_FAMILY_MODELS_KEY] = {}
+    elif not isinstance(lc.get(CROSS_FAMILY_MODELS_KEY), dict):
+        lc[CROSS_FAMILY_MODELS_KEY] = {}
     if ENTRY_OVERRIDES_KEY not in lc:
         lc[ENTRY_OVERRIDES_KEY] = {}
     elif not isinstance(lc.get(ENTRY_OVERRIDES_KEY), dict):

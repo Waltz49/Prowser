@@ -3305,14 +3305,12 @@ class ThumbnailCanvas(QWidget):
         else:
             normalized_pattern = ImageBrowserConfig.normalize_filter_pattern(filter_pattern)
         
-        self.main_window.filter_pattern = normalized_pattern
-        config.update_setting('filter_pattern', normalized_pattern)
-        
-        if hasattr(self.main_window, 'status_bar_manager'):
-            self.main_window.status_bar_manager._update_filter_section(self.main_window)
-        
-        if hasattr(self.main_window, 'refresh_directory'):
-            self.main_window.refresh_directory()
+        if hasattr(self.main_window, 'filter_settings_model') and self.main_window.filter_settings_model:
+            self.main_window.filter_settings_model.set_filter_pattern(
+                normalized_pattern,
+                persist=True,
+                notify=True,
+            )
         
         # Clear suggested filters since we're applying a new filter
         self.suggested_filters = []

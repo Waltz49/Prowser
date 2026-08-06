@@ -392,6 +392,65 @@ def lora_model_support(settings: Optional[Dict[str, Any]] = None) -> Dict[str, T
     return out
 
 
+def lora_cross_family_models(
+    settings: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Tuple[str, ...]]:
+    """Per-LoRA model keys where Check LoRAs passed outside the entry's host family."""
+    from imagegen_plugins.lora_catalog_settings import CROSS_FAMILY_MODELS_KEY
+
+    if settings is None:
+        from config import get_config
+
+        settings = get_config().load_settings()
+    lc = lora_catalog_from_settings(settings)
+    raw = lc.get(CROSS_FAMILY_MODELS_KEY)
+    if not isinstance(raw, dict):
+        return {}
+    catalog = merged_lora_catalog(settings)
+    out: Dict[str, Tuple[str, ...]] = {}
+    for lid, models in raw.items():
+        lid_s = str(lid)
+        if lid_s not in catalog:
+            continue
+        if not isinstance(models, list):
+            continue
+        cross = tuple(
+            m for m in LORA_PROBE_MODEL_ORDER if str(m) in {str(x) for x in models}
+        )
+        if cross:
+            out[lid_s] = cross
+    return out
+
+
+def lora_model_is_cross_family(
+    lora_id: str,
+    model_key: str,
+    settings: Optional[Dict[str, Any]] = None,
+    *,
+    entry: Optional[FluxLoraEntry] = None,
+    cross_family: Optional[Dict[str, Any]] = None,
+) -> bool:
+    """True when model_key is a cross-family association for this LoRA."""
+    mk = (model_key or "").strip()
+    if not mk:
+        return False
+    if cross_family is not None:
+        raw_cf = cross_family.get(lora_id, ())
+    else:
+        raw_cf = lora_cross_family_models(settings).get(lora_id, ())
+    if isinstance(raw_cf, (list, tuple)) and raw_cf:
+        return mk in {str(x) for x in raw_cf}
+    resolved = entry if entry is not None else get_lora_entry(lora_id, settings)
+    if resolved is None:
+        return False
+    ms = lora_model_support(settings).get(lora_id, ())
+    if mk not in {str(x) for x in ms}:
+        return False
+    from imagegen_plugins.lora_model_registry import is_cross_family_lora_model
+
+    return is_cross_family_lora_model(resolved, mk)
+
+
 def lora_probe_history(
     settings: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Dict[str, Any]]:
@@ -422,7 +481,11 @@ def lora_base_display_name(entry: FluxLoraEntry, *, model_key: str = "") -> str:
 
 def lora_choice_label(entry: FluxLoraEntry, *, model_key: str = "") -> str:
     """Combo/menu label; appends trigger hint when the catalog entry defines one."""
+    from imagegen_plugins.lora_catalog_settings import lora_catalog_from_settings
+
     base = lora_base_display_name(entry, model_key=model_key)
+    if model_key and lora_model_is_cross_family(entry.lora_id, model_key):
+        base = f"{base} *"
     trigger = (entry.trigger_word or "").strip()
     if trigger:
         return f"{base} - Trigger: {trigger}"

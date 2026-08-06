@@ -483,6 +483,19 @@ class CheckLorasOptionsDialog(QDialog):
         self._skip_unchanged_checkbox.setChecked(bool(options.skip_unchanged))
         layout.addWidget(self._skip_unchanged_checkbox)
 
+        self._check_cross_families_checkbox = QCheckBox(
+            "Check cross families (probe LoRAs on other host families too)"
+        )
+        self._check_cross_families_checkbox.setChecked(
+            bool(options.check_cross_families)
+        )
+        self._check_cross_families_checkbox.setToolTip(
+            "When checked, each LoRA is also tested on installed base models "
+            "outside its catalog host family (e.g. a Flux LoRA on Z-Image Turbo). "
+            "Cross-family passes are marked with * in Map LoRAs."
+        )
+        layout.addWidget(self._check_cross_families_checkbox)
+
         self._all_models_radio.toggled.connect(self._on_model_scope_changed)
         self._selected_models_radio.toggled.connect(self._on_model_scope_changed)
         self._all_loras_radio.toggled.connect(self._on_lora_scope_changed)
@@ -618,6 +631,7 @@ class CheckLorasOptionsDialog(QDialog):
             registration_mode=registration_mode,
             probe_prompt=probe_prompt,
             skip_unchanged=self._skip_unchanged_checkbox.isChecked(),
+            check_cross_families=self._check_cross_families_checkbox.isChecked(),
         )
         self.accept()
 
@@ -785,9 +799,10 @@ def _apply_check_result(parent, result: LoraCheckResult) -> None:
     from imagegen_plugins.check_loras_debug import write_check_loras_report
 
     settings_before = get_config().load_settings()
-    if result.model_support or result.by_model or result.probe_history:
+    if result.model_support or result.cross_family_models or result.by_model or result.probe_history:
         save_lora_catalog_state(
             model_support=result.model_support or None,
+            cross_family_models=result.cross_family_models or None,
             by_model=result.by_model or None,
             probe_history=result.probe_history or None,
         )

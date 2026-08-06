@@ -312,7 +312,11 @@ class DirectoryHistoryHandler:
                 # Load specific files instead of directory
                 self.main_window.load_specific_files(specific_files, external_load=True)
                 if state.get('filter_pattern') is not None:
-                    self.main_window.filter_pattern = state['filter_pattern']
+                    self.main_window.filter_settings_model.set_filter_pattern(
+                        state['filter_pattern'],
+                        persist=False,
+                        notify=True,
+                    )
                     # Update status bar immediately to reflect filter change
                     if hasattr(self.main_window, 'status_bar_manager'):
                         self.main_window.status_bar_manager._update_filter_section(self.main_window)
@@ -344,7 +348,11 @@ class DirectoryHistoryHandler:
                     external_load=True
                 )
                 if state.get('filter_pattern') is not None:
-                    self.main_window.filter_pattern = state['filter_pattern']
+                    self.main_window.filter_settings_model.set_filter_pattern(
+                        state['filter_pattern'],
+                        persist=False,
+                        notify=True,
+                    )
                     # Update status bar immediately to reflect filter change
                     if hasattr(self.main_window, 'status_bar_manager'):
                         self.main_window.status_bar_manager._update_filter_section(self.main_window)
@@ -367,7 +375,11 @@ class DirectoryHistoryHandler:
                 external_load=True
             )
             if state.get('filter_pattern') is not None:
-                self.main_window.filter_pattern = state['filter_pattern']
+                self.main_window.filter_settings_model.set_filter_pattern(
+                    state['filter_pattern'],
+                    persist=False,
+                    notify=True,
+                )
                 # Update status bar immediately to reflect filter change
                 if hasattr(self.main_window, 'status_bar_manager'):
                     self.main_window.status_bar_manager._update_filter_section(self.main_window)

@@ -6438,9 +6438,14 @@ class SettingsDialog(QDialog):
 
     def _lora_settings_choice_label(self, entry, *, model_key: str = "") -> str:
         """LoRA settings row label; elides trigger words longer than 30 characters."""
-        from imagegen_plugins.lora_catalog import lora_base_display_name
+        from imagegen_plugins.lora_catalog import (
+            lora_base_display_name,
+            lora_model_is_cross_family,
+        )
 
         base = lora_base_display_name(entry, model_key=model_key)
+        if model_key and lora_model_is_cross_family(entry.lora_id, model_key):
+            base = f"{base} *"
         trigger = (entry.trigger_word or "").strip()
         if not trigger:
             return base
@@ -9756,15 +9761,15 @@ Total Requests:
             # Normalize pattern for storage (remove trailing asterisk)
             normalized_pattern = ImageBrowserConfig.normalize_filter_pattern(filter_pattern)
             
-            # Apply filter directly to parent window (use pattern with asterisk for matching)
-            self.parent().filter_pattern = ImageBrowserConfig.get_filter_pattern_for_matching(normalized_pattern)
-            # Update status bar immediately to reflect filter change
-            if hasattr(self.parent(), 'status_bar_manager'):
-                self.parent().status_bar_manager._update_filter_section(self.parent())
-            
-            # Save filter_pattern setting - use config from parent if available
-            if hasattr(self.parent(), 'config'):
-                self.parent().config.update_setting('filter_pattern', normalized_pattern)
+            # Apply filter immediately for debugging
+            normalized_pattern = ImageBrowserConfig.normalize_filter_pattern(filter_pattern)
+            parent = self.parent()
+            if parent and hasattr(parent, 'filter_settings_model'):
+                parent.filter_settings_model.set_filter_pattern(
+                    normalized_pattern,
+                    persist=True,
+                    notify=True,
+                )
             
             # Stop thumbnail generation when filter is applied
             if (hasattr(self.parent(), 'cache_manager') and self.parent().cache_manager and 

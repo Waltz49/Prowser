@@ -223,6 +223,38 @@ class ImageBrowserWindow(QMainWindow):
             self.file_data_model.set_current_index(value)
 
     @property
+    def filter_pattern(self) -> Optional[str]:
+        if getattr(self, 'filter_settings_model', None):
+            return self.filter_settings_model.get_filter_pattern()
+        return None
+
+    @filter_pattern.setter
+    def filter_pattern(self, value: Optional[str]) -> None:
+        if getattr(self, 'filter_settings_model', None):
+            self.filter_settings_model.set_filter_pattern(value)
+
+    @property
+    def filtered_tree(self) -> str:
+        if getattr(self, 'filter_settings_model', None):
+            return self.filter_settings_model.get_filtered_tree()
+        return 'images'
+
+    @filtered_tree.setter
+    def filtered_tree(self, value: str) -> None:
+        if getattr(self, 'filter_settings_model', None):
+            self.filter_settings_model.set_filtered_tree(value)
+
+    def set_filter_pattern(
+        self,
+        pattern: Optional[str],
+        *,
+        persist: bool = True,
+        notify: bool = True,
+    ) -> None:
+        if getattr(self, 'filter_settings_model', None):
+            self.filter_settings_model.set_filter_pattern(pattern, persist=persist, notify=notify)
+
+    @property
     def current_index(self) -> int:
         if getattr(self, 'file_data_model', None):
             return self.file_data_model.get_current_index()
@@ -374,14 +406,19 @@ class ImageBrowserWindow(QMainWindow):
         self.file_data_model.current_image_changed.connect(self._on_current_image_changed)
         self.file_data_model.directory_changed.connect(self._on_directory_changed)
         from browser_window.infra.window_model_bridge import WindowModelBridge
+        from filter_settings_model import FilterSettingsModel
+        from browser_window.infra.filter_settings_bridge import FilterSettingsBridge
 
         self._model_event_bridge = WindowModelBridge(self.file_data_model, self.event_bus)
         self._model_event_bridge.connect()
+        self.filter_settings_model = FilterSettingsModel()
+        self._filter_settings_bridge = FilterSettingsBridge(self.filter_settings_model, self.event_bus)
+        self._filter_settings_bridge.connect()
+        self.filter_settings_model.filter_pattern_changed.connect(self._on_filter_pattern_changed)
+        self.filter_settings_model.filtered_tree_changed.connect(self._on_filtered_tree_changed)
         self.launch_macos_space_mode = fullscreen
         self.target_file = target_file
         self.immediate_macos_space_mode = immediate_macos_space_mode
-        # Normalize filter pattern for storage (remove trailing asterisk)
-        self.filter_pattern = ImageBrowserConfig.normalize_filter_pattern(filter_pattern)
         # When True, the current thumbnail set is a specific list of files provided
         # externally (e.g., via API). Used to avoid replacing the set with a full
         # directory scan when exiting fullscreen.
@@ -417,6 +454,13 @@ class ImageBrowserWindow(QMainWindow):
         
         # Load settings
         settings = self.config.load_settings()
+        self.filter_settings_model.load_from_settings(settings, notify=False)
+        if filter_pattern is not None:
+            self.filter_settings_model.set_filter_pattern(
+                filter_pattern,
+                persist=False,
+                notify=False,
+            )
         
         # CNN similarity sorter - lazy initialization (only created when needed)
         # Store config for lazy initialization
@@ -443,18 +487,12 @@ class ImageBrowserWindow(QMainWindow):
         self.allow_quick_mass_rename = settings.get('allow_quick_mass_rename', False)
         self.show_extensions = settings.get('show_extensions', True)
         self.show_image_size = settings.get('show_image_size', False)
-        filtered_tree_setting = settings.get('filtered_tree', 'images')
-        self.filtered_tree = filtered_tree_setting
         self.space_key_mode = settings.get('space_key_mode', 'exit')
         _bh_ms = settings.get('browse_image_history_save_after_ms', 3000)
         try:
             self.browse_image_history_save_after_ms = max(0, min(5000, int(_bh_ms)))
         except (TypeError, ValueError):
             self.browse_image_history_save_after_ms = 3000
-        
-        if self.filter_pattern is None:
-            saved_filter = settings.get('filter_pattern', '')
-            self.filter_pattern = ImageBrowserConfig.normalize_filter_pattern(saved_filter)
         
         # Enhanced similarity settings
         similarity_metric = settings.get('similarity_metric', 'cosine')
@@ -1032,14 +1070,9 @@ class ImageBrowserWindow(QMainWindow):
                 )
             
             if filter_pattern is not None:
-                # Normalize filter pattern for storage (remove trailing asterisk)
-                self.filter_pattern = ImageBrowserConfig.normalize_filter_pattern(filter_pattern)
-                # Update status bar immediately to reflect filter change
+                self.filter_settings_model.set_filter_pattern(filter_pattern, persist=False, notify=True)
                 if hasattr(self, 'status_bar_manager'):
                     self.status_bar_manager._update_filter_section(self)
-                # Sync filter pattern to file tree
-                if hasattr(self, 'file_tree_handler') and self.file_tree_handler.is_tree_initialized():
-                    self.file_tree_handler.sync_filter_pattern_from_main_window()
             if requested_macos_space_mode and not self.isFullScreen():
                 def enter_macos_space_mode_deferred():
                     if should_preserve_window_focus(self):
@@ -2727,17 +2760,6 @@ class ImageBrowserWindow(QMainWindow):
             self.file_tree_handler.ensure_tree_initialized()
             
         try:
-            # Apply filter settings in one batched invalidation
-            if hasattr(self, 'filter_pattern') and hasattr(self, 'filtered_tree'):
-                self.file_tree_handler.synchronize_tree_filter_settings(
-                    self.filter_pattern,
-                    self.filtered_tree,
-                )
-            elif hasattr(self, 'filter_pattern'):
-                self.file_tree_handler.apply_filter_pattern(self.filter_pattern)
-            elif hasattr(self, 'filtered_tree'):
-                self.file_tree_handler.apply_filtered_tree(self.filtered_tree)
-            
             # Update tree root directory if we have a current directory
             if getattr(self, 'current_directory', None):
                 # Add a small delay to ensure the tree model has time to load
@@ -2764,6 +2786,27 @@ class ImageBrowserWindow(QMainWindow):
         except Exception:
             # Don't fail on synchronization errors
             pass
+
+    def _on_filter_pattern_changed(self, _pattern: str) -> None:
+        """React to filter pattern changes from FilterSettingsModel."""
+        if hasattr(self, 'status_bar_manager'):
+            self.status_bar_manager._update_filter_section(self)
+        if self.current_directory and hasattr(self, 'refresh_directory'):
+            self.refresh_directory()
+
+    def _on_filtered_tree_changed(self, _mode: str) -> None:
+        """React to tree filter mode changes from FilterSettingsModel."""
+        if hasattr(self, 'file_tree_handler') and self.file_tree_handler:
+            if hasattr(self.file_tree_handler, '_filter_icon_redraw'):
+                self.file_tree_handler._filter_icon_redraw()
+            def highlight_after_filter():
+                if (
+                    hasattr(self, 'file_tree_handler')
+                    and self.file_tree_handler
+                    and not self.file_tree_handler.user_requested_directory
+                ):
+                    self.file_tree_handler.highlight_current_directory()
+            QTimer.singleShot(100, highlight_after_filter)
 
     def focus_tree(self):
         """Give focus to the tree container and tree widget"""
@@ -4078,9 +4121,6 @@ class ImageBrowserWindow(QMainWindow):
         # Update file tree highlighting when specific file is loaded
         if self.file_tree_handler.is_tree_initialized():
             self.file_tree_handler.highlight_current_file()
-            # Apply current filter pattern to file tree
-            self.file_tree_handler.apply_filter_pattern(self.filter_pattern)
-            
             # Update file tree root to show the directory of the target file
             self.file_tree_handler.update_root_directory(directory)
         
@@ -5943,14 +5983,11 @@ class ImageBrowserWindow(QMainWindow):
                 QTimer.singleShot(100, self.preview_widget.update_preview)
         
         if 'filtered_tree' in new_settings:
-            self.filtered_tree = new_settings['filtered_tree']
-            # Apply filtered_tree setting to file tree (sync pattern + mode)
-            if hasattr(self, 'file_tree_handler'):
-                if self.file_tree_handler.is_tree_initialized():
-                    self.file_tree_handler.synchronize_tree_filter_settings(
-                        self.filter_pattern,
-                        self.filtered_tree,
-                    )
+            self.filter_settings_model.set_filtered_tree(
+                new_settings['filtered_tree'],
+                persist=False,
+                notify=True,
+            )
         
         if 'image_extensions' in new_settings:
             # Clear the cache for get_image_extensions() when extensions change
@@ -6143,15 +6180,13 @@ class ImageBrowserWindow(QMainWindow):
                 self.cache_manager.background_loader.stop()
                 background_loader_was_stopped = True
             
-            # Normalize filter pattern for storage (remove trailing asterisk)
-            self.filter_pattern = ImageBrowserConfig.normalize_filter_pattern(new_settings['filter_pattern'])
-            # Update status bar immediately to reflect filter change
+            self.filter_settings_model.set_filter_pattern(
+                new_settings['filter_pattern'],
+                persist=False,
+                notify=False,
+            )
             if hasattr(self, 'status_bar_manager'):
                 self.status_bar_manager._update_filter_section(self)
-            # Apply filter pattern to file tree (same normalized pattern as main window)
-            if hasattr(self, 'file_tree_handler'):
-                if self.file_tree_handler.is_tree_initialized():
-                    self.file_tree_handler.apply_filter_pattern(self.filter_pattern)
         
         # Only refresh if limit or filter actually changed (defer until after settings dialog closes)
         if limit_or_filter_changed and self.current_directory:

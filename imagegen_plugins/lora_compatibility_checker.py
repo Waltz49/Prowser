@@ -72,6 +72,7 @@ class CheckLorasOptions:
     registration_mode: str = REGISTRATION_IGNORE_PREVIOUS
     probe_prompt: str = "test"
     skip_unchanged: bool = True
+    check_cross_families: bool = True
 
     def resolved_model_keys(self) -> List[str]:
         installed = installed_probeable_models()
@@ -205,6 +206,7 @@ class LoraCheckChange:
 @dataclass
 class LoraCheckResult:
     model_support: Dict[str, List[str]] = field(default_factory=dict)
+    cross_family_models: Dict[str, List[str]] = field(default_factory=dict)
     by_model: Dict[str, Dict[str, List[str]]] = field(default_factory=dict)
     changes: List[LoraCheckChange] = field(default_factory=list)
     hidden_by_host: Dict[str, List[str]] = field(default_factory=dict)
@@ -270,6 +272,7 @@ def check_loras_options_from_settings(
 
     probe_prompt = str(raw.get("probe_prompt") or "test").strip() or "test"
     skip_unchanged = bool(raw.get("skip_unchanged", True))
+    check_cross_families = bool(raw.get("check_cross_families", True))
 
     lora_scope = str(raw.get("lora_scope") or LORA_SCOPE_ALL)
     if lora_scope not in (LORA_SCOPE_ALL, LORA_SCOPE_SELECTED):
@@ -286,6 +289,7 @@ def check_loras_options_from_settings(
         registration_mode=mode,
         probe_prompt=probe_prompt,
         skip_unchanged=skip_unchanged,
+        check_cross_families=check_cross_families,
     )
 
 
@@ -302,6 +306,7 @@ def persist_check_loras_options(options: CheckLorasOptions) -> None:
         "registration_mode": options.registration_mode,
         "probe_prompt": options.probe_prompt,
         "skip_unchanged": bool(options.skip_unchanged),
+        "check_cross_families": bool(options.check_cross_families),
     }
     settings["imagegen"] = imagegen
     get_config().save_settings(settings)
@@ -351,13 +356,16 @@ def _probeable_local_models(_entry: FluxLoraEntry) -> List[str]:
 def _probe_models_for_entry(
     entry: FluxLoraEntry,
     local_models: List[str],
+    *,
+    check_cross_families: bool = True,
 ) -> List[str]:
     """
     Which selected base models to probe for this LoRA.
 
     Curated ``mflux_compatible=True`` entries and orphan Downloads files keep
-    cross-host discovery (every selected installed model). Other entries are
-    limited to the same LoRA host family as ``entry.host_id``.
+    cross-host discovery (every selected installed model). Other entries probe
+    their host family; when ``check_cross_families`` is set, other installed
+    host families are included as well.
     """
     if (
         entry.mflux_compatible is True
@@ -367,20 +375,31 @@ def _probe_models_for_entry(
     from imagegen_plugins.lora_model_registry import host_id_for_lora_model
 
     host = (entry.host_id or "").strip()
+    same_host: List[str] = []
     if host:
-        matched = [
-            m for m in local_models if host_id_for_lora_model(m) == host
-        ]
-        if matched:
-            return matched
-    intended = lora_models_for_entry(entry)
-    if not intended:
-        return list(local_models)
-    allowed: Set[str] = set()
-    for model_key in intended:
-        allowed.update(klein_lora_model_aliases(model_key))
-    matched = [m for m in local_models if m in allowed]
-    return matched if matched else list(local_models)
+        same_host = [m for m in local_models if host_id_for_lora_model(m) == host]
+    if not same_host:
+        intended = lora_models_for_entry(entry)
+        if not intended:
+            return list(local_models)
+        allowed: Set[str] = set()
+        for model_key in intended:
+            allowed.update(klein_lora_model_aliases(model_key))
+        same_host = [m for m in local_models if m in allowed]
+    if not check_cross_families:
+        return same_host if same_host else list(local_models)
+    cross_host = (
+        [m for m in local_models if host_id_for_lora_model(m) != host]
+        if host
+        else []
+    )
+    out: List[str] = []
+    seen: Set[str] = set()
+    for model_key in same_host + cross_host:
+        if model_key not in seen:
+            seen.add(model_key)
+            out.append(model_key)
+    return out if out else list(local_models)
 
 
 def _md5_file(path: Path, *, chunk_size: int = 1024 * 1024) -> str:
@@ -974,7 +993,9 @@ def plan_disk_lora_probes(
             if fingerprint.md5 in planned_md5:
                 stats.files_deduped += 1
                 continue
-            probe_models = _probe_models_for_entry(entry, local_models)
+            probe_models = _probe_models_for_entry(
+                entry, local_models, check_cross_families=opts.check_cross_families,
+            )
             if not probe_models:
                 continue
             planned_md5.add(fingerprint.md5)
@@ -1025,7 +1046,9 @@ def plan_disk_lora_probes(
             if catalog_id and catalog_id not in planned_catalog_ids:
                 entry = get_lora_entry(catalog_id, settings)
                 if entry is not None:
-                    probe_models = _probe_models_for_entry(entry, local_models)
+                    probe_models = _probe_models_for_entry(
+                entry, local_models, check_cross_families=opts.check_cross_families,
+            )
                     if not probe_models:
                         continue
                     planned_catalog_ids.add(catalog_id)
@@ -1065,7 +1088,11 @@ def plan_disk_lora_probes(
                 local_path=str(path),
                 source_path=str(path),
             )
-            probe_models = _probe_models_for_entry(pending_entry, local_models)
+            probe_models = _probe_models_for_entry(
+                pending_entry,
+                local_models,
+                check_cross_families=opts.check_cross_families,
+            )
             history_key = _probe_history_key(_PENDING_DOWNLOAD_LORA_ID, fingerprint)
             hist = probe_history.get(history_key)
             probed_models, cached, all_reused = _plan_item_from_history(
@@ -2268,6 +2295,13 @@ def _finalize_lora_probe_state(
 
     if registered_lora_id and registered_lora_id != _PENDING_DOWNLOAD_LORA_ID:
         model_support[registered_lora_id] = supported
+        from imagegen_plugins.lora_catalog import get_lora_entry
+        from imagegen_plugins.lora_model_registry import cross_family_models_for_entry
+
+        entry_for_cross = get_lora_entry(registered_lora_id, settings) or state.entry
+        result.cross_family_models[registered_lora_id] = list(
+            cross_family_models_for_entry(entry_for_cross, supported)
+        )
         if supported:
             stats.supported_loras += 1
         elif not plan_item.from_downloads:
