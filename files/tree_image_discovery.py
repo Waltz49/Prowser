@@ -221,7 +221,7 @@ def deep_check_has_images(dir_path: str, context: TreeImageCheckContext) -> bool
         if ext not in context.image_exts:
             return False
         if context.mode == "use_filter" and context.match_pattern and context.match_pattern != "*":
-            return fnmatch.fnmatch(basename, context.match_pattern)
+            return fnmatch.fnmatch(basename.lower(), context.match_pattern.lower())
         return True
 
     if dir_path.endswith(os.sep):

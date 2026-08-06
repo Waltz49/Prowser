@@ -2090,9 +2090,9 @@ class MenuManager:
             mw.combined_sidebar.set_tree_visible(True)
         # Update the filtered_tree setting
         mw.filtered_tree = mode
-        # Apply to file tree handler
+        # Apply to file tree handler (sync pattern + mode so use_filter respects filter)
         if hasattr(mw, 'file_tree_handler') and mw.file_tree_handler:
-            mw.file_tree_handler.apply_filtered_tree(mode)
+            mw.file_tree_handler.synchronize_tree_filter_settings(mw.filter_pattern, mode)
             # Highlight current directory after filter is applied (delay to ensure tree updates)
             def highlight_after_filter():
                 if hasattr(mw, 'file_tree_handler') and mw.file_tree_handler:

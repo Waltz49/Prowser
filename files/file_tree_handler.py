@@ -2687,7 +2687,7 @@ class CustomFileSystemFilter(QSortFilterProxyModel):
         match_pattern = ImageBrowserConfig.get_filter_pattern_for_matching(self.filter_pattern)
         if not match_pattern or match_pattern == "*":
             return True
-        return fnmatch.fnmatch(filename, match_pattern)
+        return fnmatch.fnmatch(filename.lower(), match_pattern.lower())
 
     def _quick_check_matching_images(self, dir_path: str) -> bool:
         """Fast check for matching images in immediate directory only (for icon coloring).
@@ -3023,8 +3023,7 @@ class FileTreeHandler(QObject):
                     if self.is_tree_initialized() and not self.user_requested_directory:
                         self._highlight_directory_in_tree(directory)
                 QTimer.singleShot(100, ensure_directory_highlighted)
-            if external_load is False and self.main_window.displayed_images:
-                self.apply_filter_pattern(self.main_window.filter_pattern)
+            self.sync_filter_pattern_from_main_window()
             if (
                 self.main_window.displayed_images
                 and self.main_window.highlight_index < len(self.main_window.displayed_images)
@@ -4815,6 +4814,13 @@ class FileTreeHandler(QObject):
         normalized_pattern = ImageBrowserConfig.normalize_filter_pattern(filter_pattern)
         self.current_filter_pattern = normalized_pattern
         self.filter_proxy.set_filter_pattern(normalized_pattern, invalidate=invalidate)
+
+    def sync_filter_pattern_from_main_window(self, *, invalidate: bool = True) -> None:
+        """Push main_window.filter_pattern to the tree filter proxy."""
+        if not self.is_tree_initialized() or not self.filter_proxy:
+            return
+        pattern = getattr(self.main_window, "filter_pattern", None)
+        self.apply_filter_pattern(pattern, invalidate=invalidate)
 
     def apply_filtered_tree(self, mode: str, *, invalidate: bool = True) -> None:
         """Apply filtered_tree setting to the filter proxy"""

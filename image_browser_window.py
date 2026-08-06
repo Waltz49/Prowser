@@ -1037,6 +1037,9 @@ class ImageBrowserWindow(QMainWindow):
                 # Update status bar immediately to reflect filter change
                 if hasattr(self, 'status_bar_manager'):
                     self.status_bar_manager._update_filter_section(self)
+                # Sync filter pattern to file tree
+                if hasattr(self, 'file_tree_handler') and self.file_tree_handler.is_tree_initialized():
+                    self.file_tree_handler.sync_filter_pattern_from_main_window()
             if requested_macos_space_mode and not self.isFullScreen():
                 def enter_macos_space_mode_deferred():
                     if should_preserve_window_focus(self):
@@ -5941,10 +5944,13 @@ class ImageBrowserWindow(QMainWindow):
         
         if 'filtered_tree' in new_settings:
             self.filtered_tree = new_settings['filtered_tree']
-            # Apply filtered_tree setting to file tree
+            # Apply filtered_tree setting to file tree (sync pattern + mode)
             if hasattr(self, 'file_tree_handler'):
                 if self.file_tree_handler.is_tree_initialized():
-                    self.file_tree_handler.apply_filtered_tree(self.filtered_tree)
+                    self.file_tree_handler.synchronize_tree_filter_settings(
+                        self.filter_pattern,
+                        self.filtered_tree,
+                    )
         
         if 'image_extensions' in new_settings:
             # Clear the cache for get_image_extensions() when extensions change

@@ -795,6 +795,9 @@ class ClickableFilterLabel(QLabel):
             # Update status bar immediately to reflect filter change
             if hasattr(self.main_window, 'status_bar_manager'):
                 self.main_window.status_bar_manager._update_filter_section(self.main_window)
+            # Sync filter pattern to file tree
+            if hasattr(self.main_window, 'file_tree_handler') and self.main_window.file_tree_handler:
+                self.main_window.file_tree_handler.sync_filter_pattern_from_main_window()
             # Refresh directory to apply filter
             if hasattr(self.main_window, 'refresh_directory'):
                 self.main_window.refresh_directory()
