@@ -103,6 +103,7 @@ from workers.message_handler import get_shared_message_handler
 from browser_window.managers.navigation_manager import NavigationManager
 from browser_window.sidebar.preview_widget import PreviewWidget
 from qt_key_debug import log_key_event, set_popup_callback
+from browser_window.managers.directory_watch_manager import DirectoryWatchManager
 from browser_window.managers.refresh_manager import RefreshManager
 from browser_window.sidebar.right_sidebar_combined import RightSidebarCombinedWidget
 from browser_window.managers.selection_manager import SelectionManager
@@ -540,6 +541,7 @@ class ImageBrowserWindow(QMainWindow):
         self._browse_image_history_debounce_timer.timeout.connect(self._on_browse_image_history_debounce_timeout)
         self._browse_image_history_debounce_pending_path: Optional[str] = None
         self.refresh_manager = RefreshManager(self)
+        self.directory_watch_manager = DirectoryWatchManager(self)
         self.ui_layout_manager = UILayoutManager(self)
         self.sorting_manager = SortingManager(self)
         self.thumbnail_display_manager = ThumbnailDisplayManager(self)
@@ -801,6 +803,7 @@ class ImageBrowserWindow(QMainWindow):
             self.reference_graph_data = build_reference_graph(
                 list(paths), focus_path=focus
             )
+            self.sync_directory_watcher()
         else:
             self.clear_reference_graph_presentation()
 
@@ -815,6 +818,12 @@ class ImageBrowserWindow(QMainWindow):
             canvas = self.thumbnail_container.canvas
             canvas._reference_graph_edge_routes = []
             canvas._reference_graph_layout_result = None
+        self.sync_directory_watcher()
+
+    def sync_directory_watcher(self) -> None:
+        """Start or stop directory filesystem watching based on current mode."""
+        if hasattr(self, "directory_watch_manager"):
+            self.directory_watch_manager.sync_watcher_state()
     
     def set_sort_mode(self, mode: SortMode, toggle_reverse: bool = False):
         """Unified method to set sorting mode."""

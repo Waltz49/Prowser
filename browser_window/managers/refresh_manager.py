@@ -43,11 +43,36 @@ class RefreshManager:
 
     def _on_files_changed_on_disk(self, directory: str):
         """Handle FILES_CHANGED_ON_DISK event - run efficient refresh check"""
-        if directory and directory == getattr(self.main_window, 'current_directory', None):
+        current = getattr(self.main_window, 'current_directory', None)
+        if directory and current and self._directory_paths_match(directory, current):
             self._check_and_refresh_if_changed()
+
+    @staticmethod
+    def _directory_paths_match(left: str, right: str) -> bool:
+        try:
+            return os.path.abspath(left) == os.path.abspath(right)
+        except (OSError, ValueError):
+            return left == right
+
+    def _get_filtered_disk_files_set(self) -> Optional[Set[str]]:
+        """Disk file set after sort + filter, matching what the UI displays."""
+        if hasattr(self.main_window, 'directory_loader'):
+            disk_list = self.main_window.directory_loader.get_full_sorted_filtered_list()
+        else:
+            return None
+        return set(disk_list)
+
+    def _get_unfiltered_disk_files_set(self) -> Optional[Set[str]]:
+        """Raw image files in current_directory (before filter)."""
+        if hasattr(self.main_window, 'directory_loader'):
+            return self.main_window.directory_loader._get_current_directory_files()
+        return self.main_window._get_current_directory_files()
     
     def _check_and_refresh_if_changed(self):
         """Check if directory files changed and only refresh if necessary - prevents unnecessary flashing"""
+        if getattr(self.main_window, '_refresh_in_progress', False):
+            return
+        browse_mode = getattr(self.main_window, 'current_view_mode', None) == 'browse'
         # CRITICAL: In specific files mode, refresh only the specific files set
         if getattr(self.main_window, 'specific_files_active', False):
             if hasattr(self.main_window, '_refresh_specific_files_list'):
@@ -57,25 +82,23 @@ class RefreshManager:
         if not self.main_window.current_directory or not os.path.exists(self.main_window.current_directory):
             return
         
-        # Get current files from disk
-        if hasattr(self.main_window, 'directory_loader'):
-            current_files = self.main_window.directory_loader._get_current_directory_files()
-        else:
-            current_files = self.main_window._get_current_directory_files()
+        current_files = self._get_filtered_disk_files_set()
         if current_files is None:
             return
         
         # Get currently displayed files
         displayed_set = set(self.main_window.get_displayed_images() or [])
         
-        # Quick check: if sets are identical, nothing changed - skip refresh
+        # Quick check: if filtered sets are identical, nothing changed - skip refresh
         if displayed_set == current_files:
             displayed_list = self.main_window.get_displayed_images() or []
-            if self._apply_lock_first_order_if_needed(displayed_list):
+            if self._apply_lock_first_order_if_needed(displayed_list, skip_canvas_update=browse_mode):
                 return
             # CRITICAL: Skip mtime loop when exiting browse mode - it can invalidate thumbnails
             # while the worker is loading (race on network volumes like MiscFS), leaving placeholders empty
             if getattr(self.main_window, 'browse_view_exit_in_progress', False):
+                return
+            if browse_mode:
                 return
             # OPTIMIZATION: Skip expensive mtime checks for large result sets
             # Only check mtime if we have a reasonable number of files (< 500)
@@ -100,10 +123,15 @@ class RefreshManager:
             # For large sets, rely on cache manager's stale detection during thumbnail loading
             return
         
-        # Files changed - do efficient refresh
-        self._efficient_refresh_with_changes(current_files, displayed_set)
+        # Files changed - do efficient refresh (use unfiltered scan; filter applied inside)
+        unfiltered_files = self._get_unfiltered_disk_files_set()
+        if unfiltered_files is None:
+            return
+        self._efficient_refresh_with_changes(unfiltered_files, displayed_set)
 
-    def _apply_lock_first_order_if_needed(self, images: List[str]) -> bool:
+    def _apply_lock_first_order_if_needed(
+        self, images: List[str], *, skip_canvas_update: bool = False
+    ) -> bool:
         """Pin locked files to the top without re-sorting unlocked files. Returns True if updated."""
         sm = getattr(self.main_window, 'sorting_manager', None)
         if not sm or not sm.needs_locked_files_first(images):
@@ -113,7 +141,8 @@ class RefreshManager:
             return False
         self.main_window._set_displayed_images_with_sync(ordered, sync=True)
         if (
-            hasattr(self.main_window, 'thumbnail_container')
+            not skip_canvas_update
+            and hasattr(self.main_window, 'thumbnail_container')
             and self.main_window.thumbnail_container
             and hasattr(self.main_window.thumbnail_container, 'canvas')
         ):
@@ -126,13 +155,26 @@ class RefreshManager:
         """Efficiently refresh directory when files changed - only updates what's necessary"""
         current_files_list = list(current_files)
         displayed_images = self.main_window.get_displayed_images() or []
+        browse_mode = getattr(self.main_window, 'current_view_mode', None) == 'browse'
         
-        # Find added and removed files
+        # Find added and removed files (compare filtered displayed set to disk)
         added_files = current_files - displayed_set
         removed_files = displayed_set - current_files
         
         # If only files were removed, use efficient removal
         if removed_files and not added_files:
+            if browse_mode:
+                preserve_current_image = self.main_window.get_current_image_path()
+                new_list = [f for f in displayed_images if f not in removed_files]
+                self.main_window._set_displayed_images_with_sync(new_list, sync=True)
+                if preserve_current_image and preserve_current_image in new_list:
+                    self.main_window.set_current_image_by_path(preserve_current_image, fallback_index=0)
+                elif new_list:
+                    self.main_window.set_current_image_by_path(new_list[0], fallback_index=0)
+                self.main_window.populate_indices_arrays()
+                self.main_window._sync_highlight_index_from_current_image_path(new_list)
+                self.main_window.update_status_bar_sections()
+                return
             self.main_window.remove_thumbnails_for_files(removed_files)
             return
         
@@ -180,8 +222,12 @@ class RefreshManager:
         # Update displayed_images - EventBus DISPLAYED_IMAGES_CHANGED triggers ThumbnailDisplayManager
         self.main_window._set_displayed_images_with_sync(new_list, sync=True)
         
-        # Update list view if in list mode
-        if hasattr(self.main_window, 'current_view_mode') and self.main_window.current_view_mode == 'list':
+        # Update list view if in list mode (skip during browse)
+        if (
+            not browse_mode
+            and hasattr(self.main_window, 'current_view_mode')
+            and self.main_window.current_view_mode == 'list'
+        ):
             if hasattr(self.main_window, 'view_manager') and self.main_window.view_manager:
                 self.main_window.view_manager.update_list_view()
         
@@ -199,8 +245,9 @@ class RefreshManager:
         # This guarantees file path is always the source of truth
         self.main_window._sync_highlight_index_from_current_image_path(new_list)
         
-        # Update UI to reflect the correct highlight
-        self.main_window.highlight_image()
+        # Update UI to reflect the correct highlight (skip hidden thumbnail grid during browse)
+        if not browse_mode:
+            self.main_window.highlight_image()
         
         self.main_window.update_status_bar_sections()
     

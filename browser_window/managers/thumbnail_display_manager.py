@@ -27,6 +27,8 @@ class ThumbnailDisplayManager:
         """Handle DISPLAYED_IMAGES_CHANGED event - update thumbnail canvas"""
         if getattr(self.main_window, '_batch_directory_load', False):
             return
+        if getattr(self.main_window, 'current_view_mode', None) == 'browse':
+            return
         self.generate_thumbnails(force_refresh=False)
 
     def generate_thumbnails(self, force_refresh=False):

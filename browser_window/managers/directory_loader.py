@@ -428,6 +428,8 @@ class DirectoryLoader:
         displayed_count = len(self.main_window.displayed_images) if self.main_window.displayed_images else 0
         if hasattr(self.main_window, 'event_bus') and self.main_window.event_bus:
             self.main_window.event_bus.emit(DIRECTORY_LOADED, (directory, displayed_count, external_load))
+
+        self.main_window.sync_directory_watcher()
     
     def _check_and_open_last_known_directory(self):
         """Check if we should automatically open the last known directory when no thumbnails are displayed"""
@@ -705,6 +707,8 @@ class DirectoryLoader:
             if self.main_window.displayed_images:
                 first_file_dir = os.path.dirname(self.main_window.displayed_images[0])
                 self.main_window.file_tree_handler.update_root_directory(first_file_dir)
+
+        self.main_window.sync_directory_watcher()
     
     def load_file_with_directory_thumbnails(
         self,
@@ -849,6 +853,8 @@ class DirectoryLoader:
         if not should_preserve_window_focus(self.main_window):
             self.main_window.activateWindow()
             self.main_window.raise_()
+
+        self.main_window.sync_directory_watcher()
     
     def open_specific_file(self, file_path: str):
         """Open a specific file when received from macOS file association"""
