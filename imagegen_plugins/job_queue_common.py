@@ -14,6 +14,7 @@ from config import (
     job_queue_action_bar_background_hex,
     job_queue_action_bar_background_qcolor,
     job_queue_cell_background_hex,
+    job_queue_running_cell_background_hex,
 )
 from theme.theme_service import get_active_theme
 from theme.titlebar_icons import titlebar_chip_colors
@@ -25,23 +26,35 @@ _ACTION_BAR_HEIGHT = 28
 _ACTION_BAR_OBJECT_NAME = "jobQueueActionBar"
 
 
-def _job_queue_cell_background_stylesheet() -> str:
-    bg = job_queue_cell_background_hex()
+def _job_queue_cell_background_stylesheet(*, running: bool = False) -> str:
+    bg = (
+        job_queue_running_cell_background_hex()
+        if running
+        else job_queue_cell_background_hex()
+    )
     return f"background-color: {bg};"
 
 
-def _job_queue_action_bar_background_stylesheet() -> str:
-    bg = job_queue_action_bar_background_hex()
+def _job_queue_action_bar_background_stylesheet(*, running: bool = False) -> str:
+    bg = (
+        job_queue_running_cell_background_hex()
+        if running
+        else job_queue_action_bar_background_hex()
+    )
     return f"QWidget#{_ACTION_BAR_OBJECT_NAME} {{ background-color: {bg}; }}"
 
 
-def _apply_job_queue_cell_background(widget: QWidget) -> None:
-    widget.setStyleSheet(_job_queue_cell_background_stylesheet())
+def _apply_job_queue_cell_background(widget: QWidget, *, running: bool = False) -> None:
+    widget.setStyleSheet(_job_queue_cell_background_stylesheet(running=running))
     widget.setAutoFillBackground(True)
 
 
-def _apply_job_queue_action_bar_background(widget: QWidget) -> None:
-    widget.setStyleSheet(_job_queue_action_bar_background_stylesheet())
+def _apply_job_queue_action_bar_background(
+    widget: QWidget, *, running: bool = False
+) -> None:
+    widget.setStyleSheet(
+        _job_queue_action_bar_background_stylesheet(running=running)
+    )
     widget.setAutoFillBackground(True)
 
 
@@ -250,6 +263,13 @@ class JobQueueActionBar(QWidget):
         self._row_idx = row_idx
         controller = self._controller
         has_row = row_idx >= 0
+        rows = controller.queue_snapshot() if has_row else []
+        running = (
+            has_row
+            and row_idx < len(rows)
+            and rows[row_idx].is_active
+        )
+        _apply_job_queue_action_bar_background(self, running=running)
         self._plus_btn.setEnabled(
             has_row and controller.can_add_series_cycle_for_row(row_idx)
         )
@@ -295,7 +315,13 @@ class JobQueueActionBar(QWidget):
         self._cancel_btn.setEnabled(has_row)
 
     def refresh_theme_styles(self) -> None:
-        _apply_job_queue_action_bar_background(self)
+        rows = self._controller.queue_snapshot()
+        running = (
+            self._row_idx >= 0
+            and self._row_idx < len(rows)
+            and rows[self._row_idx].is_active
+        )
+        _apply_job_queue_action_bar_background(self, running=running)
         _configure_icon_push_button(self._plus_btn, "series_plus_icon.png")
         _configure_icon_push_button(self._minus_btn, "series_minus_icon.png")
         _configure_series_toggle_push_button(

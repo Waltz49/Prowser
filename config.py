@@ -123,6 +123,37 @@ def job_queue_cell_background_hex(settings: Optional[dict] = None) -> str:
     return job_queue_cell_background_qcolor(settings).name()
 
 
+def job_queue_running_cell_background_qcolor(settings: Optional[dict] = None):
+    """Running job card fill: slightly darker on light theme, lighter on dark/user."""
+    from PySide6.QtGui import QColor
+
+    from theme.theme_service import get_active_theme
+
+    base = job_queue_cell_background_qcolor(settings)
+    if get_active_theme().theme_id == "light":
+        out = base.darker(112)
+        if out.rgb() == base.rgb():
+            out = QColor(
+                max(0, base.red() - 24),
+                max(0, base.green() - 24),
+                max(0, base.blue() - 24),
+            )
+    else:
+        out = base.lighter(112)
+        if out.rgb() == base.rgb():
+            # Browse border is often #000; Qt lighter() is a no-op on pure black.
+            out = QColor(
+                min(255, base.red() + 36),
+                min(255, base.green() + 36),
+                min(255, base.blue() + 36),
+            )
+    return out
+
+
+def job_queue_running_cell_background_hex(settings: Optional[dict] = None) -> str:
+    return job_queue_running_cell_background_qcolor(settings).name()
+
+
 def job_queue_action_bar_background_hex(settings: Optional[dict] = None) -> str:
     return job_queue_action_bar_background_qcolor(settings).name()
 

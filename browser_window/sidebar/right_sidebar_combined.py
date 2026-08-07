@@ -470,6 +470,11 @@ class RightSidebarCombinedWidget(QWidget):
 
     def _cycle_jobs_pane_size(self) -> None:
         """Double-click: refit current mode, then advance if height unchanged."""
+        from imagegen_plugins.jobs_display_mode import is_jobs_panel_showing
+
+        # Floating Job Control owns the jobs surface in panel mode.
+        if is_jobs_panel_showing(self.main_window):
+            return
         if not self.jobs_visible:
             self.set_jobs_visible(True)
         if not self._pane_visibility()[2] or self.jobs_widget is None:
@@ -977,6 +982,11 @@ class RightSidebarCombinedWidget(QWidget):
         """Set Jobs visibility programmatically (e.g. from J key)"""
         if not self._jobs_feature_enabled:
             return
+        if visible:
+            from imagegen_plugins.jobs_display_mode import ensure_jobs_pane_exclusive
+
+            # Never leave the floating dialog and sidebar pane both visible.
+            ensure_jobs_pane_exclusive(self.main_window)
         if self.jobs_visible != visible:
             self.jobs_visible = visible
             self.jobs_content.setVisible(visible)

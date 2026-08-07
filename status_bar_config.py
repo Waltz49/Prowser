@@ -473,12 +473,17 @@ def _status_bar_info_panel_stylesheet() -> str:
     return f"QWidget {{ background-color: {t.sidebar_background_color_hex}; }}"
 
 
-def _task_info_browser_stylesheet(*, job_queue_cell: bool = False) -> str:
+def _task_info_browser_stylesheet(*, job_queue_cell: bool = False, job_queue_running: bool = False) -> str:
     t = get_active_theme()
     if job_queue_cell:
-        from config import job_queue_cell_background_hex
+        if job_queue_running:
+            from config import job_queue_running_cell_background_hex
 
-        bg = job_queue_cell_background_hex()
+            bg = job_queue_running_cell_background_hex()
+        else:
+            from config import job_queue_cell_background_hex
+
+            bg = job_queue_cell_background_hex()
         text = t.sidebar_text_color_hex
         padding = "2px 4px 2px 4px"
     else:

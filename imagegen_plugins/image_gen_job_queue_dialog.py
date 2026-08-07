@@ -442,6 +442,10 @@ class ImageGenJobQueueDialog(QDialog):
             return
         self._apply_dialog_size_mode(next_mode)
 
+    def cycle_header_size(self) -> None:
+        """Public entry for ⌃J size-cycle when the floating dialog is active."""
+        self._cycle_header_size()
+
     def _on_panel_geometry_changed(self) -> None:
         if self._syncing_shell_geometry:
             return

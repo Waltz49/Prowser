@@ -3117,12 +3117,10 @@ class KeyboardHandlerManager:
         return False
 
     def _handle_ctrl_j_jobs_titlebar(self) -> bool:
-        """Simulate double-click on the jobs pane titlebar (⌃J on macOS)."""
-        rs = getattr(self.main_window, "right_sidebar", None)
-        if rs is None or not getattr(rs, "_jobs_feature_enabled", False):
-            return False
-        rs._expand_jobs_pane_to_fit()
-        return True
+        """Simulate double-click size-cycle on the active jobs surface (⌃J on macOS)."""
+        from imagegen_plugins.jobs_display_mode import cycle_active_jobs_surface_size
+
+        return cycle_active_jobs_surface_size(self.main_window)
 
     def _imagegen_unified_dialog_visible(self) -> bool:
         dlg = getattr(self.main_window, "_imagegen_function_dialog", None)

@@ -49,6 +49,22 @@ def hide_jobs_pane(main_window) -> None:
     _sync_jobs_menu_actions(main_window)
 
 
+def ensure_jobs_pane_exclusive(main_window) -> None:
+    """Claim sidebar pane ownership: hide floating dialog and mark mode as pane."""
+    showing_panel = is_jobs_panel_showing(main_window)
+    mode = get_jobs_display_mode(main_window)
+    if not showing_panel and mode == JOBS_DISPLAY_PANE:
+        return
+    if showing_panel:
+        _hide_job_queue_dialog(main_window)
+    if mode != JOBS_DISPLAY_PANE:
+        main_window.jobs_display_mode = JOBS_DISPLAY_PANE
+        if hasattr(main_window, "config"):
+            main_window.config.update_setting("jobs_display_mode", JOBS_DISPLAY_PANE)
+    _refresh_flyout_buttons(main_window)
+    _sync_jobs_menu_actions(main_window)
+
+
 def _show_job_queue_dialog(main_window) -> None:
     from imagegen_plugins.image_gen_job_queue_dialog import open_imagegen_job_queue_dialog
 
@@ -111,6 +127,23 @@ def toggle_jobs_panel(main_window) -> str:
         _hide_job_queue_dialog(main_window)
         return get_jobs_display_mode(main_window)
     return show_jobs_panel(main_window)
+
+
+def cycle_active_jobs_surface_size(main_window) -> bool:
+    """⌃J: size-cycle the active jobs surface (floating dialog or sidebar pane)."""
+    if is_jobs_panel_showing(main_window):
+        dlg = getattr(main_window, "_imagegen_job_queue_dialog", None)
+        if dlg is not None and hasattr(dlg, "cycle_header_size"):
+            dlg.cycle_header_size()
+            return True
+        return False
+    rs = getattr(main_window, "right_sidebar", None)
+    if rs is None or not getattr(rs, "_jobs_feature_enabled", False):
+        return False
+    if hasattr(rs, "_expand_jobs_pane_to_fit"):
+        rs._expand_jobs_pane_to_fit()
+        return True
+    return False
 
 
 def apply_saved_jobs_display_mode(main_window) -> None:
