@@ -1625,13 +1625,64 @@ def make_image_gen_field_label(text: str, parent: Optional[QWidget] = None) -> Q
     return label
 
 
+IMAGE_GEN_INLINE_LABEL_ROW_SPACING = 6
+
+
+def build_image_gen_inline_labeled_row(
+    label_text: str,
+    control: QWidget,
+    parent: Optional[QWidget] = None,
+    *,
+    label_accessory: Optional[QWidget] = None,
+    label_width: Optional[int] = None,
+) -> QWidget:
+    """Label and compact horizontal control on one row (unified dialog / custom size)."""
+    row = QWidget(parent)
+    hrow = QHBoxLayout(row)
+    hrow.setContentsMargins(0, 0, 0, 0)
+    hrow.setSpacing(IMAGE_GEN_INLINE_LABEL_ROW_SPACING)
+    if label_accessory is not None:
+        label_widget = make_image_gen_field_label_row(
+            label_text, label_accessory, row
+        )
+    else:
+        label_widget = make_image_gen_field_label(label_text, row)
+        label_widget.setWordWrap(False)
+        if label_width is not None:
+            label_widget.setFixedWidth(label_width)
+    hrow.addWidget(
+        label_widget,
+        0,
+        Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+    )
+    hrow.addWidget(
+        control,
+        0,
+        Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+    )
+    hp = control.sizePolicy().horizontalPolicy()
+    vp = control.sizePolicy().verticalPolicy()
+    if hp == QSizePolicy.Policy.Expanding:
+        row.setSizePolicy(QSizePolicy.Policy.Expanding, vp)
+    else:
+        row.setSizePolicy(QSizePolicy.Policy.Maximum, vp)
+    return row
+
+
 def _build_image_gen_column_cell(
     parent: QWidget,
     label_text: str,
     control: QWidget,
     *,
     half_column: bool = False,
+    inline_label: bool = False,
 ) -> QWidget:
+    if inline_label:
+        cell = build_image_gen_inline_labeled_row(label_text, control, parent)
+        if half_column:
+            cell.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        return cell
+
     cell = QWidget(parent)
     cell_layout = QVBoxLayout(cell)
     cell_layout.setContentsMargins(0, 0, 0, 0)
@@ -1659,6 +1710,7 @@ def build_image_gen_half_column_row(
     slots: List[Optional[Tuple[str, QWidget]]],
     *,
     parent: Optional[QWidget] = None,
+    inline_labels: bool = False,
 ) -> QWidget:
     """Two equal half-columns on one line; None slots are blank fillers."""
     row_w = QWidget(parent)
@@ -1677,7 +1729,11 @@ def build_image_gen_half_column_row(
             label_text, control = slot
             row.addWidget(
                 _build_image_gen_column_cell(
-                    row_w, label_text, control, half_column=True
+                    row_w,
+                    label_text,
+                    control,
+                    half_column=True,
+                    inline_label=inline_labels,
                 ),
                 1,
             )
@@ -2352,20 +2408,7 @@ class ImageGenFieldsPanel:
     ) -> QWidget:
         parent = self.widget if to_outer else self._controls_host
         group = QWidget(parent)
-        col = QVBoxLayout(group)
         edge_pad = IMAGE_GEN_FIELD_BORDER_PAD if to_outer else 0
-        col.setContentsMargins(1, 0, edge_pad, 0)
-        col.setSpacing(IMAGE_GEN_FIELD_LABEL_SPACING)
-        if label_text:
-            if label_accessory is not None:
-                col.addWidget(
-                    make_image_gen_field_label_row(
-                        label_text, label_accessory, group
-                    ),
-                    0,
-                )
-            else:
-                col.addWidget(make_image_gen_field_label(label_text, group), 0)
         display_control = control
         if copy_from_edit is not None:
             display_control = wrap_image_gen_prompt_row_with_copy(
@@ -2373,29 +2416,64 @@ class ImageGenFieldsPanel:
             )
             if self._compact:
                 install_image_gen_prompt_sentence_case_on_blur(copy_from_edit)
-        if stretch_control:
-            display_control.setSizePolicy(
-                QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
+        inline_label = (
+            self._compact
+            and bool(label_text)
+            and not stretch_control
+        )
+        if inline_label:
+            col = QVBoxLayout(group)
+            col.setContentsMargins(1, 0, edge_pad, 0)
+            col.setSpacing(0)
+            col.addWidget(
+                build_image_gen_inline_labeled_row(
+                    label_text,
+                    display_control,
+                    group,
+                    label_accessory=label_accessory,
+                ),
+                0,
             )
-            group.setSizePolicy(
-                QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
-            )
-        else:
             group.setSizePolicy(
                 QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed
             )
-        if label_text:
-            col.addWidget(
-                wrap_image_gen_field_control_indent(display_control, group), 0
-            )
-        elif stretch_control:
-            col.addWidget(display_control, 0)
         else:
-            col.addWidget(
-                display_control,
-                0,
-                Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
-            )
+            col = QVBoxLayout(group)
+            col.setContentsMargins(1, 0, edge_pad, 0)
+            col.setSpacing(IMAGE_GEN_FIELD_LABEL_SPACING)
+            if label_text:
+                if label_accessory is not None:
+                    col.addWidget(
+                        make_image_gen_field_label_row(
+                            label_text, label_accessory, group
+                        ),
+                        0,
+                    )
+                else:
+                    col.addWidget(make_image_gen_field_label(label_text, group), 0)
+            if stretch_control:
+                display_control.setSizePolicy(
+                    QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
+                )
+                group.setSizePolicy(
+                    QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
+                )
+            else:
+                group.setSizePolicy(
+                    QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed
+                )
+            if label_text:
+                col.addWidget(
+                    wrap_image_gen_field_control_indent(display_control, group), 0
+                )
+            elif stretch_control:
+                col.addWidget(display_control, 0)
+            else:
+                col.addWidget(
+                    display_control,
+                    0,
+                    Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+                )
         _set_image_gen_flow_role(group, flow_role)
         if to_outer:
             self._layout.addWidget(group)
@@ -2417,7 +2495,11 @@ class ImageGenFieldsPanel:
         col.setContentsMargins(1, 0, 0, 0)
         col.setSpacing(0)
         col.addWidget(
-            build_image_gen_half_column_row(columns, parent=group),
+            build_image_gen_half_column_row(
+                columns,
+                parent=group,
+                inline_labels=self._compact,
+            ),
             0,
             Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop,
         )
