@@ -109,7 +109,10 @@ class ImageGenModelPlugin:
         return pipeline_is_available(self.pipeline_id)
 
     def model_label(self, saved: Optional[Dict[str, Any]] = None) -> str:
-        return self.display_name
+        """User-facing model name (HF org/name → name only)."""
+        name = (self.display_name or "").strip()
+        return name.rsplit("/", 1)[-1] if "/" in name else name
+   
 
     def menu_label(self, saved: Optional[Dict[str, Any]] = None) -> str:
         """Backward-compatible alias for model dropdown labels."""

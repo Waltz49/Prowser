@@ -9,7 +9,7 @@ from imagegen_plugins.image_gen_registry import ImageGenModelPlugin
 
 
 def imagegen_backend_missing_message(plugin: ImageGenModelPlugin) -> str:
-    name = plugin.display_name
+    name = plugin.model_label()
     if plugin.pipeline_id == "sana_sprint_600m":
         if getattr(sys, "frozen", False):
             return (

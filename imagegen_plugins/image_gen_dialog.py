@@ -359,11 +359,17 @@ def apply_exif_generation_params_to_dialog(
                         if none_idx >= 0:
                             combo.setCurrentIndex(none_idx)
         elif plugin is not None:
-            from imagegen_plugins.lora_catalog import match_exif_lora_names_to_ids
+            from imagegen_plugins.lora_catalog import (
+                match_exif_lora_names_to_ids_and_scales,
+            )
 
-            matched_ids = match_exif_lora_names_to_ids(target, plugin)
+            matched_ids, scales_by_id = match_exif_lora_names_to_ids_and_scales(
+                target, plugin
+            )
             if matched_ids and lora_field is not None and lora_field.is_stack_mode():
                 lora_field.set_stack(matched_ids)
+                if scales_by_id and hasattr(lora_field, "apply_scale_overrides"):
+                    lora_field.apply_scale_overrides(scales_by_id)
             elif matched_ids:
                 entry = widgets.get("mflux_lora")
                 if entry is not None:
@@ -374,6 +380,12 @@ def apply_exif_generation_params_to_dialog(
                         idx = combo.findData(preset_id)
                         if idx >= 0:
                             combo.setCurrentIndex(idx)
+                if (
+                    scales_by_id
+                    and lora_field is not None
+                    and hasattr(lora_field, "apply_scale_overrides")
+                ):
+                    lora_field.apply_scale_overrides(scales_by_id)
 
     sync_random_seed_setting(dialog, True)
 

@@ -366,6 +366,8 @@ class LoraSelectionPopup(QFrame):
         self,
         choices: List[Tuple[str, str]],
         selected_ids: List[str],
+        *,
+        scale_overrides: Optional[Dict[str, float]] = None,
     ) -> None:
         """choices: (label, preset_id); excludes 'none'."""
         from imagegen_plugins.lora_catalog import get_lora_entry
@@ -377,6 +379,7 @@ class LoraSelectionPopup(QFrame):
             self._update_popup_layout_metrics(show_header=False)
             return
 
+        overrides = scale_overrides or {}
         self._add_header_row()
         selected = set(selected_ids)
         validator = QDoubleValidator(_SCALE_MIN, _SCALE_MAX, 2, self)
@@ -384,7 +387,16 @@ class LoraSelectionPopup(QFrame):
         row = 1
         for label, preset_id in selectable:
             entry = get_lora_entry(preset_id)
-            scale = float(entry.scale) if entry is not None else 1.0
+            catalog_scale = float(entry.scale) if entry is not None else 1.0
+            if preset_id in overrides:
+                try:
+                    scale = float(overrides[preset_id])
+                except (TypeError, ValueError):
+                    scale = catalog_scale
+                else:
+                    scale = max(_SCALE_MIN, min(_SCALE_MAX, scale))
+            else:
+                scale = catalog_scale
             self._fallback_scales[preset_id] = scale
 
             cb = QCheckBox(str(label), self._checks_host)
@@ -525,6 +537,7 @@ class LoraStackField(QWidget):
         self._selected_ids: List[str] = []
         self._label_by_id: Dict[str, str] = {}
         self._choices: List[Tuple[str, str]] = []
+        self._scale_overrides: Dict[str, float] = {}
         self._popup: Optional[LoraSelectionPopup] = None
         self._plugin: Optional[ImageGenModelPlugin] = None
 
@@ -595,6 +608,31 @@ class LoraStackField(QWidget):
             pid = coerce_lora_preset_id(self.summary_combo.currentData())
             return [] if pid == "none" else [pid]
         return list(self._selected_ids)
+
+    def scales_by_id(self) -> Dict[str, float]:
+        """Effective weights for selected LoRAs (session overrides, else catalog)."""
+        from imagegen_plugins.lora_catalog import get_lora_entry
+
+        out: Dict[str, float] = {}
+        for preset_id in self.selected_ids():
+            if preset_id in self._scale_overrides:
+                out[preset_id] = float(self._scale_overrides[preset_id])
+                continue
+            entry = get_lora_entry(preset_id)
+            out[preset_id] = float(entry.scale) if entry is not None else 1.0
+        return out
+
+    def apply_scale_overrides(self, scales: Dict[str, float]) -> None:
+        """Merge EXIF/import weights; only provided ids are updated."""
+        for preset_id, raw in (scales or {}).items():
+            pid = str(preset_id or "").strip()
+            if not pid or pid == "none":
+                continue
+            try:
+                scale = float(raw)
+            except (TypeError, ValueError):
+                continue
+            self._scale_overrides[pid] = max(_SCALE_MIN, min(_SCALE_MAX, scale))
 
     def set_stack(self, ids: List[str]) -> None:
         if not self._stack_mode:
@@ -671,6 +709,7 @@ class LoraStackField(QWidget):
             self.summary_combo.setEnabled(False)
             self.summary_combo.blockSignals(False)
             self._selected_ids = []
+            self._scale_overrides.clear()
             return
 
         settings = get_config().load_settings()
@@ -688,6 +727,11 @@ class LoraStackField(QWidget):
                 if pid in valid_ids and pid != "none":
                     stack = [pid]
             self._selected_ids = stack
+            self._scale_overrides = {
+                pid: scale
+                for pid, scale in self._scale_overrides.items()
+                if pid in valid_ids
+            }
             self._update_summary_text()
             tip = (
                 "Select one or more LoRAs (experimental stacking). "
@@ -724,7 +768,11 @@ class LoraStackField(QWidget):
             self._popup.accepted.connect(self._on_popup_accepted)
             self._popup.rejected.connect(self._on_popup_rejected)
         selectable = [(label, pid) for label, pid in self._choices if pid != "none"]
-        self._popup.set_choices(selectable, self._selected_ids)
+        self._popup.set_choices(
+            selectable,
+            self._selected_ids,
+            scale_overrides=self._scale_overrides,
+        )
         self._popup.show_below(self.summary_combo)
 
     def _on_popup_accepted(self, ids: List[str]) -> None:
@@ -736,7 +784,10 @@ class LoraStackField(QWidget):
         except ImportError:
             pass
         if self._popup is not None:
-            self._persist_scale_changes(self._popup.scales_by_id())
+            scales = self._popup.scales_by_id()
+            self._persist_scale_changes(scales)
+            for preset_id, scale in scales.items():
+                self._scale_overrides[preset_id] = float(scale)
         self._selected_ids = list(ids)
         self._update_summary_text()
         self.stack_changed.emit()

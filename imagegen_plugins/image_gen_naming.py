@@ -173,10 +173,38 @@ _EXIF_PARAM_LINE_LORA = re.compile(r"^\s*LoRA\s*:\s*(.+?)\s*$", re.IGNORECASE)
 _EXIF_PARAM_LINE_ELAPSED = re.compile(r"^\s*Elapsed\s*:", re.IGNORECASE)
 _EXIF_MODEL_STEPS_SUFFIX = re.compile(r"\[(\d+)\]\s*$")
 _EXIF_LORA_STACK_SPLIT_RE = re.compile(r"\s*\+\s*")
+_EXIF_LORA_WEIGHT_SUFFIX_RE = re.compile(r"\s*\[([\d.]+)\]\s*$")
 _EXIF_LORA_CONT_PREFIX = "\u00a0" * 6
 _EXIF_LORA_CONT_LINE = re.compile(
     rf"^{_EXIF_LORA_CONT_PREFIX}(.+?)\s*$"
 )
+
+
+def format_exif_lora_weight(scale: float) -> str:
+    """Compact weight text for EXIF (e.g. 0.9, 1, 0.34)."""
+    return f"{float(scale):g}"
+
+
+def parse_exif_lora_name_and_weight(part: str) -> tuple[str, Optional[float]]:
+    """Split ``name [0.9]`` into display name and optional weight."""
+    text = str(part or "").strip()
+    if not text:
+        return "", None
+    m = _EXIF_LORA_WEIGHT_SUFFIX_RE.search(text)
+    if m is None:
+        return text, None
+    name = text[: m.start()].strip()
+    try:
+        weight = float(m.group(1))
+    except (TypeError, ValueError):
+        return name or text, None
+    return name or text, weight
+
+
+def strip_exif_lora_weight_suffix(part: str) -> str:
+    """Remove trailing ``[weight]`` from an EXIF LoRA token for matching."""
+    name, _weight = parse_exif_lora_name_and_weight(part)
+    return name
 
 
 def _exif_line_is_lora_continuation(line: str) -> bool:
@@ -328,9 +356,13 @@ def parse_exif_generation_metadata(full_comment: str) -> Dict[str, Any]:
             in_model_block = False
 
         if in_model_block:
-            m_steps = _EXIF_MODEL_STEPS_SUFFIX.search(stripped)
-            if m_steps is not None and "steps" not in out:
-                out["steps"] = int(m_steps.group(1))
+            if (
+                not _exif_line_is_model_param(stripped)
+                and not _exif_line_is_lora_continuation(line)
+            ):
+                m_steps = _EXIF_MODEL_STEPS_SUFFIX.search(stripped)
+                if m_steps is not None and "steps" not in out:
+                    out["steps"] = int(m_steps.group(1))
 
         m_int = _EXIF_PARAM_LINE_INT.match(stripped)
         if m_int is not None:
@@ -695,7 +727,7 @@ def menu_label_for_hf_model_id(
                 plugin.hf_model_id == model_id
                 or plugin.display_name == model_id
             ):
-                return plugin.display_name
+                return plugin.model_label()
     except Exception:
         pass
     if "/" in model_id:
@@ -735,7 +767,10 @@ def format_exif_comment_from_mflux_metadata(
     guidance = values.get("guidance_scale")
     if guidance is None:
         guidance = meta.get("guidance")
-    from imagegen_plugins.mflux_lora_presets import lora_name_for_exif_from_values
+    from imagegen_plugins.mflux_lora_presets import (
+        lora_name_for_exif_from_paths_and_scales,
+        lora_name_for_exif_from_values,
+    )
 
     if seed is None and not values.get("random_seed"):
         try:
@@ -751,6 +786,13 @@ def format_exif_comment_from_mflux_metadata(
         elapsed_seconds = _parse_elapsed_seconds(meta.get("generation_time_seconds"))
         if elapsed_seconds is None:
             elapsed_seconds = _parse_elapsed_seconds(meta.get("generation_time"))
+    pipeline_id = str(values.get("pipeline_id") or "").strip() or None
+    lora = lora_name_for_exif_from_values(values, pipeline_id=pipeline_id)
+    if not lora:
+        lora = lora_name_for_exif_from_paths_and_scales(
+            meta.get("lora_paths"),
+            meta.get("lora_scales"),
+        )
     return format_image_exif_prompt(
         model_name,
         prompt_text,
@@ -758,7 +800,7 @@ def format_exif_comment_from_mflux_metadata(
         seed=seed,
         steps=steps,
         quantization=quant,
-        lora=lora_name_for_exif_from_values(values),
+        lora=lora,
         guidance=guidance,
     )
 
@@ -815,6 +857,15 @@ def make_readable_user_comment_before_browse(
         return
     if completed_step >= total_steps:
         return
+
+    from imagegen_plugins.mflux_lora_presets import (
+        lora_name_for_exif_from_paths_and_scales,
+        lora_name_for_exif_from_values,
+    )
+
+    pipeline_id = str(values.get("pipeline_id") or "").strip() or None
+    lora = lora_name_for_exif_from_values(values, pipeline_id=pipeline_id)
+
     try:
         from exif.exif_utils import decode_usercomment, get_usercomment_from_path
 
@@ -822,7 +873,8 @@ def make_readable_user_comment_before_browse(
         if raw:
             text = decode_usercomment(raw).strip()
             if text.startswith("Image Model:"):
-                return
+                if "LoRA:" in text or not lora:
+                    return
     except Exception:
         pass
 
@@ -838,8 +890,12 @@ def make_readable_user_comment_before_browse(
             quantization=quantization,
         )
     else:
-        from imagegen_plugins.mflux_lora_presets import lora_name_for_exif_from_values
-
+        if not lora:
+            # Rare: plain PNG with no mflux JSON; still try path lists on values.
+            lora = lora_name_for_exif_from_paths_and_scales(
+                values.get("mflux_lora_paths"),
+                values.get("mflux_lora_scales"),
+            )
         if seed is None and not values.get("random_seed"):
             try:
                 seed = int(values.get("seed"))
@@ -860,7 +916,7 @@ def make_readable_user_comment_before_browse(
                     else None
                 )
             ),
-            lora=lora_name_for_exif_from_values(values),
+            lora=lora,
             guidance=values.get("guidance_scale"),
         )
     if not write_exif_user_comment(

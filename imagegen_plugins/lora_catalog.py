@@ -707,7 +707,9 @@ _EXIF_LORA_TRIGGER_SUFFIX_RE = re.compile(
 
 
 def _normalize_exif_lora_token(name: str) -> str:
-    text = str(name or "").strip()
+    from imagegen_plugins.image_gen_naming import strip_exif_lora_weight_suffix
+
+    text = strip_exif_lora_weight_suffix(str(name or ""))
     text = _EXIF_LORA_TRIGGER_SUFFIX_RE.sub("", text).strip()
     return text.lower()
 
@@ -740,15 +742,20 @@ def _exif_lora_match_keys(
     return keys
 
 
-def match_exif_lora_names_to_ids(
+def match_exif_lora_names_to_ids_and_scales(
     lora_text: str,
     plugin: "ImageGenModelPlugin",
     settings: Optional[Dict[str, Any]] = None,
-) -> List[str]:
-    """Map EXIF LoRA name(s) to installed catalog ids for the active plugin."""
+) -> Tuple[List[str], Dict[str, float]]:
+    """Map EXIF LoRA name(s) to catalog ids and optional per-id weights.
+
+    Weights are included only when present in EXIF (``name [0.9]``).
+    """
+    from imagegen_plugins.image_gen_naming import parse_exif_lora_name_and_weight
+
     target = str(lora_text or "").strip()
     if not target or target.lower() == "none":
-        return []
+        return [], {}
     from config import get_config
 
     if settings is None:
@@ -763,8 +770,9 @@ def match_exif_lora_names_to_ids(
     if len(parts) <= 1:
         parts = [target]
     matched_ids: List[str] = []
-    host_id = getattr(plugin, "lora_host_id", None)
+    scales_by_id: Dict[str, float] = {}
     for part in parts:
+        _name, weight = parse_exif_lora_name_and_weight(part)
         part_token = _normalize_exif_lora_token(part)
         if not part_token:
             continue
@@ -779,6 +787,20 @@ def match_exif_lora_names_to_ids(
                 break
         if found_id is not None and found_id not in matched_ids:
             matched_ids.append(found_id)
+            if weight is not None:
+                scales_by_id[found_id] = float(weight)
+    return matched_ids, scales_by_id
+
+
+def match_exif_lora_names_to_ids(
+    lora_text: str,
+    plugin: "ImageGenModelPlugin",
+    settings: Optional[Dict[str, Any]] = None,
+) -> List[str]:
+    """Map EXIF LoRA name(s) to installed catalog ids for the active plugin."""
+    matched_ids, _scales = match_exif_lora_names_to_ids_and_scales(
+        lora_text, plugin, settings
+    )
     return matched_ids
 
 

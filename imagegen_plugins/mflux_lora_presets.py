@@ -404,21 +404,118 @@ def lora_display_names_for_stack(stack: List[str]) -> List[str]:
     return names
 
 
+def _lora_scale_for_exif(values: Dict[str, Any], preset_id: str, index: int) -> float:
+    """Prefer snapshotted scale lists, then per-id overrides, then catalog."""
+    for key in ("mflux_lora_scales", "sdxl_lora_scales", "sd15_lora_scales"):
+        scales_list = values.get(key)
+        if isinstance(scales_list, list) and index < len(scales_list):
+            try:
+                return float(scales_list[index])
+            except (TypeError, ValueError):
+                break
+    from imagegen_plugins.job_values_snapshot import _lora_scale_for_preset
+
+    return float(_lora_scale_for_preset(values, preset_id))
+
+
+def _display_name_for_lora_path(path: str) -> str:
+    """Best-effort catalog display name for an on-disk LoRA path."""
+    from pathlib import Path as _Path
+
+    from imagegen_plugins.lora_catalog import (
+        catalog_entries_sorted,
+        local_lora_weights_path,
+    )
+
+    raw = str(path or "").strip()
+    if not raw:
+        return ""
+    try:
+        resolved = str(_Path(raw).expanduser().resolve())
+    except OSError:
+        resolved = raw
+    filename = _Path(raw).name
+    stem = _Path(raw).stem
+    for entry in catalog_entries_sorted():
+        weights = local_lora_weights_path(entry.lora_id, entry=entry)
+        if weights is not None:
+            try:
+                entry_path = str(weights.resolve())
+            except OSError:
+                entry_path = str(weights)
+            if entry_path in (resolved, raw) or weights.name == filename:
+                return entry.display_name
+        if entry.filename and entry.filename == filename:
+            return entry.display_name
+        if entry.local_path:
+            try:
+                local = str(_Path(entry.local_path).expanduser().resolve())
+            except OSError:
+                local = str(entry.local_path)
+            if local in (resolved, raw) or _Path(local).name == filename:
+                return entry.display_name
+    return stem or filename
+
+
+def lora_name_for_exif_from_paths_and_scales(
+    paths: Any,
+    scales: Any = None,
+) -> Optional[str]:
+    """Format ``name [weight]`` labels from mflux path/scale lists."""
+    from imagegen_plugins.image_gen_naming import format_exif_lora_weight
+
+    if not isinstance(paths, list) or not paths:
+        return None
+    scale_list = scales if isinstance(scales, list) else []
+    labels: List[str] = []
+    for i, path in enumerate(paths):
+        name = _display_name_for_lora_path(str(path))
+        if not name:
+            continue
+        try:
+            scale = float(scale_list[i]) if i < len(scale_list) else 1.0
+        except (TypeError, ValueError):
+            scale = 1.0
+        labels.append(f"{name} [{format_exif_lora_weight(scale)}]")
+    if not labels:
+        return None
+    if len(labels) == 1:
+        return labels[0]
+    return " + ".join(labels)
+
+
 def lora_name_for_exif_from_values(
     values: Dict[str, Any],
     *,
     pipeline_id: Optional[str] = None,
 ) -> Optional[str]:
-    """LoRA label for EXIF from stack or legacy single preset."""
+    """LoRA label for EXIF from stack or legacy single preset (``name [weight]``)."""
+    from imagegen_plugins.image_gen_naming import format_exif_lora_weight
+
     stack = effective_lora_ids_from_values(
         values, pipeline_id=pipeline_id, pop=False
     )
-    if not stack:
-        return None
-    names = lora_display_names_for_stack(stack)
-    if len(names) == 1:
-        return names[0]
-    return " + ".join(names)
+    if stack:
+        names = lora_display_names_for_stack(stack)
+        labels: List[str] = []
+        for i, (preset_id, name) in enumerate(zip(stack, names)):
+            scale = _lora_scale_for_exif(values, preset_id, i)
+            labels.append(f"{name} [{format_exif_lora_weight(scale)}]")
+        if len(labels) == 1:
+            return labels[0]
+        return " + ".join(labels)
+
+    for paths_key, scales_key in (
+        ("mflux_lora_paths", "mflux_lora_scales"),
+        ("sdxl_lora_paths", "sdxl_lora_scales"),
+        ("sd15_lora_paths", "sd15_lora_scales"),
+    ):
+        label = lora_name_for_exif_from_paths_and_scales(
+            values.get(paths_key), values.get(scales_key)
+        )
+        if label:
+            return label
+    return None
 
 
 def apply_lora_to_mflux_payload(
@@ -568,6 +665,7 @@ __all__ = [
     "lora_choices_for_plugin",
     "lora_choices_for_pipeline",
     "lora_display_names_for_stack",
+    "lora_name_for_exif_from_paths_and_scales",
     "lora_name_for_exif_from_values",
     "lora_preset_min_steps",
     "lora_stack_min_steps",

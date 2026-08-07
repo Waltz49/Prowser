@@ -40,7 +40,7 @@ def model_label_for_plugin(
     """Display name for a plugin in the model dropdown."""
     if saved is None:
         saved = load_plugin_dialog_settings(plugin.function, plugin.plugin_id)
-    return plugin.display_name
+    return plugin.model_label(saved)
 
 
 def available_plugins(
