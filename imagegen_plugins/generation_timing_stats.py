@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Average generation durations keyed by model + parameter combination."""
+"""Average generation durations keyed by model + size (+ steps/quant)."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from imagegen_plugins.image_gen_registry import ImageGenModelPlugin
 
 _MAX_ENTRIES = 200
-_FILE_VERSION = 1
+_FILE_VERSION = 2
 GenerationTimingKey = Tuple[Any, ...]
 
 _store: OrderedDict[GenerationTimingKey, "_TimingEntry"] = OrderedDict()
@@ -39,7 +39,6 @@ class GenerationTimingRow:
     height: int
     steps: int
     quant: str
-    lora_stack: tuple[str, ...]
     run_count: int
     total_seconds: float
     avg_seconds: float
@@ -69,14 +68,13 @@ def _model_display_name_for_id(model_id: str) -> str:
 def _key_to_record(
     key: GenerationTimingKey, entry: _TimingEntry
 ) -> Dict[str, Any]:
-    model_id, steps, width, height, quant, lora_stack = key
+    model_id, steps, width, height, quant = key
     return {
         "model_id": str(model_id),
         "steps": int(steps),
         "width": int(width),
         "height": int(height),
         "quant": str(quant or ""),
-        "lora_stack": list(lora_stack),
         "total_seconds": float(entry.total_seconds),
         "run_count": int(entry.run_count),
     }
@@ -93,12 +91,7 @@ def _record_to_key(record: Dict[str, Any]) -> GenerationTimingKey | None:
     if not model_id or width <= 0 or height <= 0:
         return None
     quant = str(record.get("quant") or "")
-    lora_raw = record.get("lora_stack")
-    if isinstance(lora_raw, list):
-        lora_stack = tuple(str(item) for item in lora_raw)
-    else:
-        lora_stack = ()
-    return (model_id, steps, width, height, quant, lora_stack)
+    return (model_id, steps, width, height, quant)
 
 
 def _trim_store() -> None:
@@ -169,10 +162,9 @@ def build_generation_timing_key(
     values: Dict[str, Any],
     payload: Optional[Dict[str, Any]] = None,
 ) -> GenerationTimingKey | None:
-    """Hashable key for model + steps + size + quant + LoRA list, or None if size unknown."""
+    """Hashable key for model + steps + size + quant, or None if size unknown."""
     from imagegen_plugins.image_gen_dim_limits import effective_max_for_plugin
     from imagegen_plugins.image_gen_pipeline_modes import generation_status_display_size
-    from imagegen_plugins.mflux_lora_presets import effective_lora_ids_from_values
     from imagegen_plugins.model_task_status_info import _generation_model_id_for_status
 
     effective = dict(values)
@@ -208,13 +200,7 @@ def build_generation_timing_key(
         return None
 
     quant = plugin.quantize_status_value(effective) or ""
-    lora_stack = tuple(
-        effective_lora_ids_from_values(
-            effective, pipeline_id=plugin.pipeline_id, pop=False
-        )
-    )
-
-    return (model_id, steps, int(size[0]), int(size[1]), quant, lora_stack)
+    return (model_id, steps, int(size[0]), int(size[1]), quant)
 
 
 def lookup_average(key: GenerationTimingKey | None) -> float | None:
@@ -262,7 +248,7 @@ def list_timing_rows() -> List[GenerationTimingRow]:
     _load_store()
     rows: List[GenerationTimingRow] = []
     for key, entry in reversed(_store.items()):
-        model_id, steps, width, height, quant, lora_stack = key
+        model_id, steps, width, height, quant = key
         rows.append(
             GenerationTimingRow(
                 model_name=_model_display_name_for_id(str(model_id)),
@@ -271,7 +257,6 @@ def list_timing_rows() -> List[GenerationTimingRow]:
                 height=int(height),
                 steps=int(steps),
                 quant=str(quant or ""),
-                lora_stack=tuple(str(item) for item in lora_stack),
                 run_count=int(entry.run_count),
                 total_seconds=float(entry.total_seconds),
                 avg_seconds=entry.average_seconds,

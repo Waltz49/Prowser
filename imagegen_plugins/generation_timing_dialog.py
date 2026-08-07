@@ -62,10 +62,9 @@ def _format_area_k(width: int, height: int) -> tuple[str, float]:
     return f"{area / _AREA_K:.1f}K", float(area)
 
 
-def _combo_label(steps: int, quant: str, lora_stack: tuple[str, ...]) -> str:
-    lora_label = ",".join(lora_stack) if lora_stack else "(none)"
+def _combo_label(steps: int, quant: str) -> str:
     quant_label = quant or "(none)"
-    return f"{steps}:{quant_label}:{lora_label}"
+    return f"{steps}:{quant_label}"
 
 
 def _padded_range(vmin: float, vmax: float, *, padding: float = 0.08) -> tuple[float, float]:
@@ -476,16 +475,14 @@ class GenerationTimingDialog(QDialog):
             return
 
         model_names: set[str] = set()
-        groups: dict[tuple[int, str, tuple[str, ...]], list[tuple[float, float]]] = (
-            defaultdict(list)
-        )
+        groups: dict[tuple[int, str], list[tuple[float, float]]] = defaultdict(list)
         for row_index in visible:
             item = self._table.item(row_index, 0)
             row = item.data(Qt.ItemDataRole.UserRole) if item is not None else None
             if not isinstance(row, GenerationTimingRow):
                 continue
             model_names.add(row.model_name)
-            key = (row.steps, row.quant, row.lora_stack)
+            key = (row.steps, row.quant)
             area = float(row.width * row.height)
             groups[key].append((area, row.avg_seconds))
 
@@ -499,8 +496,8 @@ class GenerationTimingDialog(QDialog):
 
         series_list: list[_ChartSeries] = []
         for series_index, (key, points) in enumerate(sorted(groups.items())):
-            steps, quant, lora_stack = key
-            label = _combo_label(steps, quant, lora_stack)
+            steps, quant = key
+            label = _combo_label(steps, quant)
             color = _SERIES_COLORS[series_index % len(_SERIES_COLORS)]
             sorted_points = sorted(points, key=lambda point: point[0])
             series_list.append(_ChartSeries(label, color, sorted_points))
