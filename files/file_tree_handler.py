@@ -3680,7 +3680,7 @@ class FileTreeHandler(QObject):
         app = QApplication.instance()
         if app:
             # could also be 'windows' or 'macos' or 'Fusion'
-            app.setStyle('Fusion')
+            app.setStyle('macos')
         self.file_tree.setAnimated(False)
         # Change indentation to half the icon width (icon is 16px, so 8px per level)
         self.file_tree.setIndentation(8)

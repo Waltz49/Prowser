@@ -179,7 +179,7 @@ BROWSE_IMAGE_HISTORY_MAX = 60  # ucust: max entries in browse image history
 
 # Image generation: where auto-added LoRA trigger words are inserted in the prompt.
 # 0 = top, 1 = bottom, 2 = both (top and bottom).
-TRIGGER_POSITION = 1
+TRIGGER_POSITION = 0
 
 
 # =============================================================================

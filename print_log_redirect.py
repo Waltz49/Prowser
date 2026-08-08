@@ -5,12 +5,29 @@ user share this path so one `less +F` session can follow the combined output.
 """
 
 import os
+import re
 import sys
 import threading
 import contextlib
 
 PRINT_LOG_FILE_PATH = None
 _print_log_lock = threading.Lock()
+
+# Drop indented emoji chatter (e.g. mflux "   🔀 Fusing with existing LoRA at ...").
+# Top-level status lines that start with an emoji (no leading whitespace) are kept.
+_INDENTED_EMOJI_LINE = re.compile(
+    r"^[ \t]+"
+    r"(?:"
+    r"[\U0001F300-\U0001FAFF]"
+    r"|[\u2600-\u27BF]"
+    r")"
+    r"[\uFE0E\uFE0F]?"
+)
+
+
+def _suppress_print_log_line(line: str) -> bool:
+    """True when a completed log line should be omitted from terminal and View log."""
+    return bool(_INDENTED_EMOJI_LINE.match(line))
 
 
 class _NullTerminal:
@@ -49,14 +66,30 @@ class _StdoutToPrintLog:
         self._terminal = getattr(sys, '__stdout__', None) or sys.stdout
         self.encoding = getattr(self._terminal, 'encoding', 'utf-8')
         self.errors = getattr(self._terminal, 'errors', 'strict')
+        self._pending = ""
 
     def write(self, s):
+        if not isinstance(s, str):
+            s = str(s)
         with _print_log_lock:
-            self._file.write(s)
-            self._terminal.write(s)
+            self._pending += s
+            while True:
+                idx = self._pending.find("\n")
+                if idx < 0:
+                    break
+                line = self._pending[: idx + 1]
+                self._pending = self._pending[idx + 1 :]
+                if _suppress_print_log_line(line):
+                    continue
+                self._file.write(line)
+                self._terminal.write(line)
 
     def flush(self):
         with _print_log_lock:
+            if self._pending and not _suppress_print_log_line(self._pending):
+                self._file.write(self._pending)
+                self._terminal.write(self._pending)
+                self._pending = ""
             self._file.flush()
             self._terminal.flush()
 
@@ -110,6 +143,7 @@ def clear_print_log_file() -> None:
                 out._file.close()
             except OSError:
                 pass
+            out._pending = ""
             open(path, "w").close()
             out._file = open(path, "a", buffering=1)
         else:
