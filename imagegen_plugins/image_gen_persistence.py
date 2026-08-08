@@ -578,6 +578,24 @@ def save_job_queue_size_mode(mode: str) -> None:
     _mutate_imagegen_settings(mutate)
 
 
+def effective_restored_job_queue_size_mode(
+    saved: str,
+    *,
+    has_jobs: bool,
+    has_active: bool,
+) -> str:
+    """Pick a queue size mode valid for the current queue/active state."""
+    if saved not in _JOB_QUEUE_SIZE_MODES:
+        saved = "all"
+    if not has_jobs and not has_active:
+        return "all"
+    if saved == "strip" and not has_active:
+        return "all"
+    if saved == "one" and not has_jobs:
+        return "strip" if has_active else "all"
+    return saved
+
+
 def load_hold_job_queue() -> bool:
     settings = get_config().load_settings()
     imagegen = settings.get("imagegen") or {}

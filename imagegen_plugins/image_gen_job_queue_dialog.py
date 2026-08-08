@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import QEvent, QObject, Qt
+from PySide6.QtCore import QEvent, QEventLoop, QObject, Qt
 from PySide6.QtGui import QKeyEvent, QCursor, QWindow
 from PySide6.QtWidgets import (
     QApplication,
@@ -28,6 +28,7 @@ from imagegen_plugins.job_queue_panel import (
     QUEUE_SIZE_ONE,
     QUEUE_SIZE_STRIP,
     job_control_dialog_outer_minimum_width,
+    next_queue_size_mode,
 )
 from thumbnails.combined_sidebar_widget import HeaderWidget
 import thumbnails.thumbnail_constants as tc
@@ -367,17 +368,15 @@ class ImageGenJobQueueDialog(QDialog):
         self.setGeometry(geo.x(), new_y, width, target_height)
 
     def _effective_restored_size_mode(self, saved: str) -> str:
-        if saved not in (QUEUE_SIZE_ALL, QUEUE_SIZE_ONE, QUEUE_SIZE_STRIP):
-            return QUEUE_SIZE_ALL
-        has_jobs = self._panel.has_job_rows()
-        has_active = self._panel.has_active_generation()
-        if not has_jobs and not has_active:
-            return QUEUE_SIZE_ALL
-        if saved == QUEUE_SIZE_STRIP and not has_active:
-            return QUEUE_SIZE_ALL
-        if saved == QUEUE_SIZE_ONE and not has_jobs:
-            return QUEUE_SIZE_STRIP if has_active else QUEUE_SIZE_ALL
-        return saved
+        from imagegen_plugins.image_gen_persistence import (
+            effective_restored_job_queue_size_mode,
+        )
+
+        return effective_restored_job_queue_size_mode(
+            saved,
+            has_jobs=self._panel.has_job_rows(),
+            has_active=self._panel.has_active_generation(),
+        )
 
     def _persist_size_mode(self) -> None:
         try:
@@ -385,17 +384,23 @@ class ImageGenJobQueueDialog(QDialog):
         except Exception:
             pass
 
-    def _apply_dialog_size_mode(self, mode: str) -> None:
+    def _flush_layout_immediate(self) -> None:
+        self._panel.prepare_size_measure()
+        app = QApplication.instance()
+        if app is not None:
+            app.processEvents(QEventLoop.ProcessEventsFlag.ExcludeUserInputEvents)
+
+    def _apply_dialog_size_mode(self, mode: str, *, force_refit: bool = False) -> int:
         anchor_bottom_y = self.geometry().y() + self.geometry().height()
         if mode == QUEUE_SIZE_ALL:
             self._panel.prepare_expand_layout()
-        self._panel.set_queue_size_mode(mode)
+        self._panel.set_queue_size_mode(mode, force_refit=force_refit)
         self._sync_shell_layout_for_mode(mode)
 
         prev_height = -1
         target_height = self.minimumHeight()
         for _ in range(4):
-            self._panel.prepare_size_measure()
+            self._flush_layout_immediate()
             self._sync_shell_layout_for_mode(mode)
             target_height = self._dialog_height_for_panel_mode(mode)
             if prev_height >= 0 and abs(target_height - prev_height) <= 1:
@@ -404,43 +409,35 @@ class ImageGenJobQueueDialog(QDialog):
 
         self._resize_anchored_bottom(target_height, anchor_bottom_y=anchor_bottom_y)
         self._persist_size_mode()
+        self._flush_layout_immediate()
+        return self.height()
 
     def _heights_match(self, a: int, b: int) -> bool:
         ref = max(a, b, 1)
         return abs(a - b) <= pane_fit_height_tolerance(ref)
-
-    def _resolve_next_cycle_mode(self, current: str) -> str:
-        """Advance fit cycle; skip steps that would not change dialog height."""
-        has_jobs = self._panel.has_job_rows()
-        has_active = self._panel.has_active_generation()
-
-        if not has_jobs and not has_active:
-            return QUEUE_SIZE_ALL
-
-        if current == QUEUE_SIZE_STRIP:
-            return QUEUE_SIZE_ALL
-        if current == QUEUE_SIZE_ONE:
-            return QUEUE_SIZE_STRIP if has_active else QUEUE_SIZE_ALL
-
-        self._panel.prepare_size_measure()
-        current_h = self.height()
-        if not has_jobs:
-            return QUEUE_SIZE_STRIP if has_active else QUEUE_SIZE_ALL
-
-        one_h = self._dialog_height_for_panel_mode(QUEUE_SIZE_ONE)
-        if self._heights_match(current_h, one_h):
-            return QUEUE_SIZE_STRIP if has_active else QUEUE_SIZE_ALL
-        return QUEUE_SIZE_ONE
 
     def _cycle_header_size(self) -> None:
         if not self._panel.has_job_rows() and not self._panel.has_active_generation():
             if self._panel.queue_size_mode() != QUEUE_SIZE_ALL:
                 self._apply_dialog_size_mode(QUEUE_SIZE_ALL)
             return
-        next_mode = self._resolve_next_cycle_mode(self._panel.queue_size_mode())
-        if next_mode == self._panel.queue_size_mode():
+
+        start_mode = self._panel.queue_size_mode()
+        start_height = self.height()
+
+        def height_changed(height: int) -> bool:
+            return not self._heights_match(start_height, height)
+
+        height = self._apply_dialog_size_mode(start_mode, force_refit=True)
+        if height_changed(height):
             return
-        self._apply_dialog_size_mode(next_mode)
+
+        mode = next_queue_size_mode(start_mode)
+        while mode != start_mode:
+            height = self._apply_dialog_size_mode(mode)
+            if height_changed(height):
+                return
+            mode = next_queue_size_mode(mode)
 
     def cycle_header_size(self) -> None:
         """Public entry for ⌃J size-cycle when the floating dialog is active."""

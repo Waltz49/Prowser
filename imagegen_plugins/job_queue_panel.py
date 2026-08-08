@@ -72,6 +72,11 @@ QUEUE_SIZE_ONE = "one"
 QUEUE_SIZE_STRIP = "strip"
 _QUEUE_SIZE_MODES = (QUEUE_SIZE_ALL, QUEUE_SIZE_ONE, QUEUE_SIZE_STRIP)
 
+
+def next_queue_size_mode(mode: str) -> str:
+    idx = _QUEUE_SIZE_MODES.index(mode) if mode in _QUEUE_SIZE_MODES else 0
+    return _QUEUE_SIZE_MODES[(idx + 1) % len(_QUEUE_SIZE_MODES)]
+
 _EMPTY_LABEL_FONT_PX = 12
 _EMPTY_LABEL_HEIGHT_LINES = 1.5
 
@@ -421,14 +426,22 @@ class _FlowReferenceThumbs(QWidget):
 class _JobCardDblClickFilter(QObject):
     """Open the job editor on double-click (viewport + browser)."""
 
-    def __init__(self, opener: Callable[[], None], parent: QObject | None = None):
+    def __init__(
+        self,
+        opener: Callable[[], None],
+        on_force_select: Callable[[], None] | None = None,
+        parent: QObject | None = None,
+    ):
         super().__init__(parent)
         self._opener = opener
+        self._on_force_select = on_force_select
 
     def eventFilter(self, obj: QObject, event: QEvent) -> bool:
         if event.type() == QEvent.Type.MouseButtonDblClick:
             mouse_event = event  # type: ignore[assignment]
             if mouse_event.button() == Qt.MouseButton.LeftButton:
+                if self._on_force_select is not None:
+                    self._on_force_select()
                 self._opener()
                 return True
         return False
@@ -446,6 +459,7 @@ class JobCard(QFrame):
         job_id: str,
         is_active: bool,
         on_select: Callable[[str], None] | None = None,
+        on_select_force: Callable[[str], None] | None = None,
         on_reorder_drop: Callable[[str, int], None] | None = None,
         on_drop_hover: Callable[[int], None] | None = None,
         on_drop_hover_clear: Callable[[], None] | None = None,
@@ -461,6 +475,7 @@ class JobCard(QFrame):
         self._job_id = job_id
         self._is_active = bool(is_active)
         self._on_select = on_select
+        self._on_select_force = on_select_force
         self._on_reorder_drop = on_reorder_drop
         self._on_drop_hover = on_drop_hover
         self._on_drop_hover_clear = on_drop_hover_clear
@@ -472,6 +487,9 @@ class JobCard(QFrame):
         self._last_content_width = 0
         self._drag_start_pos: QPoint | None = None
         self._drag_started = False
+        self._pending_select_timer = QTimer(self)
+        self._pending_select_timer.setSingleShot(True)
+        self._pending_select_timer.timeout.connect(self._apply_pending_select)
 
         row_layout = QHBoxLayout(self)
         row_layout.setContentsMargins(2, 2, 2, 2)
@@ -581,14 +599,39 @@ class JobCard(QFrame):
         if self._on_select is not None:
             self._on_select(self._job_id)
 
+    def _force_select_self(self) -> None:
+        self._cancel_pending_select()
+        if self._on_select_force is not None:
+            self._on_select_force(self._job_id)
+
+    def _schedule_select_toggle(self) -> None:
+        self._pending_select_timer.start(QApplication.doubleClickInterval())
+
+    def _cancel_pending_select(self) -> None:
+        self._pending_select_timer.stop()
+
+    def _apply_pending_select(self) -> None:
+        self._select_self()
+
+    def _open_edit_dialog(self) -> None:
+        job_queue_edit_row(self._main_window, self._controller, self._row_idx)
+
     def mousePressEvent(self, event: QMouseEvent) -> None:
         if event.button() == Qt.MouseButton.LeftButton:
-            self._select_self()
+            self._schedule_select_toggle()
             self._drag_start_pos = event.position().toPoint()
             self._drag_started = False
             event.accept()
             return
         super().mousePressEvent(event)
+
+    def mouseDoubleClickEvent(self, event: QMouseEvent) -> None:
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._force_select_self()
+            self._open_edit_dialog()
+            event.accept()
+            return
+        super().mouseDoubleClickEvent(event)
 
     def mouseMoveEvent(self, event: QMouseEvent) -> None:
         if (
@@ -611,6 +654,7 @@ class JobCard(QFrame):
         super().mouseReleaseEvent(event)
 
     def _start_drag(self) -> None:
+        self._cancel_pending_select()
         mime = QMimeData()
         mime.setData(_JOB_QUEUE_DRAG_MIME, self._job_id.encode("utf-8"))
         drag = QDrag(self)
@@ -666,7 +710,7 @@ class JobCard(QFrame):
                 if mouse.button() == Qt.MouseButton.LeftButton:
                     local = mouse.position().toPoint()
                     if not self._info_browser.anchorAt(local):
-                        self._select_self()
+                        self._schedule_select_toggle()
                         self._drag_start_pos = mouse.position().toPoint()
                         self._drag_started = False
                         return True
@@ -696,7 +740,9 @@ class JobCard(QFrame):
         opener = lambda: job_queue_edit_row(
             self._main_window, self._controller, self._row_idx
         )
-        filt = _JobCardDblClickFilter(opener, parent=self)
+        filt = _JobCardDblClickFilter(
+            opener, on_force_select=self._force_select_self, parent=self
+        )
         self._dblclick_filter = filt
         self._info_browser.installEventFilter(filt)
         viewport = self._info_browser.viewport()
@@ -1077,6 +1123,18 @@ class JobQueuePanelWidget(QWidget):
         toggle_jobs_display_mode(self.main_window)
 
     def _on_job_selected(self, job_id: str) -> None:
+        sole = self._sole_visible_job_card()
+        if sole is not None and job_id == sole.job_id():
+            self._controller.set_selected_job_id(job_id)
+            self._sync_all_panels_selection()
+            return
+        if self._controller.selected_job_id() == job_id:
+            self._controller.set_selected_job_id(None)
+        else:
+            self._controller.set_selected_job_id(job_id)
+        self._sync_all_panels_selection()
+
+    def _on_job_force_selected(self, job_id: str) -> None:
         self._controller.set_selected_job_id(job_id)
         self._sync_all_panels_selection()
 
@@ -1092,11 +1150,86 @@ class JobQueuePanelWidget(QWidget):
         if panel is not None and panel is not self:
             panel._sync_selection_ui()
 
+    def _sole_visible_job_card(self) -> JobCard | None:
+        """The one job card shown in the list, if any (one-job mode or sole queue row)."""
+        if self._queue_size_mode == QUEUE_SIZE_STRIP or not self._job_cards:
+            return None
+        if self._queue_size_mode == QUEUE_SIZE_ONE or len(self._job_cards) == 1:
+            return self._job_cards[0]
+        return None
+
+    def _is_single_visible_job(self) -> bool:
+        return self._sole_visible_job_card() is not None
+
+    def _ensure_single_job_auto_selection(self) -> None:
+        sole = self._sole_visible_job_card()
+        if sole is None:
+            return
+        job_id = sole.job_id()
+        if self._controller.selected_job_id() != job_id:
+            self._controller.set_selected_job_id(job_id)
+
+    def _action_bar_controller_row(self, resolved_row_idx: int) -> int:
+        sole = self._sole_visible_job_card()
+        if sole is not None:
+            return sole.row_index()
+        return resolved_row_idx
+
+    def _action_bar_list_row(self, resolved_row_idx: int) -> int:
+        sole = self._sole_visible_job_card()
+        if sole is not None:
+            return self._job_cards.index(sole)
+        if resolved_row_idx < 0:
+            return -1
+        return resolved_row_idx
+
+    def _action_bar_below_first_card(self) -> bool:
+        if not self._should_show_action_bar():
+            return False
+        sole = self._sole_visible_job_card()
+        if sole is not None:
+            return self._job_cards.index(sole) == 0
+        return self._controller.resolve_selected_row_index() == 0
+
     def _should_show_action_bar(self) -> bool:
-        """Show unless strip-only progress view or no jobs in queue."""
+        """Show when a job card is selected (not in strip-only mode)."""
         if self._queue_size_mode == QUEUE_SIZE_STRIP:
             return False
-        return bool(self._job_cards) or self._controller.is_running()
+        if self._is_single_visible_job():
+            return True
+        return self._controller.resolve_selected_row_index() >= 0
+
+    def _sync_action_bar_from_selection(self) -> None:
+        self._ensure_single_job_auto_selection()
+        if self._should_show_action_bar():
+            row_idx = self._controller.resolve_selected_row_index()
+            list_row = self._action_bar_list_row(row_idx)
+            self._place_action_bar(list_row)
+            self._action_bar.update_for_row(self._action_bar_controller_row(row_idx))
+        else:
+            self._detach_action_bar_from_list()
+            self._action_bar.hide()
+        if self._queue_size_mode == QUEUE_SIZE_ONE:
+            self._apply_one_job_scroll_height()
+            self._sync_fixed_panel_geometry()
+            self._notify_shell_geometry_changed()
+
+    def _detach_action_bar_from_list(self) -> None:
+        layout = self._list_layout
+        for i in range(layout.count()):
+            item = layout.itemAt(i)
+            if item is not None and item.widget() is self._action_bar:
+                layout.removeWidget(self._action_bar)
+                break
+
+    def _place_action_bar(self, row_idx: int) -> None:
+        self._detach_action_bar_from_list()
+        if row_idx < 0 or row_idx >= len(self._job_cards):
+            self._action_bar.hide()
+            return
+        self._action_bar.setParent(self._list_host)
+        self._list_layout.insertWidget(row_idx + 1, self._action_bar)
+        self._action_bar.show()
 
     def _action_bar_block_height(self) -> int:
         if not self._should_show_action_bar():
@@ -1175,15 +1308,13 @@ class JobQueuePanelWidget(QWidget):
             self._show_drop_indicator(self._drop_indicator_index)
 
     def _sync_selection_ui(self, *, notify_geometry: bool = True) -> None:
+        self._ensure_single_job_auto_selection()
         selected_id = self._controller.selected_job_id()
-        row_idx = self._controller.resolve_selected_row_index()
         for card in self._job_cards:
-            card.set_selected(card.job_id() == selected_id)
-        if self._should_show_action_bar():
-            self._action_bar.show()
-            self._action_bar.update_for_row(row_idx)
-        else:
-            self._action_bar.hide()
+            card.set_selected(
+                selected_id is not None and card.job_id() == selected_id
+            )
+        self._sync_action_bar_from_selection()
         self._reflow_all()
         if notify_geometry:
             self._notify_shell_geometry_changed()
@@ -1283,7 +1414,6 @@ class JobQueuePanelWidget(QWidget):
         )
         self._panel_layout = layout
         layout.addWidget(self._active_job_strip)
-        layout.addWidget(self._action_bar)
         layout.addWidget(self._empty_label)
         layout.addWidget(self._scroll, 0)
         _disable_tab_focus(self)
@@ -1291,8 +1421,7 @@ class JobQueuePanelWidget(QWidget):
     def _connect_controller(self) -> None:
         if self._signal_connected:
             return
-        self._controller.queue_changed.connect(self._schedule_refresh_table)
-        self._controller.queue_changed.connect(self._update_header_status)
+        self._controller.queue_changed.connect(self._on_queue_changed)
         self._controller.jobs_pane_title_changed.connect(self._update_header_status)
         self._controller.hold_job_queue_changed.connect(self._update_header_status)
         self._controller.generation_started.connect(self._on_generation_started)
@@ -1510,6 +1639,53 @@ class JobQueuePanelWidget(QWidget):
             self._refresh_table_timer = timer
         timer.start(0)
 
+    def _can_refresh_queue_rows_in_place(self) -> bool:
+        rows = self._controller.queue_snapshot()
+        if len(rows) != len(self._job_cards):
+            return False
+        for idx, card in enumerate(self._job_cards):
+            if card.job_id() != rows[idx].job_id:
+                return False
+        return True
+
+    def _refresh_queue_rows_in_place(self) -> None:
+        """Update row HTML and action bar without tearing down job cards."""
+        rows = self._controller.queue_snapshot()
+        info_w = self._info_content_width()
+        viewport_w = self._viewport_width()
+        for row_idx, card in enumerate(self._job_cards):
+            if row_idx >= len(rows):
+                break
+            row = rows[row_idx]
+            card.set_row_index(row_idx)
+            info_html = info_html_for_queue_row(
+                self._controller, row_idx, row, for_sidebar=True
+            )
+            card._full_prompt = row.full_prompt or ""
+            update_delayed_prompt_tooltip(card._info_browser, card._full_prompt)
+            card.update_info_html(info_html, info_w, scroll_width=viewport_w)
+            if row.thumbnail_paths:
+                card._replace_refs(row.thumbnail_paths, info_w, scroll_width=viewport_w)
+            else:
+                card.reflow_refs(viewport_w)
+        self._controller.resolve_selected_row_index()
+        self._sync_selection_ui(notify_geometry=False)
+        self._update_header_status()
+        self._refresh_active_job_strip(force=True)
+        if self._queue_size_mode in (QUEUE_SIZE_ONE, QUEUE_SIZE_STRIP):
+            self._apply_queue_size_layout()
+        self._notify_shell_geometry_changed()
+        sidebar = getattr(self.main_window, "right_sidebar", None)
+        if sidebar is not None and hasattr(sidebar, "ensure_jobs_pane_fits_content"):
+            sidebar.ensure_jobs_pane_fits_content()
+
+    def _on_queue_changed(self) -> None:
+        self._update_header_status()
+        if self._job_cards and self._can_refresh_queue_rows_in_place():
+            self._refresh_queue_rows_in_place()
+            return
+        self._schedule_refresh_table()
+
     def _viewport_width(self) -> int:
         w = self._scroll.viewport().width() if hasattr(self, "_scroll") else self.width()
         return max(80, w - 8)
@@ -1567,15 +1743,16 @@ class JobQueuePanelWidget(QWidget):
     def queue_size_mode(self) -> str:
         return self._queue_size_mode
 
-    def set_queue_size_mode(self, mode: str) -> None:
+    def set_queue_size_mode(self, mode: str, *, force_refit: bool = False) -> None:
         """all: every job row; one: active strip + first row; strip: progress strip only."""
         if mode not in _QUEUE_SIZE_MODES:
             mode = QUEUE_SIZE_ALL
-        if mode == self._queue_size_mode:
+        if mode == self._queue_size_mode and not force_refit:
             if mode != QUEUE_SIZE_ALL or self.should_shrink_wrap_client():
                 self._sync_fixed_panel_geometry()
             return
-        self._queue_size_mode = mode
+        if mode != self._queue_size_mode:
+            self._queue_size_mode = mode
         self._apply_queue_size_layout()
 
     def set_queue_compact(self, compact: bool) -> None:
@@ -1659,8 +1836,15 @@ class JobQueuePanelWidget(QWidget):
             self._scroll.setFixedHeight(0)
             return
         margins = self._list_layout.contentsMargins()
-        card_h = self._job_cards[0].minimumHeight()
-        self._scroll.setFixedHeight(card_h + margins.top() + margins.bottom())
+        card_h = self._measure_first_job_card_height()
+        if card_h <= 0:
+            card_h = self._job_cards[0].minimumHeight()
+        extra = 0
+        if self._action_bar_below_first_card():
+            extra = self._list_layout.spacing() + self._action_bar_block_height()
+        self._scroll.setFixedHeight(
+            card_h + extra + margins.top() + margins.bottom()
+        )
 
     def _apply_queue_size_layout(self) -> None:
         has_rows = bool(self._job_cards)
@@ -1668,13 +1852,7 @@ class JobQueuePanelWidget(QWidget):
         show_scroll = self._show_queue_scroll()
         mode = self._queue_size_mode
         self._apply_panel_layout_stretch()
-        if self._should_show_action_bar():
-            self._action_bar.show()
-            self._action_bar.update_for_row(
-                self._controller.resolve_selected_row_index()
-            )
-        else:
-            self._action_bar.hide()
+        self._sync_action_bar_from_selection()
 
         if mode == QUEUE_SIZE_STRIP:
             self._scroll.hide()
@@ -1772,13 +1950,11 @@ class JobQueuePanelWidget(QWidget):
                 return total
             return total + self.empty_state_height_hint()
         margins = self._list_layout.contentsMargins()
-        return (
-            total
-            + self._action_bar_block_height()
-            + margins.top()
-            + margins.bottom()
-            + self._measure_first_job_card_height()
-        )
+        card_h = self._measure_first_job_card_height()
+        bar_extra = 0
+        if self._action_bar_below_first_card():
+            bar_extra = self._list_layout.spacing() + self._action_bar_block_height()
+        return total + margins.top() + margins.bottom() + card_h + bar_extra
 
     def content_height_for_size_mode(self, mode: str | None = None) -> int:
         mode = mode or self._queue_size_mode
@@ -1843,6 +2019,7 @@ class JobQueuePanelWidget(QWidget):
             self._notify_shell_geometry_changed()
 
     def _clear_job_cards(self) -> None:
+        self._detach_action_bar_from_list()
         while self._list_layout.count() > 1:
             item = self._list_layout.takeAt(0)
             widget = item.widget()
@@ -1895,7 +2072,11 @@ class JobQueuePanelWidget(QWidget):
             if self._controller.is_running():
                 return total
             return total + self.empty_state_height_hint()
-        total += self._action_bar_block_height()
+        self._ensure_single_job_auto_selection()
+        selected_row = self._controller.resolve_selected_row_index()
+        show_bar = self._should_show_action_bar()
+        bar_h = self._action_bar_block_height() if show_bar else 0
+        bar_list_row = self._action_bar_list_row(selected_row) if show_bar else -1
         info_w = self._info_content_width()
         width = self._viewport_width()
         rows = self._controller.queue_snapshot()
@@ -1925,9 +2106,13 @@ class JobQueuePanelWidget(QWidget):
             else:
                 card.reflow_refs(width)
                 total += self._card_layout_height(card)
+                if show_bar and row_idx == bar_list_row:
+                    total += spacing + bar_h
                 continue
             card.reflow_refs(width)
             total += self._card_layout_height(card)
+            if show_bar and row_idx == bar_list_row:
+                total += spacing + bar_h
         return total
 
     def refresh_table(self) -> None:
@@ -1948,6 +2133,7 @@ class JobQueuePanelWidget(QWidget):
                 job_id=row.job_id,
                 is_active=row.is_active,
                 on_select=self._on_job_selected,
+                on_select_force=self._on_job_force_selected,
                 on_reorder_drop=self._on_job_reorder_drop,
                 on_drop_hover=self._show_drop_indicator,
                 on_drop_hover_clear=self._clear_drop_indicator,
@@ -1975,3 +2161,7 @@ class JobQueuePanelWidget(QWidget):
         sidebar = getattr(self.main_window, "right_sidebar", None)
         if sidebar is not None and hasattr(sidebar, "ensure_jobs_pane_fits_content"):
             sidebar.ensure_jobs_pane_fits_content()
+        # Empty→job (or card height change) can race with an in-progress sidebar
+        # geometry pass; re-measure after Qt applies the new card/action bar.
+        if self._queue_size_mode == QUEUE_SIZE_ONE and self._job_cards:
+            QTimer.singleShot(0, self._deferred_generation_geometry_sync)

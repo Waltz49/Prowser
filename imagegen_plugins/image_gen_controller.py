@@ -367,11 +367,8 @@ class ImageGenController(QObject):
             for idx, row in enumerate(rows):
                 if row.job_id == self._selected_job_id:
                     return idx
-        if rows[0].is_active:
-            self._selected_job_id = rows[0].job_id
-            return 0
-        self._selected_job_id = rows[0].job_id
-        return 0
+        self._selected_job_id = None
+        return -1
 
     def job_row_supports_image_series_refinement(self, row: int) -> bool:
         record = self.job_record_for_row(row)

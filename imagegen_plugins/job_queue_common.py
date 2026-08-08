@@ -214,11 +214,11 @@ class JobQueueActionBar(QWidget):
 
         layout.addStretch(1)
         for btn in (
-            self._plus_btn,
-            self._minus_btn,
             self._image_refine_btn,
             self._text_refine_btn,
             self._edit_btn,
+            self._plus_btn,
+            self._minus_btn,
             self._cancel_btn,
         ):
             layout.addWidget(btn, 0, Qt.AlignmentFlag.AlignCenter)
@@ -270,6 +270,13 @@ class JobQueueActionBar(QWidget):
             and rows[row_idx].is_active
         )
         _apply_job_queue_action_bar_background(self, running=running)
+        for btn in (
+            self._edit_btn,
+            self._plus_btn,
+            self._minus_btn,
+            self._cancel_btn,
+        ):
+            btn.setVisible(True)
         self._plus_btn.setEnabled(
             has_row and controller.can_add_series_cycle_for_row(row_idx)
         )
