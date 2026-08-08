@@ -232,7 +232,6 @@ from utils import (
     convert_file_url_to_path,
     validate_image_file,
     resolve_path,
-    directory_has_images
 )
 
 _startup_profile_enabled = os.environ.get("PROWSER_PROFILE_STARTUP", "").strip().lower() in (
@@ -957,34 +956,13 @@ def main():
                 # Store restore state for later use after window creation
                 args._restore_state = restore_state
                 
-                # Only respect saved state if no explicit flags were passed
-                if not explicit_fullscreen_flag and not explicit_no_fullscreen_flag:
-                    # No explicit flags: args.no_fullscreen already set from saved OS fullscreen state above
-                    # Just restore the paths
-                    if last_file and os.path.exists(last_file):
-                        args.paths = [last_file]
-                    elif last_directory and os.path.exists(last_directory):
-                        # Restore directory
-                        args.paths = [last_directory]
-                else:
-                    # Explicit flags override saved state: use paths from saved state but respect flags
-                    if last_file and os.path.exists(last_file):
-                        args.paths = [last_file]
-                    elif last_directory and os.path.exists(last_directory):
-                        args.paths = [last_directory]
-                    # args.no_fullscreen already set by explicit flag handling above
-
-                    # Use utility function for directory image checking
-                    dir_has_supported_files = directory_has_images
-
-                    # If the last saved file does not exist, but the last directory exists and has supported files, just show the directory
-                    if not (last_file and os.path.exists(last_file)) and os.path.exists(last_directory) and dir_has_supported_files(last_directory):
-                        args.paths = [last_directory]
-                    elif dir_has_supported_files(last_directory):
-                        args.paths = [last_directory]
-                    else:
-                        # Open the system directory dialog and set args.paths from the result, or exit if canceled
-                        args.paths = open_directory_dialog(args)
+                # Restore paths from saved state. Explicit --fullscreen/--no-fullscreen
+                # only override OS fullscreen preference (already applied above); they
+                # must not force an open dialog when the saved directory exists but is empty.
+                if last_file and os.path.exists(last_file):
+                    args.paths = [last_file]
+                elif last_directory and os.path.exists(last_directory):
+                    args.paths = [last_directory]
             else:
                 # No saved state, try macOS document-based application file opening
                 # Create Apple Events handler

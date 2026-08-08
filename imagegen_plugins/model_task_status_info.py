@@ -69,12 +69,17 @@ def _truncate(text: str, limit: int = PROMPT_DISPLAY_MAX_LEN) -> str:
 
 
 
-def full_prompt_tooltip_text(full_prompt: str) -> str:
+def full_prompt_tooltip_text(
+    full_prompt: str,
+    *,
+    display_max_len: int | None = None,
+) -> str:
     """Return full prompt for a hover tooltip when status display truncates it."""
     full = (full_prompt or "").strip()
     if not full:
         return ""
-    if _truncate(full) == full:
+    limit = PROMPT_DISPLAY_MAX_LEN if display_max_len is None else max(1, int(display_max_len))
+    if _truncate(full, limit) == full:
         return ""
     return full
 

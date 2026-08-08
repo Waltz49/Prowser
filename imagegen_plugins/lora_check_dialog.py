@@ -76,6 +76,7 @@ from utils import (
 )
 
 FLUX_LORA_CATALOG = LORA_CATALOG
+_PROBE_PROMPT_DISPLAY_MAX = 60
 
 
 class _LoraCheckWorkerBridge(QObject):
@@ -277,6 +278,7 @@ def _format_progress_html(
             f"Duplicates removed: <b>{stats.downloads_deduped}</b>"
         )
     else:
+        activity = (stats.probe_activity or "").strip()
         display_label = stats.current_lora_label
         lora_label = html.escape(
             _lora_label(lora_id, display_label=display_label) if lora_id else "—"
@@ -299,7 +301,17 @@ def _format_progress_html(
             f"Probe <b>{probe_pos}</b> "
             f"({stats.probes_done} finished)"
         )
-        lines.append(f"Testing <b>{model_label}</b> with <b>{lora_label}</b>")
+        full_prompt = (stats.probe_prompt or "").strip()
+        if full_prompt:
+            if len(full_prompt) <= _PROBE_PROMPT_DISPLAY_MAX:
+                prompt_display = full_prompt
+            else:
+                prompt_display = full_prompt[:_PROBE_PROMPT_DISPLAY_MAX] + "…"
+            lines.append(f"Prompt: {html.escape(prompt_display)}")
+        if activity:
+            lines.append(f"<b>{html.escape(activity)}</b>")
+        else:
+            lines.append(f"Testing <b>{model_label}</b> with <b>{lora_label}</b>")
         if stats.last_result == "pass":
             lines.append("Last result: <span style='color:#1a7f37'>pass</span>")
         elif stats.last_result == "fail":
@@ -361,6 +373,19 @@ class CheckLorasOptionsDialog(QDialog):
         self._model_scope_group.addButton(self._selected_models_radio)
         layout.addWidget(self._all_models_radio)
         layout.addWidget(self._selected_models_radio)
+
+        models_toolbar = QWidget()
+        models_toolbar_layout = QHBoxLayout(models_toolbar)
+        models_toolbar_layout.setContentsMargins(24, 0, 0, 0)
+        models_toolbar_layout.setSpacing(8)
+        self._select_all_models_btn = QPushButton("Select all")
+        self._clear_models_btn = QPushButton("Clear all")
+        self._select_all_models_btn.clicked.connect(self._select_all_models)
+        self._clear_models_btn.clicked.connect(self._clear_all_models)
+        models_toolbar_layout.addWidget(self._select_all_models_btn)
+        models_toolbar_layout.addWidget(self._clear_models_btn)
+        models_toolbar_layout.addStretch(1)
+        layout.addWidget(models_toolbar)
 
         models_host = QWidget()
         models_layout = QVBoxLayout(models_host)
@@ -525,8 +550,11 @@ class CheckLorasOptionsDialog(QDialog):
 
     def _on_model_scope_changed(self, _checked: bool = False) -> None:
         selected = self._selected_models_radio.isChecked()
+        has_models = bool(self._model_checkboxes)
         for cb in self._model_checkboxes.values():
-            cb.setEnabled(selected)
+            cb.setEnabled(selected and has_models)
+        self._select_all_models_btn.setEnabled(selected and has_models)
+        self._clear_models_btn.setEnabled(selected and has_models)
 
     def _on_lora_scope_changed(self, _checked: bool = False) -> None:
         selected = self._selected_loras_radio.isChecked()
@@ -538,6 +566,14 @@ class CheckLorasOptionsDialog(QDialog):
         if not has_choices:
             self._all_loras_radio.setEnabled(False)
             self._selected_loras_radio.setEnabled(False)
+
+    def _select_all_models(self) -> None:
+        for cb in self._model_checkboxes.values():
+            cb.setChecked(True)
+
+    def _clear_all_models(self) -> None:
+        for cb in self._model_checkboxes.values():
+            cb.setChecked(False)
 
     def _select_all_loras(self) -> None:
         for cb in self._lora_checkboxes.values():
@@ -994,6 +1030,7 @@ class _LoraCheckProgressDialog(QDialog):
         self._cancel_requested = False
         # True when user dismissed UI before the worker finished (abandon apply).
         self.abandoned = False
+        self._full_prompt = ""
 
         self.status_label = QLabel()
         self.status_label.setAlignment(
@@ -1002,6 +1039,7 @@ class _LoraCheckProgressDialog(QDialog):
         self.status_label.setTextFormat(Qt.TextFormat.RichText)
         self.status_label.setWordWrap(True)
         self.status_label.setMinimumWidth(520)
+        self.status_label.setMouseTracking(True)
 
         pass_heading = QLabel("Passed (registered or pending):")
         self.pass_list = QPlainTextEdit()
@@ -1031,13 +1069,31 @@ class _LoraCheckProgressDialog(QDialog):
         btn_row.addWidget(self._cancel_btn)
         layout.addLayout(btn_row)
 
-    def set_status_html(self, html_text: str) -> None:
+    def set_status_html(
+        self,
+        html_text: str,
+        *,
+        full_prompt: str | None = None,
+    ) -> None:
+        from imagegen_plugins.job_prompt_tooltip import (
+            notify_job_prompt_tooltip_content_updating,
+            update_delayed_prompt_tooltip,
+        )
+
+        if full_prompt is not None:
+            self._full_prompt = full_prompt
+        notify_job_prompt_tooltip_content_updating(self.status_label)
         if self._cancel_requested and not self._closing:
             self.status_label.setText(
                 "<b>Cancelling…</b> (Cancel again to close now)<br/>" + html_text
             )
-            return
-        self.status_label.setText(html_text)
+        else:
+            self.status_label.setText(html_text)
+        update_delayed_prompt_tooltip(
+            self.status_label,
+            self._full_prompt,
+            display_max_len=_PROBE_PROMPT_DISPLAY_MAX,
+        )
 
     def setMaximum(self, total: int) -> None:
         total = max(1, int(total))
@@ -1132,9 +1188,12 @@ def _start_probe_run(
 
     probes_total = max(1, lora_check_work_total(plan_stats))
     start_time = time.monotonic()
+    if not (plan_stats.probe_prompt or "").strip():
+        plan_stats.probe_prompt = (options.probe_prompt or "test").strip() or "test"
     progress = _LoraCheckProgressDialog(parent, probes_total)
     progress.set_status_html(
-        _format_progress_html("scan", "", "", plan_stats, elapsed=0.0)
+        _format_progress_html("scan", "", "", plan_stats, elapsed=0.0),
+        full_prompt=plan_stats.probe_prompt,
     )
     progress.setValue(0)
 
@@ -1183,7 +1242,8 @@ def _start_probe_run(
                 stats,
                 elapsed=elapsed,
                 eta=eta,
-            )
+            ),
+            full_prompt=stats.probe_prompt or options.probe_prompt,
         )
         if (
             phase == "probe"

@@ -214,9 +214,10 @@ def update_delayed_prompt_tooltip(
     full_prompt: str,
     *,
     delay_ms: int = 1000,
+    display_max_len: int | None = None,
 ) -> None:
     """Install or refresh the delayed prompt tooltip for ``full_prompt``."""
-    tip = full_prompt_tooltip_text(full_prompt)
+    tip = full_prompt_tooltip_text(full_prompt, display_max_len=display_max_len)
     filt: _DelayedPromptTooltipFilter | None = getattr(
         widget, "_job_prompt_tooltip_filter", None
     )
@@ -246,6 +247,12 @@ def install_delayed_prompt_tooltip(
     full_prompt: str,
     *,
     delay_ms: int = 1000,
+    display_max_len: int | None = None,
 ) -> None:
     """Attach a 1s-delay tooltip when ``full_prompt`` is truncated for display."""
-    update_delayed_prompt_tooltip(widget, full_prompt, delay_ms=delay_ms)
+    update_delayed_prompt_tooltip(
+        widget,
+        full_prompt,
+        delay_ms=delay_ms,
+        display_max_len=display_max_len,
+    )

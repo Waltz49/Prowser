@@ -150,6 +150,10 @@ class LoraCheckStats:
     progress_pairs_total: int = 0
     current_lora_label: str = ""
     last_result: str = ""  # pass | fail | skip | ""
+    # Short in-flight status for the progress dialog (baseline / render / compare).
+    probe_activity: str = ""
+    # Shared probe prompt shown in the progress dialog (may include triggers).
+    probe_prompt: str = ""
 
 
 @dataclass
@@ -747,6 +751,7 @@ def _downloads_probe_candidates(
     catalog_md5: Dict[str, str],
     stats: LoraCheckStats,
     hash_sizes: Optional[Set[int]] = None,
+    allowed_lora_keys: Optional[Set[str]] = None,
 ) -> List[Path]:
     remaining: List[Path] = []
     seen_md5 = set(planned_md5)
@@ -754,6 +759,11 @@ def _downloads_probe_candidates(
         if path in planned_paths:
             continue
         if _path_is_registered(path, settings):
+            continue
+        if (
+            allowed_lora_keys is not None
+            and not (_orphan_path_selection_keys(path) & allowed_lora_keys)
+        ):
             continue
         digest = _content_digest_for_path(path, digest_cache, hash_sizes=hash_sizes)
         if digest is None:
@@ -806,14 +816,40 @@ def _probe_plan_item_choice_label(item: LoraProbePlanItem) -> str:
     return lora_choice_label(item.entry)
 
 
+def _selected_lora_key_set(options: CheckLorasOptions) -> Optional[Set[str]]:
+    """Return allowed LoRA option keys, or None when every discovered LoRA is in scope."""
+    if options.lora_scope != LORA_SCOPE_SELECTED or not options.selected_lora_keys:
+        return None
+    allowed = {str(k) for k in options.selected_lora_keys if str(k)}
+    return allowed or None
+
+
+def _catalog_entry_selection_keys(
+    entry: FluxLoraEntry,
+    path: Optional[Path],
+) -> Set[str]:
+    keys: Set[str] = set()
+    lora_id = str(entry.lora_id or "")
+    if lora_id and lora_id != _PENDING_DOWNLOAD_LORA_ID:
+        keys.add(lora_id)
+    if path is not None:
+        text = str(path)
+        keys.add(text)
+        keys.add(f"path:{text}")
+    return keys
+
+
+def _orphan_path_selection_keys(path: Path) -> Set[str]:
+    text = str(path)
+    return {text, f"path:{text}"}
+
+
 def _filter_plan_by_lora_scope(
     plan: List[LoraProbePlanItem],
     options: CheckLorasOptions,
 ) -> List[LoraProbePlanItem]:
-    if options.lora_scope != LORA_SCOPE_SELECTED or not options.selected_lora_keys:
-        return plan
-    allowed = {str(k) for k in options.selected_lora_keys if str(k)}
-    if not allowed:
+    allowed = _selected_lora_key_set(options)
+    if allowed is None:
         return plan
     return [
         item
@@ -942,6 +978,7 @@ def plan_disk_lora_probes(
     """
     stats = LoraCheckStats()
     opts = options or CheckLorasOptions()
+    allowed_loras = _selected_lora_key_set(opts)
     digest_cache: Dict[Path, str] = {}
     discovered = _discover_safetensors_paths()
     stats.files_discovered = len(discovered)
@@ -981,6 +1018,11 @@ def plan_disk_lora_probes(
     if local_models:
         for entry in candidates:
             path = local_lora_weights_path(entry.lora_id, settings)
+            if (
+                allowed_loras is not None
+                and not (_catalog_entry_selection_keys(entry, path) & allowed_loras)
+            ):
+                continue
             if path is None:
                 stats.skipped_not_on_disk += 1
                 continue
@@ -1035,6 +1077,7 @@ def plan_disk_lora_probes(
             catalog_md5=catalog_md5,
             stats=stats,
             hash_sizes=hash_sizes,
+            allowed_lora_keys=allowed_loras,
         )
         for path in orphan_paths:
             fingerprint = _fingerprint_for_path(
@@ -1047,8 +1090,10 @@ def plan_disk_lora_probes(
                 entry = get_lora_entry(catalog_id, settings)
                 if entry is not None:
                     probe_models = _probe_models_for_entry(
-                entry, local_models, check_cross_families=opts.check_cross_families,
-            )
+                        entry,
+                        local_models,
+                        check_cross_families=opts.check_cross_families,
+                    )
                     if not probe_models:
                         continue
                     planned_catalog_ids.add(catalog_id)
@@ -1229,6 +1274,12 @@ def _write_probe_image_exif(
         print(f"[Check LoRAs] Could not write probe EXIF for {path}: {exc}")
 
 
+def _probe_activity_pair(model_key: str, lora_label: str) -> str:
+    model = lora_model_display_name(model_key)
+    lora = (lora_label or "").strip() or "—"
+    return f"{model}/{lora}"
+
+
 def _ensure_probe_baseline(
     cache: LoraProbeBaselineCache,
     *,
@@ -1239,6 +1290,7 @@ def _ensure_probe_baseline(
     steps: int,
     cancel_check: Callable[[], bool],
     render_baseline: Callable[[str], None],
+    activity_callback: Optional[Callable[[str], None]] = None,
 ) -> Tuple[Optional[str], bool]:
     """
     Return (baseline_path, generated_new).
@@ -1259,8 +1311,11 @@ def _ensure_probe_baseline(
         return None, False
     baseline_path = _probe_temp_path(model_key, "", role="baseline")
     _prepare_mflux_output_path(baseline_path)
+    model_name = lora_model_display_name(model_key)
+    if activity_callback is not None:
+        activity_callback(f"Creating base image for {model_name}…")
     print(
-        f"[Check LoRAs] Baseline render {lora_model_display_name(model_key)} "
+        f"[Check LoRAs] Baseline render {model_name} "
         f"(prompt={prompt!r}, no LoRA)"
     )
     render_baseline(baseline_path)
@@ -1328,6 +1383,7 @@ def _run_baseline_vs_lora_probe(
     seed: int = 42,
     quantization: Optional[int] = None,
     guidance: Optional[float] = None,
+    activity_callback: Optional[Callable[[str], None]] = None,
 ) -> bool:
     """
     Shared Check LoRAs / import probe process for every T2I model:
@@ -1344,6 +1400,11 @@ def _run_baseline_vs_lora_probe(
     cache = baseline_cache if baseline_cache is not None else LoraProbeBaselineCache()
     out_path = _probe_temp_path(model_key, lora_label)
     exif_lora = (lora_label or "").strip() or None
+    pair = _probe_activity_pair(model_key, lora_label)
+
+    def _report(message: str) -> None:
+        if activity_callback is not None:
+            activity_callback(message)
 
     def _gen_baseline(path: str) -> None:
         generate(path, False)
@@ -1361,10 +1422,15 @@ def _run_baseline_vs_lora_probe(
             steps=steps,
             cancel_check=cancel_check,
             render_baseline=_gen_baseline,
+            activity_callback=activity_callback,
         )
         if baseline_path is None or cancel_check():
             return False
+        _report(f"Creating test image for {pair}")
         _gen_with_lora(out_path)
+        if cancel_check():
+            return False
+        _report(f"Creating similarity data for {pair}")
         has_effect = _lora_probe_has_effect(
             baseline_path=baseline_path,
             out_path=out_path,
@@ -1462,6 +1528,7 @@ def _probe_t2i(
     prompt: str = "test",
     lora_label: str = "lora",
     baseline_cache: Optional[LoraProbeBaselineCache] = None,
+    activity_callback: Optional[Callable[[str], None]] = None,
 ) -> bool:
     from imagegen_plugins.pipelines.mflux_schnell import (
         align_mflux_dims,
@@ -1506,6 +1573,7 @@ def _probe_t2i(
             seed=42,
             quantization=3,
             guidance=0.0,
+            activity_callback=activity_callback,
         )
     except Exception as e:
         if is_lora_incompatibility_error(e):
@@ -1552,6 +1620,7 @@ def _probe_z_image_turbo(
     entry: Optional[FluxLoraEntry] = None,
     baseline_cache: Optional[LoraProbeBaselineCache] = None,
     lora_label: str = "lora",
+    activity_callback: Optional[Callable[[str], None]] = None,
 ) -> bool:
     """Z-Image Turbo T2I: shared no-LoRA baseline vs with-LoRA."""
     from imagegen_plugins.lora_host_registry import HOST_Z_IMAGE_TURBO
@@ -1610,6 +1679,7 @@ def _probe_z_image_turbo(
             generate=_generate,
             seed=42,
             quantization=4,
+            activity_callback=activity_callback,
         )
     except Exception as e:
         if is_lora_incompatibility_error(e):
@@ -1631,6 +1701,7 @@ def _probe_klein_create(
     model_path: str | None = None,
     lora_label: str = "lora",
     baseline_cache: Optional[LoraProbeBaselineCache] = None,
+    activity_callback: Optional[Callable[[str], None]] = None,
 ) -> bool:
     """Klein txt2img: shared no-LoRA baseline vs with-LoRA (prompt only)."""
     from imagegen_plugins.mflux_flux2_klein_session import generate_flux2_klein_create
@@ -1679,6 +1750,7 @@ def _probe_klein_create(
             seed=42,
             quantization=quantize,
             guidance=1.0,
+            activity_callback=activity_callback,
         )
     except Exception as e:
         if is_lora_incompatibility_error(e):
@@ -1698,6 +1770,7 @@ def _probe_diffusers(
     prompt: str = "test",
     lora_label: str = "lora",
     baseline_cache: Optional[LoraProbeBaselineCache] = None,
+    activity_callback: Optional[Callable[[str], None]] = None,
 ) -> bool:
     """SD 1.5 / SDXL T2I: shared no-LoRA baseline vs with-LoRA."""
     if cancel_check():
@@ -1752,6 +1825,7 @@ def _probe_diffusers(
             generate=_generate,
             seed=42,
             guidance=7.5,
+            activity_callback=activity_callback,
         )
     except Exception as e:
         if is_lora_incompatibility_error(e):
@@ -1813,6 +1887,7 @@ def probe_lora_on_model(
     keep_model_loaded: bool = False,
     probe_prompt: str = "test",
     baseline_cache: Optional[LoraProbeBaselineCache] = None,
+    activity_callback: Optional[Callable[[str], None]] = None,
 ) -> bool:
     """
     Return True if a 512x512 T2I probe shows a visual effect vs no-LoRA baseline.
@@ -1851,6 +1926,7 @@ def probe_lora_on_model(
             prompt=render_prompt,
             lora_label=lora_label,
             baseline_cache=cache,
+            activity_callback=activity_callback,
         )
     if model_key == FLUX1_DEV:
         return _probe_t2i(
@@ -1862,6 +1938,7 @@ def probe_lora_on_model(
             prompt=render_prompt,
             lora_label=lora_label,
             baseline_cache=cache,
+            activity_callback=activity_callback,
         )
     if model_key == FLUX2_KLEIN_4B:
         return _probe_klein_create(
@@ -1873,6 +1950,7 @@ def probe_lora_on_model(
             prompt=render_prompt,
             lora_label=lora_label,
             baseline_cache=cache,
+            activity_callback=activity_callback,
         )
     if model_key == FLUX2_KLEIN_9B:
         return _probe_klein_create(
@@ -1884,6 +1962,7 @@ def probe_lora_on_model(
             prompt=render_prompt,
             lora_label=lora_label,
             baseline_cache=cache,
+            activity_callback=activity_callback,
         )
     if model_key == FLUX2_KLEIN_9B_KV:
         return _probe_klein_create(
@@ -1895,6 +1974,7 @@ def probe_lora_on_model(
             prompt=render_prompt,
             lora_label=lora_label,
             baseline_cache=cache,
+            activity_callback=activity_callback,
         )
     if model_key == SCENEWORKS_FLUX2_KLEIN_9B_KV_MLX:
         from imagegen_plugins.sceneworks_klein_mlx import (
@@ -1919,6 +1999,7 @@ def probe_lora_on_model(
             model_path=tier_path,
             lora_label=lora_label,
             baseline_cache=cache,
+            activity_callback=activity_callback,
         )
     if model_key in SD15_LORA_MODEL_KEYS:
         vae = (
@@ -1937,6 +2018,7 @@ def probe_lora_on_model(
             prompt=render_prompt,
             lora_label=lora_label,
             baseline_cache=cache,
+            activity_callback=activity_callback,
         )
     if model_key == SDXL_BASE_1_0:
         return _probe_diffusers(
@@ -1949,6 +2031,7 @@ def probe_lora_on_model(
             prompt=render_prompt,
             lora_label=lora_label,
             baseline_cache=cache,
+            activity_callback=activity_callback,
         )
     if model_key == Z_IMAGE_TURBO_MFLUX_4BIT:
         return _probe_z_image_turbo(
@@ -1961,6 +2044,7 @@ def probe_lora_on_model(
             entry=entry,
             baseline_cache=cache,
             lora_label=lora_label,
+            activity_callback=activity_callback,
         )
     raise ValueError(f"Unknown LoRA probe model: {model_key}")
 
@@ -2412,6 +2496,7 @@ def run_lora_compatibility_check(
         plan = prepared.plan
         stats = prepared.stats
         result.stats = stats
+        stats.probe_prompt = (opts.probe_prompt or "test").strip() or "test"
         progress_callback(
             0,
             max(1, lora_check_work_total(stats)),
@@ -2428,6 +2513,7 @@ def run_lora_compatibility_check(
             options=opts,
         )
         result.stats = stats
+        stats.probe_prompt = (opts.probe_prompt or "test").strip() or "test"
 
     for plan_item in plan:
         for model_key in plan_item.models:
@@ -2492,6 +2578,7 @@ def run_lora_compatibility_check(
         [(state.entry, state.lora_path) for state in lora_states],
         allow_online=False,
     )
+    stats.probe_prompt = shared_probe_prompt
     print(
         f"[Check LoRAs] Shared probe prompt "
         f"({len(shared_triggers)} known trigger"
@@ -2545,7 +2632,20 @@ def run_lora_compatibility_check(
             stats.probe_current = probe_idx + 1
             stats.last_result = ""
             stats.current_lora_label = state.lora_label
+            stats.probe_activity = ""
             work_total = lora_check_work_total(stats)
+            pair = _probe_activity_pair(model_key, state.lora_label)
+
+            def report_activity(message: str) -> None:
+                stats.probe_activity = message
+                progress_callback(
+                    probe_idx,
+                    work_total,
+                    "probe",
+                    state.lora_id,
+                    model_key,
+                    stats,
+                )
 
             if not _probe_should_run(
                 state.lora_id,
@@ -2555,6 +2655,7 @@ def run_lora_compatibility_check(
             ):
                 stats.skipped_registered_probes += 1
                 stats.last_result = "skip"
+                stats.probe_activity = f"Skipping registered pair {pair}"
                 if (
                     opts.registration_mode == REGISTRATION_SKIP_REGISTERED
                     and model_key in state.prev_models
@@ -2587,6 +2688,7 @@ def run_lora_compatibility_check(
                 opts.skip_unchanged
                 and model_key in state.plan_item.probed_models_from_history
             ):
+                stats.probe_activity = f"Reusing probe history for {pair}"
                 progress_callback(
                     probe_idx,
                     work_total,
@@ -2622,6 +2724,7 @@ def run_lora_compatibility_check(
             # Clear before pre-probe UI update so a prior pass is not attributed
             # to this LoRA when the progress signal is delivered later.
             stats.last_result = ""
+            stats.probe_activity = f"Preparing probe for {pair}"
             progress_callback(
                 probe_idx,
                 work_total,
@@ -2648,6 +2751,7 @@ def run_lora_compatibility_check(
                     keep_model_loaded=keep_model_loaded,
                     probe_prompt=shared_probe_prompt,
                     baseline_cache=baseline_cache,
+                    activity_callback=report_activity,
                 )
             except Exception as e:
                 print(
