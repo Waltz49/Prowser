@@ -80,6 +80,7 @@ def set_jobs_display_mode(main_window, mode: str, *, persist: bool = True) -> st
         main_window.config.update_setting("jobs_display_mode", mode)
 
     rs = getattr(main_window, "right_sidebar", None)
+    chrome_suppressed = getattr(main_window, "_chrome_suppressed", False)
     if mode == JOBS_DISPLAY_PANE:
         _hide_job_queue_dialog(main_window)
         if rs is not None and hasattr(rs, "set_jobs_visible"):
@@ -90,6 +91,19 @@ def set_jobs_display_mode(main_window, mode: str, *, persist: bool = True) -> st
             rs.set_jobs_visible(False)
         main_window.jobs_visible = False
         _show_job_queue_dialog(main_window)
+        if chrome_suppressed:
+            # F4 hide: floating panel only — do not resurrect sidebars via pane state.
+            cs = getattr(main_window, "combined_sidebar", None)
+            if cs is not None:
+                cs.hide()
+            if rs is not None:
+                rs.hide()
+                if hasattr(rs, "hide_info"):
+                    rs.hide_info()
+            splitter = getattr(main_window, "main_splitter", None)
+            total_width = splitter.width() if splitter is not None else 0
+            if total_width and hasattr(main_window, "_set_splitter_sizes_safe"):
+                main_window._set_splitter_sizes_safe([0, total_width, 0])
 
     if prev != mode or persist:
         _refresh_flyout_buttons(main_window)

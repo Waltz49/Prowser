@@ -9457,6 +9457,7 @@ class ImageBrowserWindow(QMainWindow):
 
     def _hide_all_chrome(self):
         self._chrome_suppressed = True
+        self._chrome_partial_side = None
         self._status_bar_peek_active = False
         if getattr(self, '_status_bar_anim', None):
             self._status_bar_anim.stop()
@@ -9666,6 +9667,8 @@ class ImageBrowserWindow(QMainWindow):
 
     def _apply_right_sidebar_visibility(self):
         """Apply right sidebar visibility based on Organize, Information, or Jobs panes."""
+        if getattr(self, '_chrome_suppressed', False):
+            return
         partial = getattr(self, '_chrome_partial_side', None)
         if partial == 'left':
             if self._sidebar_container_visible('left'):
