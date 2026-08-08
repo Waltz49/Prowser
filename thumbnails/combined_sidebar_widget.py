@@ -507,11 +507,6 @@ class CombinedSidebarWidget(QWidget):
         elif disp[1] and self.preview_widget:
             self.preview_widget.setFocus()
 
-    def enterEvent(self, event):
-        """Restore browse cursor when the pointer enters any sidebar pane."""
-        super().enterEvent(event)
-        self._refresh_browse_cursor_for_pointer()
-        
     def setup_ui(self):
         """Setup the combined widget UI"""
         self.setMinimumWidth(250)
@@ -1243,7 +1238,6 @@ class CombinedSidebarWidget(QWidget):
             self._update_splitter_sizes()
             self.tree_visibility_changed.emit(visible)
             self._update_overall_visibility()
-            self._refresh_browse_cursor_for_pointer()
         elif visible and self.tree_widget:
             self.tree_widget.show()
 
@@ -1261,7 +1255,6 @@ class CombinedSidebarWidget(QWidget):
             self._update_splitter_sizes()
             self.preview_visibility_changed.emit(visible)
             self._update_overall_visibility()
-            self._refresh_browse_cursor_for_pointer()
 
         if not visible:
             self._maybe_reenter_chat_cover()
@@ -1283,7 +1276,6 @@ class CombinedSidebarWidget(QWidget):
                 self._apply_display_sections()
             self.chat_header.set_hide_button_mode("minus" if visible else "plus")
             if visible and self.chat_widget and hasattr(self.chat_widget, "on_pane_activated"):
-                self._refresh_browse_cursor_for_pointer()
                 self.chat_widget.on_pane_activated()
             self._update_splitter_sizes()
             self.main_window.config.update_setting('chat_visible', visible)
@@ -1300,7 +1292,6 @@ class CombinedSidebarWidget(QWidget):
             if self.isVisible():
                 self.chat_widget.show()
             if hasattr(self.chat_widget, "on_pane_activated"):
-                self._refresh_browse_cursor_for_pointer()
                 self.chat_widget.on_pane_activated()
             if hasattr(self.chat_widget, "ensure_input_focus_policy"):
                 self.chat_widget.ensure_input_focus_policy()
@@ -1313,11 +1304,6 @@ class CombinedSidebarWidget(QWidget):
         if action is not None:
             action.setChecked(self.chat_visible)
             action.setText("Hide Chat" if self.chat_visible else "Show Chat")
-
-    def _refresh_browse_cursor_for_pointer(self) -> None:
-        cm = getattr(self.main_window, "cursor_manager", None)
-        if cm is not None:
-            cm.refresh_for_pointer_location()
 
     def is_chat_visible(self):
         """Check if chat is visible"""

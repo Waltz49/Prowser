@@ -302,12 +302,7 @@ class Slideshow3Manager:
         if getattr(self, 'image_container', None):
             self.image_container.hide()
         self._setup_frames_container()
-        # Clean up regular cursor manager if it exists (we use slideshow3-specific system)
-        if hasattr(self.main_window, 'cursor_manager') and self.main_window.cursor_manager:
-            self.main_window.cursor_manager.cleanup()
-            self.main_window.cursor_manager = None
-        # Start slideshow3-specific cursor hiding system
-        self._start_cursor_hiding()
+        self.main_window.view_manager._setup_cursor_manager()
         # Spawn some initial frames already on screen (simulating pre-travel)
         QTimer.singleShot(100, self._spawn_initial_frames)
         QTimer.singleShot(200, self._start_timers)
@@ -385,14 +380,10 @@ class Slideshow3Manager:
                 self.cursor_is_hidden = True
     
     def _on_mouse_activity_overlay(self):
-        """Called by overlay widget when mouse activity is detected"""
-        self.last_mouse_activity_time = time.time()
-        # Show cursor immediately - force it visible
-        app = QApplication.instance()
-        if app:
-            app.restoreOverrideCursor()
-        self.main_window.setCursor(Qt.ArrowCursor)
-        self.cursor_is_hidden = False
+        """Called by overlay widget when mouse activity is detected."""
+        cm = getattr(self.main_window, "cursor_manager", None)
+        if cm is not None:
+            cm.on_mouse_activity()
     
     def _force_restore_cursor(self):
         """Force restore cursor - called after widget operations complete"""
@@ -1200,9 +1191,9 @@ class Slideshow3Manager:
             return
         self.animation_timer.stop()
         self.spawn_timer.stop()
-        # Stop cursor hiding timer
-        self.cursor_hide_timer.stop()
-        self.cursor_is_hidden = False
+        if hasattr(self.main_window, 'cursor_manager') and self.main_window.cursor_manager:
+            self.main_window.cursor_manager.cleanup()
+            self.main_window.cursor_manager = None
         # Remove cursor overlay
         if self.cursor_overlay:
             self.cursor_overlay.hide()
@@ -1253,8 +1244,6 @@ class Slideshow3Manager:
             QTimer.singleShot(100, self.main_window.efficient_directory_refresh)
         # Save current max_simultaneous_frames to persist keyboard changes
         self.config.update_setting('slideshow3_max_simultaneous_frames', self.max_simultaneous_frames)
-        # Restore cursor after all widget operations complete
-        QTimer.singleShot(100, self._force_restore_cursor)
         if self.status_notification:
             self.status_notification.show_message("Frames slideshow stopped")
 
