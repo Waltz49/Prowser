@@ -1386,12 +1386,16 @@ class ImageBrowserWindow(QMainWindow):
         # Connect idle detector signals to controller
         # Pass current directory when idle is detected to prioritize it
         def on_idle_detected():
-            try:
-                self.background_clip_controller.start_process(
-                    priority_directory=getattr(self, 'current_directory', None)
-                )
-            except Exception as e:
-                raise
+            # Image generation counts as non-idle (memory pressure).
+            ctrl = getattr(self, "_imagegen_controller", None)
+            if ctrl is not None and ctrl._generation_busy_for_idle():
+                self.idle_detector.set_generation_busy(True)
+                return
+            if getattr(self, "debug_mode", False):
+                print("[idle] on_idle_detected → start_process", flush=True)
+            self.background_clip_controller.start_process(
+                priority_directory=getattr(self, 'current_directory', None)
+            )
         
         self.idle_detector.idle_detected.connect(on_idle_detected)
         self.idle_detector.user_activity_detected.connect(self.background_clip_controller.pause_process)
@@ -6046,6 +6050,10 @@ class ImageBrowserWindow(QMainWindow):
                         self.idle_detector.start()
                     if hasattr(self, 'background_cache_importer'):
                         self.background_cache_importer.start()
+                    # Re-apply generation-busy if a job is already running.
+                    ctrl = getattr(self, "_imagegen_controller", None)
+                    if ctrl is not None:
+                        ctrl._sync_idle_detector_generation_busy()
                 else:
                     if hasattr(self, 'idle_detector'):
                         self.idle_detector.stop()

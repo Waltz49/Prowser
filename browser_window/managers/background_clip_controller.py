@@ -119,29 +119,41 @@ class BackgroundClipController(QObject):
         # Check if process is running BEFORE sending command
         process_already_running = self.is_process_running()
         
-        # If process is running but socket isn't working, it might be stuck - restart it
-        if process_already_running and self.command_socket_path.exists():
-            # Test if socket is actually accepting connections
+        # Only probe/restart a stuck worker when starting fresh — never before resume.
+        # An empty connect is accepted by the worker as a no-op command and can race
+        # with the real resume/pause payload.
+        if (
+            process_already_running
+            and not self.process
+            and self.command_socket_path.exists()
+        ):
+            # Orphaned worker from a prior session: verify socket, else restart.
             try:
                 test_sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
                 test_sock.settimeout(0.1)
                 test_sock.connect(str(self.command_socket_path))
                 test_sock.close()
             except Exception:
-                # Socket exists but not accepting connections - process might be stuck
-                # Force restart by stopping the stuck process
                 print(f"WARNING: Worker process exists but socket not responding. Restarting process...")
                 self.stop_process()
                 process_already_running = False
         
         # Send command via socket (event-driven)
         # Use "resume" if process is already running and paused, "start" if not running
+        debug = bool(getattr(self.main_window, "debug_mode", False))
         if process_already_running:
             # Process is running - send resume command to ensure it's not stuck in paused state
-            self._send_control_command("resume", foreground_busy=False, directories=directories)
+            ok = self._send_control_command("resume", foreground_busy=False, directories=directories)
+            if debug:
+                print(
+                    f"[idle] start_process resume sent={ok} dirs={len(directories)}",
+                    flush=True,
+                )
         else:
             # Process not running - send start command
-            self._send_control_command("start", foreground_busy=False, directories=directories)
+            ok = self._send_control_command("start", foreground_busy=False, directories=directories)
+            if debug:
+                print(f"[idle] start_process start sent={ok}", flush=True)
         
         if process_already_running:
             self._update_status_bar()
@@ -665,6 +677,15 @@ class BackgroundClipController(QObject):
 
         return False
     
+    def mark_paused_for_generation(self) -> None:
+        """Optimistically mark paused so the status indicator updates immediately."""
+        self.current_status = {
+            **self.current_status,
+            "status": "flushed_and_paused",
+            "last_update": time.time(),
+        }
+        self._update_status_bar()
+
     def is_background_active(self) -> bool:
         """
         Check if background CLIP extraction is currently active (running and not paused)
@@ -673,6 +694,10 @@ class BackgroundClipController(QObject):
             True if background process is running and actively processing, False otherwise
         """
         if not self.enabled:
+            return False
+
+        idle = getattr(self.main_window, "idle_detector", None)
+        if idle is not None and idle.is_generation_busy():
             return False
         
         is_running = self.is_process_running()

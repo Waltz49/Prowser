@@ -189,8 +189,30 @@ class ImageGenController(QObject):
         self._gpu_cleanup_active = False
         self._restore_persisted_job_queue()
 
+        # Keep background idle scanning paused for the full generation job lifetime.
+        self.generation_started.connect(self._sync_idle_detector_generation_busy)
+        self.generation_finished.connect(self._sync_idle_detector_generation_busy)
+        self.queue_changed.connect(self._sync_idle_detector_generation_busy)
+
     _GPU_CLEANUP_POLL_MS = 2000
     _GPU_CLEANUP_MAX_ATTEMPTS = 30
+
+    def _generation_busy_for_idle(self) -> bool:
+        """True while a generation job is active start-to-finish (incl. AI/cooldown/cleanup).
+
+        Uses job-queue identity rather than ``_tasks.is_running()``: finish handlers
+        run before the worker clears its active job id, so relying on the task flag
+        would leave background idle scanning paused forever after the last job.
+        """
+        return bool(self._active_queue_job_id) or self._gpu_cleanup_active or (
+            self._copy_batch_active and not self._copy_batch_cancelled
+        ) or self._is_in_copy_cooldown() or self._job_ai_stage_active
+
+    def _sync_idle_detector_generation_busy(self, *_args) -> None:
+        idle = getattr(self.main_window, "idle_detector", None)
+        if idle is None:
+            return
+        idle.set_generation_busy(self._generation_busy_for_idle())
 
     def _release_main_process_gpu_memory(self) -> None:
         """Return Metal pool memory in the UI process after the worker exits."""
@@ -234,6 +256,10 @@ class ImageGenController(QObject):
     def _abort_queued_job_start(self) -> None:
         """Reset controller state after a queued job failed to start."""
         self._set_gpu_cleanup_status(False)
+        self._copy_batch_active = False
+        self._copies_total = 0
+        self._copies_done = 0
+        self._copy_batch_cancelled = False
         self._active_queue_job_id = ""
         self._active_display_index = 0
         self._active_thumbnail_paths = []
@@ -2158,6 +2184,7 @@ class ImageGenController(QObject):
         self._active_thumbnail_paths = []
         self._reset_generation_state()
         self._update_status_bar_indicator(None)
+        self._sync_idle_detector_generation_busy()
 
     def _quit_interrupts_active_worker(self) -> bool:
         """True when quitting would cancel an in-flight model worker task."""
@@ -2425,6 +2452,7 @@ class ImageGenController(QObject):
         self._active_queue_job_id = ""
         self._active_thumbnail_paths = []
         self._reset_generation_state()
+        self._sync_idle_detector_generation_busy()
 
     def _on_foreground_task_finished(self, kind: str, _success: bool, _err: str) -> None:
         if kind == "caption":
@@ -3114,6 +3142,8 @@ class ImageGenController(QObject):
         self._emit_jobs_pane_title_changed()
         if not self._hold_job_queue and not self._queue_advance_suppressed:
             QTimer.singleShot(0, self._try_start_next_queued_job)
+        # Re-evaluate after queue advance (and after worker clears its active job id).
+        QTimer.singleShot(0, self._sync_idle_detector_generation_busy)
 
     def _try_start_next_queued_job(self) -> None:
         if self._quit_after_current_worker and not self._deferred_quit_wait_all_jobs:

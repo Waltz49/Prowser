@@ -632,11 +632,31 @@ def main():
                                 logger.info(f"  ... and {len(directories) - sample_size} more directories")
                     
                     if directories:
-                        # Process CLIP cycle first
-                        if cycle_type == "clip":
+                        # Keep alternating CLIP/CNN until paused/stopped. After each pair,
+                        # wait 2 minutes (or resume early) then run another pair.
+                        while not paused and not should_stop:
+                            # Process CLIP cycle first
+                            if cycle_type != "clip":
+                                cycle_type = "clip"
                             logger.info(f"Starting CLIP cycle: Processing {len(directories)} directories")
+                            current_status["status"] = "running"
+                            current_status["last_update"] = time.time()
+                            _send_status_update(status_socket_path, current_status, logger)
                             _process_directories(cnn_sorter, directories, feature_cache, image_cache, logger, command_socket, status_socket_path, current_status)
                             
+                            # Interrupted pause/stop already updates current_status; honor it
+                            # even when the only socket command was consumed inside processing.
+                            status_str = current_status.get("status", "")
+                            if status_str in ("paused", "flushed_and_paused", "stopped"):
+                                logger.info(
+                                    f"CLIP processing was interrupted (status={status_str})"
+                                )
+                                if status_str == "stopped":
+                                    should_stop = True
+                                else:
+                                    paused = True
+                                break
+
                             # Check if processing was paused/stopped (non-blocking check, socket-only)
                             control_data = None
                             if command_socket:
@@ -645,7 +665,20 @@ def main():
                                 command = control_data.get("command", "")
                                 if command in ("stop", "pause", "flush_and_pause"):
                                     logger.info(f"CLIP processing was interrupted by {command} command")
-                                    continue  # Skip CNN cycle and wait
+                                    if command == "stop":
+                                        should_stop = True
+                                    else:
+                                        paused = True
+                                        current_status["status"] = (
+                                            "flushed_and_paused"
+                                            if command == "flush_and_pause"
+                                            else "paused"
+                                        )
+                                        current_status["last_update"] = time.time()
+                                        _send_status_update(
+                                            status_socket_path, current_status, logger
+                                        )
+                                    break  # Skip CNN cycle and wait
                             
                             logger.info("CLIP cycle completed. Starting CNN cycle.")
                             
@@ -653,6 +686,17 @@ def main():
                             logger.info(f"Starting CNN cycle: Processing {len(directories)} directories")
                             _process_directories_cnn(cnn_sorter, directories, feature_cache, image_cache, logger, command_socket, status_socket_path, current_status)
                             
+                            status_str = current_status.get("status", "")
+                            if status_str in ("paused", "flushed_and_paused", "stopped"):
+                                logger.info(
+                                    f"CNN processing was interrupted (status={status_str})"
+                                )
+                                if status_str == "stopped":
+                                    should_stop = True
+                                else:
+                                    paused = True
+                                break
+
                             # Check if processing was paused/stopped (non-blocking check, socket-only)
                             control_data = None
                             if command_socket:
@@ -662,60 +706,88 @@ def main():
                                 command = control_data.get("command", "")
                                 if command in ("stop", "pause", "flush_and_pause"):
                                     logger.info(f"CNN processing was interrupted by {command} command, skipping wait")
+                                    if command == "stop":
+                                        should_stop = True
+                                    else:
+                                        paused = True
+                                        current_status["status"] = (
+                                            "flushed_and_paused"
+                                            if command == "flush_and_pause"
+                                            else "paused"
+                                        )
+                                        current_status["last_update"] = time.time()
+                                        _send_status_update(
+                                            status_socket_path, current_status, logger
+                                        )
                                     should_wait = False
                             
                             # After both CLIP and CNN cycles complete, wait 2 minutes before restarting
                             # Use event-driven socket waiting with timeout to remain responsive
-                            if should_wait:
-                                logger.info("Both CLIP and CNN cycles completed. Waiting 2 minutes before restarting...")
-                                wait_seconds = 120  # 2 minutes
-                                waited = 0
-                                
-                                # Update status to "waiting" to indicate sleep period
-                                current_status = {"status": "waiting", "last_update": time.time()}
-                                _send_status_update(status_socket_path, current_status, logger)
-                                
-                                while waited < wait_seconds:
-                                    # Wait for command via socket with timeout (event-driven)
-                                    remaining_wait = wait_seconds - waited
-                                    check_timeout = min(5.0, remaining_wait)  # Check every 5 seconds or remaining time
-                                    
-                                    control_data = None
-                                    if command_socket:
-                                        control_data = _wait_for_command(command_socket, timeout=check_timeout, logger=logger)
-                                    
-                                    # Socket-only (event-driven) - must process command so status updates (e.g. flushed_and_paused)
-                                    if control_data:
-                                        command = control_data.get("command", "")
-                                        if command in ("stop", "pause", "flush_and_pause"):
-                                            logger.info(f"Received {command} command during wait, stopping wait")
-                                            if command == "stop":
-                                                should_stop = True
-                                                current_status = {"status": "stopped", "last_update": time.time()}
-                                                _send_status_update(status_socket_path, current_status, logger)
-                                            elif command == "flush_and_pause":
-                                                if cnn_sorter and hasattr(cnn_sorter, 'feature_cache'):
-                                                    cnn_sorter.feature_cache.flush_caches(async_flush=False)
-                                                feature_cache.flush_caches(async_flush=False)
-                                                _flush_face_cache_index_safe()
-                                                current_status = {"status": "flushed_and_paused", "last_flush_time": time.time(), "last_update": time.time()}
-                                                _send_status_update(status_socket_path, current_status, logger)
-                                                paused = True
-                                            elif command == "pause":
-                                                paused = True
-                                                current_status = {"status": "paused", "last_update": time.time()}
-                                                _send_status_update(status_socket_path, current_status, logger)
-                                            break
-                                    
-                                    waited += check_timeout
-                                
-                                if waited >= wait_seconds:
-                                    logger.info("Wait period completed, restarting with CLIP cycle")
-                                    # Update status back to "running" when sleep completes
-                                    current_status = {"status": "running", "last_update": time.time()}
-                                    _send_status_update(status_socket_path, current_status, logger)
+                            if not should_wait:
+                                break
+
+                            logger.info("Both CLIP and CNN cycles completed. Waiting 2 minutes before restarting...")
+                            wait_seconds = 120  # 2 minutes
+                            waited = 0
+                            resume_during_wait = False
                             
-                            # Cycle type stays "clip" for next iteration (always start with CLIP)
+                            # Update status to "waiting" to indicate sleep period
+                            current_status = {"status": "waiting", "last_update": time.time()}
+                            _send_status_update(status_socket_path, current_status, logger)
+                            
+                            while waited < wait_seconds:
+                                # Wait for command via socket with timeout (event-driven)
+                                remaining_wait = wait_seconds - waited
+                                check_timeout = min(5.0, remaining_wait)  # Check every 5 seconds or remaining time
+                                
+                                control_data = None
+                                if command_socket:
+                                    control_data = _wait_for_command(command_socket, timeout=check_timeout, logger=logger)
+                                
+                                # Socket-only (event-driven) - must process command so status updates (e.g. flushed_and_paused)
+                                if control_data:
+                                    command = control_data.get("command", "")
+                                    if command in ("stop", "pause", "flush_and_pause"):
+                                        logger.info(f"Received {command} command during wait, stopping wait")
+                                        if command == "stop":
+                                            should_stop = True
+                                            current_status = {"status": "stopped", "last_update": time.time()}
+                                            _send_status_update(status_socket_path, current_status, logger)
+                                        elif command == "flush_and_pause":
+                                            if cnn_sorter and hasattr(cnn_sorter, 'feature_cache'):
+                                                cnn_sorter.feature_cache.flush_caches(async_flush=False)
+                                            feature_cache.flush_caches(async_flush=False)
+                                            _flush_face_cache_index_safe()
+                                            current_status = {"status": "flushed_and_paused", "last_flush_time": time.time(), "last_update": time.time()}
+                                            _send_status_update(status_socket_path, current_status, logger)
+                                            paused = True
+                                        elif command == "pause":
+                                            paused = True
+                                            current_status = {"status": "paused", "last_update": time.time()}
+                                            _send_status_update(status_socket_path, current_status, logger)
+                                        break
+                                    if command in ("resume", "start"):
+                                        # Idle resume arrived during the inter-cycle wait.
+                                        paused = False
+                                        resume_during_wait = True
+                                        logger.info(
+                                            f"Received {command} command during wait, "
+                                            "restarting cycles early"
+                                        )
+                                        break
+                                
+                                waited += check_timeout
+                            
+                            if paused or should_stop:
+                                break
+
+                            if waited >= wait_seconds or resume_during_wait:
+                                logger.info("Wait period completed, restarting with CLIP cycle")
+                                current_status = {"status": "running", "last_update": time.time()}
+                                _send_status_update(status_socket_path, current_status, logger)
+                                continue  # another CLIP/CNN pair
+
+                            break
                     else:
                         logger.debug("No directories to process")
                 else:
@@ -1065,19 +1137,6 @@ def _process_directories_cnn(cnn_sorter: CNNImageSimilaritySorter, directories: 
         photos_scopes_normalized = None
         ignore_dirs_normalized = []
     
-    def _should_pause() -> bool:
-        """Check if pause command has been received (non-blocking check, socket-only)"""
-        try:
-            control_data = None
-            if command_socket:
-                control_data = _wait_for_command(command_socket, timeout=0.0, logger=logger)
-            if control_data:
-                command = control_data.get("command", "")
-                return command in ("pause", "flush_and_pause", "stop")
-        except Exception:
-            pass
-        return False
-    
     def _get_command() -> Optional[str]:
         """Get the current command if any (non-blocking check, socket-only)"""
         try:
@@ -1092,32 +1151,36 @@ def _process_directories_cnn(cnn_sorter: CNNImageSimilaritySorter, directories: 
     
     for dir_idx, directory in enumerate(directories):
         # Check for pause command every directory (responsive pause)
-        if _should_pause():
-            logger.info(f"Pause command received, stopping CNN directory processing (processed {dir_idx}/{len(directories)} directories)")
-            # Update status to paused (socket-based)
+        command = _get_command()
+        if command in ("pause", "flush_and_pause", "stop"):
+            logger.info(
+                f"Pause command received, stopping CNN directory processing "
+                f"(processed {dir_idx}/{len(directories)} directories)"
+            )
+            # Use the command we already consumed — do not re-read the socket
+            # (a single pause must still mark paused and stop the cycle).
             try:
-                # Check command via socket
-                control_data = None
-                if command_socket:
-                    control_data = _wait_for_command(command_socket, timeout=0.0, logger=logger)
-                if control_data:
-                    command = control_data.get("command", "")
-                    if command == "flush_and_pause":
-                        # Flush before pausing
-                        feature_cache.flush_caches(async_flush=False)
-                        _flush_face_cache_index_safe()
-                        current_status["status"] = "flushed_and_paused"
-                        current_status["last_flush_time"] = time.time()
-                        current_status["last_update"] = time.time()
-                        _send_status_update(status_socket_path, current_status, logger)
-                        logger.info("Flushed caches and paused")
-                    else:
-                        current_status["status"] = "paused"
-                        current_status["last_update"] = time.time()
-                        _send_status_update(status_socket_path, current_status, logger)
-                        logger.info("Paused")
+                if command == "flush_and_pause":
+                    feature_cache.flush_caches(async_flush=False)
+                    _flush_face_cache_index_safe()
+                    current_status["status"] = "flushed_and_paused"
+                    current_status["last_flush_time"] = time.time()
+                    current_status["last_update"] = time.time()
+                    _send_status_update(status_socket_path, current_status, logger)
+                    logger.info("Flushed caches and paused")
+                elif command == "stop":
+                    current_status["status"] = "stopped"
+                    current_status["last_update"] = time.time()
+                    _send_status_update(status_socket_path, current_status, logger)
+                else:
+                    current_status["status"] = "paused"
+                    current_status["last_update"] = time.time()
+                    _send_status_update(status_socket_path, current_status, logger)
+                    logger.info("Paused")
             except Exception as e:
                 logger.warning(f"Error updating status on pause: {e}")
+                current_status["status"] = "paused"
+                current_status["last_update"] = time.time()
             return
         # Skip excluded directories if they somehow got through (prowser cache, Photos Library paths, and ignore directories)
         is_excluded = False
@@ -1374,19 +1437,6 @@ def _process_directories(cnn_sorter: CNNImageSimilaritySorter, directories: List
         photos_scopes_normalized = None
         ignore_dirs_normalized = []
     
-    def _should_pause() -> bool:
-        """Check if pause command has been received (non-blocking check, socket-only)"""
-        try:
-            control_data = None
-            if command_socket:
-                control_data = _wait_for_command(command_socket, timeout=0.0, logger=logger)
-            if control_data:
-                command = control_data.get("command", "")
-                return command in ("pause", "flush_and_pause", "stop")
-        except Exception:
-            pass
-        return False
-    
     def _get_command() -> Optional[str]:
         """Get the current command if any (non-blocking check, socket-only)"""
         try:
@@ -1401,32 +1451,36 @@ def _process_directories(cnn_sorter: CNNImageSimilaritySorter, directories: List
     
     for dir_idx, directory in enumerate(directories):
         # Check for pause command every directory (responsive pause)
-        if _should_pause():
-            logger.info(f"Pause command received, stopping directory processing (processed {dir_idx}/{len(directories)} directories)")
-            # Update status to paused (socket-based)
+        command = _get_command()
+        if command in ("pause", "flush_and_pause", "stop"):
+            logger.info(
+                f"Pause command received, stopping directory processing "
+                f"(processed {dir_idx}/{len(directories)} directories)"
+            )
+            # Use the command we already consumed — do not re-read the socket
+            # (a single pause must still mark paused and stop the cycle).
             try:
-                # Check command via socket
-                control_data = None
-                if command_socket:
-                    control_data = _wait_for_command(command_socket, timeout=0.0, logger=logger)
-                if control_data:
-                    command = control_data.get("command", "")
-                    if command == "flush_and_pause":
-                        # Flush before pausing
-                        feature_cache.flush_caches(async_flush=False)
-                        _flush_face_cache_index_safe()
-                        current_status["status"] = "flushed_and_paused"
-                        current_status["last_flush_time"] = time.time()
-                        current_status["last_update"] = time.time()
-                        _send_status_update(status_socket_path, current_status, logger)
-                        logger.info("Flushed caches and paused")
-                    else:
-                        current_status["status"] = "paused"
-                        current_status["last_update"] = time.time()
-                        _send_status_update(status_socket_path, current_status, logger)
-                        logger.info("Paused")
+                if command == "flush_and_pause":
+                    feature_cache.flush_caches(async_flush=False)
+                    _flush_face_cache_index_safe()
+                    current_status["status"] = "flushed_and_paused"
+                    current_status["last_flush_time"] = time.time()
+                    current_status["last_update"] = time.time()
+                    _send_status_update(status_socket_path, current_status, logger)
+                    logger.info("Flushed caches and paused")
+                elif command == "stop":
+                    current_status["status"] = "stopped"
+                    current_status["last_update"] = time.time()
+                    _send_status_update(status_socket_path, current_status, logger)
+                else:
+                    current_status["status"] = "paused"
+                    current_status["last_update"] = time.time()
+                    _send_status_update(status_socket_path, current_status, logger)
+                    logger.info("Paused")
             except Exception as e:
                 logger.warning(f"Error updating status on pause: {e}")
+                current_status["status"] = "paused"
+                current_status["last_update"] = time.time()
             return
         # Skip excluded directories if they somehow got through (prowser cache, Photos Library paths, and ignore directories)
         is_excluded = False
