@@ -182,7 +182,8 @@ class NavigationManager:
         for i in range(start_index, end_index + 1):
             if 0 <= i < len(displayed_images):
                 self.main_window.selected_files.add(displayed_images[i])
-        self.main_window.most_recent_selected_index = current_index #DGN
+        if 0 <= current_index < len(displayed_images):
+            self.main_window.most_recent_selected_path = displayed_images[current_index]
         
         # CRITICAL: Don't set highlight_index directly - it should already be synced from current_image_path
         # The caller (handle_range_selection in image_browser_window) will sync it

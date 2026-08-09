@@ -339,15 +339,15 @@ class ImageBrowserWindow(QMainWindow):
             self.selection_model.last_clicked_index = value
 
     @property
-    def most_recent_selected_index(self):
+    def most_recent_selected_path(self):
         if getattr(self, 'selection_model', None):
-            return self.selection_model.most_recent_selected_index
+            return self.selection_model.most_recent_selected_path
         return None
 
-    @most_recent_selected_index.setter
-    def most_recent_selected_index(self, value):
+    @most_recent_selected_path.setter
+    def most_recent_selected_path(self, value):
         if getattr(self, 'selection_model', None):
-            self.selection_model.most_recent_selected_index = value
+            self.selection_model.most_recent_selected_path = value
 
     def __init__(self, fullscreen: bool = False, 
                 target_file: Optional[str] = None,
@@ -1025,7 +1025,7 @@ class ImageBrowserWindow(QMainWindow):
             if not files:
                 self.directory_stack_history_handler.save_current_state('image_browser_window.refresh_from_configuration')
             if getattr(self, 'selection_model', None) is not None:
-                self.most_recent_selected_index = None  # DGN
+                self.most_recent_selected_path = None
 
             # If multiple explicit files are requested, force thumbnail mode handling
             # unless fullscreen is explicitly requested via command line

@@ -998,6 +998,9 @@ class FileOperationsManager:
 
         # Capture the active file BEFORE deletion (this is the file that should determine next selection)
         active_file_path = mw.get_current_image_path()
+        # Drop cached selection path so clear_selection cannot override post-delete active
+        if getattr(mw, 'selection_model', None) is not None:
+            mw.most_recent_selected_path = None
 
         if len(selected_files) == 1:
             success = self._delete_single_file(selected_files[0], force_confirmation, active_file_path)

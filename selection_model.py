@@ -20,7 +20,7 @@ class SelectionModel(QObject):
         self.cmd_multi_axis: Optional[str] = None
         self.cmd_multi_sign: int = 0
         self.last_clicked_index: Optional[int] = None
-        self.most_recent_selected_index: Optional[int] = None
+        self.most_recent_selected_path: Optional[str] = None
 
     @property
     def selected_files(self) -> Set[str]:

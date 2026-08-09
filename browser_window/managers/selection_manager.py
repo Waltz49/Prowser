@@ -44,27 +44,33 @@ class SelectionManager:
             self.main_window.highlight_index = 0
     
     def clear_selection(self):
-        """Clear all selected thumbnails"""
-        # Set highlight to the last selected item before clearing
-        if hasattr(self.main_window, 'most_recent_selected_index') and self.main_window.most_recent_selected_index is not None:
-            self.main_window.highlight_index = self.main_window.most_recent_selected_index #DGN
-            self.main_window.most_recent_selected_index = None #DGN
-        elif self.main_window.selected_files:
-            # Find the index of the last selected file (preserve order from displayed_images)
-            last_index = -1
-            for i, image_path in enumerate(self.main_window.displayed_images):
-                if image_path in self.main_window.selected_files:
-                    last_index = i
-            if last_index >= 0:
-                self.main_window.highlight_index = last_index
-        
-        self.main_window.selected_files.clear()
-        self.main_window.range_anchor_index = None
-        self.main_window._emit_selection_changed()
+        """Clear all selected thumbnails.
+
+        Restore highlight by file path only (source of truth). Never use a cached
+        index — after delete/reorder an index can point at a different file.
+        """
+        mw = self.main_window
+        displayed = mw.displayed_images
+        selected = mw.selected_files
+        recent_path = getattr(mw, 'most_recent_selected_path', None)
+        mw.most_recent_selected_path = None
+        if recent_path and selected and recent_path in selected and recent_path in displayed:
+            mw.set_current_image_by_path(recent_path)
+        elif selected and displayed:
+            last_path = None
+            for image_path in displayed:
+                if image_path in selected:
+                    last_path = image_path
+            if last_path is not None:
+                mw.set_current_image_by_path(last_path)
+
+        mw.selected_files.clear()
+        mw.range_anchor_index = None
+        mw._emit_selection_changed()
         # Reset cmd+arrow multi-select state
-        self.main_window.cmd_multi_origin_index = None
-        self.main_window.cmd_multi_axis = None
-        self.main_window.cmd_multi_sign = 0
+        mw.cmd_multi_origin_index = None
+        mw.cmd_multi_axis = None
+        mw.cmd_multi_sign = 0
     
     def _get_selected_indices_for_display(self) -> set:
         """Convert selected_files to indices for visual display only"""
