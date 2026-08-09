@@ -47,20 +47,16 @@ from PySide6.QtWidgets import (
 
 # AppKit imports for file operations - will be imported lazily when needed
 _NSWorkspace = None
-_NSUndoManager = None
-_NSObject = None
 _NSWorkspaceRecycleOperation = None
 
 def _import_appkit_modules():
     """Lazily import AppKit modules when needed"""
-    global _NSWorkspace, _NSUndoManager, _NSObject, _NSWorkspaceRecycleOperation
+    global _NSWorkspace, _NSWorkspaceRecycleOperation
     
     if _NSWorkspace is None:
         try:
-            from AppKit import NSWorkspace, NSUndoManager, NSObject, NSWorkspaceRecycleOperation
+            from AppKit import NSWorkspace, NSWorkspaceRecycleOperation
             _NSWorkspace = NSWorkspace
-            _NSUndoManager = NSUndoManager
-            _NSObject = NSObject
             _NSWorkspaceRecycleOperation = NSWorkspaceRecycleOperation
         except ImportError:
             pass
@@ -616,8 +612,7 @@ class ImageBrowserWindow(QMainWindow):
         self._cached_thumbnail_size = None
         self.cached_container_width = None
         self.cached_container_height = None
-        self.deletion_operations = []
-        self.move_operations = []  # Track move operations for undo
+        self.file_undo_stack = []  # [{'kind': 'delete'|'move', 'payload': ...}, ...] chronological ⌘Z source of truth
         self.browse_view_exit_in_progress = False
         self.image_indices = None
         self.temp_transformed_pixmap = None
@@ -691,8 +686,6 @@ class ImageBrowserWindow(QMainWindow):
         # Zoom center point for cursor-aware zoom
         self.zoom_center_point = QPointF()
         
-        # Initialize undo manager for file operations (will be properly initialized in initialize_components)
-        self.file_undo_manager = None
         self.deleted_files = []
         
         # Initialize message handler for JSON configuration messages
@@ -1418,11 +1411,6 @@ class ImageBrowserWindow(QMainWindow):
         self._message_poll_timer.start(50)  # Poll every 50ms for queued messages
 
         _import_appkit_modules()
-        # Initialize undo manager for file operations
-        if _NSUndoManager is not None:
-            self.file_undo_manager = _NSUndoManager.alloc().init()
-        else:
-            self.file_undo_manager = None
 
     def closeEvent(self, event):
         """Handle window close event"""
@@ -8962,16 +8950,6 @@ class ImageBrowserWindow(QMainWindow):
         # Update status bar
         self.update_status_bar_sections()
 
-    def restore_multiple_files_from_trash_(self, deleted_files_batch):
-        """Restore multiple files from trash"""
-        if getattr(self, 'file_operations_manager', None):
-            self.file_operations_manager.restore_multiple_files_from_trash_(deleted_files_batch)
-
-    def undo_move_operation_(self, moved_files_info):
-        """Undo move operation - move files back to their original locations"""
-        if getattr(self, 'file_operations_manager', None):
-            self.file_operations_manager.undo_move_operation(moved_files_info)
-
     def mousePressEvent(self, event):
         """Optimized: handle mouse press for dragging/panning and browse mode management"""
         super().mousePressEvent(event)
@@ -10351,18 +10329,6 @@ class ImageBrowserWindow(QMainWindow):
         """Undo last file operation (file deletion or wallpaper change)"""
         if getattr(self, 'file_operations_manager', None):
             self.file_operations_manager.undo_file_operation()
-        
-    
-    def _handle_successful_restore(self, original_path, original_position=None):
-        """Handle successful file restoration from AppleScript fallback"""
-        if getattr(self, 'file_operations_manager', None):
-            self.file_operations_manager._handle_successful_restore(original_path, original_position)
-
-    def restore_file_from_trash_(self, original_path, original_position=None, show_status=True):
-        """Restore file from trash (undo operation)"""
-        if getattr(self, 'file_operations_manager', None):
-            return self.file_operations_manager.restore_file_from_trash_(original_path, original_position, show_status)
-        return False
 
     def create_immediate_placeholders(self):
         """Create placeholder thumbnails immediately for instant UI response when exiting fullscreen"""

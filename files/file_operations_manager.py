@@ -75,260 +75,19 @@ from utils import (
 )
 
 # AppKit imports for file operations - will be imported lazily when needed
-_NSWorkspace = _NSUndoManager = _NSObject = _NSWorkspaceRecycleOperation = None
+_NSWorkspace = _NSWorkspaceRecycleOperation = None
 
 logger = logging.getLogger(__name__)
 
 
-class AppleScriptUndoManager:
-    """AppleScript-based undo manager for file operations"""
-    
-    def __init__(self):
-        self.is_available = True
-        if not self.is_available:
-            logger.warning("AppleScript undo manager only available on macOS")
-    
-    def _generate_unique_filename(self, original_path):
-        """Generate a unique filename to avoid overwriting existing files"""
-        directory = os.path.dirname(original_path)
-        filename = os.path.basename(original_path)
-        name, ext = os.path.splitext(filename)
-        
-        # Check if original filename is available
-        if not os.path.exists(original_path):
-            return original_path
-        
-        # Try with "-restored" suffix
-        restored_name = f"{name}-restored{ext}"
-        restored_path = os.path.join(directory, restored_name)
-        
-        if not os.path.exists(restored_path):
-            return restored_path
-        
-        # Try with sequential numbers
-        counter = 1
-        while True:
-            numbered_name = f"{name}-restored-{counter}{ext}"
-            numbered_path = os.path.join(directory, numbered_name)
-            if not os.path.exists(numbered_path):
-                return numbered_path
-            counter += 1
-    
-    def restore_file_from_trash(self, original_path: str, original_position: Optional[int] = None) -> bool:
-        """
-        Restore a file from trash using AppleScript
-        
-        Args:
-            original_path: The original file path before deletion
-            original_position: Optional position in the image list
-            
-        Returns:
-            bool: True if successful, False otherwise
-        """
-        if not self.is_available:
-            logger.error("AppleScript not available")
-            return False
-        
-        logger.debug(f"AppleScript undo: Starting restoration of {original_path}")
-        logger.debug(f"AppleScript undo: Original position: {original_position}")
-        
-        try:
-            # Generate unique filename to avoid overwriting existing files
-            unique_path = self._generate_unique_filename(original_path)
-            filename = os.path.basename(unique_path)
-            directory = os.path.dirname(unique_path)
-            
-            logger.debug(f"AppleScript undo: Original path: {original_path}")
-            logger.debug(f"AppleScript undo: Unique path: {unique_path}")
-            logger.debug(f"AppleScript undo: Filename: {filename}")
-            logger.debug(f"AppleScript undo: Directory: {directory}")
-            
-            # Check if original directory exists
-            if not os.path.exists(directory):
-                logger.error(f"AppleScript undo: Original directory does not exist: {directory}")
-                return False
-            
-            # Check directory permissions
-            try:
-                dir_readable = os.access(directory, os.R_OK)
-                dir_writable = os.access(directory, os.W_OK)
-                logger.debug(f"AppleScript undo: Directory readable: {dir_readable}, writable: {dir_writable}")
-            except Exception as e:
-                logger.error(f"AppleScript undo: Error checking directory permissions: {e}")
-            
-            # Try AppleScript first
-            success = self._try_applescript_restore(original_path, unique_path, filename, directory)
-            if success:
-                return True
-            
-            # If AppleScript fails, try system trash command as fallback
-            logger.debug("AppleScript failed, trying system trash command fallback...")
-            return self._try_system_trash_restore(filename, directory, original_path, unique_path)
-            
-        except Exception as e:
-            logger.error(f"AppleScript undo: Exception while restoring {filename}: {e}")
-            return False
-    
-    def _try_applescript_restore(self, original_path: str, unique_path: str, filename: str, directory: str) -> bool:
-        """Try to restore file using AppleScript"""
-        try:
-            # Create simple AppleScript that just finds the file
-            original_filename = os.path.basename(original_path)
-            script = f'''
-            tell application "Finder"
-                try
-                    -- Find the file in trash by name
-                    set trashItems to items of trash
-                    repeat with trashItem in trashItems
-                        if name of trashItem is "{original_filename}" then
-                            return "FOUND:" & name of trashItem
-                        end if
-                    end repeat
-                    return "NOT_FOUND"
-                on error
-                    return "ERROR:Script failed"
-                end try
-            end tell
-            '''
-            
-            logger.debug("AppleScript undo: Executing AppleScript...")
-            logger.debug(f"AppleScript undo: Script content:\n{script}")
-            
-            # Execute the AppleScript with shorter timeout to prevent beachball
-            result = run_osascript(script, timeout=10)
-            
-            logger.debug(f"AppleScript undo: Subprocess return code: {result.returncode}")
-            logger.debug(f"AppleScript undo: Subprocess stdout: {result.stdout.strip()}")
-            if result.stderr:
-                logger.debug(f"AppleScript undo: Subprocess stderr: {result.stderr.strip()}")
-            
-            if result.returncode == 0:
-                output = result.stdout.strip()
-                logger.debug(f"AppleScript undo: Raw output: '{output}'")
-                
-                if output.startswith("FOUND:"):
-                    # AppleScript found the file, now use system commands to restore it
-                    found_filename = output[6:]  # Remove "FOUND:" prefix
-                    logger.info(f"AppleScript undo: Found file in trash: {found_filename}")
-                    
-                    # Construct the trash path
-                    trash_path = os.path.expanduser("~/.Trash")
-                    trash_item_path = os.path.join(trash_path, found_filename)
-                    logger.info(f"AppleScript undo: Constructed trash path: {trash_item_path}")
-                    
-                    # Try to restore using system commands
-                    return self._restore_with_system_commands(trash_item_path, unique_path)
-                        
-                        
-                elif output == "NOT_FOUND":
-                    logger.debug(f"AppleScript undo: File {filename} not found in trash")
-                    return False
-                elif output.startswith("ERROR:"):
-                    error_msg = output[6:]  # Remove "ERROR:" prefix
-                    logger.error(f"AppleScript undo: Error restoring {filename}: {error_msg}")
-                    return False
-                else:
-                    logger.debug(f"AppleScript undo: Unexpected output: '{output}'")
-                    return False
-            else:
-                error_msg = result.stderr.strip()
-                logger.error(f"AppleScript undo: Subprocess execution failed: {error_msg}")
-                return False
-                
-        except subprocess.TimeoutExpired:
-            logger.error(f"AppleScript undo: Timeout while restoring {filename}, trying system fallback")
-            # Try system restore as fallback when AppleScript times out
-            return self._try_system_trash_restore(filename, directory, original_path, unique_path)
-        except Exception as e:
-            logger.error(f"AppleScript undo: Exception while restoring {filename}: {e}")
-            return False
-    
-    def _restore_with_system_commands(self, trash_item_path: str, target_path: str) -> bool:
-        """Restore file using system commands with the actual trash path"""
-        try:
-            logger.info(f"System restore: Attempting to restore from {trash_item_path} to {target_path}")
-            
-            # Try using mv command with the actual trash path
-            result = subprocess.run(
-                ['mv', trash_item_path, target_path],
-                capture_output=True,
-                text=True,
-                timeout=5
-            )
-            
-            if result.returncode == 0:
-                logger.info(f"System restore: Successfully restored file using mv")
-                return True
-            else:
-                logger.error(f"System restore: mv command failed: {result.stderr}")
-                return False
-                
-        except subprocess.TimeoutExpired:
-            logger.error(f"System restore: mv command timed out")
-            return False
-        except Exception as e:
-            logger.error(f"System restore: Exception: {e}")
-            return False
-    
-    def _try_system_trash_restore(self, filename: str, directory: str, original_path: str, unique_path: str) -> bool:
-        """Try to restore file using system trash command as fallback"""
-        try:
-            logger.debug(f"System trash fallback: Attempting to restore {filename}")
-            logger.debug(f"System trash fallback: Original path: {original_path}")
-            logger.debug(f"System trash fallback: Unique path: {unique_path}")
-            
-            # Try using mv command directly - this often works even with permission restrictions
-            logger.debug("System trash fallback: Trying mv command...")
-            
-            # Construct the trash path using the original filename
-            trash_path = os.path.expanduser("~/.Trash")
-            original_filename = os.path.basename(original_path)
-            trash_file_path = os.path.join(trash_path, original_filename)
-            
-            # Check if file exists in trash
-            if os.path.exists(trash_file_path):
-                logger.debug(f"System trash fallback: Found file in trash: {trash_file_path}")
-                
-                # Try to restore using mv command (mv preserves dates by default)
-                try:
-                    logger.debug(f"System trash fallback: Moving from {trash_file_path} to {unique_path}")
-                    result = subprocess.run(
-                        ['mv', trash_file_path, unique_path],
-                        capture_output=True,
-                        text=True,
-                        timeout=5
-                    )
-                    
-                    if result.returncode == 0:
-                        logger.info(f"System trash fallback: Successfully restored {filename} using mv to {unique_path}")
-                        return True
-                    else:
-                        logger.error(f"System trash fallback: mv command failed: {result.stderr}")
-                        return False
-                        
-                except subprocess.TimeoutExpired:
-                    logger.error(f"System trash fallback: mv command timed out")
-                    return False
-                except Exception as e:
-                    logger.error(f"System trash fallback: mv command exception: {e}")
-                    return False
-            else:
-                logger.debug(f"System trash fallback: File not found in trash: {trash_file_path}")
-                logger.debug(f"System trash fallback: No matching file found for {filename}")
-                return False
-            
-        except Exception as e:
-            logger.error(f"System trash fallback: Exception: {e}")
-            return False
-    
 def _import_appkit_modules():
     """Lazily import AppKit modules when needed"""
-    global _NSWorkspace, _NSUndoManager, _NSObject, _NSWorkspaceRecycleOperation
+    global _NSWorkspace, _NSWorkspaceRecycleOperation
     if _NSWorkspace is None:
         try:
-            from AppKit import NSWorkspace, NSUndoManager, NSObject, NSWorkspaceRecycleOperation
-            _NSWorkspace, _NSUndoManager, _NSObject, _NSWorkspaceRecycleOperation = (
-                NSWorkspace, NSUndoManager, NSObject, NSWorkspaceRecycleOperation
+            from AppKit import NSWorkspace, NSWorkspaceRecycleOperation
+            _NSWorkspace, _NSWorkspaceRecycleOperation = (
+                NSWorkspace, NSWorkspaceRecycleOperation
             )
         except ImportError:
             pass
@@ -1305,6 +1064,8 @@ class FileOperationsManager:
             if reply != QMessageBox.StandardButton.Yes:
                 return False
         try:
+            # Capture metadata BEFORE recycle — original path is gone afterward
+            delete_entry = self._capture_delete_entry(file_path)
             _import_appkit_modules()
             if _NSWorkspace and _NSWorkspaceRecycleOperation:
                 workspace = _NSWorkspace.sharedWorkspace()
@@ -1316,7 +1077,10 @@ class FileOperationsManager:
                 if os.path.exists(file_path):
                     show_styled_warning(mw, "Delete failed", f"Unable to delete file: {file_path}")
                     return False
-            self._register_undo_for_deleted_files([file_path], 1)
+            delete_entry['trash_path'] = self._locate_just_trashed_file(delete_entry)
+            if not delete_entry['trash_path']:
+                print(f"Warning: could not locate trashed file for undo: {file_path}")
+            self._register_undo_for_deleted_files([delete_entry])
             mw.remove_thumbnails_for_files([file_path], active_file_path)
             mw.status_notification.show_file_operation_message(f"Moved '{os.path.basename(file_path)}' to Trash")
             return True
@@ -1361,8 +1125,9 @@ class FileOperationsManager:
                 mw, "Deleting Files", len(selected_files)
             )
         
-        deleted_count = 0
+        deleted_entries = []
         files_to_remove = []
+        displayed = mw.get_displayed_images()
         for idx, file_path in enumerate(selected_files):
             # Update progress if dialog is shown
             if progress_dialog:
@@ -1378,6 +1143,8 @@ class FileOperationsManager:
                     continue
                 
                 if os.path.exists(file_path) and os.access(file_path, os.W_OK):
+                    # Capture metadata BEFORE recycle
+                    delete_entry = self._capture_delete_entry(file_path, displayed)
                     _import_appkit_modules()
                     if _NSWorkspace and _NSWorkspaceRecycleOperation:
                         workspace = _NSWorkspace.sharedWorkspace()
@@ -1386,9 +1153,11 @@ class FileOperationsManager:
                             os.path.dirname(file_path), "", [os.path.basename(file_path)], None
                         )
                     if not os.path.exists(file_path):
-                        deleted_count += 1
+                        delete_entry['trash_path'] = self._locate_just_trashed_file(delete_entry)
+                        if not delete_entry['trash_path']:
+                            print(f"Warning: could not locate trashed file for undo: {file_path}")
+                        deleted_entries.append(delete_entry)
                         mw.cache_manager.clear_cache_for_file(file_path)
-                        displayed = mw.get_displayed_images()
                         if file_path in displayed:
                             files_to_remove.append(file_path)
             except Exception:
@@ -1399,21 +1168,16 @@ class FileOperationsManager:
             progress_dialog.setValue(len(selected_files))
             progress_dialog.close()
         
-        if deleted_count > 0 and getattr(mw, 'file_undo_manager', None):
-            self._register_undo_for_deleted_files(files_to_remove, deleted_count)
+        deleted_count = len(deleted_entries)
+        if deleted_count > 0:
+            # Register undo for ALL successfully trashed files (not only displayed ones)
+            self._register_undo_for_deleted_files(deleted_entries)
             if files_to_remove:
                 mw.remove_thumbnails_for_files(files_to_remove, active_file_path)
-                mw.clear_selection()
-                mw.status_notification.show_message(f"Deleted {deleted_count} files")
-            else:
-                mw.status_notification.show_message("No files deleted.")
-                return False
+            mw.clear_selection()
+            mw.status_notification.show_message(f"Deleted {deleted_count} files")
         else:
-            if not getattr(mw, 'file_undo_manager', None):
-                reason = " (undo manager unavailable)"
-            else:
-                reason = " (no files selected or no files deleted)"
-            mw.status_notification.show_message(f"Delete operation cancelled{reason}.")
+            mw.status_notification.show_message("Delete operation cancelled (no files selected or no files deleted).")
             return False
         return True
 
@@ -1427,59 +1191,129 @@ class FileOperationsManager:
         reply = show_styled_question(self.main_window, "Delete Files", message, default_no=True)
         return reply if reply is not None else QMessageBox.StandardButton.No
 
-    def _register_undo_for_deleted_files(self, files_to_remove_from_images: List[str], deleted_count: int) -> None:
-        """Register undo operation for deleted files"""
+    def _capture_delete_entry(self, file_path: str, displayed: Optional[List[str]] = None) -> dict:
+        """Capture undo metadata for a file before it is moved to trash."""
         mw = self.main_window
-        deleted_files_batch = []
-        displayed = mw.get_displayed_images()
-        for file_path in files_to_remove_from_images:
-            original_position = displayed.index(file_path) if file_path in displayed else None
-            try:
-                stat_info = os.stat(file_path)
-                file_size = stat_info.st_size
-                file_mtime = stat_info.st_mtime
-            except OSError:
-                file_size = file_mtime = None
-            deleted_files_batch.append({
-                'path': file_path,
-                'filename': os.path.basename(file_path),
-                'directory': os.path.dirname(file_path),
-                'original_position': original_position,
-                'file_size': file_size,
-                'file_mtime': file_mtime
-            })
+        if displayed is None:
+            displayed = mw.get_displayed_images()
+        original_position = displayed.index(file_path) if file_path in displayed else None
+        file_size = file_mtime = file_inode = None
         try:
-            undo_mgr = getattr(mw, "file_undo_manager", None)
-            if undo_mgr:
-                undo_mgr.registerUndoWithTarget_selector_object_(
-                    mw, mw.restore_multiple_files_from_trash_, deleted_files_batch
-                )
-                undo_mgr.setActionName_(f"Delete {deleted_count} Files")
-        except ValueError:
+            stat_info = os.stat(file_path)
+            file_size = stat_info.st_size
+            file_mtime = stat_info.st_mtime
+            file_inode = getattr(stat_info, 'st_ino', None)
+        except OSError:
             pass
-        except Exception as e:
-            print(f"Exception registering undo: {e}")
-            traceback.print_exc()
-        if hasattr(mw, 'deletion_operations'):
-            mw.deletion_operations.append(deleted_files_batch)
+        return {
+            'path': file_path,
+            'filename': os.path.basename(file_path),
+            'directory': os.path.dirname(file_path),
+            'original_position': original_position,
+            'file_size': file_size,
+            'file_mtime': file_mtime,
+            'file_inode': file_inode,
+            'trash_path': None,
+        }
 
-    def _register_undo_for_moved_files(self, moved_files_info: List[dict], moved_count: int) -> None:
+    def _locate_just_trashed_file(self, delete_entry: dict) -> Optional[str]:
+        """Find the file in Trash immediately after recycle; store path for reliable undo.
+
+        Same-basename deletes are renamed in Trash (e.g. test.jpg -> test 2.jpg). Recording the
+        actual trash path avoids guessing later. Prefers inode, then size, and probes common
+        collision names when Trash listing is blocked by TCC.
+        """
+        original_path = delete_entry.get('path') or ''
+        filename = delete_entry.get('filename') or os.path.basename(original_path)
+        file_size = delete_entry.get('file_size')
+        file_mtime = delete_entry.get('file_mtime')
+        file_inode = delete_entry.get('file_inode')
+
+        found = self._find_trashed_file(
+            original_path,
+            file_size=file_size,
+            file_mtime=file_mtime,
+            file_inode=file_inode,
+            probe_collisions=True,
+        )
+        if found:
+            return found
+
+        # Last resort: AppleScript POSIX path for exact or related names
+        try:
+            return self._applescript_find_trash_path(filename, file_size=file_size, file_inode=file_inode)
+        except Exception:
+            return None
+
+    def _applescript_find_trash_path(self, filename: str, file_size=None, file_inode=None) -> Optional[str]:
+        """Ask Finder for trash item POSIX paths matching filename / collision renames."""
+        stem, ext = os.path.splitext(filename)
+        # Escape for AppleScript string
+        safe_stem = stem.replace('\\', '\\\\').replace('"', '\\"')
+        safe_ext = ext.replace('\\', '\\\\').replace('"', '\\"')
+        safe_name = filename.replace('\\', '\\\\').replace('"', '\\"')
+        script = f'''
+        tell application "Finder"
+            try
+                set outPaths to {{}}
+                set trashItems to items of trash
+                repeat with trashItem in trashItems
+                    set n to name of trashItem as text
+                    if n is "{safe_name}" or n starts with "{safe_stem} " then
+                        if n ends with "{safe_ext}" or "{safe_ext}" is "" then
+                            try
+                                set p to POSIX path of (trashItem as alias)
+                                set end of outPaths to p
+                            end try
+                        end if
+                    end if
+                end repeat
+                set AppleScript's text item delimiters to "\\n"
+                return outPaths as text
+            on error
+                return ""
+            end try
+        end tell
+        '''
+        result = run_osascript(script, timeout=3)
+        if result.returncode != 0 or not result.stdout.strip():
+            return None
+        candidates = []
+        for line in result.stdout.strip().splitlines():
+            p = line.strip().rstrip('/')
+            if not p or not os.path.isfile(p):
+                continue
+            try:
+                st = os.stat(p)
+            except OSError:
+                continue
+            if file_inode is not None and getattr(st, 'st_ino', None) == file_inode:
+                return p
+            if file_size is not None and st.st_size == file_size:
+                candidates.append(p)
+            elif file_size is None:
+                candidates.append(p)
+        return candidates[0] if candidates else None
+
+    def _register_undo_for_deleted_files(self, deleted_files_batch: List[dict]) -> None:
+        """Register undo operation for deleted files (batch entries already include metadata)."""
+        mw = self.main_window
+        if not deleted_files_batch:
+            return
+        if hasattr(mw, 'file_undo_stack'):
+            mw.file_undo_stack.append({'kind': 'delete', 'payload': deleted_files_batch})
+        if hasattr(mw, 'update_edit_menu_states'):
+            mw.update_edit_menu_states()
+
+    def _register_undo_for_moved_files(self, moved_files_info: List[dict]) -> None:
         """Register undo operation for moved files"""
         mw = self.main_window
-        try:
-            undo_mgr = getattr(mw, "file_undo_manager", None)
-            if undo_mgr:
-                undo_mgr.registerUndoWithTarget_selector_object_(
-                    mw, mw.undo_move_operation_, moved_files_info
-                )
-                undo_mgr.setActionName_(f"Move {moved_count} File{'s' if moved_count != 1 else ''}")
-        except ValueError:
-            pass
-        except Exception as e:
-            print(f"Exception registering move undo: {e}")
-            traceback.print_exc()
-        if hasattr(mw, 'move_operations'):
-            mw.move_operations.append(moved_files_info)
+        if not moved_files_info:
+            return
+        if hasattr(mw, 'file_undo_stack'):
+            mw.file_undo_stack.append({'kind': 'move', 'payload': moved_files_info})
+        if hasattr(mw, 'update_edit_menu_states'):
+            mw.update_edit_menu_states()
 
     def _validate_unix_filename(self, prefix: str) -> Tuple[bool, str]:
         """
@@ -5943,7 +5777,7 @@ class FileOperationsManager:
 
         # Register move operations for undo if any files were successfully moved (move only)
         if not copy_only and moved_files_info:
-            self._register_undo_for_moved_files(moved_files_info, moved_count)
+            self._register_undo_for_moved_files(moved_files_info)
 
         # Remove successfully moved files from displayed images and update selection (move only)
         if not copy_only and successfully_moved_files and hasattr(mw, 'remove_thumbnails_for_files'):
@@ -6013,201 +5847,315 @@ class FileOperationsManager:
                 return numbered_path
             counter += 1
 
-    def restore_file_from_trash_(self, original_path, original_position=None, show_status=True):
-        """Restore file from trash (undo operation)
-        
-        Searches both user's home trash and volume-specific trash directories
-        based on where the original file was located.
-        """
-        mw = self.main_window
+    @staticmethod
+    def _trash_name_related(trash_name: str, original_filename: str) -> bool:
+        """True if trash_name is original or a macOS collision rename of it (e.g. 'photo 2.jpg')."""
+        if trash_name == original_filename:
+            return True
+        orig_stem, orig_ext = os.path.splitext(original_filename)
+        name, ext = os.path.splitext(trash_name)
+        if ext.lower() != orig_ext.lower():
+            return False
+        if name == orig_stem:
+            return True
+        # macOS: "name 2.ext", "name 14.30.55.ext", "name copy.ext"
+        return name.startswith(orig_stem + ' ')
 
-        try:
-            # Generate unique filename once at the beginning
-            unique_path = self._generate_unique_filename(original_path)
-            # Use original filename for trash search, not the unique_path filename
-            original_filename = os.path.basename(original_path)
-
-            # Check original directory permissions
-            original_dir = os.path.dirname(original_path)
+    def _find_trashed_file(self, original_path: str, file_size=None, file_mtime=None, file_inode=None,
+                           probe_collisions: bool = True, trash_path: Optional[str] = None) -> Optional[str]:
+        """Locate the trashed copy of original_path using metadata when available."""
+        # Prefer the path recorded at delete time (handles same-basename Trash renames)
+        if trash_path:
             try:
-                if not os.path.exists(original_dir):
-                    return False
-            except Exception:
+                if os.path.isfile(trash_path):
+                    return trash_path
+            except OSError:
                 pass
 
-            # Get metadata from deletion_operations for precise matching
-            file_size = None
-            file_mtime = None
-            if hasattr(mw, 'deletion_operations') and mw.deletion_operations:
-                for _, operation in enumerate(reversed(mw.deletion_operations)):
-                    for entry in operation:
-                        if entry['path'] == original_path:
-                            file_size = entry.get('file_size')
-                            file_mtime = entry.get('file_mtime')
-                            break
-                    if file_size is not None:
-                        break
+        original_filename = os.path.basename(original_path)
+        trash_dirs = self._get_trash_directories_for_path(original_path)
+        stem, ext = os.path.splitext(original_filename)
 
-            # Build list of candidate trash directories (without os.listdir)
-            trash_dirs = self._get_trash_directories_for_path(original_path)
+        def _candidate_names():
+            names = [original_filename]
+            if probe_collisions:
+                for n in range(2, 40):
+                    names.append(f"{stem} {n}{ext}")
+            return names
 
-            # --- Fast path: try direct file access by name (works even under TCC) ---
-            restored_file = None
-            for trash_path in trash_dirs:
-                candidate_path = os.path.join(trash_path, original_filename)
+        def _score_candidate(candidate_path: str):
+            try:
+                stat_info = os.stat(candidate_path)
+            except OSError:
+                return None
+            candidate_inode = getattr(stat_info, 'st_ino', None)
+            if file_inode is not None and candidate_inode == file_inode:
+                return (0, 0, candidate_path)  # best
+            if file_size is not None and stat_info.st_size == file_size:
+                mtime_diff = abs(stat_info.st_mtime - file_mtime) if file_mtime is not None else 0
+                return (1, mtime_diff, candidate_path)
+            if file_size is None and file_inode is None:
+                return (2, 0, candidate_path)
+            return None
+
+        # Direct path probes (works under TCC when listdir is blocked)
+        scored = []
+        for trash_dir in trash_dirs:
+            for name in _candidate_names():
+                candidate_path = os.path.join(trash_dir, name)
                 try:
                     if not os.path.isfile(candidate_path):
                         continue
-                    if file_size is not None:
-                        stat_info = os.stat(candidate_path)
-                        if stat_info.st_size == file_size:
-                            if file_mtime is None or abs(stat_info.st_mtime - file_mtime) < 5:
-                                restored_file = candidate_path
-                                break
-                    else:
-                        restored_file = candidate_path
-                        break
                 except OSError:
                     continue
+                scored_item = _score_candidate(candidate_path)
+                if scored_item:
+                    if scored_item[0] == 0:
+                        return scored_item[2]
+                    scored.append(scored_item)
 
-            # --- Enumeration fallback: scan trash dirs for metadata matches ---
-            if not restored_file:
-                candidates_with_metadata = []
-                candidates_by_name = []
-                for trash_path in trash_dirs:
-                    try:
-                        trash_files = os.listdir(trash_path)
-                    except (PermissionError, OSError):
-                        continue
-                    except Exception:
-                        continue
+        # Enumeration fallback when listing is allowed
+        for trash_path_dir in trash_dirs:
+            try:
+                trash_files = os.listdir(trash_path_dir)
+            except (PermissionError, OSError, Exception):
+                continue
 
-                    for file in trash_files:
-                        candidate_path = os.path.join(trash_path, file)
-                        if not os.path.isfile(candidate_path):
-                            continue
-                        try:
-                            stat_info = os.stat(candidate_path)
-                            candidate_size = stat_info.st_size
-                            candidate_mtime = stat_info.st_mtime
-                        except OSError:
-                            candidate_size = None
-                            candidate_mtime = None
+            for trash_name in trash_files:
+                if not self._trash_name_related(trash_name, original_filename):
+                    continue
+                candidate_path = os.path.join(trash_path_dir, trash_name)
+                if not os.path.isfile(candidate_path):
+                    continue
+                scored_item = _score_candidate(candidate_path)
+                if scored_item:
+                    if scored_item[0] == 0:
+                        return scored_item[2]
+                    scored.append(scored_item)
 
-                        if file_size is not None and candidate_size is not None:
-                            size_match = (file_size == candidate_size)
-                            mtime_match = (file_mtime is None or abs(candidate_mtime - file_mtime) < 5)
-                            if size_match and mtime_match:
-                                mtime_diff = abs(candidate_mtime - file_mtime) if file_mtime is not None else 0
-                                candidates_with_metadata.append((candidate_path, file, mtime_diff, True))
-                            elif size_match:
-                                mtime_diff = abs(candidate_mtime - file_mtime) if file_mtime is not None else 999999
-                                candidates_with_metadata.append((candidate_path, file, mtime_diff, False))
-                        if file == original_filename:
-                            candidates_by_name.append((candidate_path, file))
+        if scored:
+            scored.sort(key=lambda x: (x[0], x[1]))
+            return scored[0][2]
+        return None
 
-                if candidates_with_metadata:
-                    candidates_with_metadata.sort(key=lambda x: (not x[3], x[2]))
-                    restored_file = candidates_with_metadata[0][0]
-                elif candidates_by_name:
-                    restored_file = candidates_by_name[0][0]
+    def _restored_path_belongs_in_current_view(self, restored_path: str, original_path: Optional[str] = None) -> bool:
+        """True only if the restored file should appear in the current thumbnail/list view.
 
-            # --- AppleScript fallback (for sandboxed app bundles) ---
-            if not restored_file:
-                try:
-                    applescript_manager = AppleScriptUndoManager()
-                    if applescript_manager.is_available:
-                        success = applescript_manager.restore_file_from_trash(original_path, original_position)
-                        if success:
-                            QTimer.singleShot(300, mw.sequential_refresh_after_browse)
-                            return True
-                except Exception:
-                    pass
-                if show_status:
-                    show_styled_warning(mw, "Undo Failed", f"Undo: '{original_filename}' not found in Trash.")
+        Avoids phantom thumbnails when undoing a delete after navigating to another directory.
+        """
+        mw = self.main_window
+        if not restored_path:
+            return False
+
+        displayed = []
+        try:
+            displayed = list(mw.get_displayed_images() or [])
+        except Exception:
+            displayed = []
+
+        # Slot still present (formatted list) or already in the view
+        if original_path and original_path in displayed:
+            return True
+        if restored_path in displayed:
+            return True
+
+        try:
+            restored_dir = os.path.normpath(os.path.abspath(os.path.dirname(restored_path)))
+        except Exception:
+            return False
+
+        current_dir = getattr(mw, 'current_directory', None)
+        if current_dir and not getattr(mw, 'specific_files_active', False):
+            try:
+                cur = os.path.normpath(os.path.abspath(current_dir))
+                return restored_dir == cur
+            except Exception:
                 return False
 
-            if restored_file and os.path.exists(restored_file):
+        # Specific-files / no current_directory: only re-insert if another shown file shares the directory
+        # (same multi-dir set). If the user navigated to a different directory view, current_directory
+        # is set above and we already returned False when dirs differ.
+        if getattr(mw, 'specific_files_active', False) and displayed:
+            for p in displayed:
+                try:
+                    if os.path.normpath(os.path.abspath(os.path.dirname(p))) == restored_dir:
+                        return True
+                except Exception:
+                    continue
+            return False
 
-                # Restore the file to its unique location
+        # Empty specific-files set after deleting everything from that set: allow re-insert
+        if getattr(mw, 'specific_files_active', False) and not displayed:
+            return True
+
+        # Directory mode without current_directory: match against displayed files' directory
+        if displayed:
+            for p in displayed:
+                try:
+                    if os.path.normpath(os.path.abspath(os.path.dirname(p))) == restored_dir:
+                        return True
+                except Exception:
+                    continue
+            return False
+
+        return False
+
+    def restore_file_from_trash_(self, original_path, original_position=None, show_status=True,
+                                 file_size=None, file_mtime=None, file_inode=None, update_ui=True,
+                                 trash_path=None):
+        """Restore file from trash (undo operation).
+
+        Returns the restored filesystem path on success, or None on failure.
+        """
+        mw = self.main_window
+        original_filename = os.path.basename(original_path)
+
+        try:
+            unique_path = self._generate_unique_filename(original_path)
+
+            original_dir = os.path.dirname(original_path)
+            try:
+                if not os.path.exists(original_dir):
+                    if show_status:
+                        show_styled_warning(
+                            mw,
+                            "Undo Failed",
+                            f"Undo: original folder no longer exists:\n{original_dir}",
+                        )
+                    return None
+            except Exception:
+                if show_status:
+                    show_styled_warning(
+                        mw,
+                        "Undo Failed",
+                        f"Undo: cannot access original folder for '{original_filename}'.",
+                    )
+                return None
+
+            # Prefer caller-supplied metadata from the undo payload
+            trash_path_missing = False
+            if trash_path:
+                try:
+                    if not os.path.isfile(trash_path):
+                        trash_path_missing = True
+                        trash_path = None  # fall through to metadata search
+                except OSError:
+                    trash_path_missing = True
+                    trash_path = None
+
+            restored_file = self._find_trashed_file(
+                original_path,
+                file_size=file_size,
+                file_mtime=file_mtime,
+                file_inode=file_inode,
+                trash_path=trash_path,
+                probe_collisions=True,
+            )
+
+            if not restored_file:
+                if show_status:
+                    if trash_path_missing:
+                        show_styled_warning(
+                            mw,
+                            "Undo Failed",
+                            f"Undo: '{original_filename}' is no longer in Trash\n"
+                            f"(it may have been emptied or restored elsewhere).",
+                        )
+                    else:
+                        show_styled_warning(mw, "Undo Failed", f"Undo: '{original_filename}' not found in Trash.")
+                return None
+
+            if restored_file and os.path.exists(restored_file):
                 try:
                     shutil.move(restored_file, unique_path)
-
-                    # Optimized: Return False immediately if file does not exist after restore
                     if not os.path.exists(unique_path):
-                        return False
-
+                        return None
                 except Exception as e:
                     if show_status:
                         show_styled_warning(None, "Restore Error", f"Undo: Error restoring '{original_filename}': {e}")
-                    return False
+                    return None
 
-                # Add back to displayed images list if it was removed
-                displayed = mw.get_displayed_images()
-                if unique_path not in displayed:
-                    if original_position is not None and original_position <= len(displayed):
-                        mw.displayed_images.insert(original_position, unique_path)
-                    else:
-                        mw.displayed_images.append(unique_path)
-                    mw.populate_indices_arrays()
+                if not update_ui:
+                    return unique_path
 
-                    # Always update thumbnail view when a file is restored, regardless of current view mode
-                    # This ensures thumbnails are updated even when in browse mode
-                    if hasattr(mw, 'cache_manager') and mw.cache_manager:
-                        mw.cache_manager.clear_cache_for_file(unique_path)
+                show_in_view = self._restored_path_belongs_in_current_view(unique_path, original_path)
+                if show_in_view:
+                    displayed = mw.get_displayed_images()
+                    if unique_path not in displayed:
+                        if original_position is not None and original_position <= len(displayed):
+                            mw.displayed_images.insert(original_position, unique_path)
+                        else:
+                            mw.displayed_images.append(unique_path)
+                        mw.populate_indices_arrays()
 
-                    # Refresh thumbnail view - add the restored file at its original position
-                    if hasattr(mw, 'thumbnail_display_manager') and mw.thumbnail_display_manager:
-                        mw.thumbnail_display_manager.add_thumbnails_for_files([unique_path], [original_position] if original_position is not None else None)
-                    if show_status and mw.status_notification:
-                        restored_filename = os.path.basename(unique_path)
-                        if unique_path != original_path:
-                            mw.status_notification.show_file_operation_message(
-                                f"Restored: {restored_filename} (renamed to avoid overwrite)"
+                        if hasattr(mw, 'cache_manager') and mw.cache_manager:
+                            mw.cache_manager.clear_cache_for_file(unique_path)
+
+                        if hasattr(mw, 'thumbnail_display_manager') and mw.thumbnail_display_manager:
+                            mw.thumbnail_display_manager.add_thumbnails_for_files(
+                                [unique_path], [original_position] if original_position is not None else None
                             )
-                        else:
-                            mw.status_notification.show_file_operation_message(f"Restored: {restored_filename}")
-                    return True
-                else:
-                    # Formatted mode: file was kept as slot, just clear placeholder and repaint
-                    if hasattr(mw, 'cache_manager') and mw.cache_manager:
-                        mw.cache_manager.clear_cache_for_file(unique_path)
-                    placeholders = getattr(mw, 'deleted_file_placeholders', None)
-                    if placeholders:
-                        placeholders.discard(unique_path)
-                        placeholders.discard(original_path)
-                    if hasattr(mw, '_emit_deleted_placeholders_changed'):
-                        mw._emit_deleted_placeholders_changed()
+                    else:
+                        # Formatted mode: file was kept as slot, just clear placeholder and repaint
+                        if hasattr(mw, 'cache_manager') and mw.cache_manager:
+                            mw.cache_manager.clear_cache_for_file(unique_path)
+                        placeholders = getattr(mw, 'deleted_file_placeholders', None)
+                        if placeholders:
+                            placeholders.discard(unique_path)
+                            placeholders.discard(original_path)
+                        if hasattr(mw, '_emit_deleted_placeholders_changed'):
+                            mw._emit_deleted_placeholders_changed()
 
-                    if mw.current_view_mode == 'browse':
-                        displayed = mw.get_displayed_images()
-                        if displayed:
-                            mw.show_image(displayed[mw.image_indices[mw.current_index]], mw.current_index)
+                        if mw.current_view_mode == 'browse':
+                            displayed = mw.get_displayed_images()
+                            if displayed:
+                                mw.show_image(displayed[mw.image_indices[mw.current_index]], mw.current_index)
 
-                    if show_status and mw.status_notification:
-                        restored_filename = os.path.basename(unique_path)
-                        if unique_path != original_path:
-                            mw.status_notification.show_file_operation_message(f"Restored: {restored_filename} (renamed to avoid overwrite)")
-                        else:
-                            mw.status_notification.show_file_operation_message(f"Restored: {restored_filename}")
-                    return True
+                if show_status and mw.status_notification:
+                    restored_filename = os.path.basename(unique_path)
+                    if unique_path != original_path:
+                        mw.status_notification.show_file_operation_message(
+                            f"Restored: {restored_filename} (renamed to avoid overwrite)"
+                        )
+                    else:
+                        mw.status_notification.show_file_operation_message(f"Restored: {restored_filename}")
+                return unique_path
             else:
                 if show_status:
                     show_styled_warning(mw, "Undo Failed", f"Undo: '{original_filename}' not found in Trash.")
-                return False
+                return None
         except Exception as e:
             if show_status:
                 show_styled_warning(None, "Restore Error", f"Undo: Error restoring '{original_filename}': {e}")
-            return False
+            return None
 
     def restore_multiple_files_from_trash_(self, deleted_files_batch):
-        """Restore multiple files from trash"""
+        """Restore multiple files from trash.
+
+        Returns (any_restored: bool, failed_entries: list).
+        """
         mw = self.main_window
         is_formatted = getattr(mw, '_is_formatted_list_mode', lambda: False)()
         restored_count = 0
         restored_files = []
         restored_positions = []
-        total = len(deleted_files_batch)
+        restored_originals = []
+        failed_entries = []
+        total = len(deleted_files_batch) if deleted_files_batch else 0
+
+        if not deleted_files_batch:
+            show_styled_warning(mw, "Undo Failed", "Failed to restore files from trash")
+            return False, []
+
+        # Restore in ascending original_position so inserts land at pre-delete indices
+        ordered_batch = sorted(
+            enumerate(deleted_files_batch),
+            key=lambda pair: (
+                pair[1].get('original_position') is None,
+                pair[1].get('original_position') if pair[1].get('original_position') is not None else 0,
+                pair[0],
+            ),
+        )
 
         progress = None
         if total > 1:
@@ -6220,7 +6168,7 @@ class FileOperationsManager:
             progress.show()
             QApplication.processEvents()
 
-        for i, file_info in enumerate(deleted_files_batch):
+        for i, (_, file_info) in enumerate(ordered_batch):
             try:
                 original_path = file_info['path']
                 original_position = file_info.get('original_position')
@@ -6230,26 +6178,26 @@ class FileOperationsManager:
                     progress.setValue(i)
                     QApplication.processEvents()
 
-                unique_path = self._generate_unique_filename(original_path)
-
-                if os.path.exists(unique_path):
+                actual_path = self.restore_file_from_trash_(
+                    original_path,
+                    original_position,
+                    show_status=False,
+                    file_size=file_info.get('file_size'),
+                    file_mtime=file_info.get('file_mtime'),
+                    file_inode=file_info.get('file_inode'),
+                    trash_path=file_info.get('trash_path'),
+                    update_ui=False,
+                )
+                if actual_path:
                     restored_count += 1
-                    restored_files.append(unique_path)
+                    restored_files.append(actual_path)
                     restored_positions.append(original_position)
-                    continue
-
-                if self.restore_file_from_trash_(original_path, original_position, show_status=False):
-                    restored_count += 1
-                    if not is_formatted:
-                        actual_restored_path = self._generate_unique_filename(original_path)
-                        restored_files.append(actual_restored_path)
-                        restored_positions.append(original_position)
-                    else:
-                        restored_files.append(original_path)
-                        restored_positions.append(original_position)
+                    restored_originals.append(original_path)
+                else:
+                    failed_entries.append(file_info)
 
             except Exception:
-                pass
+                failed_entries.append(file_info)
 
         if progress:
             progress.setValue(total)
@@ -6257,82 +6205,40 @@ class FileOperationsManager:
 
         if restored_count > 0:
             if is_formatted:
-                # Formatted mode: displayed_images was never changed, just clear
-                # placeholders and repaint. Do NOT call add_thumbnails_for_files.
                 placeholders = getattr(mw, 'deleted_file_placeholders', None)
                 if placeholders:
-                    for fi in deleted_files_batch:
-                        placeholders.discard(fi['path'])
-                    for p in restored_files:
-                        placeholders.discard(p)
+                    for path, original in zip(restored_files, restored_originals):
+                        if self._restored_path_belongs_in_current_view(path, original):
+                            placeholders.discard(original)
+                            placeholders.discard(path)
                 if hasattr(mw, '_emit_deleted_placeholders_changed'):
                     mw._emit_deleted_placeholders_changed()
                 if getattr(mw, 'current_view_mode', None) == 'list' and hasattr(mw, 'view_manager') and mw.view_manager:
                     mw.view_manager.update_list_view()
             else:
-                # Normal mode: add files back to displayed_images
-                if restored_files and hasattr(mw, 'thumbnail_display_manager') and mw.thumbnail_display_manager:
-                    mw.thumbnail_display_manager.add_thumbnails_for_files(restored_files, restored_positions)
+                ui_files = []
+                ui_positions = []
+                for path, pos, original in zip(restored_files, restored_positions, restored_originals):
+                    if self._restored_path_belongs_in_current_view(path, original):
+                        ui_files.append(path)
+                        ui_positions.append(pos)
+                if ui_files and hasattr(mw, 'thumbnail_display_manager') and mw.thumbnail_display_manager:
+                    mw.thumbnail_display_manager.add_thumbnails_for_files(ui_files, ui_positions)
 
             if mw.status_notification:
                 if restored_count == 1 and restored_files:
                     mw.status_notification.show_file_operation_message(
                         f"Restored: {os.path.basename(restored_files[0])}"
                     )
-                elif restored_count == 1:
-                    mw.status_notification.show_file_operation_message("Restored 1 file from trash")
                 else:
-                    mw.status_notification.show_file_operation_message(
-                        f"Restored {restored_count} files from trash"
-                    )
-        else:
-            show_styled_warning(mw, "Undo Failed", "Failed to restore files from trash")
+                    msg = f"Restored {restored_count} files from trash"
+                    if failed_entries:
+                        msg += f" ({len(failed_entries)} could not be restored)"
+                    mw.status_notification.show_file_operation_message(msg)
+            return True, failed_entries
 
-    def _handle_successful_restore(self, original_path, original_position=None):
-        """Handle successful file restoration from AppleScript fallback"""
-        mw = self.main_window
-
-        try:
-            filename = os.path.basename(original_path)
-            is_formatted = getattr(mw, '_is_formatted_list_mode', lambda: False)()
-
-            if is_formatted:
-                # Formatted mode: slot was never removed, just clear placeholder and repaint
-                placeholders = getattr(mw, 'deleted_file_placeholders', None)
-                if placeholders:
-                    placeholders.discard(original_path)
-                if hasattr(mw, 'cache_manager') and mw.cache_manager:
-                    mw.cache_manager.clear_cache_for_file(original_path)
-                if hasattr(mw, '_emit_deleted_placeholders_changed'):
-                    mw._emit_deleted_placeholders_changed()
-                mw.status_notification.show_file_operation_message(f"Restored: {filename}")
-                return
-
-            # Normal mode: add back to displayed images when restore_file_from_trash_ did not already
-            displayed = mw.get_displayed_images()
-            if original_path not in displayed:
-                if original_position is not None and original_position <= len(displayed):
-                    mw.displayed_images.insert(original_position, original_path)
-                else:
-                    mw.displayed_images.append(original_path)
-                mw.populate_indices_arrays()
-
-                if hasattr(mw, 'cache_manager') and mw.cache_manager:
-                    mw.cache_manager.clear_cache_for_file(original_path)
-
-                if hasattr(mw, 'thumbnail_display_manager') and mw.thumbnail_display_manager:
-                    mw.thumbnail_display_manager.add_thumbnails_for_files([original_path], [original_position] if original_position is not None else None)
-
-                if mw.current_view_mode == 'browse':
-                    displayed = mw.get_displayed_images()
-                    if displayed:
-                        mw.show_image(displayed[mw.image_indices[mw.current_index]], mw.current_index)
-
-            if mw.status_notification:
-                mw.status_notification.show_file_operation_message(f"Restored: {filename}")
-
-        except Exception:
-            pass
+        show_styled_warning(mw, "Undo Failed", "Failed to restore files from trash")
+        return False, failed_entries or list(deleted_files_batch)
 
     def browse_trash_images(self):
         """
@@ -6399,126 +6305,87 @@ class FileOperationsManager:
             if success:
                 return  # Wallpaper undo successful, we're done
 
-        # Second check if move undo is available
-        # First try undo manager (maintains correct order)
-        if mw.file_undo_manager and hasattr(mw.file_undo_manager, 'canUndo') and mw.file_undo_manager.canUndo():
+        # Chronological file_undo_stack is the sole dispatcher for file delete/move undo.
+        # Failed restores/moves are not re-queued (op is consumed either way).
+        stack = getattr(mw, 'file_undo_stack', None)
+        if stack:
+            op = stack.pop()
+            kind = op.get('kind')
+            payload = op.get('payload') or []
             try:
-                # Use undo manager - it will call the appropriate method (undo_move_operation_ or restore_multiple_files_from_trash_)
-                if hasattr(mw.file_undo_manager, 'undo') and callable(getattr(mw.file_undo_manager, 'undo')):
-                    mw.file_undo_manager.undo()
-                    return
+                if kind == 'move':
+                    self.undo_move_operation(payload)
+                else:
+                    self.restore_multiple_files_from_trash_(payload)
             except Exception as e:
-                print(f"Undo manager error: {e}")
-                # Fall through to fallback lists
-        
-        # Fallback: check move_operations directly (if undo manager not available or failed)
-        if hasattr(mw, 'move_operations') and mw.move_operations:
-            last_move_operation = mw.move_operations.pop()
-            self.undo_move_operation(last_move_operation)
+                print(f"Undo file operation error: {e}")
+                traceback.print_exc()
+            if hasattr(mw, 'update_edit_menu_states'):
+                mw.update_edit_menu_states()
             return
 
-        # If no wallpaper or move undo, try file deletion undo
-        # Check deletion_operations fallback (undo manager already checked above)
-        if hasattr(mw, 'deletion_operations') and mw.deletion_operations:
-            # Fallback undo using deletion operations stack
-            last_operation = mw.deletion_operations.pop()
+        if mw.status_notification:
+            mw.status_notification.show_file_operation_message("No undo operations available")
 
-            if len(last_operation) == 1:
-                # Single file operation
-                file_info = last_operation[0]
+    def undo_move_operation(self, moved_files_info: List[dict]):
+        """Undo move operation by moving files back to their original locations.
 
-                success = self.restore_file_from_trash_(file_info['path'], file_info.get('original_position'), show_status=False)
-
-                # If standard restore succeeds, update the UI
-                if success:
-                    # Update the UI to reflect the restored file
-                    self._handle_successful_restore(file_info['path'], file_info.get('original_position'))
-                # If standard restore fails, try AppleScript fallback
-                elif not success:
-                    try:
-                        applescript_manager = AppleScriptUndoManager()
-                        if applescript_manager.is_available:
-                            success = applescript_manager.restore_file_from_trash(file_info['path'], file_info.get('original_position'))
-                            if success:
-                                # Update the UI to reflect the restored file
-                                self._handle_successful_restore(file_info['path'], file_info.get('original_position'))
-                    except Exception as e:
-                        pass
-            else:
-                # Multiple file operation
-                self.restore_multiple_files_from_trash_(last_operation)
-                # After restoring, set highlight_index to the last image restored
-                if last_operation:
-                    last_restored_path = last_operation[-1]['path']
-                    if last_restored_path in mw.displayed_images:
-                        mw.highlight_index = mw.displayed_images.index(last_restored_path)
-                        mw.highlight_image()
-            # In formatted mode, skip refresh - it would drop still-deleted placeholder slots
-            if not getattr(mw, '_is_formatted_list_mode', lambda: False)():
-                if hasattr(mw, 'debounce_refresh_directory'):
-                    mw.debounce_refresh_directory()
-        else:
-            if mw.status_notification:
-                mw.status_notification.show_file_operation_message("No undo operations available")
-
-    def undo_move_operation(self, moved_files_info: List[dict]) -> None:
-        """Undo move operation by moving files back to their original locations"""
+        Returns (any_restored: bool, failed_entries: list).
+        """
         mw = self.main_window
         if not moved_files_info:
             if mw.status_notification:
                 mw.status_notification.show_file_operation_message("No move operations to undo")
-            return
+            return False, []
 
         restored_count = 0
         errors = []
-        restored_files = []  # Track successfully restored files with their positions
+        restored_files = []
         restored_positions = []
-        
+        failed_entries = []
+
         for move_info in moved_files_info:
-            target_path = move_info['target_path']  # Current location (where file was moved to)
-            source_path = move_info['source_path']  # Original location (where file should be moved back to)
+            target_path = move_info['target_path']
+            source_path = move_info['source_path']
             original_position = move_info.get('original_position')
-            
-            # Check if target file still exists
+
             if not os.path.exists(target_path):
                 errors.append(f"File no longer exists: {os.path.basename(target_path)}")
+                failed_entries.append(move_info)
                 continue
-            
-            # Check if source directory exists
+
             source_dir = os.path.dirname(source_path)
             if not os.path.exists(source_dir):
                 errors.append(f"Original directory no longer exists: {source_dir}")
+                failed_entries.append(move_info)
                 continue
-            
-            # Check if source path already exists (file was moved back already or another file is there)
+
+            restore_path = source_path
             if os.path.exists(source_path):
-                # Generate unique filename to avoid overwriting
                 base, ext = os.path.splitext(source_path)
                 counter = 1
                 unique_source_path = f"{base}_restored_{counter}{ext}"
                 while os.path.exists(unique_source_path):
                     counter += 1
                     unique_source_path = f"{base}_restored_{counter}{ext}"
-                source_path = unique_source_path
-            
+                restore_path = unique_source_path
+
             try:
-                # Move file back to original location
-                shutil.move(target_path, source_path)
+                shutil.move(target_path, restore_path)
                 restored_count += 1
-                restored_files.append(source_path)
+                restored_files.append(restore_path)
                 restored_positions.append(original_position)
-                
-                # Update cache
+
                 if hasattr(mw, 'cache_manager'):
                     mw.cache_manager.clear_cache_for_file(target_path)
-                    mw.cache_manager.clear_cache_for_file(source_path)
-                    
+                    mw.cache_manager.clear_cache_for_file(restore_path)
+
             except Exception as e:
                 error_msg = f"Error moving '{os.path.basename(target_path)}' back: {str(e)}"
                 errors.append(error_msg)
                 print(f"Undo move error: {error_msg}")
-        
-        # Show status message
+                failed_entries.append(move_info)
+
         if restored_count > 0:
             if errors:
                 mw.status_notification.show_file_operation_message(
@@ -6528,29 +6395,32 @@ class FileOperationsManager:
                 mw.status_notification.show_file_operation_message(
                     f"Undo: Moved {restored_count} {file_string(restored_count)} back"
                 )
-            
-            # Add restored files back to displayed_images at their original positions
-            if restored_files and hasattr(mw, 'displayed_images'):
+
+            # Only update current view when restored files belong there
+            ui_files = []
+            ui_positions = []
+            for restored_file, original_pos in zip(restored_files, restored_positions):
+                if self._restored_path_belongs_in_current_view(restored_file, restored_file):
+                    ui_files.append(restored_file)
+                    ui_positions.append(original_pos)
+
+            if ui_files and hasattr(mw, 'displayed_images'):
                 displayed = mw.get_displayed_images()
-                for restored_file, original_pos in zip(restored_files, restored_positions):
+                for restored_file, original_pos in zip(ui_files, ui_positions):
                     if restored_file not in displayed:
                         if original_pos is not None and original_pos <= len(displayed):
                             displayed.insert(original_pos, restored_file)
                         else:
                             displayed.append(restored_file)
-                
-                # Update indices arrays
+
                 if hasattr(mw, 'populate_indices_arrays'):
                     mw.populate_indices_arrays()
-                
-                # Add thumbnails for restored files
+
                 if hasattr(mw, 'thumbnail_display_manager') and mw.thumbnail_display_manager:
-                    mw.thumbnail_display_manager.add_thumbnails_for_files(restored_files, restored_positions)
-                
-                # Highlight/select restored files
-                if len(restored_files) == 1:
-                    # Single file: highlight it
-                    restored_file = restored_files[0]
+                    mw.thumbnail_display_manager.add_thumbnails_for_files(ui_files, ui_positions)
+
+                if len(ui_files) == 1:
+                    restored_file = ui_files[0]
                     if restored_file in displayed:
                         highlight_idx = displayed.index(restored_file)
                         mw.highlight_index = highlight_idx
@@ -6560,46 +6430,43 @@ class FileOperationsManager:
                             mw.current_image_path = restored_file
                         if hasattr(mw, 'highlight_image'):
                             mw.highlight_image()
-                else:
-                    # Multiple files: select them
-                    if hasattr(mw, 'selected_files'):
-                        mw.selected_files.clear()
-                        for restored_file in restored_files:
-                            if restored_file in displayed:
-                                mw.selected_files.add(restored_file)
-                        # Highlight the last restored file
-                        if restored_files:
-                            last_file = restored_files[-1]
-                            if last_file in displayed:
-                                highlight_idx = displayed.index(last_file)
-                                mw.highlight_index = highlight_idx
-                                if hasattr(mw, 'current_index'):
-                                    mw.current_index = highlight_idx
-                                if hasattr(mw, 'current_image_path'):
-                                    mw.current_image_path = last_file
-                                if hasattr(mw, '_emit_selection_changed'):
-                                    mw._emit_selection_changed(highlight_index=highlight_idx)
-                                if hasattr(mw, 'highlight_image'):
-                                    mw.highlight_image()
+                elif len(ui_files) > 1 and hasattr(mw, 'selected_files'):
+                    mw.selected_files.clear()
+                    for restored_file in ui_files:
+                        if restored_file in displayed:
+                            mw.selected_files.add(restored_file)
+                    last_file = ui_files[-1]
+                    if last_file in displayed:
+                        highlight_idx = displayed.index(last_file)
+                        mw.highlight_index = highlight_idx
+                        if hasattr(mw, 'current_index'):
+                            mw.current_index = highlight_idx
+                        if hasattr(mw, 'current_image_path'):
+                            mw.current_image_path = last_file
+                        if hasattr(mw, '_emit_selection_changed'):
+                            mw._emit_selection_changed(highlight_index=highlight_idx)
+                        if hasattr(mw, 'highlight_image'):
+                            mw.highlight_image()
 
-            # Refresh directory to show restored files
-            # CRITICAL: Reuse existing timer - QTimer.singleShot drops GIL during connect(),
-            # causing deadlock when thumbnail workers are waiting for GIL (reproducible on undo after delete).
-            if mw.current_view_mode == 'thumbnail':
-                if hasattr(mw, '_refresh_directory_timer') and mw._refresh_directory_timer:
-                    mw._refresh_directory_timer.stop()
-                    mw._refresh_directory_timer.start(30)
+            # Refresh only when restored files belong in the current directory view
+            if ui_files:
+                if mw.current_view_mode == 'thumbnail':
+                    if hasattr(mw, '_refresh_directory_timer') and mw._refresh_directory_timer:
+                        mw._refresh_directory_timer.stop()
+                        mw._refresh_directory_timer.start(30)
+                    elif hasattr(mw, 'debounce_refresh_directory'):
+                        mw.debounce_refresh_directory()
                 elif hasattr(mw, 'debounce_refresh_directory'):
                     mw.debounce_refresh_directory()
-            elif hasattr(mw, 'debounce_refresh_directory'):
-                mw.debounce_refresh_directory()
+            return True, failed_entries
+
+        if errors:
+            error_text = "Could not undo move operation:\n\n" + "\n".join(errors[:3])
+            if len(errors) > 3:
+                error_text += f"\n... and {len(errors) - 3} more error(s)"
+            show_styled_warning(mw, "Undo Failed", error_text)
         else:
-            if errors:
-                error_text = "Could not undo move operation:\n\n" + "\n".join(errors[:3])
-                if len(errors) > 3:
-                    error_text += f"\n... and {len(errors) - 3} more error(s)"
-                show_styled_warning(mw, "Undo Failed", error_text)
-            else:
-                show_styled_warning(mw, "Undo Failed", "No files could be moved back")
+            show_styled_warning(mw, "Undo Failed", "No files could be moved back")
+        return False, failed_entries or list(moved_files_info)
 
     # Similiarly, all other methods shown above are retained exactly as in the original file.

@@ -430,6 +430,9 @@ class FeatureCacheManager:
             valid_mask = []
             
             for path, (feature, mtime, size) in dir_features.items():
+                # Skip entries with missing metadata (cannot serialize to np.int64/float64)
+                if mtime is None or size is None:
+                    continue
                 paths.append(path)
                 mtimes.append(mtime)
                 sizes.append(size)
@@ -438,6 +441,9 @@ class FeatureCacheManager:
                     valid_mask.append(True)
                 else:
                     valid_mask.append(False)
+            
+            if not paths:
+                continue
             
             # Stack valid features into 2D array
             if valid_features:
@@ -472,8 +478,8 @@ class FeatureCacheManager:
                     
                     temp_file.replace(cache_file)
                     
-                    # Update index
-                    for path in dir_features:
+                    # Update index (only entries that were serialized)
+                    for path in paths:
                         index[path] = {
                             'dir_hash': dir_hash,
                             'mtime': dir_features[path][1],
@@ -481,7 +487,7 @@ class FeatureCacheManager:
                         }
                     
                     saved_dirs += 1
-                    total_items += len(dir_features)
+                    total_items += len(paths)
                 finally:
                     shutil.rmtree(temp_dir, ignore_errors=True)
             except Exception:
@@ -540,6 +546,9 @@ class FeatureCacheManager:
             valid_mask = []
             
             for path, (feature, mtime, size) in dir_features.items():
+                # Skip entries with missing metadata (cannot serialize to np.int64/float64)
+                if mtime is None or size is None:
+                    continue
                 paths.append(path)
                 mtimes.append(mtime)
                 sizes.append(size)
@@ -548,6 +557,9 @@ class FeatureCacheManager:
                     valid_mask.append(True)
                 else:
                     valid_mask.append(False)
+            
+            if not paths:
+                continue
             
             # Stack valid features into 2D array
             if valid_features:
@@ -582,8 +594,8 @@ class FeatureCacheManager:
                     
                     temp_file.replace(cache_file)
                     
-                    # Update index
-                    for path in dir_features:
+                    # Update index (only entries that were serialized)
+                    for path in paths:
                         index[path] = {
                             'dir_hash': dir_hash,
                             'mtime': dir_features[path][1],
@@ -591,7 +603,7 @@ class FeatureCacheManager:
                         }
                     
                     saved_dirs += 1
-                    total_items += len(dir_features)
+                    total_items += len(paths)
                 finally:
                     shutil.rmtree(temp_dir, ignore_errors=True)
             except Exception:
@@ -706,6 +718,9 @@ class FeatureCacheManager:
     def set_cnn_feature(self, path: str, feature: Optional['torch.Tensor'], mtime: float, size: int):
         """Store CNN feature in cache (in-memory only, disk write deferred)"""
         import torch
+        # mtime/size are required for disk save (np.int64) and cache validity checks
+        if mtime is None or size is None:
+            return
         cache_key = self._get_cache_key(path)
         dir_hash = self._get_directory_hash(path)
         
@@ -768,6 +783,9 @@ class FeatureCacheManager:
     def set_clip_feature(self, path: str, feature: Optional['torch.Tensor'], mtime: float, size: int):
         """Store CLIP feature in cache (in-memory only, disk write deferred)"""
         import torch
+        # mtime/size are required for disk save (np.int64) and cache validity checks
+        if mtime is None or size is None:
+            return
         cache_key = self._get_cache_key(path)
         dir_hash = self._get_directory_hash(path)
         

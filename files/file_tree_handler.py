@@ -2274,7 +2274,7 @@ class CustomTreeView(QTreeView):
 
         # Register move operations for undo
         if moved_files_info and self.main_window and getattr(self.main_window, 'file_operations_manager', None):
-            self.main_window.file_operations_manager._register_undo_for_moved_files(moved_files_info, moved_count)
+            self.main_window.file_operations_manager._register_undo_for_moved_files(moved_files_info)
 
         # Show error dialog if there were failures
         if failed_filenames:

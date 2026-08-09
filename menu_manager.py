@@ -2512,35 +2512,16 @@ class MenuManager:
             wallpaper_undo_available = (hasattr(mw, 'wallpaper_manager') and 
                                        mw.wallpaper_manager and 
                                        mw.wallpaper_manager.can_undo_wallpaper())
-            
-            # Check move undo (second priority)
-            # If undo manager is available, check move_operations to determine if next undo is a move
-            # Otherwise, check move_operations directly
-            move_undo_available = False
-            if hasattr(mw, 'move_operations') and mw.move_operations:
-                # If undo manager is available, it will handle the undo (maintains order)
-                # We check move_operations to determine if it's a move operation
-                if (hasattr(mw, 'file_undo_manager') and mw.file_undo_manager and 
-                    hasattr(mw.file_undo_manager, 'canUndo') and 
-                    mw.file_undo_manager.canUndo()):
-                    # Undo manager is available - check if move_operations has entries
-                    # (moves are registered to both undo manager and move_operations)
-                    move_undo_available = True
-                else:
-                    # No undo manager, check move_operations directly
-                    move_undo_available = True
-            
-            # Check delete undo (only if move undo not available)
-            delete_undo_available = False
-            if not move_undo_available:
-                if (hasattr(mw, 'file_undo_manager') and mw.file_undo_manager and 
-                    hasattr(mw.file_undo_manager, 'canUndo') and 
-                    mw.file_undo_manager.canUndo()):
-                    delete_undo_available = True
-                elif hasattr(mw, 'deletion_operations') and mw.deletion_operations:
-                    delete_undo_available = True
-            
-            # Update text and enabled state (priority: wallpaper > move > delete)
+
+            # Chronological file_undo_stack is the sole source of truth for file undo
+            next_kind = None
+            stack = getattr(mw, 'file_undo_stack', None)
+            if stack:
+                next_kind = stack[-1].get('kind')
+
+            move_undo_available = next_kind == 'move'
+            delete_undo_available = next_kind == 'delete'
+
             if wallpaper_undo_available:
                 mw.undo_action.setText("Undo Wallpaper")
                 mw.undo_action.setEnabled(True)

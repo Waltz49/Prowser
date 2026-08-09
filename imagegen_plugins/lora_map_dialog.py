@@ -107,32 +107,43 @@ def build_lora_map_html(rows: Optional[List[LoraMapRow]] = None) -> str:
         ".lora-name { font-weight: bold; margin: 0; padding: 0; }",
         "ul { margin: 2px 0 0 1.25em; padding: 0; }",
         "li { margin: 0; padding: 0; }",
-        ".empty { margin: 2px 0 0 1.25em; opacity: 0.7; }",
         ".summary { margin: 0 0 12px 0; opacity: 0.85; }",
+        ".section { margin: 16px 0 8px 0; font-weight: bold; "
+        "font-size: 13px; border-bottom: 1px solid "
+        f"{th.border_default_hex}; padding-bottom: 2px; }}",
         ".footnote { margin: 12px 0 0 0; opacity: 0.75; font-size: 11px; }",
         "</style></head><body>",
     ]
-    mapped = sum(1 for _, models in rows if models)
-    cross_count = sum(1 for _, models in rows for _, is_cross in models if is_cross)
+    used = [(label, models) for label, models in rows if models]
+    unused = [label for label, models in rows if not models]
+    cross_count = sum(1 for _, models in used for _, is_cross in models if is_cross)
     parts.append(
         f"<div class='summary'>{len(rows)} LoRA(s); "
-        f"{mapped} with at least one model."
+        f"{len(used)} with at least one model; "
+        f"{len(unused)} unused."
         + (f" {cross_count} cross-family link(s)." if cross_count else "")
         + "</div>"
     )
     if not rows:
         parts.append("<div>(No LoRA model-support map yet. Run Check LoRAs first.)</div>")
-    for lora_label, models in rows:
+    for lora_label, models in used:
         parts.append("<div class='lora'>")
         parts.append(f"<div class='lora-name'>{html.escape(lora_label)}</div>")
-        if models:
-            parts.append("<ul>")
-            for model_label, _is_cross in models:
-                parts.append(f"<li>{html.escape(model_label)}</li>")
-            parts.append("</ul>")
-        else:
-            parts.append("<div class='empty'>(none)</div>")
+        parts.append("<ul>")
+        for model_label, _is_cross in models:
+            parts.append(f"<li>{html.escape(model_label)}</li>")
+        parts.append("</ul>")
         parts.append("</div>")
+    if unused:
+        parts.append("<div class='section'>Unused LoRAs</div>")
+        parts.append(
+            "<div class='summary'>No associated models "
+            "(host or Check LoRAs probe).</div>"
+        )
+        for lora_label in unused:
+            parts.append("<div class='lora'>")
+            parts.append(f"<div class='lora-name'>{html.escape(lora_label)}</div>")
+            parts.append("</div>")
     parts.append(
         "<div class='footnote'>* cross-family — Check LoRAs found this LoRA "
         "working on a base model outside its catalog host family.</div>"

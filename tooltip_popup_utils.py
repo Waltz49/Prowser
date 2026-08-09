@@ -303,9 +303,13 @@ class IconGraphicTooltipFilter(QObject):
         if event.type() == QEvent.Type.Leave and obj is self._source_widget:
             self._hide_tooltip()
         elif event.type() in (QEvent.Type.Hide, QEvent.Type.Close):
-            if obj is self._source_widget or (
-                self._source_widget is not None and obj is self._source_widget.window()
-            ):
+            source = self._source_widget
+            if source is None:
+                pass
+            elif not isValid(source):
+                # Button may already be deleted (e.g. parent tear-down).
+                self._hide_tooltip()
+            elif obj is source or obj is source.window():
                 self._hide_tooltip()
 
         return False

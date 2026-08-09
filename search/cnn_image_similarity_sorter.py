@@ -2723,7 +2723,7 @@ class CNNImageSimilaritySorter:
         image_tensor = self._load_image(path)
         if image_tensor is None:
             self._feature_cache[path] = (None, mtime, size)
-            if self.feature_cache:
+            if self.feature_cache and mtime is not None and size is not None:
                 self.feature_cache.set_cnn_feature(path, None, mtime, size)
             return None
         image_tensor = image_tensor.unsqueeze(0).to(self.device)
@@ -2920,7 +2920,7 @@ class CNNImageSimilaritySorter:
                             qimage = QImage(path)
                             if qimage.isNull():
                                 self._clip_feature_cache[path] = (None, mtime, size)
-                                if self.feature_cache:
+                                if self.feature_cache and mtime is not None and size is not None:
                                     self.feature_cache.set_clip_feature(path, None, mtime, size)
                                 return None
                             
@@ -2929,7 +2929,7 @@ class CNNImageSimilaritySorter:
                             buffer.open(QIODevice.OpenModeFlag.WriteOnly)
                             if not qimage.save(buffer, format='PNG'):
                                 self._clip_feature_cache[path] = (None, mtime, size)
-                                if self.feature_cache:
+                                if self.feature_cache and mtime is not None and size is not None:
                                     self.feature_cache.set_clip_feature(path, None, mtime, size)
                                 return None
                             buffer.close()
@@ -2943,13 +2943,13 @@ class CNNImageSimilaritySorter:
                                 img = img.convert('RGB')
                         except Exception:
                             self._clip_feature_cache[path] = (None, mtime, size)
-                            if self.feature_cache:
+                            if self.feature_cache and mtime is not None and size is not None:
                                 self.feature_cache.set_clip_feature(path, None, mtime, size)
                             return None
                 else:
                     # Some other PIL error
                     self._clip_feature_cache[path] = (None, mtime, size)
-                    if self.feature_cache:
+                    if self.feature_cache and mtime is not None and size is not None:
                         self.feature_cache.set_clip_feature(path, None, mtime, size)
                     return None
             
@@ -2986,7 +2986,7 @@ class CNNImageSimilaritySorter:
             import traceback
             traceback.print_exc()
             self._clip_feature_cache[path] = (None, mtime, size)
-            if self.feature_cache:
+            if self.feature_cache and mtime is not None and size is not None:
                 self.feature_cache.set_clip_feature(path, None, mtime, size)
             return None
 
