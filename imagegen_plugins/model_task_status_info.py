@@ -346,6 +346,13 @@ def _queue_table_row_primary_plus_inline(
     )
 
 
+def _information_panel_progress_bar_outer_style(border_hex: str) -> str:
+    return (
+        f"border:1px solid {border_hex}; table-layout:fixed; "
+        "border-collapse:collapse; margin:0; padding:0;"
+    )
+
+
 def _information_panel_progress_bar_html(
     fill_percent: int,
     bar_width_px: int,
@@ -359,28 +366,33 @@ def _information_panel_progress_bar_html(
     bar_width_px = max(_INFO_PANEL_BAR_MIN_W, int(bar_width_px))
     fill_percent = max(0, min(100, int(fill_percent)))
     h = _INFO_PANEL_BAR_H
+    outer_style = _information_panel_progress_bar_outer_style(border_hex)
+    outer_open = (
+        f'<table width="{bar_width_px}" cellspacing="0" cellpadding="0" '
+        f'style="{outer_style}"><tr>'
+    )
     if show_pending_start_indicator and fill_percent <= 0:
         # Match empty progress-bar cell height (small font/line-height on <td> shrinks in QTextBrowser).
         return (
-            f'<table width="{bar_width_px}" cellspacing="0" cellpadding="0" '
-            f'style="border:1px solid {border_hex}; table-layout:fixed;"><tr>'
-            f'<td width="{bar_width_px}" bgcolor="{bg_hex}" height="{h}" '
-            f'align="center" valign="middle" style="color:#FFFFFF;">'
+            outer_open
+            + f'<td width="{bar_width_px}" bgcolor="{bg_hex}" height="{h}" '
+            f'align="center" valign="middle" style="color:#FFFFFF;border:none;">'
             f"\u2192</td></tr></table>"
         )
     filled_w = max(0, min(bar_width_px, int(round(bar_width_px * fill_percent / 100.0))))
-    empty_w = bar_width_px - filled_w
-    cells: list[str] = []
+    inner_bar = ""
     if filled_w > 0:
-        cells.append(f'<td width="{filled_w}" bgcolor="{fill_hex}" height="{h}"></td>')
-    if empty_w > 0:
-        cells.append(f'<td width="{empty_w}" bgcolor="{bg_hex}" height="{h}"></td>')
-    if not cells:
-        cells.append(f'<td width="{bar_width_px}" bgcolor="{bg_hex}" height="{h}"></td>')
+        inner_bar = (
+            f'<table width="{filled_w}" cellspacing="0" cellpadding="0" '
+            f'style="border:none;margin:0;padding:0;"><tr>'
+            f'<td width="{filled_w}" bgcolor="{fill_hex}" height="{h}" '
+            f'style="border:none;padding:0;"></td></tr></table>'
+        )
     return (
-        f'<table width="{bar_width_px}" cellspacing="0" cellpadding="0" '
-        f'style="border:1px solid {border_hex}; table-layout:fixed;"><tr>'
-        f'{"".join(cells)}</tr></table>'
+        outer_open
+        + f'<td width="{bar_width_px}" bgcolor="{bg_hex}" height="{h}" '
+        f'style="border:none;padding:0;">{inner_bar}</td>'
+        f"</tr></table>"
     )
 
 

@@ -82,6 +82,8 @@ from imagegen_plugins.image_gen_persistence import (
 from imagegen_plugins.image_gen_session_state import FunctionSessionState
 from imagegen_plugins.image_gen_submit_notice import (
     ImageGenSubmitNotice,
+    JOB_REPLACED_NOTICE,
+    JOB_UPDATED_NOTICE,
     submit_notice_text,
 )
 from imagegen_plugins.imagegen_flux_prompt_ai import cancel_dialog_flux_prompt_refine
@@ -193,6 +195,11 @@ class ImageGenUnifiedDialog(QDialog):
         self._replace_btn = self._actions.findChild(QPushButton, "imageGenReplaceButton")
         self._generate_btn = self._actions.findChild(QPushButton, "imageGenGenerateButton")
         self._submit_notice = ImageGenSubmitNotice(self, self._generate_btn)
+        self._replace_notice = (
+            ImageGenSubmitNotice(self, self._replace_btn)
+            if self._replace_btn is not None
+            else None
+        )
         self._close_on_generate_cb = create_image_gen_close_on_generate_checkbox(
             on_changed=self._on_close_on_generate_changed,
         )
@@ -826,7 +833,12 @@ class ImageGenUnifiedDialog(QDialog):
             return None
         return plugin, values
 
-    def _after_successful_submit(self) -> None:
+    def _after_successful_submit(
+        self,
+        *,
+        notice: Optional[ImageGenSubmitNotice] = None,
+        notice_text: Optional[str] = None,
+    ) -> None:
         self._save_current_to_session()
         snapshot = getattr(self._current_panel, "snapshot_state", None)
         if snapshot is not None:
@@ -836,7 +848,9 @@ class ImageGenUnifiedDialog(QDialog):
         if self._close_on_generate_cb.isChecked():
             self._close_after_successful_generate()
         else:
-            self._submit_notice.show(submit_notice_text(self._function))
+            target_notice = notice or self._submit_notice
+            text = notice_text or submit_notice_text(self._function)
+            target_notice.show(text)
 
     def _on_generate(self) -> None:
         if self._current_panel is None:
@@ -877,8 +891,10 @@ class ImageGenUnifiedDialog(QDialog):
         )
         set_active_plugin_for_function(self._main_window, self._function, plugin)
         job_id = self._replace_job_id
+        replace_notice_text = JOB_UPDATED_NOTICE
         if self._controller.is_queued_job_replaceable(job_id):
             ok = self._controller.replace_queued_job(job_id, plugin, values)
+            replace_notice_text = JOB_REPLACED_NOTICE
             failure_title = "Replace job"
             failure_message = (
                 "That queued job is no longer available "
@@ -906,7 +922,10 @@ class ImageGenUnifiedDialog(QDialog):
                 failure_message,
             )
             return
-        self._after_successful_submit()
+        self._after_successful_submit(
+            notice=self._replace_notice,
+            notice_text=replace_notice_text,
+        )
 
     def _close_after_successful_generate(self) -> None:
         if self._dismissing:
@@ -1035,6 +1054,8 @@ class ImageGenUnifiedDialog(QDialog):
     def resizeEvent(self, event):
         super().resizeEvent(event)
         self._submit_notice.reposition()
+        if self._replace_notice is not None:
+            self._replace_notice.reposition()
         QTimer.singleShot(0, self._on_shell_geometry_changed)
 
     def _on_shell_geometry_changed(self) -> None:

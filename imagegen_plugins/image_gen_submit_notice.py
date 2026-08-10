@@ -27,17 +27,20 @@ _SUBMIT_NOTICE_BY_FUNCTION = {
     "infill_paint": "Infill job submitted",
 }
 
+JOB_REPLACED_NOTICE = "Job replaced"
+JOB_UPDATED_NOTICE = "Job updated"
+
 
 def submit_notice_text(function: str) -> str:
     return _SUBMIT_NOTICE_BY_FUNCTION.get(function, "Job submitted")
 
 
 class ImageGenSubmitNotice:
-    """Themed overlay label right-aligned above the generate button."""
+    """Themed overlay label right-aligned above an anchor button."""
 
-    def __init__(self, host: QWidget, generate_btn: QPushButton) -> None:
+    def __init__(self, host: QWidget, anchor_btn: QPushButton) -> None:
         self._host = host
-        self._generate_btn = generate_btn
+        self._anchor_btn = anchor_btn
         self._label = QLabel(host)
         self._label.setAlignment(
             Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter
@@ -68,8 +71,8 @@ class ImageGenSubmitNotice:
         self._label.adjustSize()
         notice_w = self._label.sizeHint().width()
         notice_h = self._label.sizeHint().height()
-        btn_origin = self._generate_btn.mapTo(self._host, QPoint(0, 0))
-        x = btn_origin.x() + self._generate_btn.width() - notice_w
+        btn_origin = self._anchor_btn.mapTo(self._host, QPoint(0, 0))
+        x = btn_origin.x() + self._anchor_btn.width() - notice_w
         y = btn_origin.y() - self._gap_px() - notice_h
         self._label.setGeometry(x, y, notice_w, notice_h)
         self._label.raise_()

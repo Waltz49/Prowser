@@ -448,7 +448,7 @@ class _JobCardDblClickFilter(QObject):
 
 
 class JobCard(QFrame):
-    """One queue row: status HTML + thumbnails (actions live in shared bar)."""
+    """One queue row: status HTML + thumbnails; action bar embeds when selected."""
 
     def __init__(
         self,
@@ -487,13 +487,14 @@ class JobCard(QFrame):
         self._last_content_width = 0
         self._drag_start_pos: QPoint | None = None
         self._drag_started = False
+        self._action_bar: QWidget | None = None
         self._pending_select_timer = QTimer(self)
         self._pending_select_timer.setSingleShot(True)
         self._pending_select_timer.timeout.connect(self._apply_pending_select)
 
-        row_layout = QHBoxLayout(self)
-        row_layout.setContentsMargins(2, 2, 2, 2)
-        row_layout.setSpacing(4)
+        card_layout = QVBoxLayout(self)
+        card_layout.setContentsMargins(2, 2, 2, 2)
+        card_layout.setSpacing(2)
 
         self._content = QWidget()
         self._content.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
@@ -510,7 +511,7 @@ class JobCard(QFrame):
 
         self._refs = _FlowReferenceThumbs(main_window, [])
         self._ensure_content_layout(False)
-        row_layout.addWidget(self._content, 1)
+        card_layout.addWidget(self._content, 1)
         self._apply_card_style()
 
     def job_id(self) -> str:
@@ -534,6 +535,58 @@ class JobCard(QFrame):
         if self._last_content_width <= 0:
             self.updateGeometry()
 
+    def attach_action_bar(self, bar: QWidget) -> None:
+        """Embed the shared action bar at the bottom of this card."""
+        if self._action_bar is bar:
+            layout = self.layout()
+            if layout is not None and layout.indexOf(bar) >= 0:
+                bar.show()
+                self._resync_height_after_action_bar_change()
+                return
+        self.detach_action_bar()
+        layout = self.layout()
+        if layout is None:
+            return
+        self._action_bar = bar
+        bar.setParent(self)
+        layout.addWidget(bar, 0)
+        bar.show()
+        self._resync_height_after_action_bar_change()
+
+    def detach_action_bar(self) -> None:
+        bar = self._action_bar
+        if bar is None:
+            return
+        layout = self.layout()
+        if layout is not None:
+            layout.removeWidget(bar)
+        self._action_bar = None
+        self._resync_height_after_action_bar_change()
+
+    def has_action_bar(self) -> bool:
+        return self._action_bar is not None
+
+    def _action_bar_block_height(self) -> int:
+        bar = self._action_bar
+        if bar is None or not bar.isVisible():
+            return 0
+        layout = self.layout()
+        spacing = layout.spacing() if layout is not None else 0
+        h = bar.height()
+        if h <= 0:
+            hint = bar.sizeHint().height()
+            h = hint if hint > 0 else _ACTION_BAR_HEIGHT
+        return spacing + h
+
+    def _resync_height_after_action_bar_change(self) -> None:
+        if self._last_content_width > 0:
+            self._sync_card_height(
+                self._last_content_width,
+                scroll_width=self._scroll_width or None,
+            )
+        else:
+            self.updateGeometry()
+
     def _frame_border_width_px(self) -> int:
         return _job_selection_border_width_px() if self._selected else 1
 
@@ -545,8 +598,11 @@ class JobCard(QFrame):
         return m.top() + m.bottom()
 
     def _card_frame_minimum_height(self, content_h: int) -> int:
-        return content_h + self._layout_vertical_margins_px() + (
-            2 * self._frame_border_width_px()
+        return (
+            content_h
+            + self._action_bar_block_height()
+            + self._layout_vertical_margins_px()
+            + (2 * self._frame_border_width_px())
         )
 
     def _apply_cell_chrome_stylesheet(self) -> None:
@@ -1180,22 +1236,12 @@ class JobQueuePanelWidget(QWidget):
         return self._controller.resolve_selected_row_index()
 
     def _action_bar_card_list_index(self) -> int:
-        """Job card list index where the action bar is inserted (below that card)."""
+        """Job card list index that hosts the embedded action bar."""
         sole = self._sole_visible_job_card()
         if sole is not None:
             return self._job_cards.index(sole)
         row_idx = self._controller.resolve_selected_row_index()
         return row_idx if row_idx >= 0 else -1
-
-    def _action_bar_below_first_card(self) -> bool:
-        if not self._should_show_action_bar():
-            return False
-        if self._is_single_job_mode():
-            return bool(self._job_cards)
-        sole = self._sole_visible_job_card()
-        if sole is not None:
-            return self._job_cards.index(sole) == 0
-        return self._controller.resolve_selected_row_index() == 0
 
     def _should_show_action_bar(self) -> bool:
         """Show when a job card is selected, or always in single-job / sole-row views."""
@@ -1224,38 +1270,36 @@ class JobQueuePanelWidget(QWidget):
             self._place_action_bar(list_row)
             self._action_bar.update_for_row(row_idx)
         else:
-            self._detach_action_bar_from_list()
+            self._detach_action_bar()
             self._action_bar.hide()
         if self._queue_size_mode == QUEUE_SIZE_ONE:
             self._apply_one_job_scroll_height()
             self._sync_fixed_panel_geometry()
             self._notify_sidebar_geometry_if_needed()
 
-    def _detach_action_bar_from_list(self) -> None:
+    def _detach_action_bar(self) -> None:
+        """Remove the shared action bar from any host card or list layout."""
+        for card in self._job_cards:
+            if card.has_action_bar():
+                card.detach_action_bar()
         layout = self._list_layout
         for i in range(layout.count()):
             item = layout.itemAt(i)
             if item is not None and item.widget() is self._action_bar:
                 layout.removeWidget(self._action_bar)
                 break
+        # Keep the shared bar owned by the panel so card teardown cannot destroy it.
+        if self._action_bar.parent() is not self:
+            self._action_bar.setParent(self)
 
     def _place_action_bar(self, row_idx: int) -> None:
-        self._detach_action_bar_from_list()
+        """Embed the action bar inside the target job card."""
+        self._detach_action_bar()
         if row_idx < 0 or row_idx >= len(self._job_cards):
             self._action_bar.hide()
             return
-        self._action_bar.setParent(self._list_host)
-        self._list_layout.insertWidget(row_idx + 1, self._action_bar)
+        self._job_cards[row_idx].attach_action_bar(self._action_bar)
         self._action_bar.show()
-
-    def _action_bar_block_height(self) -> int:
-        if not self._should_show_action_bar():
-            return 0
-        h = self._action_bar.height()
-        if h > 0:
-            return h
-        hint = self._action_bar.sizeHint().height()
-        return hint if hint > 0 else _ACTION_BAR_HEIGHT
 
     def _card_layout_height(self, card: JobCard) -> int:
         h = card.minimumHeight()
@@ -1907,11 +1951,8 @@ class JobQueuePanelWidget(QWidget):
         card_h = self._measure_first_job_card_height()
         if card_h <= 0:
             card_h = self._job_cards[0].minimumHeight()
-        extra = 0
-        if self._action_bar_below_first_card():
-            extra = self._list_layout.spacing() + self._action_bar_block_height()
         self._scroll.setFixedHeight(
-            card_h + extra + margins.top() + margins.bottom()
+            card_h + margins.top() + margins.bottom()
         )
 
     def _apply_queue_size_layout(self) -> None:
@@ -2024,10 +2065,7 @@ class JobQueuePanelWidget(QWidget):
             card_h = self._measure_first_job_card_height()
         if card_h <= 0:
             card_h = self._job_cards[0].minimumHeight()
-        bar_extra = 0
-        if self._action_bar_below_first_card():
-            bar_extra = self._list_layout.spacing() + self._action_bar_block_height()
-        return total + margins.top() + margins.bottom() + card_h + bar_extra
+        return total + margins.top() + margins.bottom() + card_h
 
     def content_height_for_size_mode(
         self, mode: str | None = None, *, quick: bool = False
@@ -2096,7 +2134,7 @@ class JobQueuePanelWidget(QWidget):
             self._notify_sidebar_geometry_if_needed()
 
     def _clear_job_cards(self) -> None:
-        self._detach_action_bar_from_list()
+        self._detach_action_bar()
         while self._list_layout.count() > 1:
             item = self._list_layout.takeAt(0)
             widget = item.widget()
@@ -2170,9 +2208,6 @@ class JobQueuePanelWidget(QWidget):
                 return total
             return total + self.empty_state_height_hint()
         self._ensure_single_job_auto_selection()
-        show_bar = self._should_show_action_bar()
-        bar_h = self._action_bar_block_height() if show_bar else 0
-        bar_list_row = self._action_bar_card_list_index() if show_bar else -1
         margins = self._list_layout.contentsMargins()
         total += margins.top() + margins.bottom()
         spacing = self._list_layout.spacing()
@@ -2181,8 +2216,6 @@ class JobQueuePanelWidget(QWidget):
                 if row_idx > 0:
                     total += spacing
                 total += self._card_layout_height(card)
-                if show_bar and row_idx == bar_list_row:
-                    total += spacing + bar_h
             return total
         info_w = self._info_content_width()
         width = self._viewport_width()
@@ -2210,13 +2243,9 @@ class JobQueuePanelWidget(QWidget):
             else:
                 card.reflow_refs(width)
                 total += self._card_layout_height(card)
-                if show_bar and row_idx == bar_list_row:
-                    total += spacing + bar_h
                 continue
             card.reflow_refs(width)
             total += self._card_layout_height(card)
-            if show_bar and row_idx == bar_list_row:
-                total += spacing + bar_h
         return total
 
     def refresh_table(self) -> None:
