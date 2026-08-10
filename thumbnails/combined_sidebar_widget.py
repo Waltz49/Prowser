@@ -117,7 +117,7 @@ class HeaderWidget(QFrame):
             )
 
     def set_flyout_button(self, button: QPushButton | None) -> None:
-        """Optional titlebar flyout/flyin control (inserted at far right)."""
+        """Optional titlebar flyout/flyin control (before hide/close)."""
         layout = self._header_layout
         if layout is None:
             return
@@ -130,11 +130,15 @@ class HeaderWidget(QFrame):
         button.setFixedSize(20, 20)
         button.setFocusPolicy(Qt.NoFocus)
         self.flyout_button = button
-        layout.addWidget(button)
+        hide_idx = layout.indexOf(self.hide_button)
+        if hide_idx < 0:
+            layout.addWidget(button)
+        else:
+            layout.insertWidget(hide_idx, button)
         self.refresh_theme_styles()
 
     def set_tools_button(self, button: QPushButton | None) -> None:
-        """Optional titlebar tools control (inserted before the hide button)."""
+        """Optional titlebar tools control (before flyout and hide/close)."""
         layout = self._header_layout
         if layout is None:
             return
@@ -147,11 +151,16 @@ class HeaderWidget(QFrame):
         button.setFixedSize(20, 20)
         button.setFocusPolicy(Qt.NoFocus)
         self.tools_button = button
-        hide_idx = layout.indexOf(self.hide_button)
-        if hide_idx < 0:
+        anchor = (
+            self.flyout_button
+            if self.flyout_button is not None
+            else self.hide_button
+        )
+        anchor_idx = layout.indexOf(anchor) if anchor is not None else -1
+        if anchor_idx < 0:
             layout.addWidget(button)
         else:
-            layout.insertWidget(hide_idx, button)
+            layout.insertWidget(anchor_idx, button)
         self.refresh_theme_styles()
 
     def _titlebar_chip_stylesheet(self) -> str:

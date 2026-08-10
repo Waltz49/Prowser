@@ -978,7 +978,9 @@ def _collect_generation_status_fields(
     if quant is not None:
         fields["quant"] = quant
 
-    prompt = _truncate(str(effective.get("prompt") or ""))
+    from imagegen_plugins.flux_prompt_job import effective_job_prompt_for_tooltip
+
+    prompt = _truncate(effective_job_prompt_for_tooltip(effective))
     if prompt:
         fields["prompt"] = prompt
         fields["prompt_label"] = get_pipeline(pipeline_id).prompt_status_label

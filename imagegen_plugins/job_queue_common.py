@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import os
 
-from PySide6.QtCore import Qt, QSize
+from PySide6.QtCore import Qt, QSize, QTimer
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
 
 from imagegen_plugins.image_gen_dialog import connect_import_button_with_option_modifier
@@ -138,11 +138,17 @@ class JobQueueActionBar(QWidget):
         self._main_window = main_window
         self._controller = controller
         self._row_idx = -1
+        self._speak_highlighted = False
+        self._speak_btn: QPushButton | None = None
         _apply_job_queue_action_bar_background(self)
         layout = QHBoxLayout(self)
         layout.setContentsMargins(4, 2, 4, 2)
         layout.setSpacing(4)
         self._layout = layout
+
+        self._speak_btn = self._create_speak_button()
+        if self._speak_btn is not None:
+            layout.addWidget(self._speak_btn, 0, Qt.AlignmentFlag.AlignCenter)
 
         self._plus_btn = QPushButton()
         self._plus_btn.setToolTip("Add another image to this series")
@@ -213,6 +219,71 @@ class JobQueueActionBar(QWidget):
         ):
             layout.addWidget(btn, 0, Qt.AlignmentFlag.AlignCenter)
         self.setFixedHeight(_ACTION_BAR_HEIGHT)
+
+    def _create_speak_button(self) -> QPushButton | None:
+        from chat_plugins.chat_ui_common import (
+            chat_audio_output_ui_enabled,
+            create_chat_speak_button,
+        )
+
+        if not chat_audio_output_ui_enabled():
+            return None
+        btn = create_chat_speak_button(self)
+        btn.setObjectName("jobQueueSpeakBtn")
+        btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        btn.clicked.connect(self._on_speak)
+        from speech_utils import (
+            is_speaking,
+            register_speech_state_listener,
+            unregister_speech_state_listener,
+        )
+
+        self._speak_highlighted = is_speaking()
+        self._apply_speak_button_style()
+        register_speech_state_listener(self._on_speech_state_changed)
+        btn.destroyed.connect(
+            lambda: unregister_speech_state_listener(self._on_speech_state_changed)
+        )
+        return btn
+
+    def _full_prompt_for_row(self) -> str:
+        if self._row_idx < 0:
+            return ""
+        rows = self._controller.queue_snapshot()
+        if self._row_idx >= len(rows):
+            return ""
+        return str(rows[self._row_idx].full_prompt or "").strip()
+
+    def _on_speak(self, _checked: bool = False) -> None:
+        from speech_utils import is_speaking, speak_or_stop
+
+        text = self._full_prompt_for_row()
+        if not text and not is_speaking():
+            return
+        speak_or_stop(text)
+        QTimer.singleShot(0, self._sync_speak_highlight)
+
+    def _on_speech_state_changed(self, _speaking: bool) -> None:
+        QTimer.singleShot(0, self._sync_speak_highlight)
+
+    def _sync_speak_highlight(self) -> None:
+        from speech_utils import is_speaking
+
+        highlighted = is_speaking()
+        if highlighted == self._speak_highlighted:
+            return
+        self._speak_highlighted = highlighted
+        self._apply_speak_button_style()
+
+    def _apply_speak_button_style(self) -> None:
+        btn = self._speak_btn
+        if btn is None:
+            return
+        from chat_plugins.chat_ui_common import chat_speak_button_stylesheet
+
+        btn.setStyleSheet(
+            chat_speak_button_stylesheet(highlighted=self._speak_highlighted)
+        )
 
     def _on_plus(self, _checked: bool = False) -> None:
         if self._row_idx >= 0:
@@ -330,6 +401,12 @@ class JobQueueActionBar(QWidget):
         )
         self._edit_btn.setEnabled(has_row)
         self._cancel_btn.setEnabled(has_row)
+        if self._speak_btn is not None:
+            from speech_utils import is_speaking
+
+            prompt = self._full_prompt_for_row()
+            self._speak_btn.setEnabled(bool(prompt) or is_speaking())
+            self._sync_speak_highlight()
 
     def refresh_theme_styles(self) -> None:
         rows = self._controller.queue_snapshot()
@@ -339,6 +416,8 @@ class JobQueueActionBar(QWidget):
             and rows[self._row_idx].is_active
         )
         _apply_job_queue_action_bar_background(self, running=running)
+        if self._speak_btn is not None:
+            self._apply_speak_button_style()
         _configure_icon_push_button(self._plus_btn, "series_plus_icon.png")
         _configure_icon_push_button(self._minus_btn, "series_minus_icon.png")
         _configure_series_toggle_push_button(
