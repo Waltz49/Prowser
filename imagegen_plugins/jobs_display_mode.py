@@ -71,8 +71,21 @@ def _show_job_queue_dialog(main_window) -> None:
     open_imagegen_job_queue_dialog(main_window)
 
 
+def _jobs_ui_enabled() -> bool:
+    try:
+        from bundle_capabilities import model_jobs_ui_enabled
+
+        return model_jobs_ui_enabled()
+    except ImportError:
+        return True
+
+
 def set_jobs_display_mode(main_window, mode: str, *, persist: bool = True) -> str:
     """Show jobs in sidebar pane or floating panel (never both)."""
+    if not _jobs_ui_enabled():
+        return normalize_jobs_display_mode(
+            getattr(main_window, "jobs_display_mode", None)
+        )
     mode = normalize_jobs_display_mode(mode)
     prev = get_jobs_display_mode(main_window)
     main_window.jobs_display_mode = mode
@@ -129,6 +142,8 @@ def show_jobs_panel(main_window) -> str:
 
 def toggle_jobs_pane(main_window) -> str:
     """J: hide jobs pane when visible; otherwise show sidebar pane mode."""
+    if not _jobs_ui_enabled():
+        return JOBS_DISPLAY_PANE
     if is_jobs_pane_showing(main_window):
         hide_jobs_pane(main_window)
         return JOBS_DISPLAY_PANE
@@ -137,6 +152,8 @@ def toggle_jobs_pane(main_window) -> str:
 
 def toggle_jobs_panel(main_window) -> str:
     """Cmd+J: hide floating job dialog when visible; otherwise show panel mode."""
+    if not _jobs_ui_enabled():
+        return get_jobs_display_mode(main_window)
     if is_jobs_panel_showing(main_window):
         _hide_job_queue_dialog(main_window)
         return get_jobs_display_mode(main_window)
@@ -145,6 +162,8 @@ def toggle_jobs_panel(main_window) -> str:
 
 def cycle_active_jobs_surface_size(main_window) -> bool:
     """⌃J: size-cycle the active jobs surface (floating dialog or sidebar pane)."""
+    if not _jobs_ui_enabled():
+        return False
     if is_jobs_panel_showing(main_window):
         dlg = getattr(main_window, "_imagegen_job_queue_dialog", None)
         if dlg is not None and hasattr(dlg, "cycle_header_size"):
@@ -162,6 +181,8 @@ def cycle_active_jobs_surface_size(main_window) -> bool:
 
 def apply_saved_jobs_display_mode(main_window) -> None:
     """Apply persisted mode after UI is constructed."""
+    if not _jobs_ui_enabled():
+        return
     mode = get_jobs_display_mode(main_window)
     set_jobs_display_mode(main_window, mode, persist=False)
 

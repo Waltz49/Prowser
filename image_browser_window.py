@@ -1527,13 +1527,18 @@ class ImageBrowserWindow(QMainWindow):
         
         # Load preview visibility setting
         self.preview_visible = saved_settings.get('preview_visible', False)
-        self.jobs_visible = saved_settings.get('jobs_visible', False)
-        self.jobs_display_mode = saved_settings.get('jobs_display_mode', 'pane')
         try:
-            from bundle_capabilities import chat_ui_enabled
+            from bundle_capabilities import chat_ui_enabled, model_jobs_ui_enabled
+
             _chat_ui_enabled = chat_ui_enabled()
+            _jobs_ui_enabled = model_jobs_ui_enabled()
         except ImportError:
             _chat_ui_enabled = True
+            _jobs_ui_enabled = True
+        self.jobs_visible = (
+            saved_settings.get('jobs_visible', False) if _jobs_ui_enabled else False
+        )
+        self.jobs_display_mode = saved_settings.get('jobs_display_mode', 'pane')
         if 'chat_visible' in saved_settings:
             self.chat_visible = bool(saved_settings['chat_visible'])
         elif _chat_ui_enabled:
@@ -1839,9 +1844,21 @@ class ImageBrowserWindow(QMainWindow):
             if hasattr(self.combined_sidebar, "set_chat_visible"):
                 self.combined_sidebar.set_chat_visible(desired_chat_visible)
             self.right_sidebar.set_jobs_visible(self.jobs_visible)
-            from imagegen_plugins.jobs_display_mode import apply_saved_jobs_display_mode
+            try:
+                from bundle_capabilities import model_jobs_ui_enabled
 
-            apply_saved_jobs_display_mode(self)
+                _jobs_ui = model_jobs_ui_enabled()
+            except ImportError:
+                _jobs_ui = True
+            if _jobs_ui:
+                try:
+                    from imagegen_plugins.jobs_display_mode import (
+                        apply_saved_jobs_display_mode,
+                    )
+                except ImportError:
+                    pass
+                else:
+                    apply_saved_jobs_display_mode(self)
             self.right_sidebar_visible = (
                 self.right_sidebar.is_information_visible()
                 or self.right_sidebar.is_shortcuts_visible()
@@ -2417,6 +2434,13 @@ class ImageBrowserWindow(QMainWindow):
 
     def toggle_jobs(self):
         """Toggle jobs sidebar pane (J key)."""
+        try:
+            from bundle_capabilities import model_jobs_ui_enabled
+
+            if not model_jobs_ui_enabled():
+                return False
+        except ImportError:
+            pass
         if hasattr(self, "sidebar_manager"):
             return self.sidebar_manager.toggle_jobs()
         from imagegen_plugins.jobs_display_mode import toggle_jobs_pane

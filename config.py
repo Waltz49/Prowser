@@ -645,10 +645,22 @@ class ImageBrowserConfig:
             needs_save = True
         if save_merged and needs_save:
             self._save_settings_unlocked(settings)
-        from imagegen_plugins.lora_catalog_store import migrate_embedded_lora_catalog_if_needed
+        try:
+            from bundle_capabilities import imagegen_ui_enabled
 
-        if migrate_embedded_lora_catalog_if_needed(settings):
-            self._save_settings_unlocked(settings)
+            _run_lora_migrate = imagegen_ui_enabled()
+        except ImportError:
+            _run_lora_migrate = True
+        if _run_lora_migrate:
+            try:
+                from imagegen_plugins.lora_catalog_store import (
+                    migrate_embedded_lora_catalog_if_needed,
+                )
+            except ImportError:
+                pass
+            else:
+                if migrate_embedded_lora_catalog_if_needed(settings):
+                    self._save_settings_unlocked(settings)
         return self._merge_browse_preview_into_loaded_settings(settings)
 
     def _load_settings_locked(self, default_settings: dict) -> dict:

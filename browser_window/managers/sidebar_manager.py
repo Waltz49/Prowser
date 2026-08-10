@@ -113,6 +113,13 @@ class SidebarManager:
 
     def toggle_jobs(self):
         """Toggle jobs sidebar pane (J key); switch from panel mode when needed."""
+        try:
+            from bundle_capabilities import model_jobs_ui_enabled
+
+            if not model_jobs_ui_enabled():
+                return False
+        except ImportError:
+            pass
         from imagegen_plugins.jobs_display_mode import (
             JOBS_DISPLAY_PANE,
             get_jobs_display_mode,

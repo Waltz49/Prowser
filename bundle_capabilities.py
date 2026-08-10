@@ -24,11 +24,12 @@ def _frozen_min_bundle_without_imagegen() -> bool:
 def is_min_bundle() -> bool:
     """True for pyInstallerBuild.sh --min bundles or when ``prowser.py --min`` is used."""
     global _min_bundle_cached
-    if _min_bundle_cached is not None:
-        return _min_bundle_cached
+    # Env can be set after an early False cache (imports may call this before argv --min).
     if os.environ.get(_MIN_BUNDLE_ENV, "").strip() == "1":
         _min_bundle_cached = True
         return True
+    if _min_bundle_cached is not None:
+        return _min_bundle_cached
     if _frozen_min_bundle_without_imagegen():
         os.environ.setdefault(_MIN_BUNDLE_ENV, "1")
         _min_bundle_cached = True

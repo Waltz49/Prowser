@@ -55,6 +55,10 @@ import shutil
 import subprocess
 import sys
 
+# Must run before local imports that may call load_settings() / is_min_bundle().
+if "--min" in sys.argv:
+    os.environ["PROWSER_MIN_BUNDLE"] = "1"
+
 
 def _setup_frozen_worker_logging() -> None:
     """Route worker stdout to the shared print log (Tools > Debug > View log)."""

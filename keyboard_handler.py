@@ -3118,6 +3118,13 @@ class KeyboardHandlerManager:
 
     def _handle_ctrl_j_jobs_titlebar(self) -> bool:
         """Simulate double-click size-cycle on the active jobs surface (⌃J on macOS)."""
+        try:
+            from bundle_capabilities import model_jobs_ui_enabled
+
+            if not model_jobs_ui_enabled():
+                return False
+        except ImportError:
+            pass
         from imagegen_plugins.jobs_display_mode import cycle_active_jobs_surface_size
 
         return cycle_active_jobs_surface_size(self.main_window)
