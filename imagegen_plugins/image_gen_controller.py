@@ -1414,6 +1414,20 @@ class ImageGenController(QObject):
         if self.active_series_refinement_enabled() == enabled:
             return False
         self._pending_values["series_refinement"] = enabled
+        if (
+            enabled
+            and self._copies_done > 0
+            and not self._tasks.is_running()
+        ):
+            last_out = self._output_path
+            if last_out and os.path.isfile(last_out):
+                self._pending_values = apply_refinement_source_for_next_copy(
+                    self._pending_values, last_out
+                )
+                paths = resolve_source_image_paths(self._pending_values)
+                self._expand_source_path = paths[0] if paths else ""
+                self._task_reference_paths = list(paths)
+                self._active_thumbnail_paths = list(paths)
         self.task_status_info_changed.emit()
         self.queue_changed.emit()
         self._schedule_persist_job_queue()
@@ -1438,6 +1452,12 @@ class ImageGenController(QObject):
             if not ensure_flux_prompt_ai_job_for_series(plugin, self._pending_values):
                 return False
             self._pending_values["series_prompt_refinement"] = True
+            if self._copies_done > 0:
+                from imagegen_plugins.flux_prompt_job import (
+                    sync_flux_prompt_ai_user_prompt_for_next_copy,
+                )
+
+                sync_flux_prompt_ai_user_prompt_for_next_copy(self._pending_values)
         else:
             self._pending_values["series_prompt_refinement"] = False
             clear_series_chain_flux_prompt_ai_job(self._pending_values)
@@ -2670,10 +2690,12 @@ class ImageGenController(QObject):
                     plugin.pipeline_id, values
                 )
                 if uses_source_image:
+                    # Toolbar toggles update _pending_values mid-run; the EXIF snapshot
+                    # must not gate whether subsequent copies use image refinement.
                     will_refine_next = (
                         self._copy_batch_active
                         and not self._copy_batch_cancelled
-                        and bool(values.get("series_refinement"))
+                        and bool(self._pending_values.get("series_refinement"))
                         and (self._copies_done + 1 < self._copies_total)
                     )
                     if ref_entries and not will_refine_next:
@@ -2705,7 +2727,7 @@ class ImageGenController(QObject):
                 if self._active_queue_job_id:
                     self._finish_copy_batch()
                 return
-            if values.get("series_refinement"):
+            if self._pending_values.get("series_refinement"):
                 if output_path and os.path.isfile(output_path):
                     self._pending_values = apply_refinement_source_for_next_copy(
                         self._pending_values, output_path
@@ -2716,7 +2738,7 @@ class ImageGenController(QObject):
                     self._active_thumbnail_paths = list(paths)
                     self.task_status_info_changed.emit()
                     self.queue_changed.emit()
-            if values.get("series_prompt_refinement"):
+            if self._pending_values.get("series_prompt_refinement"):
                 from imagegen_plugins.flux_prompt_job import (
                     sync_flux_prompt_ai_user_prompt_for_next_copy,
                 )

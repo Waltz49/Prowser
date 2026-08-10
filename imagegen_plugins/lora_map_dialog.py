@@ -40,12 +40,16 @@ def _lora_map_rows() -> List[LoraMapRow]:
 
     Uses the same association rules as the LoRA combos / settings grid:
     curated host models (e.g. Furry → SD1.5) plus Check LoRAs probe passes.
-  Cross-family associations are marked for display with an asterisk.
+    Cross-family associations are marked for display with an asterisk.
+
+    Only installed weights are included (missing/uninstalled catalog ghosts
+    are omitted — same practical library as the settings grid after delete).
     """
     from config import get_config
     from imagegen_plugins.hf_model_ids import LORA_PROBE_MODEL_ORDER, lora_model_display_name
     from imagegen_plugins.lora_catalog import (
         catalog_entries_sorted,
+        local_lora_weights_path,
         lora_model_is_cross_family,
         lora_probe_passed_for_model,
     )
@@ -60,6 +64,8 @@ def _lora_map_rows() -> List[LoraMapRow]:
 
     rows: List[LoraMapRow] = []
     for entry in catalog_entries_sorted(settings):
+        if local_lora_weights_path(entry.lora_id, settings, entry=entry) is None:
+            continue
         label = (entry.display_name.strip() if entry.display_name else "") or entry.lora_id
         models: List[Tuple[str, bool]] = []
         for mk in LORA_PROBE_MODEL_ORDER:
@@ -152,8 +158,44 @@ def build_lora_map_html(rows: Optional[List[LoraMapRow]] = None) -> str:
     return "\n".join(parts)
 
 
+def build_lora_map_text(rows: Optional[List[LoraMapRow]] = None) -> str:
+    """Plain-text map: LoRA headers with indented model lines beneath."""
+    if rows is None:
+        rows = _lora_map_rows()
+    used = [(label, models) for label, models in rows if models]
+    unused = [label for label, models in rows if not models]
+    cross_count = sum(1 for _, models in used for _, is_cross in models if is_cross)
+    lines: List[str] = [
+        f"{len(rows)} LoRA(s); "
+        f"{len(used)} with at least one model; "
+        f"{len(unused)} unused."
+        + (f" {cross_count} cross-family link(s)." if cross_count else "")
+    ]
+    if not rows:
+        lines.append("(No LoRA model-support map yet. Run Check LoRAs first.)")
+    for lora_label, models in used:
+        lines.append("")
+        lines.append(lora_label)
+        for model_label, _is_cross in models:
+            lines.append(f"  - {model_label}")
+    if unused:
+        lines.append("")
+        lines.append("Unused LoRAs")
+        lines.append("No associated models (host or Check LoRAs probe).")
+        for lora_label in unused:
+            lines.append("")
+            lines.append(lora_label)
+    lines.append("")
+    lines.append(
+        "* cross-family — Check LoRAs found this LoRA "
+        "working on a base model outside its catalog host family."
+    )
+    lines.append("")
+    return "\n".join(lines)
+
+
 class LoraMapDialog(QDialog):
-    """Read-only HTML map of LoRAs → models, with Save."""
+    """Read-only HTML map of LoRAs → models, with Save (plain text)."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -168,7 +210,9 @@ class LoraMapDialog(QDialog):
         )
         self.setMinimumSize(520, 400)
         self.resize(720, 640)
-        self._html = build_lora_map_html()
+        rows = _lora_map_rows()
+        self._html = build_lora_map_html(rows)
+        self._text = build_lora_map_text(rows)
         self._setup_ui()
         self.finished.connect(self._on_finished)
 
@@ -224,7 +268,7 @@ class LoraMapDialog(QDialog):
         stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         return os.path.join(
             os.path.expanduser("~/Downloads"),
-            f"lora_map_{stamp}.html",
+            f"lora_map_{stamp}.txt",
         )
 
     def _on_save(self) -> None:
@@ -232,15 +276,15 @@ class LoraMapDialog(QDialog):
             self,
             "Save LoRA Map",
             self._default_save_path(),
-            "HTML Files (*.html)",
+            "Text Files (*.txt)",
         )
         if not path:
             return
-        if not path.lower().endswith((".html", ".htm")):
-            path += ".html"
+        if not path.lower().endswith(".txt"):
+            path += ".txt"
         try:
             with open(path, "w", encoding="utf-8") as fh:
-                fh.write(self._html)
+                fh.write(self._text)
         except OSError as exc:
             show_styled_warning(self, "Save LoRA Map", f"Could not save:\n{exc}")
 

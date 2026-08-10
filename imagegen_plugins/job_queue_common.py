@@ -169,11 +169,6 @@ class JobQueueActionBar(QWidget):
             self._image_refine_btn, "series_image_refinement_icon.png"
         )
         self._image_refine_btn.toggled.connect(self._on_image_refine_toggled)
-        self._image_refine_btn.toggled.connect(
-            lambda _checked: _sync_series_toggle_button_style(
-                self._image_refine_btn, "series_image_refinement_icon.png"
-            )
-        )
 
         self._text_refine_btn = QPushButton()
         self._text_refine_btn.setToolTip(
@@ -185,11 +180,6 @@ class JobQueueActionBar(QWidget):
             self._text_refine_btn, "series_text_refinement_icon.png"
         )
         self._text_refine_btn.toggled.connect(self._on_text_refine_toggled)
-        self._text_refine_btn.toggled.connect(
-            lambda _checked: _sync_series_toggle_button_style(
-                self._text_refine_btn, "series_text_refinement_icon.png"
-            )
-        )
 
         self._edit_btn = QPushButton()
         self._edit_btn.setToolTip(
@@ -237,14 +227,34 @@ class JobQueueActionBar(QWidget):
             self._controller.subtract_series_remaining_for_row(self._row_idx)
 
     def _on_image_refine_toggled(self, checked: bool) -> None:
-        if self._row_idx >= 0:
-            self._controller.set_series_refinement_for_row(self._row_idx, checked)
+        def apply_fn(enabled: bool) -> bool:
+            if self._row_idx < 0:
+                return False
+            return self._controller.set_series_refinement_for_row(
+                self._row_idx, enabled
+            )
+
+        _apply_series_refinement_toggle(
+            self._image_refine_btn,
+            "series_image_refinement_icon.png",
+            checked,
+            apply_fn,
+        )
 
     def _on_text_refine_toggled(self, checked: bool) -> None:
-        if self._row_idx >= 0:
-            self._controller.set_series_prompt_refinement_for_row(
-                self._row_idx, checked
+        def apply_fn(enabled: bool) -> bool:
+            if self._row_idx < 0:
+                return False
+            return self._controller.set_series_prompt_refinement_for_row(
+                self._row_idx, enabled
             )
+
+        _apply_series_refinement_toggle(
+            self._text_refine_btn,
+            "series_text_refinement_icon.png",
+            checked,
+            apply_fn,
+        )
 
     def _on_edit(self, _checked: bool = False) -> None:
         if self._row_idx >= 0:
@@ -432,13 +442,13 @@ def build_job_queue_action_widget(
             )
             image_refine_btn.blockSignals(False)
             image_refine_btn.toggled.connect(
-                lambda checked, r=row_idx: controller.set_series_refinement_for_row(
-                    r, checked
-                )
-            )
-            image_refine_btn.toggled.connect(
-                lambda _checked, btn=image_refine_btn: _sync_series_toggle_button_style(
-                    btn, "series_image_refinement_icon.png"
+                lambda checked, r=row_idx, btn=image_refine_btn: _apply_series_refinement_toggle(
+                    btn,
+                    "series_image_refinement_icon.png",
+                    checked,
+                    lambda enabled, row=r: controller.set_series_refinement_for_row(
+                        row, enabled
+                    ),
                 )
             )
             _sync_series_toggle_button_style(
@@ -463,13 +473,13 @@ def build_job_queue_action_widget(
             )
             text_refine_btn.blockSignals(False)
             text_refine_btn.toggled.connect(
-                lambda checked, r=row_idx: controller.set_series_prompt_refinement_for_row(
-                    r, checked
-                )
-            )
-            text_refine_btn.toggled.connect(
-                lambda _checked, btn=text_refine_btn: _sync_series_toggle_button_style(
-                    btn, "series_text_refinement_icon.png"
+                lambda checked, r=row_idx, btn=text_refine_btn: _apply_series_refinement_toggle(
+                    btn,
+                    "series_text_refinement_icon.png",
+                    checked,
+                    lambda enabled, row=r: controller.set_series_prompt_refinement_for_row(
+                        row, enabled
+                    ),
                 )
             )
             _sync_series_toggle_button_style(
@@ -571,6 +581,20 @@ def _configure_icon_push_button(
     btn.setStyleSheet(_job_queue_action_button_stylesheet())
     btn.setProperty("_tooltip_icon_asset", icon_name)
     _attach_icon_hover_swap(btn, icon_name, hover_icon_name)
+
+
+def _apply_series_refinement_toggle(
+    btn: QPushButton,
+    icon_name: str,
+    checked: bool,
+    apply_fn,
+) -> None:
+    """Apply a series refinement toggle; revert the button if the controller rejects it."""
+    if not apply_fn(checked):
+        btn.blockSignals(True)
+        btn.setChecked(not checked)
+        btn.blockSignals(False)
+    _sync_series_toggle_button_style(btn, icon_name)
 
 
 def _configure_series_toggle_push_button(btn: QPushButton, icon_name: str) -> None:

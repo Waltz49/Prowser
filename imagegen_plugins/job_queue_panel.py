@@ -1150,6 +1150,9 @@ class JobQueuePanelWidget(QWidget):
         if panel is not None and panel is not self:
             panel._sync_selection_ui()
 
+    def _is_single_job_mode(self) -> bool:
+        return self._queue_size_mode == QUEUE_SIZE_ONE
+
     def _sole_visible_job_card(self) -> JobCard | None:
         """The one job card shown in the list, if any (one-job mode or sole queue row)."""
         if self._queue_size_mode == QUEUE_SIZE_STRIP or not self._job_cards:
@@ -1169,50 +1172,64 @@ class JobQueuePanelWidget(QWidget):
         if self._controller.selected_job_id() != job_id:
             self._controller.set_selected_job_id(job_id)
 
-    def _action_bar_controller_row(self, resolved_row_idx: int) -> int:
+    def _action_bar_row_index(self) -> int:
+        """Controller queue row targeted by the shared action bar."""
         sole = self._sole_visible_job_card()
         if sole is not None:
             return sole.row_index()
-        return resolved_row_idx
+        return self._controller.resolve_selected_row_index()
 
-    def _action_bar_list_row(self, resolved_row_idx: int) -> int:
+    def _action_bar_card_list_index(self) -> int:
+        """Job card list index where the action bar is inserted (below that card)."""
         sole = self._sole_visible_job_card()
         if sole is not None:
             return self._job_cards.index(sole)
-        if resolved_row_idx < 0:
-            return -1
-        return resolved_row_idx
+        row_idx = self._controller.resolve_selected_row_index()
+        return row_idx if row_idx >= 0 else -1
 
     def _action_bar_below_first_card(self) -> bool:
         if not self._should_show_action_bar():
             return False
+        if self._is_single_job_mode():
+            return bool(self._job_cards)
         sole = self._sole_visible_job_card()
         if sole is not None:
             return self._job_cards.index(sole) == 0
         return self._controller.resolve_selected_row_index() == 0
 
     def _should_show_action_bar(self) -> bool:
-        """Show when a job card is selected (not in strip-only mode)."""
+        """Show when a job card is selected, or always in single-job / sole-row views."""
         if self._queue_size_mode == QUEUE_SIZE_STRIP:
             return False
+        if self._is_single_job_mode() and self._job_cards:
+            return True
         if self._is_single_visible_job():
             return True
         return self._controller.resolve_selected_row_index() >= 0
 
+    def _refresh_action_bar_if_visible(self) -> None:
+        if not self._should_show_action_bar():
+            return
+        row_idx = self._action_bar_row_index()
+        if row_idx < 0:
+            return
+        self._action_bar.update_for_row(row_idx)
+
     def _sync_action_bar_from_selection(self) -> None:
-        self._ensure_single_job_auto_selection()
+        if self._is_single_visible_job():
+            self._ensure_single_job_auto_selection()
         if self._should_show_action_bar():
-            row_idx = self._controller.resolve_selected_row_index()
-            list_row = self._action_bar_list_row(row_idx)
+            row_idx = self._action_bar_row_index()
+            list_row = self._action_bar_card_list_index()
             self._place_action_bar(list_row)
-            self._action_bar.update_for_row(self._action_bar_controller_row(row_idx))
+            self._action_bar.update_for_row(row_idx)
         else:
             self._detach_action_bar_from_list()
             self._action_bar.hide()
         if self._queue_size_mode == QUEUE_SIZE_ONE:
             self._apply_one_job_scroll_height()
             self._sync_fixed_panel_geometry()
-            self._notify_shell_geometry_changed()
+            self._notify_sidebar_geometry_if_needed()
 
     def _detach_action_bar_from_list(self) -> None:
         layout = self._list_layout
@@ -1308,16 +1325,21 @@ class JobQueuePanelWidget(QWidget):
             self._show_drop_indicator(self._drop_indicator_index)
 
     def _sync_selection_ui(self, *, notify_geometry: bool = True) -> None:
-        self._ensure_single_job_auto_selection()
+        if self._is_single_visible_job():
+            self._ensure_single_job_auto_selection()
         selected_id = self._controller.selected_job_id()
+        sole = self._sole_visible_job_card()
         for card in self._job_cards:
-            card.set_selected(
-                selected_id is not None and card.job_id() == selected_id
-            )
+            if sole is not None and card is sole:
+                card.set_selected(True)
+            else:
+                card.set_selected(
+                    selected_id is not None and card.job_id() == selected_id
+                )
         self._sync_action_bar_from_selection()
         self._reflow_all()
         if notify_geometry:
-            self._notify_shell_geometry_changed()
+            self._notify_sidebar_geometry_if_needed()
 
     def schedule_refresh(self) -> None:
         """Defer table rebuild (safe during controller signal handlers)."""
@@ -1335,6 +1357,36 @@ class JobQueuePanelWidget(QWidget):
     def should_shrink_wrap_client(self) -> bool:
         """True when client area should hug content (empty queue, no active strip)."""
         return not self._has_queue_list_content() and not self._controller.is_running()
+
+    def queue_job_count(self) -> int:
+        return len(self._job_cards)
+
+    def should_auto_resize_sidebar_pane(self) -> bool:
+        """Whether splitter fit is allowed (selection, strip height, etc.)."""
+        if self._queue_size_mode in (QUEUE_SIZE_ONE, QUEUE_SIZE_STRIP):
+            return True
+        if self._queue_size_mode == QUEUE_SIZE_ALL:
+            return self.should_shrink_wrap_client() or self.queue_job_count() <= 1
+        return False
+
+    def should_auto_resize_sidebar_on_queue_change(self) -> bool:
+        """Whether queue rebuild/update should trigger sidebar splitter fit."""
+        if self._queue_size_mode == QUEUE_SIZE_ONE:
+            return True
+        if self._queue_size_mode == QUEUE_SIZE_ALL:
+            return self.should_shrink_wrap_client() or self.queue_job_count() <= 1
+        return False
+
+    def auto_sidebar_pane_content_height(self, *, quick: bool = False) -> int:
+        """Height for automatic sidebar fit — not full multijob preferred height."""
+        mode = self._queue_size_mode
+        if mode == QUEUE_SIZE_STRIP:
+            return self.strip_only_content_height()
+        if mode == QUEUE_SIZE_ONE:
+            return self.single_job_content_height(quick=quick)
+        if mode == QUEUE_SIZE_ALL and self.queue_job_count() <= 1:
+            return self.single_job_content_height(quick=quick)
+        return self.preferred_content_height(quick=quick)
 
     def _show_queue_scroll(self) -> bool:
         return self._has_queue_list_content()
@@ -1427,7 +1479,7 @@ class JobQueuePanelWidget(QWidget):
         self._controller.generation_started.connect(self._on_generation_started)
         self._signal_connected = True
         self._controller.task_status_info_changed.connect(
-            lambda: self._refresh_active_row(force=True)
+            self._on_task_status_info_changed
         )
         timer = QTimer(self)
         timer.setInterval(500)
@@ -1435,6 +1487,11 @@ class JobQueuePanelWidget(QWidget):
         timer.start()
         self._live_timer = timer
         self._update_header_status()
+
+    def _on_task_status_info_changed(self) -> None:
+        self._refresh_active_row(force=True)
+        if self._is_single_visible_job():
+            self._refresh_action_bar_if_visible()
 
     def _on_live_refresh_timer(self) -> None:
         if self._imagegen_dialog_building_active():
@@ -1573,7 +1630,8 @@ class JobQueuePanelWidget(QWidget):
             and event.type() == QEvent.Type.Resize
         ):
             self._schedule_reflow()
-            self._refresh_active_job_strip(force=True)
+            if not self._sidebar_geometry_adjusting():
+                self._refresh_active_job_strip(force=True)
             if self._drop_indicator_index is not None:
                 self._show_drop_indicator(self._drop_indicator_index)
         if (
@@ -1674,10 +1732,7 @@ class JobQueuePanelWidget(QWidget):
         self._refresh_active_job_strip(force=True)
         if self._queue_size_mode in (QUEUE_SIZE_ONE, QUEUE_SIZE_STRIP):
             self._apply_queue_size_layout()
-        self._notify_shell_geometry_changed()
-        sidebar = getattr(self.main_window, "right_sidebar", None)
-        if sidebar is not None and hasattr(sidebar, "ensure_jobs_pane_fits_content"):
-            sidebar.ensure_jobs_pane_fits_content()
+        self._notify_sidebar_geometry_if_needed(on_queue_change=True)
 
     def _on_queue_changed(self) -> None:
         self._update_header_status()
@@ -1710,35 +1765,41 @@ class JobQueuePanelWidget(QWidget):
         self._apply_queue_size_layout()
         if self._queue_size_mode == QUEUE_SIZE_ALL:
             self._clear_expanded_layout_pin()
-        self._notify_shell_geometry_changed()
+        self._notify_sidebar_geometry_if_needed()
 
     def _on_generation_started(self) -> None:
         """Resize compact / single-job views when the progress strip appears."""
         self._refresh_active_job_strip(force=True)
         self._apply_queue_size_layout()
-        self._notify_shell_geometry_changed()
+        self._notify_sidebar_geometry_if_needed()
         QTimer.singleShot(0, self._deferred_generation_geometry_sync)
 
     def _refresh_active_job_strip(self, *, force: bool = False) -> None:
         if not hasattr(self, "_active_job_strip"):
             return
+        adjusting = self._sidebar_geometry_adjusting()
         if not self.isVisible() or not self._controller.is_running():
             if self._active_job_strip.isVisible():
                 self._active_job_strip.hide()
-            self._notify_shell_geometry_changed()
+            if not adjusting:
+                self._notify_sidebar_geometry_if_needed()
             return
         prev_strip_h = self._active_job_strip.content_height()
         self._active_job_strip.refresh(force=force)
+        if adjusting:
+            return
         if self._queue_size_mode in (QUEUE_SIZE_STRIP, QUEUE_SIZE_ONE):
             self._sync_fixed_panel_geometry()
             if abs(self._active_job_strip.content_height() - prev_strip_h) > 1:
-                self._notify_shell_geometry_changed()
+                self._notify_sidebar_geometry_if_needed()
 
     def _on_active_strip_content_height_changed(self) -> None:
+        if self._sidebar_geometry_adjusting():
+            return
         if self._queue_size_mode == QUEUE_SIZE_ONE:
             self._apply_one_job_scroll_height()
         self._sync_fixed_panel_geometry()
-        self._notify_shell_geometry_changed()
+        self._notify_sidebar_geometry_if_needed()
 
     def queue_size_mode(self) -> str:
         return self._queue_size_mode
@@ -1762,12 +1823,19 @@ class JobQueuePanelWidget(QWidget):
     def is_queue_compact(self) -> bool:
         return self._queue_size_mode == QUEUE_SIZE_STRIP
 
-    def prepare_size_measure(self) -> None:
+    def prepare_size_measure(self, *, quick: bool = False) -> None:
         """Flush layout so fit-to-content height measurements are stable."""
         if self._preparing_size_measure:
             return
         self._preparing_size_measure = True
         try:
+            if quick:
+                app = QApplication.instance()
+                if app is not None:
+                    app.processEvents(
+                        QEventLoop.ProcessEventsFlag.ExcludeUserInputEvents
+                    )
+                return
             self._refresh_active_job_strip(force=True)
             self._reflow_all()
             app = QApplication.instance()
@@ -1942,7 +2010,7 @@ class JobQueuePanelWidget(QWidget):
         card.reflow_refs(width)
         return card.minimumHeight()
 
-    def single_job_content_height(self) -> int:
+    def single_job_content_height(self, *, quick: bool = False) -> int:
         """Client height for one job row (+ active strip when running)."""
         total = self._active_strip_block_height()
         if not self._job_cards:
@@ -1950,19 +2018,26 @@ class JobQueuePanelWidget(QWidget):
                 return total
             return total + self.empty_state_height_hint()
         margins = self._list_layout.contentsMargins()
-        card_h = self._measure_first_job_card_height()
+        if quick:
+            card_h = self._card_layout_height(self._job_cards[0])
+        else:
+            card_h = self._measure_first_job_card_height()
+        if card_h <= 0:
+            card_h = self._job_cards[0].minimumHeight()
         bar_extra = 0
         if self._action_bar_below_first_card():
             bar_extra = self._list_layout.spacing() + self._action_bar_block_height()
         return total + margins.top() + margins.bottom() + card_h + bar_extra
 
-    def content_height_for_size_mode(self, mode: str | None = None) -> int:
+    def content_height_for_size_mode(
+        self, mode: str | None = None, *, quick: bool = False
+    ) -> int:
         mode = mode or self._queue_size_mode
         if mode == QUEUE_SIZE_STRIP:
             return self.strip_only_content_height()
         if mode == QUEUE_SIZE_ONE:
-            return self.single_job_content_height()
-        return self.preferred_content_height()
+            return self.single_job_content_height(quick=quick)
+        return self.preferred_content_height(quick=quick)
 
     def minimumSizeHint(self) -> QSize:
         if self._queue_size_mode != QUEUE_SIZE_ALL:
@@ -2013,10 +2088,12 @@ class JobQueuePanelWidget(QWidget):
         )
         active_card.reflow_refs(viewport_w)
         _disable_tab_focus(active_card)
+        if self._is_single_visible_job():
+            self._refresh_action_bar_if_visible()
         if self._queue_size_mode == QUEUE_SIZE_ONE:
             self._apply_one_job_scroll_height()
             self._sync_fixed_panel_geometry()
-            self._notify_shell_geometry_changed()
+            self._notify_sidebar_geometry_if_needed()
 
     def _clear_job_cards(self) -> None:
         self._detach_action_bar_from_list()
@@ -2044,7 +2121,7 @@ class JobQueuePanelWidget(QWidget):
 
     def _reflow_all_and_notify(self) -> None:
         self._reflow_all()
-        self._notify_shell_geometry_changed()
+        self._notify_sidebar_geometry_if_needed()
 
     def _notify_shell_geometry_changed(self) -> None:
         if self._preparing_size_measure:
@@ -2053,11 +2130,31 @@ class JobQueuePanelWidget(QWidget):
         if cb is not None:
             cb()
 
+    def _sidebar_geometry_adjusting(self) -> bool:
+        sidebar = getattr(self.main_window, "right_sidebar", None)
+        if sidebar is None:
+            return False
+        checker = getattr(sidebar, "jobs_pane_geometry_adjusting", None)
+        if callable(checker):
+            return bool(checker())
+        return bool(getattr(sidebar, "_adjusting_jobs_geometry", False))
+
+    def _notify_sidebar_geometry_if_needed(self, *, on_queue_change: bool = False) -> None:
+        if self._sidebar_geometry_adjusting():
+            return
+        allowed = (
+            self.should_auto_resize_sidebar_on_queue_change()
+            if on_queue_change
+            else self.should_auto_resize_sidebar_pane()
+        )
+        if allowed:
+            self._notify_shell_geometry_changed()
+
     def compact_content_height(self) -> int:
         """Client height for minimized view: active progress strip only."""
         return self.strip_only_content_height()
 
-    def preferred_content_height(self) -> int:
+    def preferred_content_height(self, *, quick: bool = False) -> int:
         """Height needed to show all job rows without vertical scrolling."""
         total = 0
         if (
@@ -2073,16 +2170,23 @@ class JobQueuePanelWidget(QWidget):
                 return total
             return total + self.empty_state_height_hint()
         self._ensure_single_job_auto_selection()
-        selected_row = self._controller.resolve_selected_row_index()
         show_bar = self._should_show_action_bar()
         bar_h = self._action_bar_block_height() if show_bar else 0
-        bar_list_row = self._action_bar_list_row(selected_row) if show_bar else -1
-        info_w = self._info_content_width()
-        width = self._viewport_width()
-        rows = self._controller.queue_snapshot()
+        bar_list_row = self._action_bar_card_list_index() if show_bar else -1
         margins = self._list_layout.contentsMargins()
         total += margins.top() + margins.bottom()
         spacing = self._list_layout.spacing()
+        if quick:
+            for row_idx, card in enumerate(self._job_cards):
+                if row_idx > 0:
+                    total += spacing
+                total += self._card_layout_height(card)
+                if show_bar and row_idx == bar_list_row:
+                    total += spacing + bar_h
+            return total
+        info_w = self._info_content_width()
+        width = self._viewport_width()
+        rows = self._controller.queue_snapshot()
         for row_idx, card in enumerate(self._job_cards):
             if row_idx > 0:
                 total += spacing
@@ -2157,10 +2261,7 @@ class JobQueuePanelWidget(QWidget):
         self._update_header_status()
         self._refresh_active_job_strip(force=True)
         self._apply_queue_size_layout()
-        self._notify_shell_geometry_changed()
-        sidebar = getattr(self.main_window, "right_sidebar", None)
-        if sidebar is not None and hasattr(sidebar, "ensure_jobs_pane_fits_content"):
-            sidebar.ensure_jobs_pane_fits_content()
+        self._notify_sidebar_geometry_if_needed(on_queue_change=True)
         # Empty→job (or card height change) can race with an in-progress sidebar
         # geometry pass; re-measure after Qt applies the new card/action bar.
         if self._queue_size_mode == QUEUE_SIZE_ONE and self._job_cards:

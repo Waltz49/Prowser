@@ -1144,7 +1144,14 @@ def delete_lora_from_library(lora_id: str, *, model_key: str = "") -> None:
         model_keys_for_lora_entry,
         remove_lora_weights_from_disk,
     )
-    from imagegen_plugins.lora_catalog_settings import DELETED_IDS_KEY, migrate_lora_catalog
+    from imagegen_plugins.lora_catalog_settings import (
+        CROSS_FAMILY_MODELS_KEY,
+        DELETED_IDS_KEY,
+        ENTRY_OVERRIDES_KEY,
+        PROBE_HISTORY_KEY,
+        migrate_lora_catalog,
+        normalize_probe_history,
+    )
     from imagegen_plugins.lora_user_entries import is_user_lora_id
 
     lid = str(lora_id or "").strip()
@@ -1161,16 +1168,17 @@ def delete_lora_from_library(lora_id: str, *, model_key: str = "") -> None:
         remove_lora_weights_from_disk(entry)
     remove_lora_enabled_everywhere(lid)
 
+    host_models = list(model_keys_for_lora_entry(entry)) if entry is not None else []
     mk = (model_key or "").strip()
-    if not mk and entry is not None:
-        models = model_keys_for_lora_entry(entry)
-        mk = models[0] if models else ""
+    targets = [mk] if mk else host_models
 
     def mutate(imagegen: dict) -> None:
         lc = _imagegen_lora_catalog(imagegen)
         bm = dict(lc.get("by_model") or {})
-        targets = [mk] if mk else list(bm.keys())
-        for model in targets:
+        mark_models = list(targets) if targets else list(bm.keys())
+        for model in mark_models:
+            if not model:
+                continue
             slice_ = dict(bm.get(model) or {"enabled_ids": [], DELETED_IDS_KEY: []})
             enabled = [x for x in (slice_.get("enabled_ids") or []) if x != lid]
             deleted = list(slice_.get(DELETED_IDS_KEY) or slice_.get("hidden_ids") or [])
@@ -1178,6 +1186,21 @@ def delete_lora_from_library(lora_id: str, *, model_key: str = "") -> None:
                 deleted.append(lid)
             bm[model] = {"enabled_ids": enabled, DELETED_IDS_KEY: deleted}
         lc["by_model"] = bm
+        ms = dict(lc.get("model_support") or {})
+        ms.pop(lid, None)
+        lc["model_support"] = ms
+        cf = dict(lc.get(CROSS_FAMILY_MODELS_KEY) or {})
+        cf.pop(lid, None)
+        lc[CROSS_FAMILY_MODELS_KEY] = cf
+        overrides = dict(lc.get(ENTRY_OVERRIDES_KEY) or {})
+        overrides.pop(lid, None)
+        lc[ENTRY_OVERRIDES_KEY] = overrides
+        prev_ph = normalize_probe_history(lc.get(PROBE_HISTORY_KEY))
+        lc[PROBE_HISTORY_KEY] = {
+            key: slice_
+            for key, slice_ in prev_ph.items()
+            if key != lid and not str(key).startswith(f"{lid}:")
+        }
         imagegen["lora_catalog"] = lc
 
     _mutate_imagegen_settings(mutate)
