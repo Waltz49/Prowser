@@ -308,9 +308,7 @@ class RefreshManager:
         - Current file (current_image_path) is preserved
         - Current directory is refreshed from disk
         - Thumbnails are regenerated
-        - Tree view is synchronized
         """
-        import traceback
         if not self.main_window.current_directory:
             return
         

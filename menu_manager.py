@@ -304,7 +304,15 @@ class MenuManager:
     def _on_file_operation_complete(self, operation_type=None, paths=None, success=None):
         """Handle FILE_OPERATION_COMPLETE event - update edit menu states (undo, etc.)"""
         self.update_edit_menu_states()
-        
+
+    def _refresh_directory_cmd_r(self):
+        """⌘R: refresh directory contents, then rebuild tree preserving open nodes."""
+        mw = self.main_window
+        mw.refresh_directory(force=True)
+        handler = getattr(mw, 'file_tree_handler', None)
+        if handler is not None and handler.is_tree_initialized():
+            handler.rebuild_tree(force=True)
+
     def setup_actions(self):
         """Setup menu bar and toolbar actions"""
         menubar = self.main_window.menuBar()
@@ -463,8 +471,8 @@ class MenuManager:
         # Refresh Directory
         refresh_action = QAction("Refresh Directory", self.main_window)
         refresh_action.setShortcut(QKeySequence("Ctrl+R"))
-        # Use refresh_directory(force=True) directly for cmd-R to ensure proper refresh
-        refresh_action.triggered.connect(lambda: self.main_window.refresh_directory(force=True))
+        # ⌘R: force directory refresh, then resync tree (preserve open nodes; pick up FS adds/deletes)
+        refresh_action.triggered.connect(self._refresh_directory_cmd_r)
 
         file_menu.addAction(refresh_action)
         

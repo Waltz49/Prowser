@@ -3280,19 +3280,22 @@ class FileTreeHandler(QObject):
             if block_signals:
                 selection_model.blockSignals(False)
 
-    def rebuild_tree(self, show_hidden: Optional[bool] = None) -> None:
+    def rebuild_tree(self, show_hidden: Optional[bool] = None, force: bool = False) -> None:
         """Completely rebuild the tree - useful when tree settings change
 
         Args:
             show_hidden: If provided, use this value instead of reading from config.
                         If None, read from config.
+            force: If True, rebuild even when user_requested_directory is set
+                   (e.g. ⌘R filesystem resync). Expanded nodes are still restored.
         """
         # Prevent concurrent rebuilds
         if self._rebuild_in_progress:
             return
 
         # Skip rebuild if directory was opened from tree view - tree is already expanded correctly
-        if self.user_requested_directory:
+        # (force=True bypasses this for explicit refresh that must pick up FS adds/deletes)
+        if self.user_requested_directory and not force:
             return
 
         # Refresh config cache when rebuilding tree
@@ -3323,8 +3326,15 @@ class FileTreeHandler(QObject):
             if hasattr(self.main_window, 'current_directory') and self.main_window.current_directory:
                 current_dir = self.main_window.current_directory
 
-            # Preserve all expanded directory states before rebuild
-            expanded_dirs = self.get_expanded_directories()
+            # Preserve all expanded directory states before rebuild.
+            # Merge walk + tracked set so restoration survives stale model rows.
+            expanded_dirs = set(self.get_expanded_directories()) | set(self._expanded_directory_paths)
+            expanded_dirs = [
+                os.path.normpath(p)
+                for p in expanded_dirs
+                if p and os.path.isdir(p)
+            ]
+            expanded_dir_set = set(expanded_dirs)
 
             # Determine filter setting - use provided value or read from config
             if show_hidden is None:
@@ -3525,7 +3535,7 @@ class FileTreeHandler(QObject):
                                 if self.file_model != self.filter_proxy.sourceModel():
                                     break
 
-                                if path not in expanded_dirs:
+                                if os.path.normpath(path) not in expanded_dir_set:
                                     try:
                                         model_idx = self.file_model.index(path)
                                         if not model_idx.isValid():

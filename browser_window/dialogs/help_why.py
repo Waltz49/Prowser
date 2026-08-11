@@ -44,9 +44,8 @@ class WhyWasThisWrittenDialog(MarkdownDialog):
 - Search functions rely on open source models that will be downloaded **once** from HuggingFace the first time they are used. This, and the initial "feature extraction" from images, can be slow. The models can be large and are downloaded to the `~/.cache/huggingface` directory.
 - Some sections of the status bar are clickable, allowing for fast changes to various settings.
 - Some tree actions require double **Enter** or double-click. This is by design.
-- The keyboard help is dynamically generated at runtime to help with development, and it may contain some keys that are not used in the current mode.
+- The keyboard help is dynamically generated and may include errors.
 - There are key combinations that are not exposed in the menu system, so it can be helpful to peruse the context-sensitive help shown by pressing **F1** or the slash key (**/**).
-- ⚠️ There may still be some problems with refreshing the thumbnails. If thumbnails don't have an image, use refresh (**Cmd-R**), an arrow key (↑ ↓ ← →), or reload the directory by clicking in the tree view.
 - ⚠️ Occasionally, you may see beachballs related to background thumbnail loading, but **wait them out**. They usually complete eventually. Rarely, the application may need to be force-quit.
 
 #
