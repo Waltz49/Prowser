@@ -791,9 +791,10 @@ class MenuManager:
             self.main_window.toggle_preview_action.setText('Hide Preview' if preview_visible else 'Show Preview')
             self.main_window.toggle_preview_action.setChecked(preview_visible)
             rs = getattr(self.main_window, 'right_sidebar', None)
-            from imagegen_plugins.jobs_display_mode import is_jobs_pane_showing
-            jobs_pane_showing = is_jobs_pane_showing(self.main_window)
-            if hasattr(self.main_window, 'toggle_jobs_action'):
+            if _jobs_ui and hasattr(self.main_window, 'toggle_jobs_action'):
+                from imagegen_plugins.jobs_display_mode import is_jobs_pane_showing
+
+                jobs_pane_showing = is_jobs_pane_showing(self.main_window)
                 self.main_window.toggle_jobs_action.setText(
                     'Hide Jobs Pane' if jobs_pane_showing else 'Show Jobs Pane'
                 )
@@ -1520,6 +1521,10 @@ class MenuManager:
         self.main_window.debug_save_canvas_action = QAction("Save Canvas", self.main_window)
         self.main_window.debug_save_canvas_action.triggered.connect(self._debug_save_canvas)
         debug_menu.addAction(self.main_window.debug_save_canvas_action)
+
+        doc_screencaps_action = QAction("Documentation screencaps", self.main_window)
+        doc_screencaps_action.triggered.connect(self._debug_documentation_screencaps)
+        debug_menu.addAction(doc_screencaps_action)
         
         # Connect aboutToShow signal to update menu action states
         tools_menu.aboutToShow.connect(self.update_tools_menu_states)
@@ -1684,6 +1689,12 @@ class MenuManager:
                 f"Canvas saved:\n{out_path}",
                 duration=4000,
             )
+
+    def _debug_documentation_screencaps(self):
+        """Tools > Debug > Documentation screencaps — settings tabs for prowser.php."""
+        from documentation_screencaps import run_documentation_screencaps
+
+        run_documentation_screencaps(self.main_window)
 
     def _debug_extract_faces(self):
         """Search > Extract faces — same as context menu: current image + Faces tab examine."""

@@ -6170,7 +6170,7 @@ class ImageBrowserWindow(QMainWindow):
                 def rebuild_tree():
                     if show_hidden_value is None:
                         # Read from config if not explicitly set
-                        show_hidden = self.config.get_setting('show_hidden_directories', False)
+                        show_hidden = self.config.load_settings().get('show_hidden_directories', False)
                     else:
                         show_hidden = show_hidden_value
                     self.file_tree_handler.rebuild_tree(show_hidden=show_hidden)

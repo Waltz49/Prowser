@@ -12,7 +12,7 @@ try:
     import sys
 
     if getattr(sys, "frozen", False):
-        from pyinstaller_frozen_support import configure_frozen_native_paths, log_frozen_diagnostic
+        from pyinstaller_frozen_support import configure_frozen_native_paths
 
         configure_frozen_native_paths()
         try:
@@ -20,22 +20,7 @@ try:
                 os.environ.setdefault("PROWSER_MIN_BUNDLE", "1")
         except Exception:
             os.environ.setdefault("PROWSER_MIN_BUNDLE", "1")
-        try:
-            from pyinstaller_frozen_support import diffusers_is_installed, mflux_is_installed
-
-            log_frozen_diagnostic(
-                f"[imagegen] startup availability mflux={mflux_is_installed()} "
-                f"diffusers={diffusers_is_installed()}"
-            )
-            try:
-                from pyinstaller_frozen_support import whisper_voice_input_is_bundled
-
-                log_frozen_diagnostic(
-                    f"[voice] whisper bundled={whisper_voice_input_is_bundled()}"
-                )
-            except Exception as exc:
-                log_frozen_diagnostic(f"[voice] whisper bundle check failed: {exc!r}")
-        except Exception as exc:
-            log_frozen_diagnostic(f"[imagegen] startup availability check failed: {exc!r}")
+        # Backend availability logging is deferred to log_frozen_imagegen_availability_once()
+        # (first Image menu open) so mflux/sdnq/whisper are not probed at process start.
 except Exception:
     pass

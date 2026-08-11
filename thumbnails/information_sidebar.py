@@ -53,7 +53,36 @@ from search.reference_graph import (
     resolve_reference_entries_map,
     resolve_reference_path,
 )
-from imagegen_plugins.image_gen_naming import compact_elapsed_display
+try:
+    from imagegen_plugins.image_gen_naming import compact_elapsed_display
+except ImportError:
+    def compact_elapsed_display(text: str) -> str:
+        """Fallback when imagegen_plugins is omitted (--min bundle)."""
+        raw = str(text or "").strip()
+        if not raw:
+            return raw
+        parts = raw.split(":")
+        try:
+            if len(parts) == 3:
+                h, m, s = (int(part) for part in parts)
+                total = h * 3600 + m * 60 + s
+            elif len(parts) == 2:
+                m, s = (int(part) for part in parts)
+                total = m * 60 + s
+            elif len(parts) == 1:
+                total = int(parts[0])
+            else:
+                return raw
+            total = int(round(max(0, total)))
+            h, rem = divmod(total, 3600)
+            m, s = divmod(rem, 60)
+            if h > 0:
+                return f"{h}:{m:02d}:{s:02d}"
+            if m > 0:
+                return f"{m}:{s:02d}"
+            return str(s)
+        except ValueError:
+            return raw
 
 # Content inset via viewport margins so the vertical scrollbar stays flush right.
 _INFO_VIEWPORT_MARGIN_LEFT = 18

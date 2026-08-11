@@ -90,6 +90,28 @@ def _module_file_on_sys_path(module_name: str) -> bool:
     return False
 
 
+def _top_level_package_on_disk(module_name: str) -> bool:
+    """True when a top-level package exists on disk (no import)."""
+    pkg_rel = module_name.replace(".", os.sep)
+    pkg_init = os.path.join(pkg_rel, "__init__.py")
+    search_roots: list[str] = []
+    if getattr(sys, "frozen", False):
+        search_roots.extend(frozen_bundle_roots())
+    search_roots.extend(entry for entry in sys.path if entry)
+    seen: set[str] = set()
+    for base in search_roots:
+        norm = os.path.normpath(base)
+        if norm in seen:
+            continue
+        seen.add(norm)
+        if os.path.isfile(os.path.join(norm, pkg_init)):
+            return True
+        pkg_dir = os.path.join(norm, pkg_rel)
+        if os.path.isdir(pkg_dir) and os.path.isfile(os.path.join(pkg_dir, "__init__.py")):
+            return True
+    return False
+
+
 def _pipeline_module_on_disk(module_name: str) -> bool:
     """True if module_name resolves to a real file (dev / non-frozen)."""
     if getattr(sys, "frozen", False):
@@ -120,15 +142,13 @@ def _pipeline_module_on_disk(module_name: str) -> bool:
 
 
 def _package_importable(module_name: str) -> bool:
-    """True when module_name is present (find_spec; import only in frozen when needed)."""
+    """True when module_name is present without importing it."""
+    if "." not in module_name and _top_level_package_on_disk(module_name):
+        return True
     if _pipeline_module_on_disk(module_name):
         return True
     if getattr(sys, "frozen", False):
-        try:
-            importlib.import_module(module_name)
-        except ImportError:
-            return False
-        return True
+        return False
     try:
         spec = importlib.util.find_spec(module_name)
     except (ImportError, ModuleNotFoundError, AttributeError, ValueError):
@@ -137,12 +157,12 @@ def _package_importable(module_name: str) -> bool:
 
 
 def mflux_is_installed() -> bool:
-    """True when the mflux package is importable (find_spec fails in some frozen builds)."""
+    """True when the mflux package is present in the environment (no import)."""
     return _package_importable("mflux")
 
 
 def sdnq_is_installed() -> bool:
-    """True when the sdnq package is importable (Z-Image quantized weights)."""
+    """True when the sdnq package is present (Z-Image quantized weights; no import)."""
     return _package_importable("sdnq")
 
 
@@ -204,6 +224,27 @@ def log_frozen_diagnostic(message: str) -> None:
         print(message, flush=True)
     except Exception:
         pass
+
+
+_frozen_availability_logged = False
+
+
+def log_frozen_imagegen_availability_once() -> None:
+    """Log bundled backend availability once (deferred from runtime hook for faster startup)."""
+    global _frozen_availability_logged
+    if _frozen_availability_logged or not getattr(sys, "frozen", False):
+        return
+    _frozen_availability_logged = True
+    try:
+        log_frozen_diagnostic(
+            f"[imagegen] availability mflux={mflux_is_installed()} "
+            f"diffusers={diffusers_is_installed()}"
+        )
+        log_frozen_diagnostic(
+            f"[voice] whisper bundled={whisper_voice_input_is_bundled()}"
+        )
+    except Exception as exc:
+        log_frozen_diagnostic(f"[imagegen] availability check failed: {exc!r}")
 
 
 def bundled_whisper_model_dir() -> str | None:

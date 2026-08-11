@@ -781,6 +781,12 @@ def _refresh_create_menu_availability(main_window) -> None:
 
 def _run_create_menu_availability_refresh(main_window) -> None:
     main_window._imagegen_menu_availability_scheduled = False
+    try:
+        from pyinstaller_frozen_support import log_frozen_imagegen_availability_once
+
+        log_frozen_imagegen_availability_once()
+    except ImportError:
+        pass
     _refresh_create_menu_availability(main_window)
 
 
@@ -951,5 +957,3 @@ def setup_create_menu(menubar, main_window) -> None:
         lambda: _open_download_loras_dialog(main_window)
     )
     create_menu.addAction(download_loras_action)
-
-    _schedule_create_menu_availability_refresh(main_window)

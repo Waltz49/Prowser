@@ -17,7 +17,7 @@ def normalize_jobs_display_mode(mode: str | None) -> str:
 def get_jobs_display_mode(main_window) -> str:
     mode = getattr(main_window, "jobs_display_mode", None)
     if mode is None and hasattr(main_window, "config"):
-        mode = main_window.config.get_setting("jobs_display_mode", JOBS_DISPLAY_PANE)
+        mode = main_window.config.load_settings().get("jobs_display_mode", JOBS_DISPLAY_PANE)
     return normalize_jobs_display_mode(mode)
 
 
