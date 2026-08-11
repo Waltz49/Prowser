@@ -170,7 +170,7 @@ class ImageGenJobQueueDialog(QDialog):
             omit_right_border=True,
             omit_top_border=True,
         )
-        self._header.set_hide_button_mode("close")
+        self._header.set_hide_button_mode("minus")
         self._header.hide_button.setToolTip("Close job control dialog")
         self._header.hide_button.clicked.connect(self._close_to_pane_mode)
         self._header.title_double_clicked.connect(self._cycle_header_size)
