@@ -68,5 +68,7 @@ def apply_lora_to_sd15_payload(merged: Dict[str, object]) -> None:
         )
 
     path = resolve_lora_path(preset_id)
+    from imagegen_plugins.job_values_snapshot import _lora_scale_for_preset
+
     merged["sd15_lora_paths"] = [path]
-    merged["sd15_lora_scales"] = [entry.scale]
+    merged["sd15_lora_scales"] = [_lora_scale_for_preset(dict(merged), preset_id)]

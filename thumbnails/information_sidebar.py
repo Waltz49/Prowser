@@ -53,6 +53,7 @@ from search.reference_graph import (
     resolve_reference_entries_map,
     resolve_reference_path,
 )
+from imagegen_plugins.image_gen_naming import compact_elapsed_display
 
 # Content inset via viewport margins so the vertical scrollbar stays flush right.
 _INFO_VIEWPORT_MARGIN_LEFT = 18
@@ -84,13 +85,21 @@ _INFO_H4_SECTION_KEY_BY_TITLE = {
 _INFO_H4_TAG_RE = re.compile(r'<h4>([^<]+)</h4>', re.IGNORECASE)
 _INFO_IMAGE_MODEL_H4 = '<h4>Image model</h4>'
 _INFO_ELAPSED_IN_MODEL_RE = re.compile(
-    r'(?i)Elapsed:\s*(\d+:\d{2}:\d{2})(?:\s*\((\d+:\d{2}:\d{2})/iter\))?'
+    r'(?i)Elapsed:\s*(\d+(?::\d{2}(?::\d{2})?)?)(?:\s*\(\d+:\d{2}:\d{2}/iter\))?'
+)
+_INFO_ELAPSED_PER_ITER_SUFFIX_RE = re.compile(
+    r'\s*\(\d+:\d{2}:\d{2}/iter\)', re.IGNORECASE
 )
 _INFO_LORA_ROW_IN_HTML_RE = re.compile(
     r'(?i)(^|<br>)((?:LoRA:\s*.+?)|(?:'
     + "\u00a0{6}"
     + r".+?))(?=<br>|$)"
 )
+_INFO_MODEL_PARAM_LINE_RE = re.compile(
+    r'^(Seed|Steps|Quantization|Guidance|LoRA|Elapsed)\s*:\s*(.*)$',
+    re.IGNORECASE,
+)
+_INFO_MODEL_LORA_CONT_PLAIN_RE = re.compile(r'^\u00a0{6}(.+)$')
 # Table rows derived from file/dimensions only (not camera EXIF); user comment is separate below.
 _BASIC_INFO_TABLE_FIELDS = frozenset({'Directory', 'Image Size', 'File Size', 'File Date', 'Scale'})
 
@@ -1126,15 +1135,111 @@ class InformationSidebar(QWidget):
         middle = disp[body_start:end]
 
         def repl(match: re.Match[str]) -> str:
-            main = match.group(1)
-            per_iter = match.group(2)
-            out = f'Elapsed: <b>{main}</b>'
-            if per_iter:
-                out += f' ({per_iter}/iter)'
-            return out
+            compact = compact_elapsed_display(match.group(1))
+            return f'Elapsed: <b>{compact}</b>'
 
         middle = _INFO_ELAPSED_IN_MODEL_RE.sub(repl, middle)
         return disp[:body_start] + middle + disp[end:]
+
+    @staticmethod
+    def _split_image_model_param_line_html(seg: str) -> Optional[Tuple[str, str]]:
+        """Split ``Label: value`` HTML, preserving markup in the value portion."""
+        plain = unescape(seg).strip()
+        match = _INFO_MODEL_PARAM_LINE_RE.match(plain)
+        if match is None:
+            return None
+        label = match.group(1)
+        prefix_re = re.compile(rf'^{re.escape(label)}\s*:\s*', re.IGNORECASE)
+        prefix_match = prefix_re.match(seg.strip())
+        if prefix_match is None:
+            value_html = escape(match.group(2).strip())
+        else:
+            value_html = seg.strip()[prefix_match.end():]
+        if label.lower() == 'elapsed':
+            value_html = _INFO_ELAPSED_PER_ITER_SUFFIX_RE.sub('', value_html)
+            plain_value = unescape(re.sub(r'<[^>]+>', '', value_html)).strip()
+            compact = compact_elapsed_display(plain_value)
+            if re.search(r'</?b\b', value_html, re.IGNORECASE):
+                value_html = f'<b>{escape(compact)}</b>'
+            else:
+                value_html = escape(compact)
+        return f'{label}:', value_html
+
+    def _basic_info_table_cell_styles(self, text_hex: str) -> Tuple[str, str, str]:
+        table_style = (
+            'border: none; border-collapse: collapse; width: 100%; '
+            'line-height: 1.0;'
+        )
+        label_cell_style = (
+            f'border: none; text-align: left; '
+            f'color: {text_hex}; white-space: nowrap; width: 1%; vertical-align: top;'
+            'padding: 0px;'
+        )
+        value_cell_style = (
+            f'border: none; color: {text_hex}; vertical-align: top;'
+            'padding: 0px 0px 0px 4px;'
+        )
+        return table_style, label_cell_style, value_cell_style
+
+    def _elided_table_value_html(self, value_html: str, width_px: int) -> str:
+        plain = unescape(re.sub(r'<[^>]+>', '', value_html))
+        return escape(self._elide_info_monospace_line(plain, width_px))
+
+    def _format_image_model_section_as_table(self, disp: str) -> str:
+        """Render Image model params in the same two-column layout as file metadata."""
+        pos = disp.find(_INFO_IMAGE_MODEL_H4)
+        if pos < 0:
+            return disp
+        body_start = pos + len(_INFO_IMAGE_MODEL_H4)
+        next_h4 = disp.find('<h4>', body_start)
+        end = len(disp) if next_h4 < 0 else next_h4
+        middle = disp[body_start:end]
+        if not middle.strip():
+            return disp
+
+        rows: List[Tuple[str, str, bool]] = []
+        for seg in middle.split('<br>'):
+            seg = seg.strip()
+            if not seg:
+                continue
+            plain = unescape(seg).strip()
+            cont_match = _INFO_MODEL_LORA_CONT_PLAIN_RE.match(plain)
+            if cont_match is not None:
+                rows.append(('', escape(cont_match.group(1).strip()), True))
+                continue
+            param = self._split_image_model_param_line_html(seg)
+            if param is not None:
+                label, value_html = param
+                rows.append((label, value_html, label.lower().startswith('lora:')))
+                continue
+            rows.append(('', seg, False))
+
+        if not rows:
+            return disp
+
+        text_hex = self._info_text_hex()
+        table_style, label_style, value_style = self._basic_info_table_cell_styles(text_hex)
+        width_px = self._info_content_width_px()
+        self._last_info_elide_width_px = width_px
+
+        parts = [f'<table style="{table_style}">']
+        for label, value_html, elide_value in rows:
+            if elide_value:
+                value_html = self._elided_table_value_html(value_html, width_px)
+            parts.append('<tr>')
+            if not label and not elide_value:
+                parts.append(
+                    f'<td colspan="2" style="border: none; color: {text_hex}; '
+                    f'vertical-align: top; padding: 0px; text-align: left;">'
+                    f'{value_html}</td>'
+                )
+            else:
+                parts.append(f'<td style="{label_style}">{label}</td>')
+                parts.append(f'<td style="{value_style}">{value_html}</td>')
+            parts.append('</tr>')
+        parts.append('</table>')
+
+        return disp[:body_start] + ''.join(parts) + disp[end:]
 
     def _info_monospace_font_metrics(self) -> QFontMetrics:
         font = QFont("Courier New", 12)
@@ -1418,19 +1523,8 @@ class InformationSidebar(QWidget):
                     f'border: 1px solid {bdr}; padding: 4px 8px; color: {text_hex};'
                 )
             else:
-                table_style = (
-                    'border: none; border-collapse: collapse; width: 100%; '
-                    'line-height: 1.0;'
-                )
-                label_cell_style = (
-                    f'border: none; text-align: left; '
-                    f'color: {text_hex}; white-space: nowrap; width: 1%; vertical-align: top;'
-                    'padding: 0px;'
-                )
-                value_cell_style = (
-                    f'border: none;  color: {text_hex}; '
-                    f'vertical-align: top;'
-                    'padding: 0px 0px 0px 4px;'
+                table_style, label_cell_style, value_cell_style = (
+                    self._basic_info_table_cell_styles(text_hex)
                 )
 
             html_parts.append(f'<table style="{table_style}">')
@@ -1479,7 +1573,7 @@ class InformationSidebar(QWidget):
         if description:
             description = description.replace('\x00', '')
             if description.strip() and not (description.strip().startswith("b'") or description.strip().startswith('b"')):
-                description = self._elide_lora_lines_in_info_html(description)
+                description = self._format_image_model_section_as_table(description)
                 description = self._wrap_description_with_collapsible_sections(description)
                 html_parts.append(f'<div style="padding-top: 10px; padding-bottom: 6px; margin-top: 10px; border-top: 1px solid {bdr}; color: {text_hex}; font-size: 12pt;">{description}</div>')
             else:

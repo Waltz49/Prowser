@@ -346,7 +346,9 @@ def apply_exif_generation_params_to_dialog(
         _set_float_slider("guidance_scale", float(params["guidance"]))
 
     if "lora" in params and (
-        "mflux_lora" in spec_keys or "mflux_lora_stack" in widgets
+        "mflux_lora_stack" in widgets
+        or "mflux_lora" in widgets
+        or "mflux_lora" in spec_keys
     ):
         stack_entry = widgets.get("mflux_lora_stack")
         lora_field = getattr(dialog, "_lora_field", None)
@@ -392,6 +394,10 @@ def apply_exif_generation_params_to_dialog(
                     and hasattr(lora_field, "apply_scale_overrides")
                 ):
                     lora_field.apply_scale_overrides(scales_by_id)
+
+        values = getattr(dialog, "_values", None)
+        if lora_field is not None and isinstance(values, dict):
+            collect_lora_field_values(values, lora_field)
 
     sync_random_seed_setting(dialog, True)
 

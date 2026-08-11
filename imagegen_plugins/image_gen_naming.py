@@ -57,11 +57,35 @@ def next_imagegen_path(directory: Optional[str] = None, ext: str = ".png") -> st
 
 
 def format_elapsed_hms(seconds: float) -> str:
-    """Format seconds as h:mm:ss; minutes always shown (even when zero)."""
+    """Format seconds, omitting leading zero hour/minute components."""
     total = int(round(max(0.0, seconds)))
     h, rem = divmod(total, 3600)
     m, s = divmod(rem, 60)
-    return f"{h}:{m:02d}:{s:02d}"
+    if h > 0:
+        return f"{h}:{m:02d}:{s:02d}"
+    if m > 0:
+        return f"{m}:{s:02d}"
+    return str(s)
+
+
+def compact_elapsed_display(text: str) -> str:
+    """Normalize an elapsed token for display (handles legacy h:mm:ss EXIF)."""
+    raw = str(text or "").strip()
+    if not raw:
+        return raw
+    parts = raw.split(":")
+    try:
+        if len(parts) == 3:
+            h, m, s = (int(part) for part in parts)
+            return format_elapsed_hms(h * 3600 + m * 60 + s)
+        if len(parts) == 2:
+            m, s = (int(part) for part in parts)
+            return format_elapsed_hms(m * 60 + s)
+        if len(parts) == 1:
+            return format_elapsed_hms(int(parts[0]))
+    except ValueError:
+        pass
+    return raw
 
 
 def _parse_elapsed_seconds(raw: Any) -> Optional[float]:
@@ -442,19 +466,7 @@ def format_image_exif_prompt(
             model_block += "\n" + "\n".join(param_lines)
         if elapsed_seconds is not None:
             elapsed_str = format_elapsed_hms(elapsed_seconds)
-            elapsed_line = f"Elapsed: {elapsed_str}"
-            if _exif_scalar_present(steps):
-                try:
-                    step_count = int(steps)
-                except (TypeError, ValueError):
-                    step_count = None
-            else:
-                step_count = None
-            if step_count is not None and step_count > 0:
-                elapsed_line += (
-                    f" ({format_elapsed_hms(elapsed_seconds / step_count)}/iter)"
-                )
-            model_block += f"\n{elapsed_line}"
+            model_block += f"\nElapsed: {elapsed_str}"
         return f"{model_block}\n\nPrompt:\n{prompt_text}"
 
     if param_lines:
