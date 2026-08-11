@@ -256,6 +256,10 @@ def settings_dialog_stylesheet(chrome: SettingsDialogChrome) -> str:
         border: 1px solid {c.groupbox_border_hex};
         border-radius: 10px;
     }}
+    #{_SETTINGS_DIALOG_OBJECT_NAME} QFrame#macPreferencePanelFlat {{
+        background-color: transparent;
+        border: none;
+    }}
     #{_SETTINGS_DIALOG_OBJECT_NAME} QLabel#macPreferenceSectionTitle {{
         color: {c.text_disabled_hex};
         font-size: 11px;

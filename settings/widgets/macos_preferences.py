@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QFrame,
+    QGroupBox,
     QHBoxLayout,
     QLabel,
     QListView,
@@ -579,7 +580,7 @@ class MacPreferencePanel(QFrame):
 
 
 def mac_preference_section_title(text: str, parent: Optional[QWidget] = None) -> QLabel:
-    """Small caps-style section header above a preference panel."""
+    """Small caps-style section header (legacy; prefer titled QGroupBox)."""
     label = QLabel(text.upper(), parent)
     label.setObjectName("macPreferenceSectionTitle")
     return label
@@ -588,6 +589,17 @@ def mac_preference_section_title(text: str, parent: Optional[QWidget] = None) ->
 def mac_preference_section(
     title: str,
     parent: Optional[QWidget] = None,
-) -> tuple[QLabel, MacPreferencePanel]:
-    """Return (section header label, panel) for a preference group."""
-    return mac_preference_section_title(title, parent), MacPreferencePanel(parent)
+) -> tuple[QGroupBox, MacPreferencePanel]:
+    """Return (titled QGroupBox, preference panel nested inside it).
+
+    Matches the Models for Search tab grouping style: a QGroupBox with an
+    embedded title. The panel is borderless so chrome comes only from the group.
+    """
+    group = QGroupBox(title, parent)
+    group_layout = QVBoxLayout(group)
+    group_layout.setContentsMargins(4, 8, 4, 8)
+    group_layout.setSpacing(6)
+    panel = MacPreferencePanel(group)
+    panel.setObjectName("macPreferencePanelFlat")
+    group_layout.addWidget(panel)
+    return group, panel

@@ -54,6 +54,15 @@ IMAGE_GEN_PROMPT_STYLE_BORDER_V = 2  # 1px top + 1px bottom border
 IMAGE_GEN_SEED_SPIN_CHAR_COUNT = 11
 IMAGE_GEN_PROMPT_MIN_LINE_COUNT = 4
 IMAGE_GEN_PROMPT_MAX_LINE_COUNT = 22
+IMAGE_GEN_PROMPT_RESET_DEFAULT_TEXT = (
+    ""
+)
+IMAGE_GEN_SYSTEM_PROMPT_RESET_DEFAULT_TEXT = (
+    "Respond with a 90 word image prompt. No commentary, no conversation.\n"
+    "If image provided, base your response on the image. Retain all details "
+    "you receive from the user. Answer in documentary prose."
+)
+IMAGE_GEN_PROMPT_LABEL_ACTION_SPACING = 6
 
 
 def _image_gen_prompt_edit_is_alive(edit: QPlainTextEdit) -> bool:
@@ -1159,7 +1168,7 @@ def image_gen_system_prompt_voice_mic_btn_dialog_stylesheet() -> str:
 
 
 class _ImageGenPromptClearButton(QPushButton):
-    """Boxed clear icon for the image prompt field label row."""
+    """Boxed trash icon that resets a prompt field to its default text."""
 
     def __init__(
         self,
@@ -1167,11 +1176,13 @@ class _ImageGenPromptClearButton(QPushButton):
         parent: Optional[QWidget] = None,
         *,
         object_name: str = "imageGenPromptClearBtn",
+        default_text: str = IMAGE_GEN_PROMPT_RESET_DEFAULT_TEXT,
     ) -> None:
         super().__init__("", parent)
         self._edit = edit
+        self._default_text = str(default_text)
         self.setObjectName(object_name)
-        self.setToolTip("Clear prompt")
+        self.setToolTip("Reset to default")
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self._normal_icon = QIcon(asset_path("trash_icon.png"))
         self._hover_icon = QIcon(asset_path("trash_icon_hover.png"))
@@ -1188,15 +1199,15 @@ class _ImageGenPromptClearButton(QPushButton):
         self.setFixedSize(
             IMAGE_GEN_PROMPT_CLEAR_BTN_SIZE, IMAGE_GEN_PROMPT_CLEAR_BTN_SIZE
         )
-        self.clicked.connect(self._clear_prompt)
+        self.clicked.connect(self._reset_prompt)
 
     def _apply_icon(self) -> None:
         px = _IMAGE_GEN_PROMPT_CLEAR_ICON_PX
         self.setIcon(self._normal_icon)
         self.setIconSize(QSize(px, px))
 
-    def _clear_prompt(self) -> None:
-        self._edit.setPlainText("")
+    def _reset_prompt(self) -> None:
+        self._edit.setPlainText(self._default_text)
         self._edit.setFocus()
 
 
@@ -1205,8 +1216,11 @@ def create_image_gen_prompt_clear_button(
     parent: Optional[QWidget] = None,
     *,
     object_name: str = "imageGenPromptClearBtn",
+    default_text: str = IMAGE_GEN_PROMPT_RESET_DEFAULT_TEXT,
 ) -> QPushButton:
-    return _ImageGenPromptClearButton(edit, parent, object_name=object_name)
+    return _ImageGenPromptClearButton(
+        edit, parent, object_name=object_name, default_text=default_text
+    )
 
 
 class _ImageGenPromptSpeakButton(QObject):
@@ -1284,40 +1298,81 @@ def create_image_gen_prompt_speak_button(
     return btn
 
 
+def append_image_gen_prompt_label_action_buttons(
+    layout: QHBoxLayout,
+    edit: QPlainTextEdit,
+    parent: QWidget,
+    *,
+    copy_object_name: str = "imageGenPromptCopyBtn",
+    speak_object_name: str = "imageGenPromptSpeakBtn",
+    mic_object_name: str = "imageGenPromptVoiceMicBtn",
+    clear_object_name: str = "imageGenPromptClearBtn",
+    default_text: str = IMAGE_GEN_PROMPT_RESET_DEFAULT_TEXT,
+    include_stretch: bool = True,
+) -> tuple[
+    QPushButton,
+    Optional[QPushButton],
+    Optional[QPushButton],
+    QPushButton,
+]:
+    """Right-justify copy / read-aloud / mic / reset on a prompt label row."""
+    if include_stretch:
+        layout.addStretch(1)
+    align = Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+    copy_btn = create_image_gen_prompt_copy_button(
+        edit, parent, object_name=copy_object_name
+    )
+    layout.addWidget(copy_btn, 0, align)
+    speak_btn = create_image_gen_prompt_speak_button(
+        edit, parent, object_name=speak_object_name
+    )
+    if speak_btn is not None:
+        layout.addWidget(speak_btn, 0, align)
+    mic_btn = create_image_gen_prompt_voice_mic_button(
+        edit, parent, object_name=mic_object_name
+    )
+    if mic_btn is not None:
+        layout.addWidget(mic_btn, 0, align)
+    clear_btn = create_image_gen_prompt_clear_button(
+        edit,
+        parent,
+        object_name=clear_object_name,
+        default_text=default_text,
+    )
+    layout.addWidget(clear_btn, 0, align)
+    return copy_btn, speak_btn, mic_btn, clear_btn
+
+
 def make_image_gen_prompt_label_row(
     label_text: str,
     edit: QPlainTextEdit,
     parent: Optional[QWidget] = None,
     *,
     label_row_object_name: str = "imageGenPromptLabelRow",
-    clear_object_name: str = "imageGenPromptClearBtn",
+    copy_object_name: str = "imageGenPromptCopyBtn",
     speak_object_name: str = "imageGenPromptSpeakBtn",
+    mic_object_name: str = "imageGenPromptVoiceMicBtn",
+    clear_object_name: str = "imageGenPromptClearBtn",
+    default_text: str = IMAGE_GEN_PROMPT_RESET_DEFAULT_TEXT,
 ) -> QWidget:
-    """Field heading with read-aloud and clear buttons to the right of the label."""
+    """Field heading with prompt actions right-justified to the field edge."""
     row = QWidget(parent)
     row.setObjectName(label_row_object_name)
     row.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
     layout = QHBoxLayout(row)
     layout.setContentsMargins(0, 8, 0, 0)
-    layout.setSpacing(6)
+    layout.setSpacing(IMAGE_GEN_PROMPT_LABEL_ACTION_SPACING)
     layout.addWidget(make_image_gen_field_label(label_text, row), 0)
-    speak_btn = create_image_gen_prompt_speak_button(
-        edit, row, object_name=speak_object_name
+    append_image_gen_prompt_label_action_buttons(
+        layout,
+        edit,
+        row,
+        copy_object_name=copy_object_name,
+        speak_object_name=speak_object_name,
+        mic_object_name=mic_object_name,
+        clear_object_name=clear_object_name,
+        default_text=default_text,
     )
-    if speak_btn is not None:
-        layout.addWidget(
-            speak_btn,
-            0,
-            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
-        )
-    layout.addWidget(
-        create_image_gen_prompt_clear_button(
-            edit, row, object_name=clear_object_name
-        ),
-        0,
-        Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
-    )
-    layout.addStretch(1)
     return row
 
 
@@ -2272,6 +2327,8 @@ class ImageGenFieldsPanel:
         self,
         label_text: str,
         control: QWidget,
+        *,
+        reset_default: Optional[str] = None,
     ) -> None:
         """Full-width prompt editor above the controls / side-button row."""
         group = QWidget(self.widget)
@@ -2280,8 +2337,18 @@ class ImageGenFieldsPanel:
         col.setSpacing(IMAGE_GEN_FIELD_LABEL_SPACING)
         display_control = control
         if isinstance(control, QPlainTextEdit):
+            default_text = (
+                IMAGE_GEN_PROMPT_RESET_DEFAULT_TEXT
+                if reset_default is None
+                else str(reset_default)
+            )
             col.addWidget(
-                make_image_gen_prompt_label_row(label_text, control, group),
+                make_image_gen_prompt_label_row(
+                    label_text,
+                    control,
+                    group,
+                    default_text=default_text,
+                ),
                 0,
             )
             control.setSizePolicy(
@@ -2290,9 +2357,6 @@ class ImageGenFieldsPanel:
             configure_image_gen_prompt_edit(control)
             if self._compact:
                 install_image_gen_prompt_sentence_case_on_blur(control)
-            display_control = wrap_image_gen_prompt_row_with_copy(
-                control, control
-            )
         else:
             col.addWidget(make_image_gen_field_label(label_text, group), 0)
             display_control.setSizePolicy(
@@ -2324,10 +2388,10 @@ class ImageGenFieldsPanel:
         """Indented prompt editor wrapper (direct child of the prompt field group)."""
         if self._prompt_group is None:
             return None
-        copy_btn = self._prompt_group.findChild(QPushButton, "imageGenPromptCopyBtn")
-        if copy_btn is None:
+        edit = self._prompt_group.findChild(QPlainTextEdit)
+        if edit is None:
             return None
-        widget: Optional[QWidget] = copy_btn
+        widget: Optional[QWidget] = edit
         while widget is not None:
             parent = widget.parentWidget()
             if parent is self._prompt_group:
@@ -2411,21 +2475,20 @@ class ImageGenFieldsPanel:
         copy_from_edit: Optional[QPlainTextEdit] = None,
         flow_role: Optional[str] = None,
         label_accessory: Optional[QWidget] = None,
+        reset_default: Optional[str] = None,
     ) -> QWidget:
         parent = self.widget if to_outer else self._controls_host
         group = QWidget(parent)
         edge_pad = IMAGE_GEN_FIELD_BORDER_PAD if to_outer else 0
         display_control = control
-        if copy_from_edit is not None:
-            display_control = wrap_image_gen_prompt_row_with_copy(
-                control, copy_from_edit
-            )
-            if self._compact:
-                install_image_gen_prompt_sentence_case_on_blur(copy_from_edit)
+        prompt_actions = copy_from_edit is not None
+        if prompt_actions and self._compact:
+            install_image_gen_prompt_sentence_case_on_blur(copy_from_edit)
         inline_label = (
             self._compact
             and bool(label_text)
             and not stretch_control
+            and not prompt_actions
         )
         if inline_label:
             col = QVBoxLayout(group)
@@ -2448,7 +2511,21 @@ class ImageGenFieldsPanel:
             col.setContentsMargins(1, 0, edge_pad, 0)
             col.setSpacing(IMAGE_GEN_FIELD_LABEL_SPACING)
             if label_text:
-                if label_accessory is not None:
+                if prompt_actions:
+                    default_text = (
+                        "" if reset_default is None else str(reset_default)
+                    )
+                    col.addWidget(
+                        make_image_gen_prompt_label_row(
+                            label_text,
+                            copy_from_edit,
+                            group,
+                            label_row_object_name="imageGenFieldLabelRow",
+                            default_text=default_text,
+                        ),
+                        0,
+                    )
+                elif label_accessory is not None:
                     col.addWidget(
                         make_image_gen_field_label_row(
                             label_text, label_accessory, group

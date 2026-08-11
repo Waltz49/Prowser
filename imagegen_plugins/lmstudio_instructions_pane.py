@@ -249,9 +249,9 @@ class LmStudioInstructionsPane:
                 IMAGE_GEN_FIELD_BORDER_PAD,
                 IMAGE_GEN_FIELD_LABEL_OBJECT_NAME,
                 IMAGE_GEN_FIELD_LABEL_SPACING,
-                build_image_gen_prompt_field_action_column,
-                create_image_gen_prompt_clear_button,
-                create_image_gen_prompt_speak_button,
+                IMAGE_GEN_PROMPT_LABEL_ACTION_SPACING,
+                IMAGE_GEN_SYSTEM_PROMPT_RESET_DEFAULT_TEXT,
+                append_image_gen_prompt_label_action_buttons,
                 create_image_gen_prompt_edit,
                 wrap_image_gen_bordered_field,
                 wrap_image_gen_field_control_indent,
@@ -278,7 +278,7 @@ class LmStudioInstructionsPane:
             )
             label_row_layout = QHBoxLayout(label_row)
             label_row_layout.setContentsMargins(0, 8, 0, 0)
-            label_row_layout.setSpacing(4)
+            label_row_layout.setSpacing(IMAGE_GEN_PROMPT_LABEL_ACTION_SPACING)
             collapse_arrow = _ClickableCollapseLabel(label_row)
             arrow_font = collapse_arrow.font()
             arrow_font.setPixelSize(_COLLAPSE_ARROW_FONT_PX)
@@ -309,29 +309,37 @@ class LmStudioInstructionsPane:
                 0,
                 Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
             )
-            speak_btn = create_image_gen_prompt_speak_button(
-                edit,
-                label_row,
-                object_name="imageGenSystemPromptSpeakBtn",
+            actions_host = QWidget(label_row)
+            actions_host.setSizePolicy(
+                QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed
             )
-            if speak_btn is not None:
-                label_row_layout.addWidget(
-                    speak_btn,
-                    0,
-                    Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
-                )
-            clear_btn = create_image_gen_prompt_clear_button(
+            actions_layout = QHBoxLayout(actions_host)
+            actions_layout.setContentsMargins(0, 0, 0, 0)
+            actions_layout.setSpacing(IMAGE_GEN_PROMPT_LABEL_ACTION_SPACING)
+            (
+                self._copy_btn,
+                _speak_btn,
+                self._mic_btn,
+                clear_btn,
+            ) = append_image_gen_prompt_label_action_buttons(
+                actions_layout,
                 edit,
-                label_row,
-                object_name="imageGenSystemPromptClearBtn",
+                actions_host,
+                copy_object_name="imageGenSystemPromptCopyBtn",
+                speak_object_name="imageGenSystemPromptSpeakBtn",
+                mic_object_name="imageGenSystemPromptVoiceMicBtn",
+                clear_object_name="imageGenSystemPromptClearBtn",
+                default_text=IMAGE_GEN_SYSTEM_PROMPT_RESET_DEFAULT_TEXT,
+                include_stretch=False,
             )
             self._clear_btn = clear_btn
-            label_row_layout.addWidget(
-                clear_btn,
-                0,
-                Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
-            )
+            self._action_col = actions_host
             label_row_layout.addStretch(1)
+            label_row_layout.addWidget(
+                actions_host,
+                0,
+                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
+            )
             self._toolbar_host = QWidget(group_parent)
             self._toolbar_host.setSizePolicy(
                 QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum
@@ -351,25 +359,8 @@ class LmStudioInstructionsPane:
             field_row = QWidget(group_parent)
             field_row_layout = QHBoxLayout(field_row)
             field_row_layout.setContentsMargins(0, 0, 0, IMAGE_GEN_FIELD_BORDER_PAD)
-            field_row_layout.setSpacing(4)
+            field_row_layout.setSpacing(0)
             field_row_layout.addWidget(self._editor_block, 1)
-            (
-                self._action_col,
-                self._action_layout,
-                self._copy_btn,
-                self._mic_btn,
-            ) = build_image_gen_prompt_field_action_column(
-                edit,
-                field_row,
-                copy_object_name="imageGenSystemPromptCopyBtn",
-                mic_object_name="imageGenSystemPromptVoiceMicBtn",
-                action_column_object_name="imageGenSystemPromptActionCol",
-            )
-            field_row_layout.addWidget(
-                self._action_col,
-                0,
-                Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignRight,
-            )
             field_row.setSizePolicy(
                 QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum
             )
@@ -587,7 +578,9 @@ class LmStudioInstructionsPane:
         input_shown = self._system_prompt_input_shown()
         if self._body_widget is not None:
             self._body_widget.setVisible(input_shown)
-        if self._clear_btn is not None:
+        if self._action_col is not None:
+            self._action_col.setVisible(input_shown)
+        elif self._clear_btn is not None:
             self._clear_btn.setVisible(input_shown)
 
     def _toggle_editor_expanded(self) -> None:
@@ -613,7 +606,9 @@ class LmStudioInstructionsPane:
             if self._widget is not None:
                 self._widget.setVisible(vis)
             if not vis:
-                if self._clear_btn is not None:
+                if self._action_col is not None:
+                    self._action_col.setVisible(False)
+                elif self._clear_btn is not None:
                     self._clear_btn.setVisible(False)
                 return
             if self._toolbar_host is not None:
@@ -627,7 +622,9 @@ class LmStudioInstructionsPane:
         if self._widget is not None:
             self._widget.setVisible(ai_available)
         if not ai_available:
-            if self._clear_btn is not None:
+            if self._action_col is not None:
+                self._action_col.setVisible(False)
+            elif self._clear_btn is not None:
                 self._clear_btn.setVisible(False)
             return
 
@@ -641,7 +638,9 @@ class LmStudioInstructionsPane:
         if self._section_body is not None:
             self._section_body.setVisible(section_expanded)
         if not section_expanded:
-            if self._clear_btn is not None:
+            if self._action_col is not None:
+                self._action_col.setVisible(False)
+            elif self._clear_btn is not None:
                 self._clear_btn.setVisible(False)
             return
         if self._toolbar_host is not None:

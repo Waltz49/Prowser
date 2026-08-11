@@ -159,7 +159,6 @@ from settings.widgets.collapsible_theme_group import (
     merge_theme_settings_groups_expanded,
 )
 from settings.widgets.macos_preferences import (
-    MacPreferencePanel,
     MacToggleSwitch,
     SettingsListCombo,
     build_column_major_toggle_grid,
@@ -2282,7 +2281,7 @@ class SettingsDialog(QDialog):
         inner_layout.setSpacing(18)
 
         # ----- Thumbnails -----
-        thumb_title, thumb_panel = mac_preference_section("Thumbnails", inner)
+        thumb_group, thumb_panel = mac_preference_section("Thumbnails", inner)
 
         filter_container = QWidget()
         filter_layout = QVBoxLayout(filter_container)
@@ -2384,11 +2383,10 @@ class SettingsDialog(QDialog):
             subtitle="Warning: This can rename large numbers of files without confirmation.",
         )
 
-        inner_layout.addWidget(thumb_title)
-        inner_layout.addWidget(thumb_panel)
+        inner_layout.addWidget(thumb_group)
 
         # ----- Browse -----
-        browse_title, browse_panel = mac_preference_section("Browse", inner)
+        browse_group, browse_panel = mac_preference_section("Browse", inner)
 
         self.space_mode_combo = SettingsListCombo()
         self.space_mode_combo.addItem("Exit to thumbnails", userData="exit")
@@ -2448,11 +2446,10 @@ class SettingsDialog(QDialog):
             subtitle="For Image History (F3)",
         )
 
-        inner_layout.addWidget(browse_title)
-        inner_layout.addWidget(browse_panel)
+        inner_layout.addWidget(browse_group)
 
         # ----- General -----
-        general_title, general_panel = mac_preference_section("General", inner)
+        general_group, general_panel = mac_preference_section("General", inner)
 
         self.confirm_delete_checkbox = general_panel.add_toggle(
             f"Delete confirmation on {CMD_SYMBOL}-Delete",
@@ -2509,8 +2506,7 @@ class SettingsDialog(QDialog):
             subtitle="Use Exit code to modify prompt data before model calls.",
         )
 
-        inner_layout.addWidget(general_title)
-        inner_layout.addWidget(general_panel)
+        inner_layout.addWidget(general_group)
 
         # ----- Image generation -----
         from imagegen_plugins.image_gen_dim_limits import (
@@ -2524,7 +2520,7 @@ class SettingsDialog(QDialog):
             app_series_cooldown_seconds,
         )
 
-        imagegen_title, imagegen_panel = mac_preference_section("Image Generation", inner)
+        imagegen_group, imagegen_panel = mac_preference_section("Image Generation", inner)
 
         _dim_step = APP_MAX_GENERATION_DIMENSION_STEP
         _dim_slider_max = (
@@ -2662,14 +2658,8 @@ class SettingsDialog(QDialog):
         )
         self._update_imagegen_series_cooldown_label()
 
-        imagegen_section = QWidget()
-        imagegen_section_layout = QVBoxLayout(imagegen_section)
-        imagegen_section_layout.setContentsMargins(0, 0, 0, 0)
-        imagegen_section_layout.setSpacing(6)
-        imagegen_section_layout.addWidget(imagegen_title)
-        imagegen_section_layout.addWidget(imagegen_panel)
-        inner_layout.addWidget(imagegen_section)
-        self._imagegen_general_settings_group = imagegen_section
+        inner_layout.addWidget(imagegen_group)
+        self._imagegen_general_settings_group = imagegen_group
 
         inner_layout.addStretch()
         scroll.setWidget(inner)
@@ -4029,7 +4019,7 @@ class SettingsDialog(QDialog):
         slideshow_layout.setColumnStretch(2, 0)
         slideshow_layout.setColumnStretch(3, 0)
 
-        playback_panel = MacPreferencePanel()
+        playback_group, playback_panel = mac_preference_section("Playback")
         self.slideshow_back_and_forth_checkbox = playback_panel.add_toggle(
             "Back and forth",
             tooltip="Play through images forward and backward repeatedly.",
@@ -4053,7 +4043,7 @@ class SettingsDialog(QDialog):
         warning_label.setStyleSheet(self.NOTE_TEXT_STYLE)
 
         layout.addWidget(slideshow_group)
-        layout.addWidget(playback_panel)
+        layout.addWidget(playback_group)
         layout.addWidget(warning_label)
         layout.addStretch()
 
@@ -4347,7 +4337,7 @@ class SettingsDialog(QDialog):
         
         layout.addWidget(cache_group)
 
-        bg_title, bg_panel = mac_preference_section("Background Processing")
+        bg_group, bg_panel = mac_preference_section("Background Processing")
 
         self.background_clip_enabled_checkbox = bg_panel.add_toggle(
             "Enable idle search-data collection",
@@ -4388,8 +4378,7 @@ class SettingsDialog(QDialog):
         )
         self._update_background_clip_subordinates_enabled()
 
-        layout.addWidget(bg_title)
-        layout.addWidget(bg_panel)
+        layout.addWidget(bg_group)
         layout.addStretch()
         
         # Load initial cache statistics (with error handling) - only if stats are enabled
@@ -5117,7 +5106,7 @@ class SettingsDialog(QDialog):
             print(f"Failed to list root directories: {e}")
             all_directories = []
 
-        root_title, root_panel = mac_preference_section("Root Directories", inner)
+        root_group, root_panel = mac_preference_section("Root Directories", inner)
         root_desc = QLabel(
             "Select which root-level directories should be shown in the file tree view."
         )
@@ -5139,11 +5128,10 @@ class SettingsDialog(QDialog):
         )
         root_panel.add_custom_row(dir_grid)
 
-        layout.addWidget(root_title)
-        layout.addWidget(root_desc)
-        layout.addWidget(root_panel)
+        root_group.layout().insertWidget(0, root_desc)
+        layout.addWidget(root_group)
 
-        options_title, options_panel = mac_preference_section("Scanning Options", inner)
+        options_group, options_panel = mac_preference_section("Scanning Options", inner)
 
         self.show_hidden_directories_checkbox = options_panel.add_toggle(
             "Process hidden directories",
@@ -5177,10 +5165,9 @@ class SettingsDialog(QDialog):
             subtitle="Including system volumes",
         )
 
-        layout.addWidget(options_title)
-        layout.addWidget(options_panel)
+        layout.addWidget(options_group)
 
-        depth_title, depth_panel = mac_preference_section("Depth", inner)
+        depth_group, depth_panel = mac_preference_section("Depth", inner)
 
         self.shift_cmd_depth_spinbox = QSpinBox()
         self.shift_cmd_depth_spinbox.setRange(1, 10)
@@ -5219,10 +5206,9 @@ class SettingsDialog(QDialog):
             tooltip="Maximum depth for recursive directory scans.",
         )
 
-        layout.addWidget(depth_title)
-        layout.addWidget(depth_panel)
+        layout.addWidget(depth_group)
 
-        files_title, files_panel = mac_preference_section("Image Creation & Temporary Files", inner)
+        files_group, files_panel = mac_preference_section("Image Creation & Temporary Files", inner)
         _default_image_dir = self._path_to_display(os.path.expanduser("~/Downloads"))
         files_note = QLabel(
             "When enabled, newly generated images are saved in the folder below. "
@@ -5299,11 +5285,10 @@ class SettingsDialog(QDialog):
             ),
         )
 
-        layout.addWidget(files_title)
-        layout.addWidget(files_note)
-        layout.addWidget(files_panel)
+        files_group.layout().insertWidget(0, files_note)
+        layout.addWidget(files_group)
 
-        ignore_title, ignore_panel = mac_preference_section("Ignore Directories", inner)
+        ignore_group, ignore_panel = mac_preference_section("Ignore Directories", inner)
 
         self.ignore_directory_input_fields = []
         self.ignore_directory_checkboxes = []
@@ -5342,8 +5327,7 @@ class SettingsDialog(QDialog):
             ignore_panel.add_form_row(f"Ignore path {i + 1}", ignore_control, 
                 subtitle=f"Skipped during scans and file operations")
 
-        layout.addWidget(ignore_title)
-        layout.addWidget(ignore_panel)
+        layout.addWidget(ignore_group)
 
         layout.addStretch()
         scroll.setWidget(inner)
@@ -5366,7 +5350,7 @@ class SettingsDialog(QDialog):
 
         all_extensions = sorted(IMAGE_EXTENSIONS)
 
-        ext_title, ext_panel = mac_preference_section("Image File Extensions", inner)
+        ext_group, ext_panel = mac_preference_section("Image File Extensions", inner)
         ext_desc = QLabel(
             "Select which file extensions should be recognized as image files."
         )
@@ -5395,9 +5379,8 @@ class SettingsDialog(QDialog):
         warning_label.setObjectName("macPreferenceRowSubtitle")
         warning_label.setWordWrap(True)
 
-        layout.addWidget(ext_title)
-        layout.addWidget(ext_desc)
-        layout.addWidget(ext_panel)
+        ext_group.layout().insertWidget(0, ext_desc)
+        layout.addWidget(ext_group)
         layout.addWidget(warning_label)
         layout.addStretch()
 
@@ -5628,7 +5611,7 @@ class SettingsDialog(QDialog):
         default_temp = CAPTION_DEFAULTS['caption_temperature']
         default_lms_host = CAPTION_DEFAULTS['caption_lms_host']
 
-        caption_group = QGroupBox("AI Captioning (LMStudio)")
+        caption_group = QGroupBox("AI Captioning via LMStudio (⌘E)")
         caption_layout = QFormLayout(caption_group)
         caption_layout.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
 
