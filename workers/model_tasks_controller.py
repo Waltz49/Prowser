@@ -207,7 +207,11 @@ class ModelTasksController(QObject):
         kind = self._active_kind
         self._cancelling = True
         try:
-            self._terminate_worker(blocking=False)
+            self._terminate_worker(
+                blocking=True, max_wait_ms=_WORKER_SHUTDOWN_GRACE_MS
+            )
+            if self._is_worker_alive():
+                self.force_terminate_worker()
             self._finish_job(kind, False, "Cancelled")
         finally:
             self._cancelling = False
@@ -332,8 +336,17 @@ class ModelTasksController(QObject):
             return
 
         job_id = str(msg.get("job_id") or "")
-        if self._active_job_id and job_id and job_id != self._active_job_id:
-            return
+        if msg_type in (
+            "progress",
+            "result",
+            "caption_chunk",
+            "flux_prompt_chunk",
+            "error",
+        ):
+            if not self._active_job_id:
+                return
+            if job_id and job_id != self._active_job_id:
+                return
 
         if msg_type == "progress":
             if self._active_kind == "generate":

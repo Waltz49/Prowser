@@ -160,7 +160,7 @@ def guidance_slider_block(
     )
     return FieldSpec(
         key="guidance_scale",
-        label="Guidance scale",
+        label="Guidance",
         kind="float_slider",
         default=float(values.get("guidance_scale", reset_default)),
         min_value=guidance_min,
