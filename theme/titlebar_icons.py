@@ -15,7 +15,6 @@ _COLOR_PLACEHOLDER = "%COLOR%"
 _HIDE_ICON_ASSETS = {
     "minus": "titlebar_minus.svg",
     "plus": "titlebar_plus.svg",
-    "close": "titlebar_close.svg",
 }
 _LIGHT_ON_DARK_FG = "#f2f2f2"
 _DARK_ON_LIGHT_FG = "#1a1a1a"

@@ -107,8 +107,8 @@ class HeaderWidget(QFrame):
         self.refresh_theme_styles()
 
     def set_hide_button_mode(self, mode: str) -> None:
-        """Show minus (collapse), plus (expand), or close on the hide button."""
-        if mode not in ("minus", "plus", "close"):
+        """Show minus (collapse) or plus (expand) on the hide button."""
+        if mode not in ("minus", "plus"):
             mode = "minus"
         self._hide_button_mode = mode
         if self.hide_button is not None:
@@ -117,7 +117,7 @@ class HeaderWidget(QFrame):
             )
 
     def set_flyout_button(self, button: QPushButton | None) -> None:
-        """Optional titlebar flyout/flyin control (before hide/close)."""
+        """Optional titlebar flyout/flyin control (before hide button)."""
         layout = self._header_layout
         if layout is None:
             return
@@ -138,7 +138,7 @@ class HeaderWidget(QFrame):
         self.refresh_theme_styles()
 
     def set_tools_button(self, button: QPushButton | None) -> None:
-        """Optional titlebar tools control (before flyout and hide/close)."""
+        """Optional titlebar tools control (before flyout and hide button)."""
         layout = self._header_layout
         if layout is None:
             return
