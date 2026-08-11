@@ -2003,7 +2003,9 @@ class CustomTreeView(QTreeView):
         progress_dialog = None
         if len(file_paths) > 10:
             from utils import create_file_operation_progress_dialog
-            progress_dialog = create_file_operation_progress_dialog(self.main_window, "Copying Files", len(file_paths)
+            progress_dialog = create_file_operation_progress_dialog(
+                self.main_window, "Copying Files", len(file_paths),
+                destination=target_directory,
             )
 
         # Track "apply to all" state
@@ -2164,7 +2166,9 @@ class CustomTreeView(QTreeView):
         progress_dialog = None
         if len(file_paths) > 10:
             from utils import create_file_operation_progress_dialog
-            progress_dialog = create_file_operation_progress_dialog(self.main_window, "Moving Files", len(file_paths)
+            progress_dialog = create_file_operation_progress_dialog(
+                self.main_window, "Moving Files", len(file_paths),
+                destination=target_directory,
             )
 
         for idx, source_path in enumerate(file_paths):

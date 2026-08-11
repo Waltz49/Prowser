@@ -77,6 +77,38 @@ def wrap_progress_dialog_label_elision(progress_dialog: QProgressDialog) -> None
 
     progress_dialog.setLabelText = _elided_set_label  # type: ignore[method-assign]
 
+
+def size_progress_dialog_to_message(
+    progress_dialog: QProgressDialog,
+    message: str,
+    *,
+    max_width: int = 700,
+) -> None:
+    """Widen a progress dialog so its label can show message without clipping."""
+    label = progress_dialog.findChild(QLabel)
+    if not label:
+        return
+    label.setWordWrap(False)
+    fm = label.fontMetrics()
+    text_w = fm.horizontalAdvance(message)
+    chrome_pad = 72
+    needed_label_w = min(text_w, max_width - chrome_pad)
+    if text_w > needed_label_w:
+        # Extremely long destination names: elide to the soft width cap.
+        avg = max(fm.averageCharWidth(), 1)
+        message = format_progress_label(
+            message, line_max=max(24, needed_label_w // avg)
+        )
+        text_w = fm.horizontalAdvance(message)
+        needed_label_w = text_w
+        progress_dialog.setWindowTitle(message)
+        label.setText(message)
+    label.setMaximumWidth(max(needed_label_w + 8, PROGRESS_LABEL_MAX_WIDTH_PX))
+    label.setMinimumWidth(needed_label_w)
+    dialog_w = max(progress_dialog.sizeHint().width(), needed_label_w + chrome_pad)
+    progress_dialog.setMinimumWidth(dialog_w)
+    progress_dialog.resize(dialog_w, max(progress_dialog.height(), progress_dialog.sizeHint().height()))
+
 # Local imports
 from thumbnails.thumbnail_constants import GREEN, RED, RESET, YELLOW
 from files.photos_library_paths import (
@@ -1649,11 +1681,29 @@ def create_titled_progress_dialog(
     return progress_dialog
 
 
-def create_file_operation_progress_dialog(parent, title: str, total_files: int) -> QProgressDialog:
-    """Create a progress dialog for file operations (deletions, moves, copies)."""
-    return create_titled_progress_dialog(
-        parent, title, total_files, cancellable=False
+def create_file_operation_progress_dialog(
+    parent,
+    title: str,
+    total_files: int,
+    *,
+    destination: Optional[str] = None,
+) -> QProgressDialog:
+    """Create a progress dialog for file operations (deletions, moves, copies).
+
+    When destination is provided (moves/copies), the dialog message includes
+    the file count and last path component, e.g. "Moving 15 files to foobar".
+    """
+    dialog_title = title
+    if destination:
+        dest_name = os.path.basename(os.path.normpath(destination)) or destination
+        verb = title.split()[0] if title else "Processing"
+        dialog_title = f"{verb} {total_files} {file_string(total_files)} to {dest_name}"
+    progress_dialog = create_titled_progress_dialog(
+        parent, dialog_title, total_files, cancellable=False
     )
+    if destination:
+        size_progress_dialog_to_message(progress_dialog, dialog_title)
+    return progress_dialog
 
 def show_styled_question(
     parent,

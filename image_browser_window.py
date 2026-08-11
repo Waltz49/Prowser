@@ -2248,7 +2248,8 @@ class ImageBrowserWindow(QMainWindow):
         if len(files_to_move) > 10:
             from utils import create_file_operation_progress_dialog
             progress_dialog = create_file_operation_progress_dialog(
-                self, "Moving Files", len(files_to_move)
+                self, "Moving Files", len(files_to_move),
+                destination=new_dir_path,
             )
         
         moved_count = 0

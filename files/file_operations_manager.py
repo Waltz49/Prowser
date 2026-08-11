@@ -5314,7 +5314,8 @@ class FileOperationsManager:
         if len(file_paths) > 10:
             from utils import create_file_operation_progress_dialog
             progress_dialog = create_file_operation_progress_dialog(
-                mw, "Copying Files from Photos Library", len(file_paths)
+                mw, "Copying Files from Photos Library", len(file_paths),
+                destination=target_directory,
             )
         
         for idx, source_path in enumerate(file_paths):
@@ -5566,7 +5567,8 @@ class FileOperationsManager:
         if len(file_paths) > 10:
             from utils import create_file_operation_progress_dialog
             progress_dialog = create_file_operation_progress_dialog(
-                mw, f"{op_label}ing Files", len(file_paths)
+                mw, f"{op_label}ing Files", len(file_paths),
+                destination=target_directory,
             )
 
         for idx, source_path in enumerate(file_paths):
