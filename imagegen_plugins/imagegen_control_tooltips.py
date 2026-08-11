@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-from PySide6.QtWidgets import QCheckBox, QDialogButtonBox, QPushButton, QSlider
+from PySide6.QtWidgets import QCheckBox, QDialogButtonBox, QDoubleSpinBox, QPushButton, QSlider
 from theme.spin_box import StepSpinBox
 
 from imagegen_plugins.image_gen_fields import FieldSpec
@@ -106,7 +106,7 @@ def apply_field_control_tooltips(
     widget: Any,
     *,
     slider: Optional[QSlider] = None,
-    spin: Optional[StepSpinBox] = None,
+    spin: Optional[StepSpinBox | QDoubleSpinBox] = None,
 ) -> None:
     """Set tooltips on bool checkboxes and slider/spin controls."""
     tip = field_tooltip(spec)
@@ -121,6 +121,8 @@ def apply_field_control_tooltips(
             spin.setToolTip(tip)
     elif spec.kind == "float_slider" and slider is not None:
         slider.setToolTip(tip)
+        if isinstance(spin, (StepSpinBox, QDoubleSpinBox)):
+            spin.setToolTip(tip)
 
 
 def apply_dim_helper_tooltips(

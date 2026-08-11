@@ -381,6 +381,7 @@ class ImageGenExpandDialog(ImageGenDimensionAspectMixin, QDialog):
                 self._fields_panel,
                 build_options=default_widget_build_options(
                     non_prompt_text_min_height=48,
+                    float_slider_use_spin=self._panel_mode,
                 ),
             )
         self._param_panel.repopulate(

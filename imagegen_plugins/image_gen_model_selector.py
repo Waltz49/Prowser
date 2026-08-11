@@ -520,19 +520,31 @@ def sync_image_gen_lora_field(dialog: Any) -> None:
         current_stack=stack,
         current_preset_id=legacy,
     )
+    from imagegen_plugins.job_values_snapshot import LORA_SCALES_BY_ID_KEY
+
+    scales_raw = values.get(LORA_SCALES_BY_ID_KEY)
+    if isinstance(scales_raw, dict) and hasattr(lora_field, "apply_scale_overrides"):
+        lora_field.apply_scale_overrides(scales_raw)
+    if not getattr(dialog, "_lora_popup_values_connected", False):
+
+        def _sync_lora_popup_to_dialog_values() -> None:
+            lf = getattr(dialog, "_lora_field", None)
+            if lf is None or not lf.is_popup_mode():
+                return
+            vals = getattr(dialog, "_values", None)
+            if not isinstance(vals, dict):
+                return
+            if lf.is_stack_mode():
+                vals["mflux_lora_stack"] = lf.selected_ids()
+            else:
+                ids = lf.selected_ids()
+                vals["mflux_lora"] = coerce_lora_preset_id(
+                    ids[0] if ids else "none"
+                )
+
+        lora_field.stack_changed.connect(_sync_lora_popup_to_dialog_values)
+        dialog._lora_popup_values_connected = True
     if use_stack:
-        if not getattr(dialog, "_lora_stack_values_connected", False):
-
-            def _sync_lora_stack_to_dialog_values() -> None:
-                lf = getattr(dialog, "_lora_field", None)
-                if lf is None or not lf.is_stack_mode():
-                    return
-                vals = getattr(dialog, "_values", None)
-                if isinstance(vals, dict):
-                    vals["mflux_lora_stack"] = lf.selected_ids()
-
-            lora_field.stack_changed.connect(_sync_lora_stack_to_dialog_values)
-            dialog._lora_stack_values_connected = True
         tip = field_tooltip(lora_spec) or ""
         extra = (
             " Select one or more LoRAs (experimental stacking). "
@@ -542,9 +554,10 @@ def sync_image_gen_lora_field(dialog: Any) -> None:
         widgets["mflux_lora_stack"] = (lora_field, None, lora_spec)
         widgets.pop("mflux_lora", None)
     else:
-        tip = field_tooltip(lora_spec)
-        if tip:
-            lora_field.summary_combo.setToolTip(tip)
+        if not lora_field.is_popup_mode():
+            tip = field_tooltip(lora_spec)
+            if tip:
+                lora_field.summary_combo.setToolTip(tip)
         widgets["mflux_lora"] = (lora_field.summary_combo, None, lora_spec)
         widgets.pop("mflux_lora_stack", None)
 

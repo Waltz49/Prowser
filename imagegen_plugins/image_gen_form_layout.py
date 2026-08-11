@@ -797,6 +797,12 @@ def configure_image_gen_int_slider_spin(spin: StepSpinBox) -> None:
     spin.setFixedWidth(spin.char_width())
 
 
+def configure_image_gen_float_slider_spin(spin: QWidget) -> None:
+    """Fixed-width spin for guidance and other float slider fields."""
+    spin.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+    spin.setFixedWidth(max(spin.sizeHint().width(), 56))
+
+
 def configure_image_gen_seed_spin(spin: StepSpinBox) -> None:
     """Fixed-width seed spin sized for eleven digit characters."""
     spin.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)

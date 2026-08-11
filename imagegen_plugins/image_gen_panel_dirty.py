@@ -56,7 +56,7 @@ def connect_panel_field_widgets(panel, emit: Callable[[], None]) -> None:
         panel._model_combo_dirty_connected = True
     lora_field = getattr(panel, "_lora_field", None)
     if lora_field is not None and not getattr(panel, "_lora_dirty_connected", False):
-        if lora_field.is_stack_mode():
+        if lora_field.is_popup_mode():
             lora_field.stack_changed.connect(lambda: emit())
         else:
             lora_field.summary_combo.currentIndexChanged.connect(lambda _i: emit())

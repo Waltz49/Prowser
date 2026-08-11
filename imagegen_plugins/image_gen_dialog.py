@@ -289,9 +289,15 @@ def apply_exif_generation_params_to_dialog(
             return
         lo = float(spec.min_value or 0.0)
         hi = float(spec.max_value or value)
-        scale = extra or 10
         clamped = max(lo, min(hi, float(value)))
         inner = widget.layout()
+        value_widget = inner.itemAt(1).widget()
+        from PySide6.QtWidgets import QDoubleSpinBox
+
+        if isinstance(value_widget, QDoubleSpinBox):
+            value_widget.setValue(clamped)
+            return
+        scale = extra or 10
         slider = inner.itemAt(0).widget()
         slider.setValue(int(clamped * scale))
 
@@ -347,7 +353,7 @@ def apply_exif_generation_params_to_dialog(
         target = str(params["lora"]).strip()
         plugin = getattr(dialog, "plugin", None)
         if not target or target.lower() == "none":
-            if lora_field is not None and lora_field.is_stack_mode():
+            if lora_field is not None and lora_field.is_popup_mode():
                 lora_field.set_stack([])
             elif stack_entry is None:
                 entry = widgets.get("mflux_lora")
@@ -366,7 +372,7 @@ def apply_exif_generation_params_to_dialog(
             matched_ids, scales_by_id = match_exif_lora_names_to_ids_and_scales(
                 target, plugin
             )
-            if matched_ids and lora_field is not None and lora_field.is_stack_mode():
+            if matched_ids and lora_field is not None and lora_field.is_popup_mode():
                 lora_field.set_stack(matched_ids)
                 if scales_by_id and hasattr(lora_field, "apply_scale_overrides"):
                     lora_field.apply_scale_overrides(scales_by_id)
@@ -1593,7 +1599,9 @@ class ImageGenDialog(ImageGenDimensionAspectMixin, QDialog):
         if self._param_panel is None:
             self._param_panel = ImageGenParameterPanel(
                 self._fields_panel,
-                build_options=default_widget_build_options(),
+                build_options=default_widget_build_options(
+                    float_slider_use_spin=self._panel_mode,
+                ),
             )
         self._param_panel.repopulate(
             self.plugin,
@@ -1701,7 +1709,7 @@ class ImageGenDialog(ImageGenDimensionAspectMixin, QDialog):
         if lora_entry is None:
             return
         lora_widget, _, lora_spec = lora_entry
-        if lora_field is not None and lora_field.is_stack_mode():
+        if lora_field is not None and lora_field.is_popup_mode():
             if self._lora_steps_floor_widget is not lora_field:
                 lora_field.stack_changed.connect(self._on_mflux_lora_steps_changed)
                 self._lora_steps_floor_widget = lora_field
@@ -1732,9 +1740,13 @@ class ImageGenDialog(ImageGenDimensionAspectMixin, QDialog):
 
         mode = get_pipeline(self.plugin.pipeline_id)
         lora_field = getattr(self, "_lora_field", None)
-        if lora_field is not None and lora_field.is_stack_mode():
+        if lora_field is not None and lora_field.is_popup_mode():
             stack = lora_field.selected_ids()
-            lora_min = lora_stack_min_steps(stack)
+            lora_min = lora_stack_min_steps(stack) if lora_field.is_stack_mode() else (
+                lora_preset_min_steps(
+                    coerce_lora_preset_id(stack[0] if stack else "none")
+                )
+            )
         else:
             lora_entry = self._widgets.get("mflux_lora")
             if lora_entry is None:

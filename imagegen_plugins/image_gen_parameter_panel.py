@@ -10,6 +10,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
+    QDoubleSpinBox,
     QHBoxLayout,
     QLabel,
     QPlainTextEdit,
@@ -34,6 +35,7 @@ from imagegen_plugins.image_gen_form_layout import (
     IMAGE_GEN_FLOW_ROLE_STEPS_QUANT,
     IMAGE_GEN_HALF_COLUMN_SLIDER_TRACK_WIDTH,
     ImageGenFieldsPanel,
+    configure_image_gen_float_slider_spin,
     configure_image_gen_int_slider_spin,
     configure_image_gen_seed_spin,
     configure_image_gen_slider_track,
@@ -51,6 +53,7 @@ from imagegen_plugins.imagegen_control_tooltips import apply_field_control_toolt
 class WidgetBuildOptions:
     non_prompt_text_min_height: int = 72
     float_label_precise: bool = False
+    float_slider_use_spin: bool = False
     show_field_reset_buttons: bool = True
     slider_track_width: Optional[int] = None
 
@@ -59,12 +62,28 @@ def default_widget_build_options(
     *,
     non_prompt_text_min_height: int = 72,
     float_label_precise: bool = False,
+    float_slider_use_spin: bool = False,
 ) -> WidgetBuildOptions:
     """Default widget build options for image-gen function panels."""
     return WidgetBuildOptions(
         non_prompt_text_min_height=non_prompt_text_min_height,
         float_label_precise=float_label_precise,
+        float_slider_use_spin=float_slider_use_spin,
     )
+
+
+def _float_slider_value_widget(widget: QWidget) -> QWidget:
+    inner = widget.layout()
+    return inner.itemAt(1).widget()
+
+
+def _float_slider_spin_value(widget: QWidget, extra: Any) -> float:
+    value_widget = _float_slider_value_widget(widget)
+    if isinstance(value_widget, QDoubleSpinBox):
+        return float(value_widget.value())
+    slider = widget.layout().itemAt(0).widget()
+    scale = extra or 10
+    return slider.value() / scale
 
 
 def choice_field_widget(widget: QWidget) -> QComboBox:
@@ -97,10 +116,7 @@ def _field_current_value(spec: FieldSpec, widget: QWidget, extra: Any) -> Any:
         inner = widget.layout()
         return inner.itemAt(1).widget().value()
     if spec.kind == "float_slider":
-        inner = widget.layout()
-        slider = inner.itemAt(0).widget()
-        scale = extra or 10
-        return slider.value() / scale
+        return _float_slider_spin_value(widget, extra)
     if spec.kind == "choice":
         return choice_field_widget(widget).currentData()
     return None
@@ -154,13 +170,16 @@ def _wire_field_reset_button(
             hi = int(spec.max_value or 100)
             spin.setValue(max(lo, min(hi, int(val))))
         elif spec.kind == "float_slider":
-            inner = widget.layout()
-            slider = inner.itemAt(0).widget()
             lo = float(spec.min_value or 0.0)
             hi = float(spec.max_value or 10.0)
-            scale = extra or 10
             clamped = max(lo, min(hi, float(val)))
-            slider.setValue(int(clamped * scale))
+            value_widget = _float_slider_value_widget(widget)
+            if isinstance(value_widget, QDoubleSpinBox):
+                value_widget.setValue(clamped)
+            else:
+                slider = widget.layout().itemAt(0).widget()
+                scale = extra or 10
+                slider.setValue(int(clamped * scale))
         elif spec.kind == "choice":
             combo = choice_field_widget(widget)
             idx = combo.findData(val)
@@ -181,9 +200,14 @@ def _wire_field_reset_button(
     elif spec.kind == "float_slider":
         inner = widget.layout()
         slider = inner.itemAt(0).widget()
+        value_widget = inner.itemAt(1).widget()
         slider.valueChanged.connect(
             lambda _v: _sync_field_reset_button(spec, widget, extra, button)
         )
+        if isinstance(value_widget, QDoubleSpinBox):
+            value_widget.valueChanged.connect(
+                lambda _v: _sync_field_reset_button(spec, widget, extra, button)
+            )
     elif spec.kind == "choice":
         choice_field_widget(widget).currentIndexChanged.connect(
             lambda _i: _sync_field_reset_button(spec, widget, extra, button)
@@ -311,22 +335,47 @@ def widget_for_field_spec(
         val = float(spec.default or lo)
         val = max(lo, min(hi, val))
         slider.setValue(int(val * scale))
-        if opts.float_label_precise and step < 0.1:
-            label = QLabel(f"{val:.2f}")
+        if opts.float_slider_use_spin:
+            spin = QDoubleSpinBox()
+            spin.setMinimum(lo)
+            spin.setMaximum(hi)
+            spin.setSingleStep(step)
+            spin.setDecimals(2 if step < 0.1 else 1)
+            spin.setValue(val)
+            configure_image_gen_float_slider_spin(spin)
 
-            def update_label(v: int, lbl=label, sc=scale, st=step):
-                lbl.setText(f"{v / sc:.2f}" if st < 0.1 else f"{v / sc:.1f}")
+            def sync_spin_from_slider(v: int, sp=spin, sc=scale) -> None:
+                sp.blockSignals(True)
+                sp.setValue(v / sc)
+                sp.blockSignals(False)
 
+            def sync_slider_from_spin(v: float, sl=slider, sc=scale) -> None:
+                sl.blockSignals(True)
+                sl.setValue(int(round(v * sc)))
+                sl.blockSignals(False)
+
+            slider.valueChanged.connect(sync_spin_from_slider)
+            spin.valueChanged.connect(sync_slider_from_spin)
+            apply_field_control_tooltips(spec, slider, slider=slider, spin=spin)
+            value_widget = spin
         else:
-            label = QLabel(f"{val:.1f}")
+            if opts.float_label_precise and step < 0.1:
+                label = QLabel(f"{val:.2f}")
 
-            def update_label(v: int, lbl=label, sc=scale):
-                lbl.setText(f"{v / sc:.1f}")
+                def update_label(v: int, lbl=label, sc=scale, st=step):
+                    lbl.setText(f"{v / sc:.2f}" if st < 0.1 else f"{v / sc:.1f}")
 
-        slider.valueChanged.connect(update_label)
-        apply_field_control_tooltips(spec, slider, slider=slider)
+            else:
+                label = QLabel(f"{val:.1f}")
+
+                def update_label(v: int, lbl=label, sc=scale):
+                    lbl.setText(f"{v / sc:.1f}")
+
+            slider.valueChanged.connect(update_label)
+            apply_field_control_tooltips(spec, slider, slider=slider)
+            value_widget = label
         reset_btn = _maybe_field_reset_button(spec, options=opts)
-        row = wrap_image_gen_slider_row(slider, label, reset_button=reset_btn)
+        row = wrap_image_gen_slider_row(slider, value_widget, reset_button=reset_btn)
         if reset_btn is not None:
             _wire_field_reset_button(spec, row, scale, reset_btn)
         return row, scale
@@ -369,10 +418,7 @@ def collect_widget_values(
             spin = inner.itemAt(1).widget()
             out[key] = spin.value()
         elif spec.kind == "float_slider":
-            inner = widget.layout()
-            slider = inner.itemAt(0).widget()
-            scale = extra or 10
-            out[key] = slider.value() / scale
+            out[key] = _float_slider_spin_value(widget, extra)
         elif spec.kind == "seed":
             out[key] = widget.value()
         else:

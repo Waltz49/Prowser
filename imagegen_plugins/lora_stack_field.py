@@ -10,12 +10,14 @@ from PySide6.QtGui import QDoubleValidator, QFontMetrics, QKeyEvent, QMouseEvent
 from PySide6.QtWidgets import (
     QApplication,
     QAbstractButton,
+    QButtonGroup,
     QCheckBox,
     QComboBox,
     QFrame,
     QGridLayout,
     QLabel,
     QLineEdit,
+    QRadioButton,
     QScrollArea,
     QSizePolicy,
     QStyle,
@@ -206,9 +208,11 @@ class LoraSelectionPopup(QFrame):
         self._scroll.setWidget(self._checks_host)
         root.addWidget(self._scroll, 0)
 
-        self._rows: List[Tuple[str, QCheckBox, QLineEdit]] = []
+        self._rows: List[Tuple[str, QAbstractButton, Optional[QLineEdit]]] = []
         self._fallback_scales: Dict[str, float] = {}
         self._empty_label: Optional[QLabel] = None
+        self._single_select = False
+        self._radio_group: Optional[QButtonGroup] = None
         self._preferred_width = _POPUP_MIN_WIDTH
         self._committed = False
         self._click_through_filter: Optional[_LoraPopupClickThroughFilter] = None
@@ -231,7 +235,8 @@ class LoraSelectionPopup(QFrame):
             f" background-color: {bg};"
             f" border: none;"
             f"}}"
-            f"QFrame#imageGenLoraSelectionPopup QCheckBox {{"
+            f"QFrame#imageGenLoraSelectionPopup QCheckBox,"
+            f"QFrame#imageGenLoraSelectionPopup QRadioButton {{"
             f" color: {text};"
             f"}}"
             f"QFrame#imageGenLoraSelectionPopup QLabel#loraPopupHeader {{"
@@ -308,6 +313,10 @@ class LoraSelectionPopup(QFrame):
         self._rows.clear()
         self._fallback_scales.clear()
         self._empty_label = None
+        self._single_select = False
+        if self._radio_group is not None:
+            self._radio_group.deleteLater()
+            self._radio_group = None
 
     def _add_empty_state_row(self) -> None:
         label = QLabel(_EMPTY_LORAS_MESSAGE, self._checks_host)
@@ -333,19 +342,24 @@ class LoraSelectionPopup(QFrame):
     def _wire_weight_row(
         self,
         preset_id: str,
-        cb: QCheckBox,
-        weight_edit: QLineEdit,
+        selector: QAbstractButton,
+        weight_edit: Optional[QLineEdit],
     ) -> None:
+        if weight_edit is None:
+            return
+
         def _on_toggled(checked: bool) -> None:
             weight_edit.setEnabled(checked)
 
-        cb.toggled.connect(_on_toggled)
-        _on_toggled(cb.isChecked())
+        selector.toggled.connect(_on_toggled)
+        _on_toggled(selector.isChecked())
 
     def _row_height_estimate(self) -> int:
         if not self._rows:
             return _ROW_HEIGHT_ESTIMATE
         _, _, weight_edit = self._rows[0]
+        if weight_edit is None:
+            return _ROW_HEIGHT_ESTIMATE
         return max(_ROW_HEIGHT_ESTIMATE, weight_edit.sizeHint().height() + 2)
 
     def _update_popup_layout_metrics(self, *, show_header: bool) -> None:
@@ -368,12 +382,19 @@ class LoraSelectionPopup(QFrame):
         selected_ids: List[str],
         *,
         scale_overrides: Optional[Dict[str, float]] = None,
+        single_select: bool = False,
     ) -> None:
-        """choices: (label, preset_id); excludes 'none'."""
+        """choices: (label, preset_id); multi-select excludes 'none', single-select includes it."""
         from imagegen_plugins.lora_catalog import get_lora_entry
 
         self._clear_checks()
-        selectable = [(label, preset_id) for label, preset_id in choices if preset_id != "none"]
+        self._single_select = single_select
+        if single_select:
+            selectable = list(choices)
+            if not any(pid == "none" for _, pid in selectable):
+                selectable = [("None", "none")] + selectable
+        else:
+            selectable = [(label, preset_id) for label, preset_id in choices if preset_id != "none"]
         if not selectable:
             self._add_empty_state_row()
             self._update_popup_layout_metrics(show_header=False)
@@ -381,7 +402,15 @@ class LoraSelectionPopup(QFrame):
 
         overrides = scale_overrides or {}
         self._add_header_row()
-        selected = set(selected_ids)
+        if single_select:
+            active_id = "none"
+            for pid in selected_ids:
+                if pid and pid != "none":
+                    active_id = pid
+                    break
+            selected = {active_id}
+        else:
+            selected = set(selected_ids)
         validator = QDoubleValidator(_SCALE_MIN, _SCALE_MAX, 2, self)
         validator.setNotation(QDoubleValidator.Notation.StandardNotation)
         row = 1
@@ -397,23 +426,34 @@ class LoraSelectionPopup(QFrame):
                     scale = max(_SCALE_MIN, min(_SCALE_MAX, scale))
             else:
                 scale = catalog_scale
-            self._fallback_scales[preset_id] = scale
+            if preset_id != "none":
+                self._fallback_scales[preset_id] = scale
 
-            cb = QCheckBox(str(label), self._checks_host)
-            cb.setChecked(preset_id in selected)
-            weight_edit = QLineEdit(_format_scale(scale), self._checks_host)
-            weight_edit.setObjectName("loraPopupWeightEdit")
-            weight_edit.setFixedWidth(_WEIGHT_COL_WIDTH)
-            weight_edit.setAlignment(
-                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
-            )
-            weight_edit.setValidator(validator)
-            weight_edit.setToolTip("LoRA weight (0.1–2.0)")
-            self._wire_weight_row(preset_id, cb, weight_edit)
+            if single_select:
+                selector: QAbstractButton = QRadioButton(str(label), self._checks_host)
+                if self._radio_group is None:
+                    self._radio_group = QButtonGroup(self)
+                self._radio_group.addButton(selector)
+            else:
+                selector = QCheckBox(str(label), self._checks_host)
+            selector.setChecked(preset_id in selected)
 
-            self._grid.addWidget(cb, row, 0, 1, 2)
-            self._grid.addWidget(weight_edit, row, 2)
-            self._rows.append((preset_id, cb, weight_edit))
+            weight_edit: Optional[QLineEdit] = None
+            if preset_id != "none":
+                weight_edit = QLineEdit(_format_scale(scale), self._checks_host)
+                weight_edit.setObjectName("loraPopupWeightEdit")
+                weight_edit.setFixedWidth(_WEIGHT_COL_WIDTH)
+                weight_edit.setAlignment(
+                    Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+                )
+                weight_edit.setValidator(validator)
+                weight_edit.setToolTip("LoRA weight (0.1–2.0)")
+                self._wire_weight_row(preset_id, selector, weight_edit)
+
+            self._grid.addWidget(selector, row, 0, 1, 2)
+            if weight_edit is not None:
+                self._grid.addWidget(weight_edit, row, 2)
+            self._rows.append((preset_id, selector, weight_edit))
             row += 1
 
         self._update_popup_layout_metrics(show_header=True)
@@ -423,9 +463,10 @@ class LoraSelectionPopup(QFrame):
         label_w = fm.horizontalAdvance("LoRA")
         if self._empty_label is not None:
             label_w = max(label_w, fm.horizontalAdvance(_EMPTY_LORAS_MESSAGE) // 2)
-        for _preset_id, cb, weight_edit in self._rows:
-            label_w = max(label_w, fm.horizontalAdvance(cb.text()))
-            label_w = max(label_w, weight_edit.sizeHint().width())
+        for _preset_id, selector, weight_edit in self._rows:
+            label_w = max(label_w, fm.horizontalAdvance(selector.text()))
+            if weight_edit is not None:
+                label_w = max(label_w, weight_edit.sizeHint().width())
 
         style = self.style()
         indicator = 18
@@ -451,9 +492,12 @@ class LoraSelectionPopup(QFrame):
 
     def _selected_ids(self) -> List[str]:
         out: List[str] = []
-        for preset_id, cb, _weight_edit in self._rows:
-            if cb.isChecked():
-                out.append(preset_id)
+        for preset_id, selector, _weight_edit in self._rows:
+            if not selector.isChecked():
+                continue
+            if preset_id == "none":
+                continue
+            out.append(preset_id)
         return out
 
     def scales_by_id(self) -> Dict[str, float]:
@@ -462,7 +506,8 @@ class LoraSelectionPopup(QFrame):
                 weight_edit.text(),
                 fallback=self._fallback_scales.get(preset_id, 1.0),
             )
-            for preset_id, _cb, weight_edit in self._rows
+            for preset_id, _selector, weight_edit in self._rows
+            if weight_edit is not None
         }
 
     def show_below(self, anchor: QWidget) -> None:
@@ -497,21 +542,17 @@ class LoraSummaryCombo(QComboBox):
 
     def showPopup(self) -> None:
         parent = self.parent()
-        stack_mode = getattr(parent, "_stack_mode", False)
-        if isinstance(parent, LoraStackField) and stack_mode:
+        popup_mode = getattr(parent, "_popup_mode", False)
+        if isinstance(parent, LoraStackField) and popup_mode:
             parent._open_popup()
             return
         super().showPopup()
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
-        # Stack mode: open the multi-select popup ourselves.
-        # Single-select (SD15): defer to QComboBox so show/hide pairing stays
-        # correct — manually calling showPopup() and consuming the press makes
-        # the repositioned list dismiss on the matching mouseup.
         parent = self.parent()
         if (
             isinstance(parent, LoraStackField)
-            and parent._stack_mode
+            and parent._popup_mode
             and self.isEnabled()
             and event.button() == Qt.MouseButton.LeftButton
         ):
@@ -525,8 +566,8 @@ class LoraStackField(QWidget):
     """
     LoRA control for image-gen dialogs.
 
-    FLUX/mflux/Klein: read-only summary combo opens multi-select popup.
-    SD15: standard single-select combo (unchanged behavior).
+    FLUX/mflux/Klein/SDXL: read-only summary combo opens multi-select popup.
+    SD15: read-only summary combo opens single-select popup (radio + weight).
     """
 
     stack_changed = Signal()
@@ -534,6 +575,7 @@ class LoraStackField(QWidget):
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self._stack_mode = True
+        self._popup_mode = True
         self._selected_ids: List[str] = []
         self._label_by_id: Dict[str, str] = {}
         self._choices: List[Tuple[str, str]] = []
@@ -603,11 +645,15 @@ class LoraStackField(QWidget):
     def is_stack_mode(self) -> bool:
         return self._stack_mode
 
+    def is_popup_mode(self) -> bool:
+        """True when the summary combo opens the custom LoRA popup (stack or single)."""
+        return self._popup_mode
+
     def selected_ids(self) -> List[str]:
-        if not self._stack_mode:
-            pid = coerce_lora_preset_id(self.summary_combo.currentData())
-            return [] if pid == "none" else [pid]
-        return list(self._selected_ids)
+        if self._popup_mode:
+            return list(self._selected_ids)
+        pid = coerce_lora_preset_id(self.summary_combo.currentData())
+        return [] if pid == "none" else [pid]
 
     def scales_by_id(self) -> Dict[str, float]:
         """Effective weights for selected LoRAs (session overrides, else catalog)."""
@@ -635,19 +681,28 @@ class LoraStackField(QWidget):
             self._scale_overrides[pid] = max(_SCALE_MIN, min(_SCALE_MAX, scale))
 
     def set_stack(self, ids: List[str]) -> None:
-        if not self._stack_mode:
-            preset = ids[0] if ids else "none"
-            idx = self.summary_combo.findData(preset)
-            if idx >= 0:
-                self.summary_combo.setCurrentIndex(idx)
+        if self._popup_mode:
+            if self._stack_mode:
+                self._selected_ids = list(ids)
+            else:
+                preset = ids[0] if ids else "none"
+                self._selected_ids = [] if preset == "none" else [preset]
+            self._update_summary_text()
             return
-        self._selected_ids = list(ids)
-        self._update_summary_text()
+        preset = ids[0] if ids else "none"
+        idx = self.summary_combo.findData(preset)
+        if idx >= 0:
+            self.summary_combo.setCurrentIndex(idx)
 
     def _update_summary_text(self) -> None:
-        if not self._stack_mode:
+        if not self._popup_mode:
             return
-        text = lora_stack_summary_text(self._selected_ids, self._label_by_id)
+        if self._stack_mode and len(self._selected_ids) > 1:
+            text = lora_stack_summary_text(self._selected_ids, self._label_by_id)
+        elif self._selected_ids:
+            text = lora_stack_summary_text(self._selected_ids, self._label_by_id)
+        else:
+            text = "None"
         self.summary_combo.blockSignals(True)
         self.summary_combo.clear()
         self.summary_combo.addItem(text, self._selected_ids)
@@ -699,8 +754,12 @@ class LoraStackField(QWidget):
             and host_id not in (HOST_SD15,)
         )
         self._stack_mode = use_stack
+        self._popup_mode = (
+            plugin_supports_lora(plugin) and host_id is not None
+        )
 
         if not plugin_supports_lora(plugin):
+            self._popup_mode = False
             self._configure_single_mode_combo()
             self.summary_combo.blockSignals(True)
             self.summary_combo.clear()
@@ -740,6 +799,30 @@ class LoraStackField(QWidget):
             self.summary_combo.setToolTip(tip)
             return
 
+        if self._popup_mode:
+            self._configure_stack_mode_combo()
+            self.summary_combo.setEnabled(True)
+            valid_ids = {pid for _, pid in choices}
+            preset = coerce_lora_preset_id(
+                current_preset_id if current_preset_id is not None else "none"
+            )
+            if preset in valid_ids and preset != "none":
+                self._selected_ids = [preset]
+            else:
+                self._selected_ids = []
+            self._scale_overrides = {
+                pid: scale
+                for pid, scale in self._scale_overrides.items()
+                if pid in valid_ids
+            }
+            self._update_summary_text()
+            tip = (
+                "Select a LoRA. Edit weight in the popup; "
+                "click outside to apply, Esc to cancel."
+            )
+            self.summary_combo.setToolTip(tip)
+            return
+
         self._configure_single_mode_combo()
         populate_image_gen_lora_combo(
             self.summary_combo,
@@ -749,7 +832,7 @@ class LoraStackField(QWidget):
         self._sync_combo_click_filters()
 
     def eventFilter(self, obj: Any, event: Any) -> bool:
-        if not self._stack_mode or not self.summary_combo.isEnabled():
+        if not self._popup_mode or not self.summary_combo.isEnabled():
             return super().eventFilter(obj, event)
         if event.type() != QEvent.Type.MouseButtonPress:
             return super().eventFilter(obj, event)
@@ -761,17 +844,21 @@ class LoraStackField(QWidget):
         return True
 
     def _open_popup(self) -> None:
-        if not self._stack_mode or not self.summary_combo.isEnabled():
+        if not self._popup_mode or not self.summary_combo.isEnabled():
             return
         if self._popup is None:
             self._popup = LoraSelectionPopup(self.window())
             self._popup.accepted.connect(self._on_popup_accepted)
             self._popup.rejected.connect(self._on_popup_rejected)
-        selectable = [(label, pid) for label, pid in self._choices if pid != "none"]
+        if self._stack_mode:
+            selectable = [(label, pid) for label, pid in self._choices if pid != "none"]
+        else:
+            selectable = list(self._choices)
         self._popup.set_choices(
             selectable,
             self._selected_ids,
             scale_overrides=self._scale_overrides,
+            single_select=not self._stack_mode,
         )
         self._popup.show_below(self.summary_combo)
 
