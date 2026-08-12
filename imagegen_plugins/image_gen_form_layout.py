@@ -313,6 +313,66 @@ def image_gen_prompt_edit_set_plain_text(
 
 _SENTENCE_START_RE = re.compile(r"(^|[.!?]\s+)(\w)")
 _IMAGE_GEN_PROMPT_SENTENCE_CASE_BLUR_ATTR = "_image_gen_prompt_sentence_case_blur"
+_TRAILING_PUNCT_NO_PERIOD = frozenset(".:?!")
+_HORIZONTAL_BLANK_RE = re.compile(r"[ \t]+")
+_SPACE_BEFORE_PERIOD_RE = re.compile(r"\s+\. ")
+
+
+def _collapse_duplicate_blanks(text: str) -> str:
+    return _HORIZONTAL_BLANK_RE.sub(" ", text.strip())
+
+
+def _normalize_period_spacing(text: str) -> str:
+    return _SPACE_BEFORE_PERIOD_RE.sub(". ", text)
+
+
+def _ensure_trailing_period(text: str) -> str:
+    stripped = text.rstrip()
+    if not stripped:
+        return text
+    if stripped[-1] in _TRAILING_PUNCT_NO_PERIOD:
+        return text
+    return stripped + "."
+
+
+def _normalize_line_content(line: str) -> str:
+    return _normalize_period_spacing(_collapse_duplicate_blanks(line).lower())
+
+
+def _normalize_line_for_sentence_case(line: str) -> str:
+    if not line.strip():
+        return ""
+    return _ensure_trailing_period(_normalize_line_content(line))
+
+
+def _collapse_consecutive_blank_lines(lines: list[str]) -> list[str]:
+    collapsed: list[str] = []
+    prev_blank = False
+    for line in lines:
+        is_blank = not line
+        if is_blank and prev_blank:
+            continue
+        prev_blank = is_blank
+        collapsed.append(line)
+    return collapsed
+
+
+def prepare_for_sentence_case(text: str) -> str:
+    """Lower text, collapse duplicate blanks, ensure trailing punctuation."""
+    lines: list[str] = []
+    for line in text.splitlines():
+        lines.append(_normalize_line_content(line) if line.strip() else "")
+    lines = _collapse_consecutive_blank_lines(lines)
+    return _ensure_trailing_period("\n".join(lines))
+
+
+def prepare_for_sentence_case_lines(text: str) -> str:
+    """Apply line normalization to each non-empty line."""
+    lines: list[str] = []
+    for line in text.splitlines():
+        lines.append(_normalize_line_for_sentence_case(line) if line.strip() else "")
+    lines = _collapse_consecutive_blank_lines(lines)
+    return "\n".join(lines)
 
 
 def sentence_case(text: str) -> str:
@@ -346,7 +406,10 @@ def apply_sentence_case_to_plain_text_edit(
     if _image_gen_prompt_edit_is_streaming(edit):
         return False
     text = edit.toPlainText()
-    normalized = sentence_case_lines(text) if per_line else sentence_case(text)
+    prepared = (
+        prepare_for_sentence_case_lines(text) if per_line else prepare_for_sentence_case(text)
+    )
+    normalized = sentence_case_lines(prepared) if per_line else sentence_case(prepared)
     if normalized != text:
         edit.setPlainText(normalized)
         return True

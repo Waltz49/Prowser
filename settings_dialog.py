@@ -8258,6 +8258,11 @@ class SettingsDialog(QDialog):
                 if hasattr(self, 'imagegen_fast_open_action_combo')
                 else 'from_text'
             ),
+            'imagegen_output_format': (
+                self.imagegen_output_format_combo.currentData()
+                if hasattr(self, 'imagegen_output_format_combo')
+                else 'png'
+            ),
             'filtered_tree': self.original_settings.get('filtered_tree', 'images'),  # UI removed, value set from Tree Filtering menu and persisted
             'filter_pattern': ImageBrowserConfig.normalize_filter_pattern(self.filter_pattern_input.text().strip()),
             'shift_cmd_depth': self.shift_cmd_depth_spinbox.value(),
