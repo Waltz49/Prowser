@@ -3558,6 +3558,15 @@ class ImageBrowserWindow(QMainWindow):
         if list_container and hasattr(list_container, "refresh_theme_styles"):
             list_container.refresh_theme_styles()
 
+    def refresh_custom_theme_menu(self, custom_themes: Optional[dict] = None) -> None:
+        from theme.theme_service import rebuild_view_custom_theme_menu
+
+        rebuild_view_custom_theme_menu(
+            self,
+            self.config,
+            custom_themes=custom_themes,
+        )
+
     def refresh_theme_styles(self):
         """Re-apply theme-dependent widget styles after global palette change."""
         theme = get_active_theme()
@@ -5739,6 +5748,7 @@ class ImageBrowserWindow(QMainWindow):
             or 'user_theme_colors' in new_settings
             or 'dark_theme_colors' in new_settings
             or 'light_theme_colors' in new_settings
+            or 'custom_themes' in new_settings
         ):
             from theme.theme_service import apply_theme, get_active_theme
 
@@ -5756,11 +5766,16 @@ class ImageBrowserWindow(QMainWindow):
                 user_theme_colors=new_settings.get('user_theme_colors'),
                 dark_theme_colors=new_settings.get('dark_theme_colors'),
                 light_theme_colors=new_settings.get('light_theme_colors'),
+                custom_themes=new_settings.get('custom_themes'),
             )
             if getattr(self, 'theme_dark_action', None):
                 from theme.theme_service import sync_view_theme_menu_actions
 
                 sync_view_theme_menu_actions(self, tid)
+            if hasattr(self, 'refresh_custom_theme_menu'):
+                self.refresh_custom_theme_menu(
+                    custom_themes=new_settings.get('custom_themes'),
+                )
 
         if 'debug_mode' in new_settings:
             self.debug_mode = new_settings['debug_mode']

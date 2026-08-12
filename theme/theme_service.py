@@ -3,9 +3,10 @@
 
 from __future__ import annotations
 
+import re
 from copy import deepcopy
 from dataclasses import dataclass, fields, replace
-from typing import Any, Dict, Optional, Union
+from typing import Any, Dict, Optional, Tuple, Union
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QGuiApplication
@@ -319,6 +320,9 @@ THEMES: Dict[str, ThemeType] = {
     "light": DEFAULT_LIGHT_THEME,
 }
 
+BUILTIN_THEME_IDS = frozenset({"dark", "light", "user", "system"})
+EDITABLE_BUILTIN_THEME_IDS = frozenset({"dark", "light", "user"})
+
 _active_theme: ThemeType = DEFAULT_DARK_THEME
 
 _theme_main_window: Any = None
@@ -338,9 +342,178 @@ def apply_view_chrome_splitter_theme(splitter) -> None:
 
 
 
-def normalize_theme_id(theme_id: str) -> str:
+def is_builtin_theme_id(theme_id: Optional[str]) -> bool:
+    return (theme_id or "").lower() in BUILTIN_THEME_IDS
+
+
+def is_editable_theme_id(theme_id: Optional[str], custom_themes: Optional[dict] = None) -> bool:
+    tid = (theme_id or "").lower()
+    if tid in EDITABLE_BUILTIN_THEME_IDS:
+        return True
+    if custom_themes is None:
+        custom_themes = _load_custom_themes_for_normalize()
+    return is_custom_theme_id(tid, custom_themes)
+
+
+def is_custom_theme_id(theme_id: Optional[str], custom_themes: Optional[dict]) -> bool:
+    tid = (theme_id or "").lower()
+    if not tid or tid in BUILTIN_THEME_IDS:
+        return False
+    return isinstance(custom_themes, dict) and tid in custom_themes
+
+
+def slugify_theme_display_name(name: str) -> str:
+    s = (name or "").strip().lower()
+    s = re.sub(r"[^a-z0-9_]+", "_", s)
+    s = re.sub(r"_+", "_", s).strip("_")
+    return s
+
+
+def validate_new_theme_display_name(
+    name: str,
+    custom_themes: Optional[dict],
+) -> Tuple[Optional[str], Optional[str]]:
+    """Return (slug, error_message). slug is None when validation fails."""
+    display = (name or "").strip()
+    if not display:
+        return None, "Name cannot be empty."
+    slug = slugify_theme_display_name(display)
+    if not slug:
+        return None, "Name must contain at least one letter or number."
+    if slug in BUILTIN_THEME_IDS:
+        return None, f"\"{display}\" is a reserved theme name."
+    merged = merge_custom_themes(custom_themes)
+    base_slug = slug
+    n = 2
+    while slug in merged:
+        slug = f"{base_slug}_{n}"
+        n += 1
+    return slug, None
+
+
+def merge_custom_theme_colors(
+    stored: Optional[Dict[str, Any]],
+    base: str,
+) -> Dict[str, Any]:
+    if base == "light":
+        return merge_light_theme_colors(stored)
+    if base == "user":
+        return merge_user_theme_colors(stored)
+    return merge_dark_theme_colors(stored)
+
+
+def merge_custom_theme_browse_transparency(raw: Optional[dict]) -> Dict[str, Any]:
+    from config import default_browse_transparency_entry
+
+    out = default_browse_transparency_entry()
+    if not isinstance(raw, dict):
+        return out
+    tc = raw.get("transparency_color")
+    if isinstance(tc, (list, tuple)) and len(tc) >= 3:
+        try:
+            out["transparency_color"] = [int(tc[0]), int(tc[1]), int(tc[2])]
+        except (TypeError, ValueError):
+            pass
+    if "use_diamonds" in raw:
+        out["use_diamonds"] = bool(raw["use_diamonds"])
+    bbc = raw.get("browse_border_color")
+    if isinstance(bbc, (list, tuple)) and len(bbc) >= 3:
+        try:
+            out["browse_border_color"] = [int(bbc[0]), int(bbc[1]), int(bbc[2])]
+        except (TypeError, ValueError):
+            pass
+    return out
+
+
+def merge_custom_themes(raw: Optional[dict]) -> Dict[str, Dict[str, Any]]:
+    out: Dict[str, Dict[str, Any]] = {}
+    if not isinstance(raw, dict):
+        return out
+    for slug, ent in raw.items():
+        if not isinstance(slug, str) or not slug or slug in BUILTIN_THEME_IDS:
+            continue
+        if not isinstance(ent, dict):
+            continue
+        base = str(ent.get("base") or "dark").lower()
+        if base not in EDITABLE_BUILTIN_THEME_IDS:
+            base = "dark"
+        display_name = str(ent.get("display_name") or slug).strip() or slug
+        colors = merge_custom_theme_colors(ent.get("colors"), base)
+        browse_transparency = merge_custom_theme_browse_transparency(ent.get("browse_transparency"))
+        out[slug] = {
+            "display_name": display_name,
+            "base": base,
+            "colors": colors,
+            "browse_transparency": browse_transparency,
+        }
+    return out
+
+
+def get_custom_theme_entry(
+    custom_themes: Optional[dict],
+    theme_id: str,
+) -> Optional[Dict[str, Any]]:
+    merged = merge_custom_themes(custom_themes)
+    return merged.get((theme_id or "").lower())
+
+
+def theme_base_for_id(theme_id: str, custom_themes: Optional[dict] = None) -> str:
+    tid = (theme_id or "dark").lower()
+    if tid in EDITABLE_BUILTIN_THEME_IDS:
+        return tid
+    entry = get_custom_theme_entry(custom_themes, tid)
+    if entry:
+        return str(entry.get("base") or "dark")
+    return "dark"
+
+
+def build_theme_from_custom_entry(tid: str, entry: Dict[str, Any]) -> ThemeType:
+    base = str(entry.get("base") or "dark").lower()
+    merged = merge_custom_theme_colors(entry.get("colors"), base)
+    if base == "light":
+        return replace(build_light_theme_from_colors(merged), theme_id=tid)
+    if base == "user":
+        return replace(build_user_theme_from_colors(merged), theme_id=tid)
+    return replace(build_dark_theme_from_colors(merged), theme_id=tid)
+
+
+def colors_for_theme_id(theme_id: str, settings: dict) -> Dict[str, Any]:
+    tid = (theme_id or "dark").lower()
+    if tid == "user":
+        return merge_user_theme_colors(settings.get("user_theme_colors"))
+    if tid == "dark":
+        return merge_dark_theme_colors(settings.get("dark_theme_colors"))
+    if tid == "light":
+        return merge_light_theme_colors(settings.get("light_theme_colors"))
+    entry = get_custom_theme_entry(settings.get("custom_themes"), tid)
+    if entry:
+        return deepcopy(entry.get("colors") or {})
+    return merge_dark_theme_colors(None)
+
+
+def _load_custom_themes_for_normalize(config: Any = None) -> Dict[str, Dict[str, Any]]:
+    try:
+        if config is None:
+            from config import get_config
+
+            config = get_config()
+        return merge_custom_themes(config.load_settings().get("custom_themes"))
+    except Exception:
+        return {}
+
+
+def normalize_theme_id(
+    theme_id: str,
+    *,
+    custom_themes: Optional[dict] = None,
+    config: Any = None,
+) -> str:
     tid = (theme_id or "dark").lower()
     if tid in THEMES or tid in ("user", "system"):
+        return tid
+    if custom_themes is None:
+        custom_themes = _load_custom_themes_for_normalize(config)
+    if tid in custom_themes:
         return tid
     return "dark"
 
@@ -355,9 +528,14 @@ def system_appearance_theme_id() -> str:
     return "dark"
 
 
-def resolve_theme_id_for_apply(theme_id: str) -> str:
-    """Resolve stored ui_theme (including 'system') to dark/light/user for palette application."""
-    tid = normalize_theme_id(theme_id)
+def resolve_theme_id_for_apply(
+    theme_id: str,
+    *,
+    custom_themes: Optional[dict] = None,
+    config: Any = None,
+) -> str:
+    """Resolve stored ui_theme (including 'system') for palette application."""
+    tid = normalize_theme_id(theme_id, custom_themes=custom_themes, config=config)
     if tid == "system":
         return system_appearance_theme_id()
     return tid
@@ -365,7 +543,11 @@ def resolve_theme_id_for_apply(theme_id: str) -> str:
 
 def resolved_ui_theme_from_settings(settings: dict) -> str:
     """Browse transparency and other per-theme settings use this (system -> dark/light)."""
-    return resolve_theme_id_for_apply((settings.get("ui_theme") or "dark"))
+    ui = (settings.get("ui_theme") or "dark").lower()
+    custom_themes = merge_custom_themes(settings.get("custom_themes"))
+    if ui == "system":
+        return system_appearance_theme_id()
+    return normalize_theme_id(ui, custom_themes=custom_themes)
 
 
 def set_theme_main_window(main_window: Any) -> None:
@@ -374,14 +556,88 @@ def set_theme_main_window(main_window: Any) -> None:
 
 
 def sync_view_theme_menu_actions(main_window: Any, ui_theme_id: str) -> None:
-    tid = normalize_theme_id(ui_theme_id)
+    custom_themes = _load_custom_themes_for_normalize(
+        getattr(main_window, "config", None),
+    )
+    tid = normalize_theme_id(ui_theme_id, custom_themes=custom_themes)
+    is_custom = is_custom_theme_id(tid, custom_themes)
     if getattr(main_window, "theme_system_action", None) is not None:
         main_window.theme_system_action.setChecked(tid == "system")
     if getattr(main_window, "theme_dark_action", None) is not None:
-        main_window.theme_dark_action.setChecked(tid == "dark")
-        main_window.theme_light_action.setChecked(tid == "light")
+        main_window.theme_dark_action.setChecked(tid == "dark" and not is_custom)
+        main_window.theme_light_action.setChecked(tid == "light" and not is_custom)
     if getattr(main_window, "theme_user_action", None) is not None:
-        main_window.theme_user_action.setChecked(tid == "user")
+        main_window.theme_user_action.setChecked(tid == "user" and not is_custom)
+    for slug, action in (getattr(main_window, "theme_custom_actions", None) or {}).items():
+        action.setChecked(tid == slug)
+
+
+def rebuild_view_custom_theme_menu(
+    main_window: Any,
+    config: Any,
+    *,
+    custom_themes: Optional[dict] = None,
+) -> None:
+    """Rebuild dynamic View > Theme entries for user-defined themes."""
+    from PySide6.QtGui import QAction
+
+    theme_menu = getattr(main_window, "theme_menu", None)
+    if theme_menu is None:
+        return
+
+    old_actions = getattr(main_window, "theme_custom_actions", None) or {}
+    theme_group = getattr(main_window, "theme_action_group", None)
+    for action in old_actions.values():
+        theme_menu.removeAction(action)
+        if theme_group is not None:
+            theme_group.removeAction(action)
+
+    if custom_themes is None:
+        try:
+            custom_themes = merge_custom_themes(config.load_settings().get("custom_themes"))
+        except Exception:
+            custom_themes = {}
+    else:
+        custom_themes = merge_custom_themes(custom_themes)
+
+    main_window.theme_custom_actions = {}
+    system_action = getattr(main_window, "theme_system_action", None)
+    menu_separator = getattr(main_window, "theme_menu_separator", None)
+    insert_before = menu_separator or system_action
+    if menu_separator is not None:
+        menu_separator.setVisible(bool(custom_themes))
+
+    def _apply_ui_theme(theme_id: str) -> None:
+        apply_theme(
+            theme_id,
+            app=QApplication.instance(),
+            main_window=main_window,
+            persist=True,
+            config=config,
+        )
+        sync_view_theme_menu_actions(main_window, theme_id)
+
+    sorted_items = sorted(
+        custom_themes.items(),
+        key=lambda kv: (str(kv[1].get("display_name") or kv[0]).lower(), kv[0]),
+    )
+    for slug, entry in sorted_items:
+        label = str(entry.get("display_name") or slug)
+        action = QAction(label, main_window)
+        action.setCheckable(True)
+        if theme_group is not None:
+            theme_group.addAction(action)
+        if insert_before is not None:
+            theme_menu.insertAction(insert_before, action)
+        else:
+            theme_menu.addAction(action)
+        action.triggered.connect(lambda _checked=False, tid=slug: _apply_ui_theme(tid))
+        main_window.theme_custom_actions[slug] = action
+
+    sync_view_theme_menu_actions(
+        main_window,
+        (config.load_settings() or {}).get("ui_theme", "dark"),
+    )
 
 
 def connect_system_theme_listener() -> None:
@@ -398,7 +654,10 @@ def _on_system_color_scheme_changed(_scheme: Qt.ColorScheme) -> None:
         from config import get_config
 
         cfg = get_config()
-        if normalize_theme_id(cfg.load_settings().get("ui_theme", "dark")) != "system":
+        if normalize_theme_id(
+            cfg.load_settings().get("ui_theme", "dark"),
+            config=cfg,
+        ) != "system":
             return
     except Exception:
         return
@@ -904,6 +1163,8 @@ def apply_theme(
     user_theme_colors: Optional[Dict[str, Any]] = None,
     dark_theme_colors: Optional[Dict[str, Any]] = None,
     light_theme_colors: Optional[Dict[str, Any]] = None,
+    custom_themes: Optional[Dict[str, Any]] = None,
+    custom_theme_colors: Optional[Dict[str, Any]] = None,
     apply_scope: str = "full",
 ) -> str:
     """
@@ -916,19 +1177,65 @@ def apply_theme(
     For \"dark\" / \"light\", pass dark_theme_colors / light_theme_colors to preview overrides,
     or None to load persisted preset colors from config.
 
+    For custom theme slugs, pass custom_themes and/or custom_theme_colors for live preview.
+
     apply_scope controls how much UI is restyled after syncing constants:
       - \"full\": global QApplication stylesheet + refresh_theme_styles (default)
       - \"chrome\": refresh_theme_styles only (splitters, sidebars, per-widget chrome)
       - \"thumbnail\": thumbnail canvas repaint only
 
-    Returns the stored/normalized theme id (e.g. 'system', 'dark', 'light', 'user').
+    Returns the stored/normalized theme id (e.g. 'system', 'dark', 'light', 'user', or custom slug).
     """
     if apply_scope not in ("full", "chrome", "thumbnail"):
         apply_scope = "full"
     global _active_theme
-    stored_tid = normalize_theme_id(theme_id)
-    apply_tid = resolve_theme_id_for_apply(stored_tid)
-    if apply_tid == "user":
+    if config is None:
+        try:
+            from config import get_config
+
+            config = get_config()
+        except Exception:
+            config = None
+    if custom_themes is None and config is not None:
+        try:
+            custom_themes = merge_custom_themes(config.load_settings().get("custom_themes"))
+        except Exception:
+            custom_themes = {}
+    if custom_themes is None:
+        custom_themes = {}
+
+    stored_tid = normalize_theme_id(theme_id, custom_themes=custom_themes, config=config)
+    apply_tid = resolve_theme_id_for_apply(
+        stored_tid,
+        custom_themes=custom_themes,
+        config=config,
+    )
+    if is_custom_theme_id(apply_tid, custom_themes):
+        entry = deepcopy(custom_themes.get(apply_tid) or {})
+        base = str(entry.get("base") or "dark").lower()
+        if custom_theme_colors is not None:
+            merged = merge_custom_theme_colors(custom_theme_colors, base)
+        else:
+            merged = merge_custom_theme_colors(entry.get("colors"), base)
+        entry["colors"] = merged
+        _active_theme = build_theme_from_custom_entry(apply_tid, entry)
+        if persist:
+            try:
+                if config is None:
+                    from config import get_config
+
+                    config = get_config()
+                settings = config.load_settings()
+                stored_custom = merge_custom_themes(settings.get("custom_themes"))
+                stored_entry = stored_custom.get(apply_tid, entry)
+                stored_entry["colors"] = deepcopy(merged)
+                stored_custom[apply_tid] = stored_entry
+                settings["custom_themes"] = stored_custom
+                settings["ui_theme"] = apply_tid
+                config.save_settings(settings)
+            except Exception:
+                pass
+    elif apply_tid == "user":
         if user_theme_colors is not None:
             merged = merge_user_theme_colors(user_theme_colors)
         else:
@@ -985,7 +1292,7 @@ def apply_theme(
     if apply_scope == "full" and app is not None:
         app.setStyleSheet(_active_theme.global_stylesheet())
 
-    if persist and stored_tid != "user":
+    if persist and stored_tid not in ("user",) and not is_custom_theme_id(stored_tid, custom_themes):
         try:
             if config is None:
                 from config import get_config

@@ -852,13 +852,23 @@ class MenuManager:
         theme_menu.addAction(self.main_window.theme_light_action)
         theme_menu.addAction(self.main_window.theme_dark_action)
         theme_menu.addAction(self.main_window.theme_user_action)
-        theme_menu.addSeparator()
+        self.main_window.theme_menu_separator = theme_menu.addSeparator()
         theme_menu.addAction(self.main_window.theme_system_action)
+        self.main_window.theme_menu = theme_menu
+        self.main_window.theme_action_group = theme_group
+        self.main_window.theme_custom_actions = {}
         _ui_theme = self.main_window.config.load_settings().get("ui_theme", "dark")
-        from theme.theme_service import apply_theme, connect_system_theme_listener, set_theme_main_window, sync_view_theme_menu_actions
+        from theme.theme_service import (
+            apply_theme,
+            connect_system_theme_listener,
+            rebuild_view_custom_theme_menu,
+            set_theme_main_window,
+            sync_view_theme_menu_actions,
+        )
 
         connect_system_theme_listener()
         set_theme_main_window(self.main_window)
+        rebuild_view_custom_theme_menu(self.main_window, self.main_window.config)
         sync_view_theme_menu_actions(self.main_window, _ui_theme)
 
         def _apply_ui_theme(theme_id: str):

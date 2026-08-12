@@ -67,9 +67,19 @@ def merge_browse_transparency_settings(
 
 def effective_browse_transparency(settings: dict) -> Tuple[List[int], bool]:
     """Transparency color and checkerboard flag for the active ui_theme."""
-    from theme.theme_service import resolved_ui_theme_from_settings
+    from theme.theme_service import (
+        get_custom_theme_entry,
+        is_custom_theme_id,
+        merge_custom_theme_browse_transparency,
+        resolved_ui_theme_from_settings,
+    )
 
     ui = resolved_ui_theme_from_settings(settings)
+    custom_themes = settings.get("custom_themes")
+    if is_custom_theme_id(ui, custom_themes):
+        entry = get_custom_theme_entry(custom_themes, ui) or {}
+        ent = merge_custom_theme_browse_transparency(entry.get("browse_transparency"))
+        return list(ent["transparency_color"]), bool(ent["use_diamonds"])
     if ui not in BROWSE_TRANSPARENCY_THEME_IDS:
         ui = "dark"
     merged = merge_browse_transparency_settings(
@@ -81,15 +91,25 @@ def effective_browse_transparency(settings: dict) -> Tuple[List[int], bool]:
 
 def effective_browse_border_color(settings: dict) -> List[int]:
     """Letterbox / margin fill behind the image in browse mode when it does not fill the viewport."""
-    from theme.theme_service import resolved_ui_theme_from_settings
+    from theme.theme_service import (
+        get_custom_theme_entry,
+        is_custom_theme_id,
+        merge_custom_theme_browse_transparency,
+        resolved_ui_theme_from_settings,
+    )
 
     ui = resolved_ui_theme_from_settings(settings)
-    if ui not in BROWSE_TRANSPARENCY_THEME_IDS:
-        ui = "dark"
-    merged = merge_browse_transparency_settings(
-        settings.get("browse_transparency_settings"),
-    )
-    ent = merged[ui]
+    custom_themes = settings.get("custom_themes")
+    if is_custom_theme_id(ui, custom_themes):
+        entry = get_custom_theme_entry(custom_themes, ui) or {}
+        ent = merge_custom_theme_browse_transparency(entry.get("browse_transparency"))
+    else:
+        if ui not in BROWSE_TRANSPARENCY_THEME_IDS:
+            ui = "dark"
+        merged = merge_browse_transparency_settings(
+            settings.get("browse_transparency_settings"),
+        )
+        ent = merged[ui]
     bc = ent.get("browse_border_color", [0, 0, 0])
     if isinstance(bc, (list, tuple)) and len(bc) >= 3:
         try:
@@ -197,17 +217,45 @@ class ImageBrowserConfig:
         self._prowser_home.mkdir(exist_ok=True)
         # Settings dialog live browse color preview (merged in load_settings only; never written by itself)
         self._browse_transparency_settings_preview: Optional[dict] = None
+        self._custom_theme_browse_preview: Optional[Tuple[str, dict]] = None
     
     def set_browse_transparency_preview(self, bts: Optional[dict]) -> None:
         """When set, load_settings() overlays this browse_transparency_settings (live color picker)."""
         self._browse_transparency_settings_preview = copy.deepcopy(bts) if bts is not None else None
 
+    def set_custom_theme_browse_preview(
+        self,
+        theme_id: Optional[str],
+        ent: Optional[dict],
+    ) -> None:
+        """Live browse transparency preview for a custom theme slug."""
+        if theme_id and isinstance(ent, dict):
+            from theme.theme_service import merge_custom_theme_browse_transparency
+
+            self._custom_theme_browse_preview = (
+                str(theme_id),
+                merge_custom_theme_browse_transparency(ent),
+            )
+        else:
+            self._custom_theme_browse_preview = None
+
     def _merge_browse_preview_into_loaded_settings(self, settings: dict) -> dict:
         prev = getattr(self, "_browse_transparency_settings_preview", None)
-        if prev is None:
+        custom_prev = getattr(self, "_custom_theme_browse_preview", None)
+        if prev is None and custom_prev is None:
             return settings
         out = copy.deepcopy(settings)
-        out["browse_transparency_settings"] = merge_browse_transparency_settings(prev)
+        if prev is not None:
+            out["browse_transparency_settings"] = merge_browse_transparency_settings(prev)
+        if custom_prev is not None:
+            slug, ent = custom_prev
+            from theme.theme_service import merge_custom_themes
+
+            custom = merge_custom_themes(out.get("custom_themes"))
+            entry = custom.get(slug, {})
+            entry["browse_transparency"] = copy.deepcopy(ent)
+            custom[slug] = entry
+            out["custom_themes"] = custom
         return out
 
     @property
@@ -435,6 +483,8 @@ class ImageBrowserConfig:
             'dark_theme_colors': default_dark_theme_colors(),
             # Custom colors when ui_theme == 'light' (defaults match built-in light palette)
             'light_theme_colors': default_light_theme_colors(),
+            # User-defined themes (slug -> display_name, base, colors, browse_transparency)
+            'custom_themes': {},
             'file_tree_visible': True,  # Default to showing file tree
             'shift_cmd_depth': 4,  # File tree expansion depth (Shift+Cmd)
             'search_depth': 4,  # Image discovery walk depth for tree expansion

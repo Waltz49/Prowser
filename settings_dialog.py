@@ -94,15 +94,26 @@ from theme.theme_service import (
     default_light_theme_colors,
     default_user_theme_colors,
     get_active_theme,
+    get_custom_theme_entry,
+    is_builtin_theme_id,
+    is_custom_theme_id,
+    is_editable_theme_id,
+    merge_custom_theme_browse_transparency,
+    merge_custom_theme_colors,
+    merge_custom_themes,
     merge_dark_theme_colors,
     merge_light_theme_colors,
     merge_user_theme_colors,
     normalize_theme_id,
+    rebuild_view_custom_theme_menu,
     resolve_theme_id_for_apply,
+    theme_base_for_id,
+    validate_new_theme_display_name,
     USER_THEME_COLOR_KEYS,
     THEME_BORDER_WIDTH_KEYS,
     VIEW_CHROME_THEME_KEYS,
     theme_apply_scope_for_keys,
+    EDITABLE_BUILTIN_THEME_IDS,
 )
 from theme.spin_box import StepSpinBox
 
@@ -866,19 +877,33 @@ class SettingsDialog(QDialog):
         """Theme preset driving settings-dialog chrome (not generic app dialog colors)."""
         if hasattr(self, "theme_preset_combo"):
             tid = self.theme_preset_combo.currentData()
-            if tid in ("dark", "light", "user"):
+            if is_editable_theme_id(tid, self._merged_custom_themes()):
+                if is_custom_theme_id(tid, self._merged_custom_themes()):
+                    base = theme_base_for_id(tid, self._merged_custom_themes())
+                    return "light" if base == "light" else "dark"
                 return tid
         tid = getattr(get_active_theme(), "theme_id", "dark")
-        return tid if tid in ("dark", "light", "user") else "dark"
+        if is_custom_theme_id(tid, self._merged_custom_themes()):
+            base = theme_base_for_id(tid, self._merged_custom_themes())
+            return "light" if base == "light" else "dark"
+        return tid if tid in EDITABLE_BUILTIN_THEME_IDS else "dark"
 
     def _settings_chrome(self):
         return settings_chrome_for_preset(self._settings_chrome_preset_id())
+
+    def _merged_custom_themes(self) -> dict:
+        if hasattr(self, "current_settings"):
+            return merge_custom_themes(self.current_settings.get("custom_themes"))
+        return merge_custom_themes(get_config().load_settings().get("custom_themes"))
 
     def _combo_theme_preset_id(self) -> str:
         if not hasattr(self, "theme_preset_combo"):
             return "dark"
         tid = self.theme_preset_combo.currentData()
-        return tid if tid in ("dark", "light", "user") else "dark"
+        custom = self._merged_custom_themes()
+        if is_editable_theme_id(tid, custom):
+            return tid
+        return "dark"
 
     def _ui_theme_user_explicitly_changed(self, combo_tid: Optional[str] = None) -> bool:
         """True when the theme combo no longer matches the stored system appearance."""
@@ -897,11 +922,17 @@ class SettingsDialog(QDialog):
         return combo_tid
 
     def _ui_theme_values_equal(self, stored_ui_theme, combo_tid: str) -> bool:
-        stored = normalize_theme_id(stored_ui_theme or "dark")
-        combo = normalize_theme_id(combo_tid if combo_tid in ("dark", "light", "user") else "dark")
+        stored = normalize_theme_id(stored_ui_theme or "dark", custom_themes=self._merged_custom_themes())
+        combo = normalize_theme_id(
+            combo_tid if is_editable_theme_id(combo_tid, self._merged_custom_themes()) else "dark",
+            custom_themes=self._merged_custom_themes(),
+        )
         if stored == combo:
             return True
-        if stored == "system" and combo == resolve_theme_id_for_apply("system"):
+        if stored == "system" and combo == resolve_theme_id_for_apply(
+            "system",
+            custom_themes=self._merged_custom_themes(),
+        ):
             return True
         return False
 
@@ -1334,8 +1365,11 @@ class SettingsDialog(QDialog):
         """Get current settings for a specific tab"""
         if tab_widget == self.theme_settings_tab:
             tid = self.theme_preset_combo.currentData()
-            if tid in ("dark", "light", "user") and hasattr(self, "use_diamonds_checkbox"):
+            custom = self._merged_custom_themes()
+            if is_editable_theme_id(tid, custom) and hasattr(self, "use_diamonds_checkbox"):
                 self._flush_browse_transparency_entry(tid)
+            if is_custom_theme_id(tid, custom):
+                self._flush_current_theme_preset_to_settings()
             if tid == "user":
                 utc = self._get_user_theme_colors_from_widgets()
             else:
@@ -1354,6 +1388,7 @@ class SettingsDialog(QDialog):
                 'user_theme_colors': utc,
                 'dark_theme_colors': dtc,
                 'light_theme_colors': ltc,
+                'custom_themes': copy.deepcopy(merge_custom_themes(self.current_settings.get("custom_themes"))),
                 'browse_transparency_settings': copy.deepcopy(bts),
             }
         elif tab_widget == self.app_settings_tab:
@@ -1529,6 +1564,10 @@ class SettingsDialog(QDialog):
             o = merge_light_theme_colors(original_value if isinstance(original_value, dict) else None)
             n = merge_light_theme_colors(new_value if isinstance(new_value, dict) else None)
             return tuple(sorted(o.items())) == tuple(sorted(n.items()))
+        if key == 'custom_themes':
+            o = merge_custom_themes(original_value if isinstance(original_value, dict) else None)
+            n = merge_custom_themes(new_value if isinstance(new_value, dict) else None)
+            return o == n
         if key == 'ui_theme':
             return self._ui_theme_values_equal(original_value, new_value)
         return original_value == new_value
@@ -1548,14 +1587,19 @@ class SettingsDialog(QDialog):
     def _apply_tab_settings(self, tab_widget, settings):
         """Apply settings to a specific tab"""
         if tab_widget == self.theme_settings_tab:
-            # Restore only the palette currently selected in the combo (dark / light / user).
+            # Restore only the palette currently selected in the combo.
             # Do not apply saved ui_theme — that would switch the combo and confuse app vs editor state.
             tid_now = self.theme_preset_combo.currentData()
-            if tid_now not in ("dark", "light", "user"):
+            custom = self._merged_custom_themes()
+            if not is_editable_theme_id(tid_now, custom):
                 tid_now = "dark"
             if not hasattr(self, "current_settings"):
                 return
-            if tid_now == "user":
+            if is_custom_theme_id(tid_now, custom):
+                saved_custom = merge_custom_themes(settings.get("custom_themes"))
+                if tid_now in saved_custom:
+                    self.current_settings["custom_themes"] = copy.deepcopy(saved_custom)
+            elif tid_now == "user":
                 if "user_theme_colors" in settings:
                     merged_u = merge_user_theme_colors(settings["user_theme_colors"])
                 else:
@@ -1574,16 +1618,24 @@ class SettingsDialog(QDialog):
                     merged_l = merge_light_theme_colors(None)
                 self.current_settings["light_theme_colors"] = copy.deepcopy(merged_l)
             bts = merge_browse_transparency_settings(self.current_settings.get("browse_transparency_settings"))
-            raw_saved_bts = settings.get("browse_transparency_settings")
-            if isinstance(raw_saved_bts, dict) and raw_saved_bts:
-                merged_saved = merge_browse_transparency_settings(raw_saved_bts)
-                if tid_now in merged_saved:
-                    bts[tid_now] = copy.deepcopy(merged_saved[tid_now])
+            if is_custom_theme_id(tid_now, custom):
+                saved_custom = merge_custom_themes(settings.get("custom_themes"))
+                entry = saved_custom.get(tid_now, {})
+                if entry:
+                    stored_custom = merge_custom_themes(self.current_settings.get("custom_themes"))
+                    stored_custom[tid_now] = copy.deepcopy(entry)
+                    self.current_settings["custom_themes"] = stored_custom
+            else:
+                raw_saved_bts = settings.get("browse_transparency_settings")
+                if isinstance(raw_saved_bts, dict) and raw_saved_bts:
+                    merged_saved = merge_browse_transparency_settings(raw_saved_bts)
+                    if tid_now in merged_saved:
+                        bts[tid_now] = copy.deepcopy(merged_saved[tid_now])
+                    else:
+                        bts[tid_now] = default_browse_transparency_entry()
                 else:
                     bts[tid_now] = default_browse_transparency_entry()
-            else:
-                bts[tid_now] = default_browse_transparency_entry()
-            self.current_settings["browse_transparency_settings"] = bts
+                self.current_settings["browse_transparency_settings"] = bts
             self._populate_theme_tab_swatches()
             self._load_browse_transparency_entry(tid_now)
             self._last_theme_preset_id = tid_now
@@ -2802,13 +2854,15 @@ class SettingsDialog(QDialog):
         preset_row.setSpacing(12)
         preset_row.addWidget(QLabel("Use palette from:"))
         self.theme_preset_combo = SettingsListCombo()
-        self.theme_preset_combo.addItem("Dark", "dark")
-        self.theme_preset_combo.addItem("Light", "light")
-        self.theme_preset_combo.addItem("User", "user")
         configure_settings_list_combo(self.theme_preset_combo)
         self.theme_preset_combo.setToolTip("Each preset has its own saved color overrides.")
         self.theme_preset_combo.currentIndexChanged.connect(self._on_theme_preset_changed)
         preset_row.addWidget(self.theme_preset_combo)
+        self.theme_preset_add_btn = self._create_theme_add_button()
+        preset_row.addWidget(self.theme_preset_add_btn)
+        self.theme_preset_delete_btn = self._create_theme_delete_button()
+        preset_row.addWidget(self.theme_preset_delete_btn)
+        self._refresh_theme_preset_combo()
         preset_row.addStretch()
         outer.addWidget(preset_group)
 
@@ -3049,13 +3103,286 @@ class SettingsDialog(QDialog):
             self.original_settings["theme_settings_groups_expanded"] = copy.deepcopy(merged_copy)
         get_config().update_setting("theme_settings_groups_expanded", merged_copy)
 
+    def _theme_add_button_style(self, size: int = 26) -> str:
+        _plus_url = f"url({asset_path('series_plus_icon.png')})"
+        _plus_hover_url = f"url({asset_path('series_plus_icon_hover.png')})"
+        c = self._settings_chrome()
+        return f"""
+            QPushButton#themePresetAddButton {{
+                background-color: {c.control_bg_hex};
+                border: 1px solid {BORDER_DEFAULT_HEX};
+                border-radius: 4px;
+                padding: 3px;
+                min-width: {size}px;
+                max-width: {size}px;
+                min-height: {size}px;
+                max-height: {size}px;
+                image: {_plus_url};
+            }}
+            QPushButton#themePresetAddButton:focus {{
+                border: 1px solid {CURRENT_IMAGE_BORDER_COLOR_HEX};
+                outline: none;
+            }}
+            QPushButton#themePresetAddButton:hover {{
+                background-color: {TAB_BUTTON_HOVER_BG_HEX};
+                border: 1px solid {TAB_BUTTON_HOVER_BG_HEX};
+                image: {_plus_hover_url};
+            }}
+            QPushButton#themePresetAddButton:pressed {{
+                background-color: {SIDEBAR_SPLITTER_HANDLE_HEX};
+            }}
+        """
+
+    def _theme_trash_button_style(self) -> str:
+        _trash_url = f"url({asset_path('trash_icon.png')})"
+        _trash_hover_url = f"url({asset_path('trash_icon_hover.png')})"
+        c = self._settings_chrome()
+        return f"""
+            QPushButton#themePresetDeleteButton {{
+                background-color: {c.control_bg_hex};
+                border: 1px solid {BORDER_DEFAULT_HEX};
+                border-radius: 3px;
+                padding: 0px 4px 4px 2px;
+                min-width: 18px;
+                max-width: 18px;
+                min-height: 18px;
+                max-height: 18px;
+                image: {_trash_url};
+            }}
+            QPushButton#themePresetDeleteButton:focus {{
+                border: 1px solid {CURRENT_IMAGE_BORDER_COLOR_HEX};
+                outline: none;
+            }}
+            QPushButton#themePresetDeleteButton:hover {{
+                background-color: {TAB_BUTTON_HOVER_BG_HEX};
+                border: 1px solid {TAB_BUTTON_HOVER_BG_HEX};
+                image: {_trash_hover_url};
+            }}
+            QPushButton#themePresetDeleteButton:pressed {{
+                background-color: {SIDEBAR_SPLITTER_HANDLE_HEX};
+            }}
+        """
+
+    def _create_theme_add_button(self) -> QPushButton:
+        btn = QPushButton()
+        btn.setObjectName("themePresetAddButton")
+        btn.setToolTip("Create a new theme from the current palette…")
+        btn.setFixedSize(26, 26)
+        btn.setStyleSheet(self._theme_add_button_style())
+        btn.clicked.connect(self._on_create_custom_theme)
+        return btn
+
+    def _create_theme_delete_button(self) -> QPushButton:
+        btn = QPushButton()
+        btn.setObjectName("themePresetDeleteButton")
+        btn.setToolTip("Delete the selected custom theme")
+        btn.setFixedSize(18, 18)
+        btn.setStyleSheet(self._theme_trash_button_style())
+        btn.clicked.connect(self._on_delete_custom_theme)
+        btn.setVisible(False)
+        return btn
+
+    def _refresh_theme_preset_combo(self, select_tid: Optional[str] = None) -> None:
+        if not hasattr(self, "theme_preset_combo"):
+            return
+        current = select_tid or self.theme_preset_combo.currentData()
+        self.theme_preset_combo.blockSignals(True)
+        self.theme_preset_combo.clear()
+        self.theme_preset_combo.addItem("Dark", "dark")
+        self.theme_preset_combo.addItem("Light", "light")
+        self.theme_preset_combo.addItem("User", "user")
+        custom = self._merged_custom_themes()
+        for slug, entry in sorted(
+            custom.items(),
+            key=lambda kv: (str(kv[1].get("display_name") or kv[0]).lower(), kv[0]),
+        ):
+            self.theme_preset_combo.addItem(str(entry.get("display_name") or slug), slug)
+        idx = self.theme_preset_combo.findData(current)
+        if idx < 0:
+            idx = 0
+        self.theme_preset_combo.setCurrentIndex(idx)
+        self.theme_preset_combo.blockSignals(False)
+        refresh_settings_list_combo(self.theme_preset_combo)
+        self._update_theme_preset_action_buttons()
+
+    def _update_theme_preset_action_buttons(self) -> None:
+        if not hasattr(self, "theme_preset_combo"):
+            return
+        tid = self.theme_preset_combo.currentData()
+        if hasattr(self, "theme_preset_delete_btn"):
+            self.theme_preset_delete_btn.setVisible(
+                is_custom_theme_id(tid, self._merged_custom_themes())
+            )
+        if hasattr(self, "theme_preset_add_btn"):
+            self.theme_preset_add_btn.setStyleSheet(self._theme_add_button_style())
+        if hasattr(self, "theme_preset_delete_btn"):
+            self.theme_preset_delete_btn.setStyleSheet(self._theme_trash_button_style())
+
+    def _prompt_new_theme_name(self) -> Optional[str]:
+        dlg = QDialog(self)
+        dlg.setWindowTitle("New theme")
+        dlg.setMinimumWidth(360)
+        layout = QVBoxLayout(dlg)
+        layout.addWidget(QLabel("Theme name:"))
+        name_edit = QLineEdit()
+        name_edit.setPlaceholderText("My theme")
+        layout.addWidget(name_edit)
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.accepted.connect(dlg.accept)
+        buttons.rejected.connect(dlg.reject)
+        layout.addWidget(buttons)
+        dlg.setStyleSheet(settings_dialog_stylesheet(self._settings_chrome()))
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return None
+        return name_edit.text().strip()
+
+    def _flush_current_theme_preset_to_settings(self) -> None:
+        if not hasattr(self, "theme_preset_combo"):
+            return
+        tid = self.theme_preset_combo.currentData()
+        if not is_editable_theme_id(tid, self._merged_custom_themes()):
+            return
+        colors = self._get_user_theme_colors_from_widgets()
+        if is_custom_theme_id(tid, self._merged_custom_themes()):
+            custom = merge_custom_themes(self.current_settings.get("custom_themes"))
+            entry = custom.get(tid, {})
+            entry["colors"] = copy.deepcopy(colors)
+            if hasattr(self, "use_diamonds_checkbox"):
+                entry["browse_transparency"] = self._browse_transparency_from_widgets()
+            custom[tid] = entry
+            self.current_settings["custom_themes"] = custom
+            return
+        if hasattr(self, "use_diamonds_checkbox"):
+            self._flush_browse_transparency_entry(tid)
+        if tid == "user":
+            self.current_settings["user_theme_colors"] = copy.deepcopy(colors)
+        elif tid == "dark":
+            self.current_settings["dark_theme_colors"] = copy.deepcopy(colors)
+        elif tid == "light":
+            self.current_settings["light_theme_colors"] = copy.deepcopy(colors)
+
+    def _get_browse_transparency_entry_for_tid(self, tid: str) -> dict:
+        if is_custom_theme_id(tid, self._merged_custom_themes()):
+            custom = merge_custom_themes(self.current_settings.get("custom_themes"))
+            entry = custom.get(tid, {})
+            return merge_custom_theme_browse_transparency(entry.get("browse_transparency"))
+        bts = merge_browse_transparency_settings(self.current_settings.get("browse_transparency_settings"))
+        return copy.deepcopy(bts.get(tid, default_browse_transparency_entry()))
+
+    def _set_browse_transparency_entry_for_tid(self, tid: str, ent: dict) -> None:
+        merged_ent = merge_custom_theme_browse_transparency(ent)
+        if is_custom_theme_id(tid, self._merged_custom_themes()):
+            custom = merge_custom_themes(self.current_settings.get("custom_themes"))
+            entry = custom.get(tid, {})
+            entry["browse_transparency"] = merged_ent
+            custom[tid] = entry
+            self.current_settings["custom_themes"] = custom
+            return
+        bts = merge_browse_transparency_settings(self.current_settings.get("browse_transparency_settings"))
+        bts[tid] = merged_ent
+        self.current_settings["browse_transparency_settings"] = bts
+
+    def _browse_transparency_from_widgets(self) -> dict:
+        tid = self.theme_preset_combo.currentData() if hasattr(self, "theme_preset_combo") else "dark"
+        ent = self._get_browse_transparency_entry_for_tid(tid)
+        if hasattr(self, "use_diamonds_checkbox"):
+            ent["use_diamonds"] = self.use_diamonds_checkbox.isChecked()
+        return ent
+
+    def _on_create_custom_theme(self) -> None:
+        display_name = self._prompt_new_theme_name()
+        if not display_name:
+            return
+        custom = self._merged_custom_themes()
+        slug, err = validate_new_theme_display_name(display_name, custom)
+        if err:
+            show_styled_warning(self, "New theme", err)
+            return
+        self._flush_current_theme_preset_to_settings()
+        source_tid = self.theme_preset_combo.currentData()
+        base = theme_base_for_id(source_tid, custom)
+        colors = self._get_user_theme_colors_from_widgets()
+        browse_transparency = self._browse_transparency_from_widgets()
+        if is_custom_theme_id(source_tid, custom):
+            source_entry = custom.get(source_tid, {})
+            browse_transparency = copy.deepcopy(
+                source_entry.get("browse_transparency") or browse_transparency
+            )
+        elif hasattr(self, "use_diamonds_checkbox"):
+            self._flush_browse_transparency_entry(source_tid)
+            bts = merge_browse_transparency_settings(
+                self.current_settings.get("browse_transparency_settings")
+            )
+            browse_transparency = copy.deepcopy(bts.get(source_tid, default_browse_transparency_entry()))
+        custom = merge_custom_themes(self.current_settings.get("custom_themes"))
+        custom[slug] = {
+            "display_name": display_name,
+            "base": base,
+            "colors": copy.deepcopy(colors),
+            "browse_transparency": browse_transparency,
+        }
+        self.current_settings["custom_themes"] = custom
+        self._refresh_theme_preset_combo(select_tid=slug)
+        self._populate_theme_tab_swatches()
+        self._load_browse_transparency_entry(slug)
+        self._last_theme_preset_id = slug
+        self._apply_theme_tab_from_dialog()
+        mw = self.parent()
+        if mw is not None and hasattr(mw, "refresh_custom_theme_menu"):
+            mw.refresh_custom_theme_menu(custom_themes=self._merged_custom_themes())
+
+    def _on_delete_custom_theme(self) -> None:
+        tid = self.theme_preset_combo.currentData()
+        custom = self._merged_custom_themes()
+        if not is_custom_theme_id(tid, custom):
+            return
+        entry = custom.get(tid) or {}
+        display_name = str(entry.get("display_name") or tid)
+        reply = show_styled_question(
+            self,
+            "Delete theme",
+            f"Delete theme \"{display_name}\"?\n\nThis cannot be undone.",
+            default_no=True,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        reply2 = show_styled_question(
+            self,
+            "Delete theme",
+            f"Are you sure? Theme \"{display_name}\" will be permanently removed.",
+            default_no=True,
+        )
+        if reply2 != QMessageBox.StandardButton.Yes:
+            return
+        self._flush_current_theme_preset_to_settings()
+        custom = merge_custom_themes(self.current_settings.get("custom_themes"))
+        custom.pop(tid, None)
+        self.current_settings["custom_themes"] = custom
+        fallback = "dark"
+        if self.current_settings.get("ui_theme") == tid:
+            self.current_settings["ui_theme"] = fallback
+        self._refresh_theme_preset_combo(select_tid=fallback)
+        self._populate_theme_tab_swatches()
+        self._load_browse_transparency_entry(fallback)
+        self._last_theme_preset_id = fallback
+        self._apply_theme_tab_from_dialog()
+        mw = self.parent()
+        if mw is not None and hasattr(mw, "refresh_custom_theme_menu"):
+            mw.refresh_custom_theme_menu(custom_themes=self._merged_custom_themes())
+
     def _populate_theme_tab_swatches(self):
-        """Fill swatches from saved palette for the selected preset (dark / light / user)."""
+        """Fill swatches from saved palette for the selected preset."""
         if not hasattr(self, "_user_theme_color_buttons"):
             return
         tid = self.theme_preset_combo.currentData()
         cs = self.current_settings if hasattr(self, "current_settings") else None
-        if tid == "user":
+        custom = self._merged_custom_themes()
+        if is_custom_theme_id(tid, custom):
+            entry = custom.get(tid, {})
+            merged = merge_custom_theme_colors(entry.get("colors"), entry.get("base", "dark"))
+        elif tid == "user":
             merged = merge_user_theme_colors(cs.get("user_theme_colors") if cs else None)
         elif tid == "dark":
             merged = merge_dark_theme_colors(cs.get("dark_theme_colors") if cs else None)
@@ -3063,11 +3390,12 @@ class SettingsDialog(QDialog):
             merged = merge_light_theme_colors(cs.get("light_theme_colors") if cs else None)
         else:
             merged = default_user_theme_colors()
+        editable = is_editable_theme_id(tid, custom)
         self._user_theme_color_hex = {k: merged[k] for k in USER_THEME_COLOR_KEYS}
         for k in USER_THEME_COLOR_KEYS:
             self._update_user_theme_color_button(k)
         for btn in self._user_theme_color_buttons.values():
-            btn.setEnabled(tid in ("dark", "light", "user"))
+            btn.setEnabled(editable)
         if hasattr(self, "_border_width_sliders"):
             for k in THEME_BORDER_WIDTH_KEYS:
                 sl = self._border_width_sliders.get(k)
@@ -3077,7 +3405,7 @@ class SettingsDialog(QDialog):
                 sl.blockSignals(True)
                 sl.setValue(ibw)
                 sl.blockSignals(False)
-                sl.setEnabled(tid in ("dark", "light", "user"))
+                sl.setEnabled(editable)
                 if getattr(self, "_border_width_value_labels", None) and k in self._border_width_value_labels:
                     self._border_width_value_labels[k].setText(str(ibw))
         for k in VIEW_CHROME_THEME_KEYS:
@@ -3088,55 +3416,40 @@ class SettingsDialog(QDialog):
             sl.blockSignals(True)
             sl.setValue(vw)
             sl.blockSignals(False)
-            sl.setEnabled(tid in ("dark", "light", "user"))
+            sl.setEnabled(editable)
             if getattr(self, "_border_width_value_labels", None) and k in self._border_width_value_labels:
                 self._border_width_value_labels[k].setText(str(vw))
+        self._update_theme_preset_action_buttons()
 
     def _on_theme_preset_changed(self, *_args):
         prev = getattr(self, "_last_theme_preset_id", None)
         tid = self.theme_preset_combo.currentData()
+        custom = self._merged_custom_themes()
         if (
             prev is not None
-            and prev in ("dark", "light", "user")
-            and tid in ("dark", "light", "user")
+            and is_editable_theme_id(prev, custom)
+            and is_editable_theme_id(tid, custom)
             and prev != tid
             and hasattr(self, "use_diamonds_checkbox")
         ):
             self._flush_browse_transparency_entry(prev)
         self._populate_theme_tab_swatches()
-        if tid in ("dark", "light", "user"):
+        if is_editable_theme_id(tid, custom):
             self._load_browse_transparency_entry(tid)
         self._last_theme_preset_id = tid
         self._apply_theme_tab_from_dialog()
 
     def _flush_browse_transparency_entry(self, tid: str) -> None:
-        if not tid or tid not in ("dark", "light", "user") or not hasattr(self, "use_diamonds_checkbox"):
+        if not tid or not is_editable_theme_id(tid, self._merged_custom_themes()) or not hasattr(self, "use_diamonds_checkbox"):
             return
-        bts = merge_browse_transparency_settings(self.current_settings.get("browse_transparency_settings"))
-        ent = bts.get(tid, default_browse_transparency_entry())
-        tc = ent.get("transparency_color", [98, 98, 98])
-        try:
-            rgb = [int(tc[0]), int(tc[1]), int(tc[2])]
-        except (TypeError, ValueError, IndexError):
-            rgb = [98, 98, 98]
-        bb = ent.get("browse_border_color", [0, 0, 0])
-        try:
-            bb = [int(bb[0]), int(bb[1]), int(bb[2])]
-        except (TypeError, ValueError, IndexError):
-            bb = [0, 0, 0]
-        bts[tid] = {
-            "transparency_color": rgb,
-            "use_diamonds": self.use_diamonds_checkbox.isChecked(),
-            "browse_border_color": bb,
-        }
-        self.current_settings["browse_transparency_settings"] = bts
+        ent = self._get_browse_transparency_entry_for_tid(tid)
+        ent["use_diamonds"] = self.use_diamonds_checkbox.isChecked()
+        self._set_browse_transparency_entry_for_tid(tid, ent)
 
     def _load_browse_transparency_entry(self, tid: str) -> None:
-        if not tid or tid not in ("dark", "light", "user") or not hasattr(self, "use_diamonds_checkbox"):
+        if not tid or not is_editable_theme_id(tid, self._merged_custom_themes()) or not hasattr(self, "use_diamonds_checkbox"):
             return
-        bts = merge_browse_transparency_settings(self.current_settings.get("browse_transparency_settings"))
-        self.current_settings["browse_transparency_settings"] = bts
-        ent = bts.get(tid, default_browse_transparency_entry())
+        ent = self._get_browse_transparency_entry_for_tid(tid)
         self.use_diamonds_checkbox.blockSignals(True)
         self.use_diamonds_checkbox.setChecked(bool(ent["use_diamonds"]))
         self.use_diamonds_checkbox.blockSignals(False)
@@ -3147,7 +3460,7 @@ class SettingsDialog(QDialog):
         if not hasattr(self, "theme_preset_combo"):
             return
         tid = self.theme_preset_combo.currentData()
-        if tid not in ("dark", "light", "user"):
+        if not is_editable_theme_id(tid, self._merged_custom_themes()):
             return
         self._flush_browse_transparency_entry(tid)
         mw = self.parent()
@@ -3207,7 +3520,8 @@ class SettingsDialog(QDialog):
     ):
         """Apply palette from in-memory swatches without persisting config (live color picker)."""
         tid = self.theme_preset_combo.currentData()
-        if tid not in ("dark", "light", "user"):
+        custom = self._merged_custom_themes()
+        if not is_editable_theme_id(tid, custom):
             return
         cfg = get_config()
         colors = self._get_user_theme_colors_from_widgets()
@@ -3217,8 +3531,12 @@ class SettingsDialog(QDialog):
             persist=False,
             config=cfg,
             apply_scope=apply_scope,
+            custom_themes=custom,
         )
-        if tid == "user":
+        if is_custom_theme_id(tid, custom):
+            kwargs["custom_theme_colors"] = colors
+            apply_theme(tid, **kwargs)
+        elif tid == "user":
             kwargs["user_theme_colors"] = colors
             apply_theme("user", **kwargs)
         elif tid == "dark":
@@ -3238,7 +3556,10 @@ class SettingsDialog(QDialog):
             sync_view_theme_menu_actions(mw, tid)
 
     def _choose_user_theme_color(self, key: str):
-        if self.theme_preset_combo.currentData() not in ("dark", "light", "user"):
+        if not is_editable_theme_id(
+            self.theme_preset_combo.currentData(),
+            self._merged_custom_themes(),
+        ):
             return
         hx = self._user_theme_color_hex.get(key, "#000000")
         current = QColor(hx)
@@ -3276,25 +3597,17 @@ class SettingsDialog(QDialog):
             return
         cfg = get_config()
         s = cfg.load_settings()
-        tid = (s.get("ui_theme") or "dark").lower()
+        custom = merge_custom_themes(s.get("custom_themes"))
+        tid = normalize_theme_id(s.get("ui_theme") or "dark", custom_themes=custom)
         if tid == "system":
             from theme.theme_service import system_appearance_theme_id
 
             tid = system_appearance_theme_id()
-        elif tid not in ("dark", "light", "user"):
-            tid = "dark"
-        idx = self.theme_preset_combo.findData(tid)
-        if idx < 0:
-            idx = 0
-        self.theme_preset_combo.blockSignals(True)
-        self.theme_preset_combo.setCurrentIndex(idx)
-        self.theme_preset_combo.blockSignals(False)
-
+        self._refresh_theme_preset_combo(select_tid=tid)
         self._populate_theme_tab_swatches()
-        if tid in ("dark", "light", "user"):
+        if is_editable_theme_id(tid, custom):
             self._load_browse_transparency_entry(tid)
             self._last_theme_preset_id = tid
-            # Combo reflects persisted ui_theme; apply palette so dialog chrome matches.
             if getattr(get_active_theme(), "theme_id", "dark") != tid:
                 self._apply_theme_tab_from_dialog()
             else:
@@ -3303,9 +3616,10 @@ class SettingsDialog(QDialog):
 
     def _get_user_theme_colors_from_widgets(self) -> dict:
         tid = self.theme_preset_combo.currentData()
-        if tid == "dark":
+        base_kind = theme_base_for_id(tid, self._merged_custom_themes())
+        if base_kind == "dark":
             base = default_dark_theme_colors()
-        elif tid == "light":
+        elif base_kind == "light":
             base = default_light_theme_colors()
         else:
             base = default_user_theme_colors()
@@ -3326,12 +3640,20 @@ class SettingsDialog(QDialog):
         """Live-preview theme from widgets; disk write happens in accept()."""
         cfg = get_config()
         tid = self.theme_preset_combo.currentData()
-        if tid in ("dark", "light", "user") and hasattr(self, "use_diamonds_checkbox"):
+        custom = self._merged_custom_themes()
+        if is_editable_theme_id(tid, custom) and hasattr(self, "use_diamonds_checkbox"):
             self._flush_browse_transparency_entry(tid)
         colors = self._get_user_theme_colors_from_widgets()
         if hasattr(self, "current_settings"):
             self.current_settings["ui_theme"] = tid
-            if tid == "user":
+            if is_custom_theme_id(tid, custom):
+                stored_custom = merge_custom_themes(self.current_settings.get("custom_themes"))
+                entry = stored_custom.get(tid, {})
+                entry["colors"] = copy.deepcopy(colors)
+                entry["browse_transparency"] = self._browse_transparency_from_widgets()
+                stored_custom[tid] = entry
+                self.current_settings["custom_themes"] = stored_custom
+            elif tid == "user":
                 self.current_settings["user_theme_colors"] = copy.deepcopy(colors)
             elif tid == "dark":
                 self.current_settings["dark_theme_colors"] = copy.deepcopy(colors)
@@ -3342,8 +3664,11 @@ class SettingsDialog(QDialog):
             main_window=self.parent(),
             persist=False,
             config=cfg,
+            custom_themes=self._merged_custom_themes(),
         )
-        if tid == "user":
+        if is_custom_theme_id(tid, custom):
+            apply_theme(tid, **kwargs, custom_theme_colors=colors)
+        elif tid == "user":
             apply_theme("user", **kwargs, user_theme_colors=colors)
         elif tid == "dark":
             apply_theme("dark", **kwargs, dark_theme_colors=colors)
@@ -3370,6 +3695,7 @@ class SettingsDialog(QDialog):
             "user_theme_colors": copy.deepcopy(s.get("user_theme_colors") or {}),
             "dark_theme_colors": copy.deepcopy(s.get("dark_theme_colors") or {}),
             "light_theme_colors": copy.deepcopy(s.get("light_theme_colors") or {}),
+            "custom_themes": copy.deepcopy(merge_custom_themes(s.get("custom_themes"))),
             "browse_transparency_settings": copy.deepcopy(
                 merge_browse_transparency_settings(s.get("browse_transparency_settings"))
             ),
@@ -3388,6 +3714,10 @@ class SettingsDialog(QDialog):
             snap_val = merge_fn(snap.get(key) if isinstance(snap.get(key), dict) else None)
             if tuple(sorted(stored.items())) != tuple(sorted(snap_val.items())):
                 return True
+        o_custom = merge_custom_themes(settings.get("custom_themes"))
+        n_custom = merge_custom_themes(snap.get("custom_themes"))
+        if o_custom != n_custom:
+            return True
         o = merge_browse_transparency_settings(
             settings.get("browse_transparency_settings") if isinstance(settings.get("browse_transparency_settings"), dict) else None
         )
@@ -3430,6 +3760,7 @@ class SettingsDialog(QDialog):
                 "user_theme_colors": copy.deepcopy(snap["user_theme_colors"]),
                 "dark_theme_colors": copy.deepcopy(snap["dark_theme_colors"]),
                 "light_theme_colors": copy.deepcopy(snap["light_theme_colors"]),
+                "custom_themes": copy.deepcopy(merge_custom_themes(snap.get("custom_themes"))),
                 "browse_transparency_settings": copy.deepcopy(
                     merge_browse_transparency_settings(snap.get("browse_transparency_settings"))
                 ),
@@ -3561,23 +3892,34 @@ class SettingsDialog(QDialog):
             return
         mode = getattr(self, "_browse_color_picker_active", None)
         tid = getattr(self, "_browse_color_picker_tid", None)
-        if mode not in ("border", "transparency") or tid not in ("dark", "light", "user"):
+        if mode not in ("border", "transparency") or not is_editable_theme_id(
+            tid,
+            self._merged_custom_themes(),
+        ):
             return
-        bts = merge_browse_transparency_settings(self.current_settings.get("browse_transparency_settings"))
-        ent = bts.get(tid, default_browse_transparency_entry())
+        ent = self._get_browse_transparency_entry_for_tid(tid)
         tc = self._browse_rgb3_tuple(ent.get("transparency_color"), [98, 98, 98])
         bb = self._browse_rgb3_tuple(ent.get("browse_border_color"), [0, 0, 0])
         if mode == "border":
             bb = [color.red(), color.green(), color.blue()]
         else:
             tc = [color.red(), color.green(), color.blue()]
-        bts[tid] = {
-            "transparency_color": tc,
-            "use_diamonds": bool(ent.get("use_diamonds", True)),
-            "browse_border_color": bb,
-        }
-        self.current_settings["browse_transparency_settings"] = bts
-        get_config().set_browse_transparency_preview(copy.deepcopy(bts))
+        self._set_browse_transparency_entry_for_tid(
+            tid,
+            {
+                "transparency_color": tc,
+                "use_diamonds": bool(ent.get("use_diamonds", True)),
+                "browse_border_color": bb,
+            },
+        )
+        cfg = get_config()
+        if is_custom_theme_id(tid, self._merged_custom_themes()):
+            cfg.set_custom_theme_browse_preview(tid, self._get_browse_transparency_entry_for_tid(tid))
+            cfg.set_browse_transparency_preview(None)
+        else:
+            cfg.set_custom_theme_browse_preview(None, None)
+            preview = merge_browse_transparency_settings(self.current_settings.get("browse_transparency_settings"))
+            cfg.set_browse_transparency_preview(copy.deepcopy(preview))
         if mode == "border":
             self._update_browse_border_color_button()
         else:
@@ -3596,11 +3938,11 @@ class SettingsDialog(QDialog):
         """Open color picker for the browse transparency fill of the selected theme preset."""
         cfg = get_config()
         cfg.set_browse_transparency_preview(None)
+        cfg.set_custom_theme_browse_preview(None, None)
         tid = self.theme_preset_combo.currentData() if hasattr(self, "theme_preset_combo") else "dark"
-        if tid not in ("dark", "light", "user"):
+        if not is_editable_theme_id(tid, self._merged_custom_themes()):
             tid = "dark"
-        bts = merge_browse_transparency_settings(self.current_settings.get("browse_transparency_settings"))
-        ent = bts.get(tid, default_browse_transparency_entry())
+        ent = self._get_browse_transparency_entry_for_tid(tid)
         snapshot_ent = copy.deepcopy(ent)
         tc = self._browse_rgb3_tuple(ent.get("transparency_color"), [98, 98, 98])
         current_color = QColor(tc[0], tc[1], tc[2])
@@ -3619,24 +3961,24 @@ class SettingsDialog(QDialog):
         except TypeError:
             pass
         cfg.set_browse_transparency_preview(None)
+        cfg.set_custom_theme_browse_preview(None, None)
 
         if result == QDialog.DialogCode.Accepted:
             c = dlg.currentColor()
             if c.isValid():
-                bts = merge_browse_transparency_settings(self.current_settings.get("browse_transparency_settings"))
-                ent_latest = bts.get(tid, default_browse_transparency_entry())
+                ent_latest = self._get_browse_transparency_entry_for_tid(tid)
                 bb = self._browse_rgb3_tuple(ent_latest.get("browse_border_color"), [0, 0, 0])
-                bts[tid] = {
-                    "transparency_color": [c.red(), c.green(), c.blue()],
-                    "use_diamonds": bool(ent_latest.get("use_diamonds", True)),
-                    "browse_border_color": bb,
-                }
-                self.current_settings["browse_transparency_settings"] = bts
+                self._set_browse_transparency_entry_for_tid(
+                    tid,
+                    {
+                        "transparency_color": [c.red(), c.green(), c.blue()],
+                        "use_diamonds": bool(ent_latest.get("use_diamonds", True)),
+                        "browse_border_color": bb,
+                    },
+                )
             self._update_transparency_color_button()
         else:
-            bts = merge_browse_transparency_settings(self.current_settings.get("browse_transparency_settings"))
-            bts[tid] = copy.deepcopy(snapshot_ent)
-            self.current_settings["browse_transparency_settings"] = bts
+            self._set_browse_transparency_entry_for_tid(tid, snapshot_ent)
             self._update_transparency_color_button()
         mw = self.parent()
         if mw and getattr(mw, "current_view_mode", None) == "browse":
@@ -3647,10 +3989,9 @@ class SettingsDialog(QDialog):
         if not hasattr(self, 'transparency_color_button'):
             return
         tid = self.theme_preset_combo.currentData() if hasattr(self, "theme_preset_combo") else "dark"
-        if tid not in ("dark", "light", "user"):
+        if not is_editable_theme_id(tid, self._merged_custom_themes()):
             tid = "dark"
-        bts = merge_browse_transparency_settings(self.current_settings.get("browse_transparency_settings"))
-        ent = bts.get(tid, default_browse_transparency_entry())
+        ent = self._get_browse_transparency_entry_for_tid(tid)
         color_rgb = ent.get("transparency_color", [98, 98, 98])
         try:
             c = QColor(int(color_rgb[0]), int(color_rgb[1]), int(color_rgb[2]))
@@ -3671,11 +4012,11 @@ class SettingsDialog(QDialog):
         """Color picker for browse viewport margin (letterbox) for the selected theme preset."""
         cfg = get_config()
         cfg.set_browse_transparency_preview(None)
+        cfg.set_custom_theme_browse_preview(None, None)
         tid = self.theme_preset_combo.currentData() if hasattr(self, "theme_preset_combo") else "dark"
-        if tid not in ("dark", "light", "user"):
+        if not is_editable_theme_id(tid, self._merged_custom_themes()):
             tid = "dark"
-        bts = merge_browse_transparency_settings(self.current_settings.get("browse_transparency_settings"))
-        ent = bts.get(tid, default_browse_transparency_entry())
+        ent = self._get_browse_transparency_entry_for_tid(tid)
         snapshot_ent = copy.deepcopy(ent)
         bb = self._browse_rgb3_tuple(ent.get("browse_border_color"), [0, 0, 0])
         current_color = QColor(bb[0], bb[1], bb[2])
@@ -3694,24 +4035,24 @@ class SettingsDialog(QDialog):
         except TypeError:
             pass
         cfg.set_browse_transparency_preview(None)
+        cfg.set_custom_theme_browse_preview(None, None)
 
         if result == QDialog.DialogCode.Accepted:
             c = dlg.currentColor()
             if c.isValid():
-                bts = merge_browse_transparency_settings(self.current_settings.get("browse_transparency_settings"))
-                ent_latest = bts.get(tid, default_browse_transparency_entry())
+                ent_latest = self._get_browse_transparency_entry_for_tid(tid)
                 tc = self._browse_rgb3_tuple(ent_latest.get("transparency_color"), [98, 98, 98])
-                bts[tid] = {
-                    "transparency_color": tc,
-                    "use_diamonds": bool(ent_latest.get("use_diamonds", True)),
-                    "browse_border_color": [c.red(), c.green(), c.blue()],
-                }
-                self.current_settings["browse_transparency_settings"] = bts
+                self._set_browse_transparency_entry_for_tid(
+                    tid,
+                    {
+                        "transparency_color": tc,
+                        "use_diamonds": bool(ent_latest.get("use_diamonds", True)),
+                        "browse_border_color": [c.red(), c.green(), c.blue()],
+                    },
+                )
             self._update_browse_border_color_button()
         else:
-            bts = merge_browse_transparency_settings(self.current_settings.get("browse_transparency_settings"))
-            bts[tid] = copy.deepcopy(snapshot_ent)
-            self.current_settings["browse_transparency_settings"] = bts
+            self._set_browse_transparency_entry_for_tid(tid, snapshot_ent)
             self._update_browse_border_color_button()
         mw = self.parent()
         if mw and getattr(mw, "current_view_mode", None) == "browse":
@@ -3721,10 +4062,9 @@ class SettingsDialog(QDialog):
         if not hasattr(self, "browse_border_color_button"):
             return
         tid = self.theme_preset_combo.currentData() if hasattr(self, "theme_preset_combo") else "dark"
-        if tid not in ("dark", "light", "user"):
+        if not is_editable_theme_id(tid, self._merged_custom_themes()):
             tid = "dark"
-        bts = merge_browse_transparency_settings(self.current_settings.get("browse_transparency_settings"))
-        ent = bts.get(tid, default_browse_transparency_entry())
+        ent = self._get_browse_transparency_entry_for_tid(tid)
         color_rgb = ent.get("browse_border_color", [0, 0, 0])
         try:
             c = QColor(int(color_rgb[0]), int(color_rgb[1]), int(color_rgb[2]))
@@ -6931,7 +7271,7 @@ class SettingsDialog(QDialog):
             
             # Store original settings for comparison
             self.original_settings = config.load_settings()
-            self.current_settings = self.original_settings.copy()
+            self.current_settings = copy.deepcopy(self.original_settings)
             
             # Get current values from parent window if available
             parent_window = self.parent()
@@ -8120,6 +8460,11 @@ class SettingsDialog(QDialog):
                     n = merge_light_theme_colors(new_value if isinstance(new_value, dict) else None)
                     original_value = tuple(sorted(o.items()))
                     new_value = tuple(sorted(n.items()))
+                elif key == 'custom_themes':
+                    o = merge_custom_themes(original_value if isinstance(original_value, dict) else None)
+                    n = merge_custom_themes(new_value if isinstance(new_value, dict) else None)
+                    if o == n:
+                        continue
                 elif key == 'ui_theme':
                     if self._ui_theme_values_equal(original_value, new_value):
                         continue
@@ -8167,6 +8512,12 @@ class SettingsDialog(QDialog):
                 mw = self.parent()
                 if mw is not None and hasattr(mw, "refresh_open_imagegen_dim_limits"):
                     mw.refresh_open_imagegen_dim_limits()
+            if "custom_themes" in changed_keys:
+                mw = self.parent()
+                if mw is not None and hasattr(mw, "refresh_custom_theme_menu"):
+                    mw.refresh_custom_theme_menu(
+                        custom_themes=new_settings.get("custom_themes"),
+                    )
             
             # Emit only changed settings so handlers skip unrelated work
             if has_changes:
@@ -8367,9 +8718,12 @@ class SettingsDialog(QDialog):
         
         if hasattr(self, 'theme_preset_combo'):
             tid = self.theme_preset_combo.currentData()
-            if tid in ("dark", "light", "user") and hasattr(self, "use_diamonds_checkbox"):
+            custom = self._merged_custom_themes()
+            if is_editable_theme_id(tid, custom) and hasattr(self, "use_diamonds_checkbox"):
                 self._flush_browse_transparency_entry(tid)
             settings['ui_theme'] = self._get_ui_theme_for_save()
+            if is_custom_theme_id(tid, custom):
+                self._flush_current_theme_preset_to_settings()
             if tid == "user":
                 settings['user_theme_colors'] = self._get_user_theme_colors_from_widgets()
             else:
@@ -8388,6 +8742,9 @@ class SettingsDialog(QDialog):
                 settings['light_theme_colors'] = merge_light_theme_colors(
                     self.current_settings.get("light_theme_colors")
                 )
+            settings["custom_themes"] = copy.deepcopy(
+                merge_custom_themes(self.current_settings.get("custom_themes"))
+            )
             settings["browse_transparency_settings"] = copy.deepcopy(
                 merge_browse_transparency_settings(self.current_settings.get("browse_transparency_settings"))
             )
@@ -8555,7 +8912,7 @@ class SettingsDialog(QDialog):
             else None
         )
         active_tid = getattr(get_active_theme(), "theme_id", "dark")
-        if combo_tid in ("dark", "light", "user") and combo_tid != active_tid:
+        if is_editable_theme_id(combo_tid, self._merged_custom_themes()) and combo_tid != active_tid:
             self._apply_theme_tab_from_dialog()
         else:
             self.apply_theme()
