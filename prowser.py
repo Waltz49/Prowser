@@ -51,9 +51,157 @@ import json
 import logging
 import multiprocessing
 import os
+import shlex
 import shutil
 import subprocess
 import sys
+
+# Worker entry flags (must never receive build-baked default argv).
+_WORKER_ARGV_FLAGS = frozenset({
+    "--model-tasks-worker",
+    "--imagegen-worker",
+    "--test-create-deps",
+})
+
+# CLI options that consume a following value (keep in sync with parse_arguments()).
+_ARGV_VALUE_OPTIONS = frozenset({
+    "-f", "--filter",
+    "-p", "--profile",
+    "--background",
+})
+
+# Short/long aliases so a user `-p` blocks a baked `--profile` and vice versa.
+_ARGV_OPTION_ALIASES = {
+    "-p": "--profile",
+    "--profile": "-p",
+    "-f": "--filter",
+    "--filter": "-f",
+}
+
+_ARGV_MUTEX_GROUPS = (
+    frozenset({"--fullscreen", "--no-fullscreen"}),
+)
+
+
+def _is_worker_argv(argv=None) -> bool:
+    argv = sys.argv if argv is None else argv
+    return len(argv) >= 2 and argv[1] in _WORKER_ARGV_FLAGS
+
+
+def _should_skip_default_argv(argv=None) -> bool:
+    """Skip bake-in for workers and multiprocessing / -c re-exec children."""
+    argv = sys.argv if argv is None else argv
+    if _is_worker_argv(argv):
+        return True
+    if len(argv) >= 2 and argv[1] in ("-c", "-m"):
+        return True
+    for tok in argv[1:]:
+        if tok.startswith("--multiprocessing"):
+            return True
+        if "multiprocessing" in tok:
+            return True
+    return False
+
+
+def _option_name(token: str) -> str:
+    return token.partition("=")[0]
+
+
+def _option_blocked(name: str, present_opts: set) -> bool:
+    if name in present_opts:
+        return True
+    alias = _ARGV_OPTION_ALIASES.get(name)
+    if alias is not None and alias in present_opts:
+        return True
+    for group in _ARGV_MUTEX_GROUPS:
+        if name in group and present_opts.intersection(group):
+            return True
+    return False
+
+
+def _classify_argv_tokens(tokens):
+    """Return (present_option_names, has_positionals) for an argv token list."""
+    present_opts = set()
+    has_positionals = False
+    i = 0
+    while i < len(tokens):
+        tok = tokens[i]
+        if tok == "--":
+            has_positionals = has_positionals or (i + 1 < len(tokens))
+            break
+        if tok.startswith("-"):
+            name = _option_name(tok)
+            present_opts.add(name)
+            if "=" in tok:
+                i += 1
+                continue
+            if name in _ARGV_VALUE_OPTIONS and i + 1 < len(tokens):
+                i += 2
+                continue
+            i += 1
+            continue
+        has_positionals = True
+        i += 1
+    return present_opts, has_positionals
+
+
+def apply_prowser_default_argv() -> None:
+    """Merge build-baked PROWSER_DEFAULT_ARGV into sys.argv (explicit args win).
+
+    Set via Info.plist LSEnvironment when building with
+    ``./pyInstallerBuild.sh --app-args '...'``. Also honored if the env var is
+    set in the shell for non-frozen runs.
+    """
+    raw = os.environ.get("PROWSER_DEFAULT_ARGV", "").strip()
+    if not raw or _should_skip_default_argv():
+        return
+    try:
+        defaults = shlex.split(raw)
+    except ValueError as exc:
+        print(f"Warning: invalid PROWSER_DEFAULT_ARGV ({raw!r}): {exc}", file=sys.stderr)
+        return
+    if not defaults:
+        return
+
+    present_opts, has_positionals = _classify_argv_tokens(sys.argv[1:])
+    inject = []
+    i = 0
+    while i < len(defaults):
+        tok = defaults[i]
+        if tok == "--":
+            if not has_positionals:
+                inject.extend(defaults[i + 1 :])
+            break
+        if tok.startswith("-"):
+            name = _option_name(tok)
+            if _option_blocked(name, present_opts):
+                if "=" not in tok and name in _ARGV_VALUE_OPTIONS:
+                    i += 2
+                else:
+                    i += 1
+                continue
+            if "=" in tok:
+                inject.append(tok)
+                i += 1
+                continue
+            if name in _ARGV_VALUE_OPTIONS and i + 1 < len(defaults):
+                inject.append(tok)
+                inject.append(defaults[i + 1])
+                i += 2
+                continue
+            inject.append(tok)
+            i += 1
+            continue
+        if not has_positionals:
+            inject.append(tok)
+        i += 1
+
+    if inject:
+        sys.argv[1:1] = inject
+
+
+# Apply build/shell defaults before --min and argparse see argv.
+apply_prowser_default_argv()
 
 # Must run before local imports that may call load_settings() / is_min_bundle().
 if "--min" in sys.argv:
@@ -528,6 +676,10 @@ Examples:
   %(prog)s /path/to/image.jpg  --fullscreen   # Open specific image file in a macOS space (fullscreen)
   %(prog)s /path/to/img1.jpg /path/to/img2.png  # Open multiple specific image files
   %(prog)s /path/to/images/ -p ~/.prowser-test  # Use custom profile directory
+
+Build-baked defaults (frozen .app): set via
+  ./pyInstallerBuild.sh --app-args '-p /tmp/foobar --background process'
+which stores PROWSER_DEFAULT_ARGV in Info.plist. Explicit CLI args override.
         """)
     
     parser.add_argument('paths', nargs='*', help='Directory containing images to browse, or specific image files to open')

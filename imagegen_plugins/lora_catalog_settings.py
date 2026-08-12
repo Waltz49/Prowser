@@ -101,6 +101,9 @@ def apply_entry_overrides(
     if "comment" in overrides:
         comment = overrides.get("comment")
         kwargs["comment"] = str(comment).strip() if comment else None
+    if "reference_prompt" in overrides:
+        ref = overrides.get("reference_prompt")
+        kwargs["reference_prompt"] = str(ref).strip() if ref else None
     if not kwargs:
         return entry
     return replace(entry, **kwargs)

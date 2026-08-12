@@ -489,8 +489,13 @@ class ImageBrowserConfig:
             # Move keys mode: 'not_links' (no clickable links), 'move', 'copy'
             'move_keys_mode': 'not_links',
             
-            # Favorite directories (9 items, None where empty) - accessible via Ctrl+1 through Ctrl+9
-            'favorite_directories': ["~/Downloads", None, None, None, None, None, None, None, None],
+            # Favorite directories (9 items, None where empty) - accessible via Ctrl+1 through Ctrl+9.
+            # Store an absolute path (same as Settings save via display_to_path); literal "~/Downloads"
+            # fails os.path.exists in menus/shortcuts/Ctrl+1 until the user re-saves Settings.
+            'favorite_directories': [
+                os.path.expanduser("~/Downloads"),
+                None, None, None, None, None, None, None, None,
+            ],
             
             # Exclude directories (list of dicts with 'path' and 'enabled' keys)
             'exclude_directories': [],
@@ -637,6 +642,22 @@ class ImageBrowserConfig:
             extensions = settings["image_extensions"]
             if not isinstance(extensions, list) or len(extensions) == 0:
                 settings["image_extensions"] = default_settings["image_extensions"]
+                needs_save = True
+        # Favorites must be absolute paths for menus/shortcuts/Ctrl+N (os.path.exists does not expand ~).
+        favs = settings.get("favorite_directories")
+        if isinstance(favs, list):
+            normalized_favs = []
+            favs_changed = False
+            for fav in favs:
+                if isinstance(fav, str) and fav.strip():
+                    expanded = os.path.expanduser(fav.strip())
+                    if expanded != fav:
+                        favs_changed = True
+                    normalized_favs.append(expanded)
+                else:
+                    normalized_favs.append(fav)
+            if favs_changed:
+                settings["favorite_directories"] = (normalized_favs + [None] * 9)[:9]
                 needs_save = True
         prev_bts = settings.get("browse_transparency_settings")
         raw_bts = prev_bts if isinstance(prev_bts, dict) and prev_bts else None

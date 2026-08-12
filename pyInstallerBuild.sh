@@ -95,6 +95,7 @@ WHISPER_MODEL_SCRIPT="$SCRIPT_DIR/pyinstaller_whisper_models.py"
 CONFIRM_BUILD=false  # Set to false to skip confirmations
 MIN_BUILD=false     # Set via --min: omit imagegen, LM Studio SDK, and audio packages
 DIRECT_SPEC=false   # Set via --spec: write spec directly, skip pyinstaller CLI generation
+APP_ARGS=""         # Set via --app-args / -a: bake default prowser.py CLI into Info.plist
 
 # Add this function to handle user preferences
 check_build_confirmation() {
@@ -746,16 +747,12 @@ customize_spec_file() {
 
     WHISPER_MODEL_DATAS=""
     FACE_MODEL_DATAS=""
+    LS_ENV_EXTRA_LINES=""
     if [ "$MIN_BUILD" = "true" ]; then
         print_status "Minimal build: skipping bundled whisper model and face models"
-        LS_ENVIRONMENT_BLOCK="'LSEnvironment': {
-            'PYTHON_JIT': '1',
-            'PROWSER_MIN_BUNDLE': '1',
-        },"
+        LS_ENV_EXTRA_LINES="${LS_ENV_EXTRA_LINES}
+            'PROWSER_MIN_BUNDLE': '1',"
     else
-        LS_ENVIRONMENT_BLOCK="'LSEnvironment': {
-            'PYTHON_JIT': '1',
-        },"
         FACE_MODEL_DATAS="        ('.pyinstaller_face_models/dlib_face_recognition_resnet_model_v1.dat', 'face_recognition_models/models'),
         ('.pyinstaller_face_models/mmod_human_face_detector.dat', 'face_recognition_models/models'),
         ('.pyinstaller_face_models/shape_predictor_5_face_landmarks.dat', 'face_recognition_models/models'),
@@ -767,6 +764,16 @@ customize_spec_file() {
         fi
         print_status "Bundling whisper model (faster-whisper-tiny.en only)"
     fi
+    if [ -n "$APP_ARGS" ]; then
+        # json.dumps → valid Python string literal for the generated .spec
+        APP_ARGS_PY=$("$PYTHON_CMD" -c 'import json,sys; print(json.dumps(sys.argv[1]))' "$APP_ARGS")
+        LS_ENV_EXTRA_LINES="${LS_ENV_EXTRA_LINES}
+            'PROWSER_DEFAULT_ARGV': ${APP_ARGS_PY},"
+        print_status "Baking default app args into Info.plist: $APP_ARGS"
+    fi
+    LS_ENVIRONMENT_BLOCK="'LSEnvironment': {
+            'PYTHON_JIT': '1',${LS_ENV_EXTRA_LINES}
+        },"
     
     cat > "$SPEC_FILE" << EOF
 # -*- mode: python ; coding: utf-8 -*-
@@ -1264,6 +1271,10 @@ main() {
         echo "                            (omits imagegen, faces, LM Studio, voice/audio)"
         echo "  --spec, -s                Write spec directly (skip pyinstaller CLI generation;"
         echo "                            falls back to CLI generation if direct write fails)"
+        echo "  --app-args, -a \"ARGS\"    Bake default prowser CLI args into the .app"
+        echo "                            (Info.plist LSEnvironment PROWSER_DEFAULT_ARGV)."
+        echo "                            Example: -a \"-p /tmp/foobar --background process\""
+        echo "                            Explicit launch args still override baked defaults."
         echo "  --help, -h                Show this help message"
         echo ""
         echo "Examples:"
@@ -1271,10 +1282,15 @@ main() {
         echo "  $0 --reuse            # Reuse venv if present, keep build artifacts (faster rebuilds)"
         echo "  $0 --reuse --spec     # Fast rebuild: reuse venv and write spec directly"
         echo "  $0 --min              # Minimal app bundle (browse + CLIP; no imagegen/faces/audio)"
+        echo "  $0 --app-args '-p /tmp/foobar --background process'"
         echo "  $0 --keep             # Full build and install (keeps temp files)"
         echo "  $0 --fix-entitlements # Fix entitlements for existing app"
         echo ""
         exit 0
+    fi
+
+    if [ -n "$APP_ARGS" ]; then
+        print_status "Default app args for this build: $APP_ARGS"
     fi
     
     # Check requirements
@@ -1350,14 +1366,28 @@ main() {
 #            "keep"  = cleanup preserves venv only (create_venv still rebuilds)
 REUSE_VENV=false
 KEEP_FILES=false
-for arg in "$@"; do
-    case "$arg" in
+_EARLY_ARGS=("$@")
+_EARLY_I=0
+while [ "$_EARLY_I" -lt "${#_EARLY_ARGS[@]}" ]; do
+    _EARLY_ARG="${_EARLY_ARGS[$_EARLY_I]}"
+    case "$_EARLY_ARG" in
         --reuse|-r) REUSE_VENV=true; KEEP_FILES=true ;;
         --keep|-k)  KEEP_FILES=true ;;
         --min|-m)   MIN_BUILD=true ;;
         --spec|-s)  DIRECT_SPEC=true ;;
+        --app-args|-a)
+            _EARLY_I=$((_EARLY_I + 1))
+            if [ "$_EARLY_I" -ge "${#_EARLY_ARGS[@]}" ]; then
+                print_error "--app-args / -a requires a quoted argument string"
+                echo "Example: $0 --app-args '-p /tmp/foobar --background process'"
+                exit 1
+            fi
+            APP_ARGS="${_EARLY_ARGS[$_EARLY_I]}"
+            ;;
     esac
+    _EARLY_I=$((_EARLY_I + 1))
 done
+unset _EARLY_ARGS _EARLY_I _EARLY_ARG
 if [ "$MIN_BUILD" = "true" ]; then
     export PYINSTALLER_MIN_BUILD=1
 fi

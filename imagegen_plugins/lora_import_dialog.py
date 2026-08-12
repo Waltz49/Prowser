@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+import html
+import os
 from pathlib import Path
 from typing import List, Optional
 
@@ -18,6 +20,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QProgressBar,
     QProgressDialog,
     QPushButton,
     QScrollArea,
@@ -51,6 +54,207 @@ from utils import (
 )
 
 _FORM_CONTROL_HEIGHT = 36
+_DEFAULT_REFERENCE_PROMPT = "test image of person standing"
+_IMPORT_PROBE_PROMPT_DISPLAY_MAX = 60
+_IMPORT_PROGRESS_PROBE_STEPS = 6
+_IMPORT_PROGRESS_SKIP_PROBE_STEPS = 3
+
+
+def _probe_fallback_prompt(reference_prompt: str) -> str:
+    return (reference_prompt or "test").strip() or "test"
+
+
+def _resolve_browser_main_window(widget: Optional[QWidget]):
+    """Find the image browser host from a settings/import dialog parent chain."""
+    from imagegen_plugins.image_gen_source_nav import resolve_image_gen_main_window
+
+    return resolve_image_gen_main_window(widget) if widget is not None else None
+
+
+def _open_profile_temp_thumbnails(main_window) -> str:
+    """Open profile tmp as a normal thumbnail level (ESC goes back), date newest-first."""
+    from prowser_temp_files import ensure_temporary_files_directory
+    from sort_mode import SortMode
+
+    temp_dir = ensure_temporary_files_directory()
+    mode = getattr(main_window, "current_view_mode", "")
+    if mode in ("thumbnail", "browse", "list") and hasattr(main_window, "set_date_sort"):
+        # Also converts list → thumbnail.
+        main_window.set_date_sort(reverse=False, notify=False)
+    else:
+        # Slideshow/etc.: set sort for the upcoming load; load exits those modes.
+        main_window.current_sort_mode = SortMode.DATE
+        main_window.is_reversed = False
+        sorting_manager = getattr(main_window, "sorting_manager", None)
+        if sorting_manager is not None and hasattr(sorting_manager, "save_sorting_settings"):
+            sorting_manager.save_sorting_settings()
+        if hasattr(main_window, "update_sort_menu_checkmarks"):
+            main_window.update_sort_menu_checkmarks()
+    fth = getattr(main_window, "file_tree_handler", None)
+    if fth is not None and hasattr(fth, "request_directory_opening"):
+        fth.request_directory_opening(temp_dir)
+    elif hasattr(main_window, "open_directory"):
+        main_window.open_directory(temp_dir)
+    return temp_dir
+
+
+def _highlight_newest_thumbnail(main_window) -> None:
+    """Highlight the first displayed image (newest when date-sorted newest-first)."""
+    displayed = []
+    if hasattr(main_window, "get_displayed_images"):
+        displayed = main_window.get_displayed_images() or []
+    if not displayed:
+        return
+    newest = displayed[0]
+    if hasattr(main_window, "set_current_image_by_path"):
+        main_window.set_current_image_by_path(newest, fallback_index=0)
+    if hasattr(main_window, "highlight_image"):
+        main_window.highlight_image()
+
+
+def _refresh_temp_and_highlight_newest(main_window) -> None:
+    """If still viewing profile tmp, refresh and highlight the newest thumbnail."""
+    from prowser_temp_files import resolve_temporary_files_directory
+
+    current = os.path.normpath(getattr(main_window, "current_directory", "") or "")
+    temp_dir = os.path.normpath(resolve_temporary_files_directory())
+    if not current or current != temp_dir:
+        return
+    if hasattr(main_window, "refresh_directory"):
+        main_window.refresh_directory(force=True)
+    _highlight_newest_thumbnail(main_window)
+
+
+def _format_import_progress_html(
+    *,
+    model_key: str,
+    lora_name: str,
+    activity: str,
+    probe_prompt: str = "",
+) -> str:
+    lines = [
+        f"Model: <b>{html.escape(lora_model_display_name(model_key))}</b>",
+        f"LoRA: <b>{html.escape((lora_name or '').strip() or '—')}</b>",
+    ]
+    prompt = (probe_prompt or "").strip()
+    if prompt:
+        if len(prompt) <= _IMPORT_PROBE_PROMPT_DISPLAY_MAX:
+            prompt_display = prompt
+        else:
+            prompt_display = prompt[:_IMPORT_PROBE_PROMPT_DISPLAY_MAX] + "…"
+        lines.append(f"Prompt: {html.escape(prompt_display)}")
+    if activity:
+        lines.append(f"<b>{html.escape(activity)}</b>")
+    return "<br/>".join(lines)
+
+
+class _LoraImportProgressDialog(QDialog):
+    """Granular progress for Test & Add (mirrors Check LoRAs status + bar)."""
+
+    canceled = Signal()
+
+    def __init__(
+        self,
+        parent: Optional[QWidget],
+        *,
+        model_key: str,
+        lora_name: str,
+        probe_prompt: str,
+        maximum: int,
+    ) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Add LoRA")
+        self.setWindowModality(Qt.WindowModality.WindowModal)
+        self.setStyleSheet(get_dialog_shell_stylesheet() + get_button_style())
+        self.resize(520, 180)
+        self._model_key = model_key
+        self._lora_name = lora_name
+        self._probe_prompt = probe_prompt
+        self._cancel_requested = False
+        self._closing = False
+        self._last_activity = "Starting…"
+
+        self.status_label = QLabel()
+        self.status_label.setAlignment(
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop
+        )
+        self.status_label.setTextFormat(Qt.TextFormat.RichText)
+        self.status_label.setWordWrap(True)
+        self.status_label.setMinimumWidth(480)
+
+        self.bar = QProgressBar()
+        self.bar.setRange(0, max(1, int(maximum)))
+        self.bar.setValue(0)
+        self.bar.setTextVisible(True)
+        self.bar.setFormat("%v / %m")
+
+        self._cancel_btn = QPushButton("Cancel")
+        self._cancel_btn.clicked.connect(self._request_cancel)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(16, 14, 16, 14)
+        layout.setSpacing(10)
+        layout.addWidget(self.status_label)
+        layout.addWidget(self.bar)
+        btn_row = QHBoxLayout()
+        btn_row.addStretch(1)
+        btn_row.addWidget(self._cancel_btn)
+        layout.addLayout(btn_row)
+        self.update_progress("Starting…", 0, maximum)
+
+    def update_progress(
+        self,
+        activity: str,
+        value: int,
+        maximum: Optional[int] = None,
+    ) -> None:
+        self._last_activity = (activity or "").strip() or self._last_activity
+        if maximum is not None:
+            self.bar.setMaximum(max(1, int(maximum)))
+        val = max(0, min(int(value), self.bar.maximum()))
+        self.bar.setValue(val)
+        prefix = ""
+        if self._cancel_requested and not self._closing:
+            prefix = "<b>Cancelling…</b><br/>"
+        body = _format_import_progress_html(
+            model_key=self._model_key,
+            lora_name=self._lora_name,
+            activity=self._last_activity,
+            probe_prompt=self._probe_prompt,
+        )
+        self.status_label.setText(prefix + body)
+
+    def _request_cancel(self) -> None:
+        if self._closing:
+            return
+        if self._cancel_requested:
+            self.finish_and_close()
+            return
+        self._cancel_requested = True
+        self._cancel_btn.setText("Close now")
+        self.update_progress(self._last_activity, self.bar.value())
+        self.canceled.emit()
+
+    def reject(self) -> None:  # noqa: N802
+        self._request_cancel()
+
+    def closeEvent(self, event) -> None:  # noqa: N802
+        if self._closing:
+            event.accept()
+            return
+        self._request_cancel()
+        if self._closing:
+            event.accept()
+        else:
+            event.ignore()
+
+    def finish_and_close(self) -> None:
+        if self._closing:
+            return
+        self._closing = True
+        self.blockSignals(True)
+        self.hide()
+        self.close()
 
 
 class _LoraFindNameButton(QPushButton):
@@ -262,6 +466,7 @@ def safetensors_path_from_mime(mime) -> Optional[Path]:
 
 class _ImportLoraWorker(QThread):
     finished_result = Signal(bool, str, object)
+    progress_update = Signal(str, int, int)
 
     def __init__(
         self,
@@ -273,6 +478,7 @@ class _ImportLoraWorker(QThread):
         scale: float,
         best_guess: float,
         comment: str,
+        reference_prompt: str,
         cancel_flag: List[bool],
         reuse_lora_id: Optional[str] = None,
         repo_id: str = "",
@@ -287,15 +493,42 @@ class _ImportLoraWorker(QThread):
         self._scale = scale
         self._best_guess = best_guess
         self._comment = comment
+        self._reference_prompt = reference_prompt
         self._cancel_flag = cancel_flag
         self._reuse_lora_id = (reuse_lora_id or "").strip() or None
         self._repo_id = (repo_id or "").strip()
         self._filename = (filename or "").strip()
         self._recovery_source_path = (recovery_source_path or "").strip()
         self._created_new_entry = False
+        self._progress_max = _IMPORT_PROGRESS_PROBE_STEPS
+        self._probe_step = 1
 
     def _cancelled(self) -> bool:
         return bool(self._cancel_flag[0])
+
+    def _emit_progress(
+        self,
+        activity: str,
+        step: int,
+        *,
+        maximum: Optional[int] = None,
+    ) -> None:
+        if maximum is not None:
+            self._progress_max = max(1, int(maximum))
+        self.progress_update.emit(activity, step, self._progress_max)
+
+    def _probe_activity_callback(self, message: str) -> None:
+        lower = message.lower()
+        if "base image" in lower:
+            step = 2
+        elif "test image" in lower:
+            step = 3
+        elif "similarity" in lower:
+            step = 4
+        else:
+            step = self._probe_step
+        self._probe_step = max(self._probe_step, step)
+        self._emit_progress(message, self._probe_step)
 
     def _model_already_supported(self, lora_id: str) -> bool:
         from imagegen_plugins.lora_catalog import lora_model_support
@@ -310,6 +543,7 @@ class _ImportLoraWorker(QThread):
             if self._cancelled():
                 self.finished_result.emit(False, "Cancelled", None)
                 return
+            self._emit_progress("Validating LoRA weights…", 0)
             source = validate_safetensors_source(self._source_path)
             if not lora_probe_model_is_local(self._model_key):
                 raise RuntimeError(
@@ -319,6 +553,7 @@ class _ImportLoraWorker(QThread):
             host_id = host_id_for_lora_model(self._model_key)
             if not host_id:
                 raise ValueError(f"LoRAs are not supported for model {self._model_key!r}.")
+            self._emit_progress("Preparing LoRA entry…", 1)
             if self._reuse_lora_id:
                 from imagegen_plugins.lora_catalog import get_lora_entry
                 from imagegen_plugins.image_gen_persistence import update_lora_entry_metadata
@@ -336,6 +571,7 @@ class _ImportLoraWorker(QThread):
                     trigger_word=self._trigger_word or None,
                     best_guess=self._best_guess,
                     comment=self._comment or None,
+                    reference_prompt=self._reference_prompt,
                     repo_id=self._repo_id,
                     filename=self._filename,
                     source_path=self._recovery_source_path or None,
@@ -355,6 +591,7 @@ class _ImportLoraWorker(QThread):
                         trigger_word=self._trigger_word or None,
                         best_guess=self._best_guess,
                         comment=self._comment or None,
+                        reference_prompt=self._reference_prompt,
                         repo_id=self._repo_id,
                         filename=self._filename,
                         source_path=self._recovery_source_path or None,
@@ -371,6 +608,7 @@ class _ImportLoraWorker(QThread):
                         scale=self._scale,
                         best_guess=self._best_guess,
                         comment=self._comment or None,
+                        reference_prompt=self._reference_prompt,
                         repo_id=self._repo_id,
                         filename=self._filename,
                     )
@@ -389,6 +627,11 @@ class _ImportLoraWorker(QThread):
             if not self._model_already_supported(entry.lora_id):
                 from imagegen_plugins.lora_catalog import lora_probe_prompt
 
+                self._emit_progress(
+                    f"Testing compatibility on {lora_model_display_name(self._model_key)}…",
+                    1,
+                    maximum=_IMPORT_PROGRESS_PROBE_STEPS,
+                )
                 ok = probe_lora_on_model(
                     self._model_key,
                     entry.local_path or "",
@@ -397,10 +640,11 @@ class _ImportLoraWorker(QThread):
                     entry=entry,
                     probe_prompt=lora_probe_prompt(
                         entry,
-                        fallback="test",
+                        fallback=_probe_fallback_prompt(self._reference_prompt),
                         weights_path=entry.local_path or "",
                         allow_online=False,
                     ),
+                    activity_callback=self._probe_activity_callback,
                 )
                 if self._cancelled():
                     self.finished_result.emit(False, "Cancelled", entry)
@@ -413,8 +657,15 @@ class _ImportLoraWorker(QThread):
                         entry,
                     )
                     return
+            else:
+                self._emit_progress(
+                    "LoRA already tested for this model; skipping probe…",
+                    2,
+                    maximum=_IMPORT_PROGRESS_SKIP_PROBE_STEPS,
+                )
             from imagegen_plugins.image_gen_persistence import register_user_lora
 
+            self._emit_progress("Adding to library…", self._progress_max - 1)
             register_user_lora(
                 entry,
                 model_key=self._model_key,
@@ -423,6 +674,7 @@ class _ImportLoraWorker(QThread):
             try:
                 from imagegen_plugins.image_gen_persistence import enrich_lora_origin_metadata
 
+                self._emit_progress("Looking up source metadata…", self._progress_max)
                 enrich_lora_origin_metadata(entry.lora_id)
                 from imagegen_plugins.lora_catalog import get_lora_entry
 
@@ -490,7 +742,7 @@ class LoraEntryDialog(QDialog):
         is_edit = mode == "edit"
         self.setWindowTitle("Edit LoRA" if is_edit else "Add Downloaded LoRA")
         self.setWindowModality(Qt.WindowModality.WindowModal)
-        self.resize(580, 420 if is_edit else 400)
+        self.resize(580, 450 if is_edit else 430)
         self.setStyleSheet(
             get_dialog_shell_stylesheet()
             + get_button_style()
@@ -565,6 +817,14 @@ class LoraEntryDialog(QDialog):
         _pin_line_edit(self._trigger_edit)
         self._trigger_edit.setPlaceholderText("Optional trigger word for prompts")
         form.addRow("Trigger:", self._trigger_edit)
+
+        self._reference_prompt_edit = QLineEdit()
+        _pin_line_edit(self._reference_prompt_edit)
+        self._reference_prompt_edit.setPlaceholderText(_DEFAULT_REFERENCE_PROMPT)
+        self._reference_prompt_edit.setToolTip(
+            "Prompt used for compatibility test images when adding this LoRA"
+        )
+        form.addRow("Reference prompt:", self._reference_prompt_edit)
 
         self._current_scale_spin = QDoubleSpinBox()
         _pin_row_height(self._current_scale_spin, width_policy=QSizePolicy.Policy.Fixed)
@@ -666,6 +926,7 @@ class LoraEntryDialog(QDialog):
         if is_edit:
             self._prime_edit_fields()
         else:
+            self._reference_prompt_edit.setText(_DEFAULT_REFERENCE_PROMPT)
             self._path_edit.textChanged.connect(self._on_path_changed)
             initial_path = str(initial_source_path or "").strip()
             if initial_path:
@@ -701,6 +962,9 @@ class LoraEntryDialog(QDialog):
             self._form.removeRow(self._path_wrap)
         self._name_edit.setText(entry.display_name)
         self._trigger_edit.setText(entry.trigger_word or "")
+        self._reference_prompt_edit.setText(
+            (entry.reference_prompt or "").strip() or _DEFAULT_REFERENCE_PROMPT
+        )
         self._current_scale_spin.setValue(float(entry.scale))
         self._best_guess_spin.setValue(float(entry.best_guess))
         self._comment_edit.setText(entry.comment or "")
@@ -811,6 +1075,8 @@ class LoraEntryDialog(QDialog):
             self._reuse_lora_id = existing.lora_id
             self._name_edit.setText(existing.display_name)
             self._trigger_edit.setText(existing.trigger_word or "")
+            if (existing.reference_prompt or "").strip():
+                self._reference_prompt_edit.setText(existing.reference_prompt or "")
             self._current_scale_spin.setValue(float(existing.scale))
             self._best_guess_spin.setValue(float(existing.best_guess))
             self._comment_edit.setText(existing.comment or "")
@@ -881,6 +1147,7 @@ class LoraEntryDialog(QDialog):
         self._path_edit.setCursorPosition(0)
         self._recovery_path_edit.setCursorPosition(0)
         self._name_edit.setCursorPosition(0)
+
     def _set_path_edit_text(self, text: str) -> None:
         self._path_edit.blockSignals(True)
         self._path_edit.setText(text)
@@ -902,6 +1169,7 @@ class LoraEntryDialog(QDialog):
                 trigger_word=self._trigger_edit.text().strip() or None,
                 best_guess=float(self._best_guess_spin.value()),
                 comment=self._comment_edit.text().strip() or None,
+                reference_prompt=self._reference_prompt_edit.text().strip(),
                 repo_id=self._repo_edit.text().strip(),
                 filename=self._filename_edit.text().strip(),
                 source_path=self._recovery_path_edit.text().strip() or None,
@@ -912,11 +1180,6 @@ class LoraEntryDialog(QDialog):
         except Exception as exc:
             show_styled_warning(self, "Edit LoRA", str(exc))
             return
-        show_styled_information(
-            self,
-            "Edit LoRA",
-            f"«{name}» was updated.",
-        )
         self.accept()
 
     def _start_import(self) -> None:
@@ -986,21 +1249,36 @@ class LoraEntryDialog(QDialog):
                 self.accept()
                 return
 
-        progress = QProgressDialog(
-            f"Testing LoRA on {lora_model_display_name(self._model_key)}…",
-            "Cancel",
-            0,
-            0,
+        # Show profile tmp thumbnails (date newest-first) as a normal ESC level
+        # so probe images appear while Test & Add runs.
+        main_window = _resolve_browser_main_window(self)
+        if main_window is not None:
+            try:
+                _open_profile_temp_thumbnails(main_window)
+                _highlight_newest_thumbnail(main_window)
+            except Exception as exc:
+                print(f"DEBUG Test & Add: could not open profile temp thumbnails: {exc}")
+
+        progress = _LoraImportProgressDialog(
             self,
+            model_key=self._model_key,
+            lora_name=name,
+            probe_prompt=_probe_fallback_prompt(
+                self._reference_prompt_edit.text().strip()
+            ),
+            maximum=_IMPORT_PROGRESS_PROBE_STEPS,
         )
-        progress.setWindowTitle("Add LoRA")
-        progress.setWindowModality(Qt.WindowModality.WindowModal)
-        progress.setMinimumDuration(0)
         progress.show()
+        progress.raise_()
+        progress.activateWindow()
         QApplication.processEvents()
 
         cancel_flag: List[bool] = [False]
-        progress.canceled.connect(lambda: cancel_flag.__setitem__(0, True))
+
+        def on_probe_user_cancel() -> None:
+            cancel_flag[0] = True
+
+        progress.canceled.connect(on_probe_user_cancel)
 
         recovery_path = recovery_path or download_source_url or resolved_path
 
@@ -1012,6 +1290,7 @@ class LoraEntryDialog(QDialog):
             scale=float(self._best_guess_spin.value()),
             best_guess=float(self._best_guess_spin.value()),
             comment=self._comment_edit.text().strip(),
+            reference_prompt=self._reference_prompt_edit.text().strip(),
             cancel_flag=cancel_flag,
             reuse_lora_id=reuse_lora_id,
             repo_id=self._repo_edit.text().strip(),
@@ -1019,8 +1298,19 @@ class LoraEntryDialog(QDialog):
             recovery_source_path=recovery_path,
         )
 
+        def on_progress(activity: str, step: int, maximum: int) -> None:
+            progress.update_progress(activity, step, maximum)
+
         def on_done(ok: bool, err: str, entry: object) -> None:
-            progress.close()
+            progress.finish_and_close()
+            if main_window is not None:
+                try:
+                    _refresh_temp_and_highlight_newest(main_window)
+                except Exception as exc:
+                    print(
+                        "DEBUG Test & Add: could not highlight newest temp thumbnail: "
+                        f"{exc}"
+                    )
             if ok:
                 show_styled_information(
                     self,
@@ -1036,6 +1326,7 @@ class LoraEntryDialog(QDialog):
             if err and err != "Cancelled":
                 show_styled_warning(self, "Add LoRA", err)
 
+        worker.progress_update.connect(on_progress)
         worker.finished_result.connect(on_done)
         worker.start()
         self._worker = worker

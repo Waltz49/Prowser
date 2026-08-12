@@ -956,6 +956,14 @@ class MenuManager:
         menu_title = "Copy to" if dest_action == 'copy' else "Move to"
         self.move_menu = menubar.addMenu(menu_title)
 
+        # Shown only when destination_menu_action is 'none' (destinations/keys hidden)
+        self.destination_action_none_separator_action = QWidgetAction(self.main_window)
+        self.destination_action_none_separator_action.setDefaultWidget(
+            TextSeparator("Action is set to None")
+        )
+        self.move_menu.addAction(self.destination_action_none_separator_action)
+        self.destination_action_none_separator_action.setVisible(dest_action == 'none')
+
         # Separator: --------- User Defined Destinations --------- 
         self.destination_separator_action = QWidgetAction(self.main_window)
         self.destination_separator_action.setDefaultWidget(TextSeparator("User Defined Destinations"))
@@ -2347,7 +2355,8 @@ class MenuManager:
         menu_title = "Copy to" if dest_action == 'copy' else "Move to"
 
         # Update menu title - get fresh reference from menubar (macOS recreates it when dialog closes)
-        # When 'none': menu stays visible as "Move To" but destinations/keys are hidden; only "Edit destinations" shown
+        # When 'none': menu stays visible as "Move To" but destinations/keys are hidden;
+        # "Action is None" note and "Edit destinations" are shown
         try:
             menubar = mw.menuBar()
             for action in menubar.actions():
@@ -2360,7 +2369,7 @@ class MenuManager:
                         if menu_action:
                             menu_action.setText(menu_title)
                         self.move_menu = submenu
-                        # Menu always visible; when 'none' only "Edit destinations" subitem is shown
+                        # Menu always visible; when 'none' show note + "Edit destinations"
                     break
         except RuntimeError:
             pass  # C++ object already deleted
@@ -2375,7 +2384,9 @@ class MenuManager:
                 last_drop_location = mw.file_tree_handler.file_tree.get_last_drop_location()
 
         # Show/hide destination separator, last drop action, move work files based on destination_menu_action
-        # When 'none': hide all destination items; only "Edit destinations" remains visible
+        # When 'none': hide all destination items; show "Action is None" note + "Edit destinations"
+        if hasattr(self, 'destination_action_none_separator_action'):
+            self.destination_action_none_separator_action.setVisible(not show_destinations)
         if hasattr(self, 'destination_separator_action'):
             self.destination_separator_action.setVisible(show_destinations)
         if hasattr(self, 'dynamic_move_separator_action'):

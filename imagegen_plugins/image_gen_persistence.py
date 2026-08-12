@@ -13,6 +13,7 @@ from config import get_config
 
 # Serialize imagegen settings writes (model params, LoRA catalog, active plugin, …).
 _imagegen_settings_lock = threading.Lock()
+_UNSET = object()
 
 
 def _ensure_imagegen_dict(settings: dict) -> dict:
@@ -948,13 +949,15 @@ def update_lora_entry_metadata(
     scale: Optional[float] = None,
     best_guess: Optional[float] = None,
     comment: Optional[str] = None,
+    reference_prompt: Any = _UNSET,
     repo_id: Optional[str] = None,
     filename: Optional[str] = None,
     source_path: Optional[str] = None,
 ) -> None:
-    """Persist user-editable LoRA metadata (name, trigger, scale, best guess, comment).
+    """Persist user-editable LoRA metadata (name, trigger, scale, best guess, comment, reference prompt).
 
     ``scale`` / ``best_guess`` are left unchanged when omitted (None).
+    ``reference_prompt`` is left unchanged when omitted (``_UNSET``); pass ``""`` to clear.
     """
     from imagegen_plugins.lora_catalog import LORA_CATALOG
     from imagegen_plugins.lora_catalog_settings import (
@@ -972,6 +975,10 @@ def update_lora_entry_metadata(
         raise ValueError("Display name is required.")
     trigger = (trigger_word or "").strip() or None
     note = (comment or "").strip() or None
+    ref_prompt: Optional[str] = None
+    update_reference_prompt = reference_prompt is not _UNSET
+    if update_reference_prompt:
+        ref_prompt = (reference_prompt or "").strip() or None
     repo = (repo_id or "").strip() if repo_id is not None else None
     fname = (filename or "").strip() if filename is not None else None
     src = (source_path or "").strip() if source_path is not None else None
@@ -1005,6 +1012,8 @@ def update_lora_entry_metadata(
             if best_guess_val is not None:
                 entry_dict["best_guess"] = best_guess_val
             entry_dict["comment"] = note
+            if update_reference_prompt:
+                entry_dict["reference_prompt"] = ref_prompt
             if repo is not None:
                 entry_dict["repo_id"] = repo
             if fname is not None:
@@ -1025,6 +1034,8 @@ def update_lora_entry_metadata(
             if best_guess_val is not None:
                 prev["best_guess"] = best_guess_val
             prev["comment"] = note
+            if update_reference_prompt:
+                prev["reference_prompt"] = ref_prompt
             overrides[lid] = prev
             lc[ENTRY_OVERRIDES_KEY] = overrides
         imagegen["lora_catalog"] = lc
@@ -1406,6 +1417,7 @@ def enrich_lora_origin_metadata(lora_id: str):
         trigger_word=match.trigger_word or entry.trigger_word,
         scale=float(entry.scale),
         comment=comment or None,
+        reference_prompt=entry.reference_prompt,
         repo_id=meta.get("repo_id", entry.repo_id or ""),
         filename=meta.get("filename", entry.filename or ""),
         source_path=meta.get("source_path", entry.source_path or ""),

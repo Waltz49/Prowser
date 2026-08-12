@@ -36,6 +36,7 @@ def _entry_to_dict(entry: FluxLoraEntry) -> Dict[str, Any]:
         "mflux_compatible": entry.mflux_compatible,
         "trigger_word": entry.trigger_word,
         "comment": entry.comment,
+        "reference_prompt": entry.reference_prompt,
         "source_path": entry.source_path or "",
     }
 
@@ -60,6 +61,10 @@ def entry_from_dict(raw: Dict[str, Any]) -> Optional[FluxLoraEntry]:
     comment = str(comment_raw).strip() if comment_raw else None
     if comment == "":
         comment = None
+    ref_raw = raw.get("reference_prompt")
+    reference_prompt = str(ref_raw).strip() if ref_raw else None
+    if reference_prompt == "":
+        reference_prompt = None
     mflux_raw = raw.get("mflux_compatible")
     mflux_compatible = mflux_raw if isinstance(mflux_raw, bool) else None
     try:
@@ -92,6 +97,7 @@ def entry_from_dict(raw: Dict[str, Any]) -> Optional[FluxLoraEntry]:
         mflux_compatible=mflux_compatible,
         trigger_word=trigger_word,
         comment=comment,
+        reference_prompt=reference_prompt,
         source_path=source_path,
     )
 
@@ -224,6 +230,7 @@ def build_user_lora_entry(
     scale: float = 1.0,
     best_guess: float = 1.0,
     comment: Optional[str] = None,
+    reference_prompt: Optional[str] = None,
     repo_id: str = "",
     filename: str = "",
     settings: Optional[Dict[str, Any]] = None,
@@ -251,6 +258,7 @@ def build_user_lora_entry(
         mflux_compatible=None,
         trigger_word=(trigger_word or "").strip() or None,
         comment=(comment or "").strip() or None,
+        reference_prompt=(reference_prompt or "").strip() or None,
         source_path=str(resolved_source),
     )
 

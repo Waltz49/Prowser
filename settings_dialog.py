@@ -5872,6 +5872,13 @@ class SettingsDialog(QDialog):
         model_grid.setColumnStretch(1, 1)
         layout.addLayout(model_grid)
 
+        self._lora_drag_hint_label = QLabel(
+            '💡 Drag safetensors file to this pane to add new LoRAs or press the "+" button'
+        )
+        self._lora_drag_hint_label.setWordWrap(True)
+        self._lora_drag_hint_label.setStyleSheet(self.NOTE_TEXT_STYLE)
+        layout.addWidget(self._lora_drag_hint_label)
+
         self._lora_intro_label = QLabel()
         self._lora_intro_label.setWordWrap(True)
         self._lora_intro_label.setStyleSheet(self.NOTE_TEXT_STYLE)
