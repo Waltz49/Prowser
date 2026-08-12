@@ -57,6 +57,8 @@ class FluxLoraEntry:
     repo_id: str = ""
     filename: str = ""
     scale: float = 1.0
+    # User-editable default weight; blank weight in the LoRA popup restores this.
+    best_guess: float = 1.0
     local_path: Optional[str] = None
     base_hf_model_id: str = FLUX1_DEV
     min_steps: int = LORA_MIN_STEPS

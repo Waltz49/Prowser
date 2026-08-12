@@ -93,6 +93,11 @@ def apply_entry_overrides(
             kwargs["scale"] = float(overrides["scale"])
         except (TypeError, ValueError):
             pass
+    if "best_guess" in overrides:
+        try:
+            kwargs["best_guess"] = float(overrides["best_guess"])
+        except (TypeError, ValueError):
+            pass
     if "comment" in overrides:
         comment = overrides.get("comment")
         kwargs["comment"] = str(comment).strip() if comment else None

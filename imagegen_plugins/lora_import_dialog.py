@@ -9,6 +9,7 @@ from typing import List, Optional
 from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtGui import QCursor, QDragEnterEvent, QDropEvent
 from PySide6.QtWidgets import (
+    QAbstractSpinBox,
     QApplication,
     QDialog,
     QDoubleSpinBox,
@@ -270,6 +271,7 @@ class _ImportLoraWorker(QThread):
         model_key: str,
         trigger_word: str,
         scale: float,
+        best_guess: float,
         comment: str,
         cancel_flag: List[bool],
         reuse_lora_id: Optional[str] = None,
@@ -283,6 +285,7 @@ class _ImportLoraWorker(QThread):
         self._model_key = model_key
         self._trigger_word = trigger_word
         self._scale = scale
+        self._best_guess = best_guess
         self._comment = comment
         self._cancel_flag = cancel_flag
         self._reuse_lora_id = (reuse_lora_id or "").strip() or None
@@ -331,7 +334,7 @@ class _ImportLoraWorker(QThread):
                     entry.lora_id,
                     display_name=self._display_name,
                     trigger_word=self._trigger_word or None,
-                    scale=self._scale,
+                    best_guess=self._best_guess,
                     comment=self._comment or None,
                     repo_id=self._repo_id,
                     filename=self._filename,
@@ -350,7 +353,7 @@ class _ImportLoraWorker(QThread):
                         existing.lora_id,
                         display_name=self._display_name,
                         trigger_word=self._trigger_word or None,
-                        scale=self._scale,
+                        best_guess=self._best_guess,
                         comment=self._comment or None,
                         repo_id=self._repo_id,
                         filename=self._filename,
@@ -366,6 +369,7 @@ class _ImportLoraWorker(QThread):
                         model_key=self._model_key,
                         trigger_word=self._trigger_word or None,
                         scale=self._scale,
+                        best_guess=self._best_guess,
                         comment=self._comment or None,
                         repo_id=self._repo_id,
                         filename=self._filename,
@@ -562,12 +566,54 @@ class LoraEntryDialog(QDialog):
         self._trigger_edit.setPlaceholderText("Optional trigger word for prompts")
         form.addRow("Trigger:", self._trigger_edit)
 
-        self._scale_spin = QDoubleSpinBox()
-        _pin_row_height(self._scale_spin, width_policy=QSizePolicy.Policy.Fixed)
-        self._scale_spin.setRange(0.1, 2.0)
-        self._scale_spin.setSingleStep(0.1)
-        self._scale_spin.setValue(1.0)
-        form.addRow("Scale:", self._scale_spin)
+        self._current_scale_spin = QDoubleSpinBox()
+        _pin_row_height(self._current_scale_spin, width_policy=QSizePolicy.Policy.Fixed)
+        self._current_scale_spin.setRange(0.1, 2.0)
+        self._current_scale_spin.setSingleStep(0.1)
+        self._current_scale_spin.setDecimals(2)
+        self._current_scale_spin.setValue(1.0)
+        self._current_scale_spin.setReadOnly(True)
+        self._current_scale_spin.setButtonSymbols(
+            QAbstractSpinBox.ButtonSymbols.NoButtons
+        )
+        self._current_scale_spin.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self._current_scale_spin.setToolTip(
+            "Current weight from the image-gen LoRA pulldown (read-only here)"
+        )
+
+        self._best_guess_spin = QDoubleSpinBox()
+        _pin_row_height(self._best_guess_spin, width_policy=QSizePolicy.Policy.Fixed)
+        self._best_guess_spin.setRange(0.1, 2.0)
+        self._best_guess_spin.setSingleStep(0.1)
+        self._best_guess_spin.setDecimals(2)
+        self._best_guess_spin.setValue(1.0)
+        self._best_guess_spin.setToolTip(
+            "Default weight restored when the LoRA pulldown weight field is left blank"
+        )
+
+        scale_row = QWidget()
+        scale_layout = QHBoxLayout(scale_row)
+        scale_layout.setContentsMargins(0, 0, 0, 0)
+        scale_layout.setSpacing(8)
+        current_label = QLabel("Current:")
+        guess_label = QLabel("Best guess:")
+        scale_layout.addWidget(current_label)
+        scale_layout.addWidget(self._current_scale_spin)
+        scale_layout.addWidget(guess_label)
+        scale_layout.addWidget(self._best_guess_spin)
+        scale_layout.addStretch(1)
+        scale_row.setFixedHeight(_FORM_CONTROL_HEIGHT)
+        scale_row.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        form.addRow("Scale:", scale_row)
+        # Keep a private alias used by older call sites in this module.
+        self._scale_spin = self._best_guess_spin
+        if not is_edit:
+            def _sync_current_from_guess(value: float) -> None:
+                if self._reuse_lora_id:
+                    return
+                self._current_scale_spin.setValue(float(value))
+
+            self._best_guess_spin.valueChanged.connect(_sync_current_from_guess)
 
         self._comment_edit = QLineEdit()
         _pin_line_edit(self._comment_edit)
@@ -655,7 +701,8 @@ class LoraEntryDialog(QDialog):
             self._form.removeRow(self._path_wrap)
         self._name_edit.setText(entry.display_name)
         self._trigger_edit.setText(entry.trigger_word or "")
-        self._scale_spin.setValue(float(entry.scale))
+        self._current_scale_spin.setValue(float(entry.scale))
+        self._best_guess_spin.setValue(float(entry.best_guess))
         self._comment_edit.setText(entry.comment or "")
         self._repo_edit.setText(entry.repo_id or "")
         self._filename_edit.setText(entry.filename or "")
@@ -764,7 +811,8 @@ class LoraEntryDialog(QDialog):
             self._reuse_lora_id = existing.lora_id
             self._name_edit.setText(existing.display_name)
             self._trigger_edit.setText(existing.trigger_word or "")
-            self._scale_spin.setValue(float(existing.scale))
+            self._current_scale_spin.setValue(float(existing.scale))
+            self._best_guess_spin.setValue(float(existing.best_guess))
             self._comment_edit.setText(existing.comment or "")
             self._update_add_intro(reusing=True)
             return
@@ -814,9 +862,15 @@ class LoraEntryDialog(QDialog):
                 pass
         self._trigger_edit.setText((choice.trigger_word or "").strip())
         try:
-            self._scale_spin.setValue(float(choice.scale))
+            current = float(choice.scale)
         except Exception:
-            self._scale_spin.setValue(1.0)
+            current = 1.0
+        if self._reuse_lora_id:
+            # Path-change already primed Current / Best guess from the existing entry.
+            pass
+        else:
+            self._current_scale_spin.setValue(current)
+            self._best_guess_spin.setValue(1.0)
         self._comment_edit.setText((choice.comment or "").strip())
         self._repo_edit.setText((choice.repo_id or "").strip())
         self._filename_edit.setText((choice.filename or "").strip())
@@ -846,7 +900,7 @@ class LoraEntryDialog(QDialog):
                 self._lora_id,
                 display_name=name,
                 trigger_word=self._trigger_edit.text().strip() or None,
-                scale=float(self._scale_spin.value()),
+                best_guess=float(self._best_guess_spin.value()),
                 comment=self._comment_edit.text().strip() or None,
                 repo_id=self._repo_edit.text().strip(),
                 filename=self._filename_edit.text().strip(),
@@ -955,7 +1009,8 @@ class LoraEntryDialog(QDialog):
             display_name=name,
             model_key=self._model_key,
             trigger_word=self._trigger_edit.text().strip(),
-            scale=float(self._scale_spin.value()),
+            scale=float(self._best_guess_spin.value()),
+            best_guess=float(self._best_guess_spin.value()),
             comment=self._comment_edit.text().strip(),
             cancel_flag=cancel_flag,
             reuse_lora_id=reuse_lora_id,

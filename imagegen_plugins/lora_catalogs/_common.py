@@ -38,6 +38,7 @@ def catalog_entry(
         repo_id=repo_id,
         filename=filename,
         scale=scale,
+        best_guess=float(scale),
         local_path=local_path,
         base_hf_model_id=base_hf_model_id,
         min_steps=min_steps,

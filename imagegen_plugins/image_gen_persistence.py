@@ -945,13 +945,17 @@ def update_lora_entry_metadata(
     *,
     display_name: str,
     trigger_word: Optional[str] = None,
-    scale: float = 1.0,
+    scale: Optional[float] = None,
+    best_guess: Optional[float] = None,
     comment: Optional[str] = None,
     repo_id: Optional[str] = None,
     filename: Optional[str] = None,
     source_path: Optional[str] = None,
 ) -> None:
-    """Persist user-editable LoRA metadata (name, trigger, scale, comment)."""
+    """Persist user-editable LoRA metadata (name, trigger, scale, best guess, comment).
+
+    ``scale`` / ``best_guess`` are left unchanged when omitted (None).
+    """
     from imagegen_plugins.lora_catalog import LORA_CATALOG
     from imagegen_plugins.lora_catalog_settings import (
         DELETED_IDS_KEY,
@@ -973,10 +977,18 @@ def update_lora_entry_metadata(
     src = (source_path or "").strip() if source_path is not None else None
     if src == "":
         src = None
-    try:
-        scale_val = float(scale)
-    except (TypeError, ValueError):
-        scale_val = 1.0
+    scale_val: Optional[float] = None
+    if scale is not None:
+        try:
+            scale_val = float(scale)
+        except (TypeError, ValueError):
+            scale_val = 1.0
+    best_guess_val: Optional[float] = None
+    if best_guess is not None:
+        try:
+            best_guess_val = float(best_guess)
+        except (TypeError, ValueError):
+            best_guess_val = 1.0
 
     def mutate(imagegen: dict) -> None:
         lc = _imagegen_lora_catalog(imagegen)
@@ -988,7 +1000,10 @@ def update_lora_entry_metadata(
             entry_dict = dict(entry_dict)
             entry_dict["display_name"] = name
             entry_dict["trigger_word"] = trigger
-            entry_dict["scale"] = scale_val
+            if scale_val is not None:
+                entry_dict["scale"] = scale_val
+            if best_guess_val is not None:
+                entry_dict["best_guess"] = best_guess_val
             entry_dict["comment"] = note
             if repo is not None:
                 entry_dict["repo_id"] = repo
@@ -1002,12 +1017,15 @@ def update_lora_entry_metadata(
             if lid not in LORA_CATALOG:
                 raise ValueError(f"LoRA {lid!r} was not found.")
             overrides = dict(lc.get(ENTRY_OVERRIDES_KEY) or {})
-            overrides[lid] = {
-                "display_name": name,
-                "trigger_word": trigger,
-                "scale": scale_val,
-                "comment": note,
-            }
+            prev = dict(overrides.get(lid) or {})
+            prev["display_name"] = name
+            prev["trigger_word"] = trigger
+            if scale_val is not None:
+                prev["scale"] = scale_val
+            if best_guess_val is not None:
+                prev["best_guess"] = best_guess_val
+            prev["comment"] = note
+            overrides[lid] = prev
             lc[ENTRY_OVERRIDES_KEY] = overrides
         imagegen["lora_catalog"] = lc
 

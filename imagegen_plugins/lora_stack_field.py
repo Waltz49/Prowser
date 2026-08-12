@@ -351,7 +351,14 @@ class LoraSelectionPopup(QFrame):
         def _on_toggled(checked: bool) -> None:
             weight_edit.setEnabled(checked)
 
+        def _on_editing_finished() -> None:
+            if weight_edit.text().strip():
+                return
+            guess = self._fallback_scales.get(preset_id, 1.0)
+            weight_edit.setText(_format_scale(guess))
+
         selector.toggled.connect(_on_toggled)
+        weight_edit.editingFinished.connect(_on_editing_finished)
         _on_toggled(selector.isChecked())
 
     def _row_height_estimate(self) -> int:
@@ -417,6 +424,9 @@ class LoraSelectionPopup(QFrame):
         for label, preset_id in selectable:
             entry = get_lora_entry(preset_id)
             catalog_scale = float(entry.scale) if entry is not None else 1.0
+            best_guess = (
+                float(entry.best_guess) if entry is not None else 1.0
+            )
             if preset_id in overrides:
                 try:
                     scale = float(overrides[preset_id])
@@ -427,7 +437,10 @@ class LoraSelectionPopup(QFrame):
             else:
                 scale = catalog_scale
             if preset_id != "none":
-                self._fallback_scales[preset_id] = scale
+                # Blank weight field restores best guess (not the displayed current).
+                self._fallback_scales[preset_id] = max(
+                    _SCALE_MIN, min(_SCALE_MAX, best_guess)
+                )
 
             if single_select:
                 selector: QAbstractButton = QRadioButton(str(label), self._checks_host)
@@ -447,7 +460,10 @@ class LoraSelectionPopup(QFrame):
                     Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
                 )
                 weight_edit.setValidator(validator)
-                weight_edit.setToolTip("LoRA weight (0.1–2.0)")
+                weight_edit.setToolTip(
+                    f"LoRA weight (0.1–2.0); blank restores best guess "
+                    f"({_format_scale(best_guess)})"
+                )
                 self._wire_weight_row(preset_id, selector, weight_edit)
 
             self._grid.addWidget(selector, row, 0, 1, 2)

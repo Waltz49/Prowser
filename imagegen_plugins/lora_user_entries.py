@@ -29,6 +29,7 @@ def _entry_to_dict(entry: FluxLoraEntry) -> Dict[str, Any]:
         "repo_id": entry.repo_id or "",
         "filename": entry.filename or "",
         "scale": float(entry.scale),
+        "best_guess": float(entry.best_guess),
         "local_path": entry.local_path or "",
         "base_hf_model_id": entry.base_hf_model_id,
         "min_steps": int(entry.min_steps),
@@ -66,6 +67,10 @@ def entry_from_dict(raw: Dict[str, Any]) -> Optional[FluxLoraEntry]:
     except (TypeError, ValueError):
         scale = 1.0
     try:
+        best_guess = float(raw.get("best_guess", 1.0))
+    except (TypeError, ValueError):
+        best_guess = 1.0
+    try:
         min_steps = int(raw.get("min_steps", LORA_MIN_STEPS))
     except (TypeError, ValueError):
         min_steps = LORA_MIN_STEPS
@@ -80,6 +85,7 @@ def entry_from_dict(raw: Dict[str, Any]) -> Optional[FluxLoraEntry]:
         repo_id=str(raw.get("repo_id") or ""),
         filename=str(raw.get("filename") or ""),
         scale=scale,
+        best_guess=best_guess,
         local_path=local_path,
         base_hf_model_id=base_hf,
         min_steps=min_steps,
@@ -216,6 +222,7 @@ def build_user_lora_entry(
     model_key: str,
     trigger_word: Optional[str] = None,
     scale: float = 1.0,
+    best_guess: float = 1.0,
     comment: Optional[str] = None,
     repo_id: str = "",
     filename: str = "",
@@ -229,6 +236,7 @@ def build_user_lora_entry(
     lora_id = unique_lora_id(base_id, existing)
     resolved_source = source_path.resolve()
     dest = copy_lora_to_user_cache(source_path, lora_id)
+    guess = float(best_guess)
     return FluxLoraEntry(
         host_id=host_id,
         lora_id=lora_id,
@@ -237,6 +245,7 @@ def build_user_lora_entry(
         filename=(filename or "").strip(),
         local_path=str(dest),
         scale=float(scale),
+        best_guess=guess,
         base_hf_model_id=model_key,
         min_steps=LORA_MIN_STEPS,
         mflux_compatible=None,
