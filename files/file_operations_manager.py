@@ -1619,7 +1619,8 @@ class FileOperationsManager:
         starting_number: int,
         progress_callback=None,
         effective_start_override: Optional[int] = None,
-        prefer_source_number: bool = False
+        prefer_source_number: bool = False,
+        append_after_occupied: bool = False
     ) -> List[Tuple[str, str]]:
         """
         Optimized calculation of new filenames for a sequential rename operation.
@@ -1648,24 +1649,29 @@ class FileOperationsManager:
             os.path.normpath(os.path.realpath(p)) for p in images_to_rename
         )
 
-        # Helper: parse number, returns int or None
+        # Helper: parse number, returns int or None.
+        # Accept digit length >= increment_length so overflow names (10000 when digits=4) count as occupied.
         _dash_pat = re.compile(rf'^{re.escape(prefix)}-(\d+)$', re.IGNORECASE)
         _nodash_pat = re.compile(rf'^{re.escape(prefix)}(\d+)$', re.IGNORECASE)
         def extract_number(fn: str) -> Optional[int]:
             name, _ = os.path.splitext(fn)
             m = _dash_pat.match(name)
-            if m and len(m.group(1)) == increment_length:
+            if m and len(m.group(1)) >= increment_length:
                 try:
                     return int(m.group(1))
                 except Exception:
                     return None
             m = _nodash_pat.match(name)
-            if m and len(m.group(1)) == increment_length:
+            if m and len(m.group(1)) >= increment_length:
                 try:
                     return int(m.group(1))
                 except Exception:
                     return None
             return None
+
+        def format_seq(n: int) -> str:
+            w = max(increment_length, len(str(n)))
+            return f"{n:0{w}d}"
 
         # 3. Find "used" (occupied) and "vacated" numbers
         occupied_numbers = set()
@@ -1696,14 +1702,17 @@ class FileOperationsManager:
             norm_path = os.path.normpath(os.path.realpath(filepath))
             return norm_path not in source_paths_normalized
 
-        MAX_SEQ = 10 ** increment_length - 1
+        # Do not wrap at 10**increment_length - 1; grow digit width instead (9999 -> 10000).
+        MAX_SEQ_CEILING = 10 ** 9
         total_images = len(images_to_rename)
         assigned_targets = set()  # UPPER(target filename)
         assigned_numbers = set()
         target_mappings = []
         effective_start = effective_start_override if effective_start_override is not None else starting_number
+        if append_after_occupied and occupied_numbers:
+            effective_start = max(effective_start, max(occupied_numbers) + 1)
 
-        # 4. For each file, find lowest available sequence number
+        # 4. For each file, find next available sequence number (never wrap, never overwrite)
         for idx, old_path in enumerate(images_to_rename):
             if progress_callback and idx % 10 == 0:
                 progress_callback(idx, total_images, f"Calculating names... ({idx}/{total_images})")
@@ -1715,7 +1724,7 @@ class FileOperationsManager:
                 src_num = extract_number(os.path.basename(old_path))
                 if src_num is not None and src_num >= effective_start:
                     if src_num not in assigned_numbers and src_num not in occupied_numbers:
-                        new_basename = f"{prefix}-{'{:0{w}d}'.format(src_num, w=increment_length)}{ext}"
+                        new_basename = f"{prefix}-{format_seq(src_num)}{ext}"
                         new_basename_upper = new_basename.upper()
                         if new_basename_upper not in assigned_targets:
                             if new_basename_upper in existing_files_map:
@@ -1726,8 +1735,8 @@ class FileOperationsManager:
                             else:
                                 next_seq = src_num
                         if next_seq is not None:
-                            cand_pat_dash = f"{prefix}-{'{:0{w}d}'.format(src_num,w=increment_length)}".upper()
-                            cand_pat_nodash = f"{prefix}{'{:0{w}d}'.format(src_num,w=increment_length)}".upper()
+                            cand_pat_dash = f"{prefix}-{format_seq(src_num)}".upper()
+                            cand_pat_nodash = f"{prefix}{format_seq(src_num)}".upper()
                             if path_occupied_by_non_source(cand_pat_dash) or path_occupied_by_non_source(cand_pat_nodash):
                                 next_seq = None
 
@@ -1735,7 +1744,7 @@ class FileOperationsManager:
             if next_seq is None:
                 candidate = effective_start
                 # Occupied numbers may grow, use set for O(1) checks.
-                while candidate <= MAX_SEQ:
+                while candidate <= MAX_SEQ_CEILING:
                     if candidate in assigned_numbers:
                         candidate += 1
                         continue
@@ -1743,7 +1752,7 @@ class FileOperationsManager:
                         candidate += 1
                         continue
 
-                    new_basename = f"{prefix}-{'{:0{w}d}'.format(candidate, w=increment_length)}{ext}"
+                    new_basename = f"{prefix}-{format_seq(candidate)}{ext}"
                     new_basename_upper = new_basename.upper()
 
                     # Already assigned in this batch?
@@ -1762,8 +1771,8 @@ class FileOperationsManager:
                             continue
 
                     # Safety: check pattern match via stem index (O(1) per candidate)
-                    cand_pat_dash = f"{prefix}-{'{:0{w}d}'.format(candidate,w=increment_length)}".upper()
-                    cand_pat_nodash = f"{prefix}{'{:0{w}d}'.format(candidate,w=increment_length)}".upper()
+                    cand_pat_dash = f"{prefix}-{format_seq(candidate)}".upper()
+                    cand_pat_nodash = f"{prefix}{format_seq(candidate)}".upper()
                     if path_occupied_by_non_source(cand_pat_dash) or path_occupied_by_non_source(cand_pat_nodash):
                         occupied_numbers.add(candidate)
                         candidate += 1
@@ -1774,12 +1783,12 @@ class FileOperationsManager:
 
             if next_seq is None:
                 raise ValueError(
-                    f"Cannot rename files: no available sequence numbers starting from {starting_number}.\n\n"
-                    f"All numbers from {starting_number} to {MAX_SEQ} are occupied or already assigned.\n"
-                    f"Please use a different prefix, increase the number of digits, or reduce the number of files."
+                    f"Cannot rename files: no available sequence numbers starting from {effective_start}.\n\n"
+                    f"Rename was aborted to avoid overwriting existing files.\n"
+                    f"Please use a different prefix or reduce the number of files."
                 )
 
-            new_filename = f"{prefix}-{'{:0{w}d}'.format(next_seq, w=increment_length)}{ext}"
+            new_filename = f"{prefix}-{format_seq(next_seq)}{ext}"
             new_filename_upper = new_filename.upper()
             new_path = os.path.join(target_directory, new_filename)
             target_mappings.append((old_path, new_path))
@@ -3166,11 +3175,14 @@ class FileOperationsManager:
                             if filename in locked_files and path not in locked_files_order:
                                 locked_files_order.append(path)
             
+            is_partial_selection = len(images_to_rename) < len(displayed_images)
+
             try:
                 progress_dialog.setLabelText("Sorting images...")
                 QApplication.processEvents()
                 
-                if sort_mode == "order":
+                # Partial selection always uses thumbnail-list order (ignore dialog date sort).
+                if sort_mode == "order" or is_partial_selection:
                     # Sort using current displayed order (NO reordering!)
                     # CRITICAL: images_to_rename is ALREADY in the correct order from earlier code
                     # (either canvas order or displayed_images order), so we do NOT reorder here.
@@ -3226,7 +3238,8 @@ class FileOperationsManager:
                     # If order_direction is "bottom", reverse the entire list so bottom item gets number 1
                     # Locked files WILL be included in numbering (they get numbers based on their position in reversed list)
                     # NOTE: We reverse images_to_rename for numbering, but preserve original_displayed_order for final display
-                    if order_direction == "bottom":
+                    # Partial + date-dialog: keep thumbnail order (do not reverse).
+                    if order_direction == "bottom" and sort_mode == "order":
                         # Reverse entire list - this ensures bottom item gets number 1
                         # Locked files are included and will be numbered based on their position
                         images_to_rename.reverse()
@@ -3379,18 +3392,11 @@ class FileOperationsManager:
             try:
                 def calc_progress_callback(current, total, message):
                     update_progress(current, total, message, 10, 50)
-                # Subset + order mode: start at max(settings, lowest in dir), prefer source number when available
-                effective_start_override = None
-                prefer_source_number = False
-                if sort_mode == "order" and len(images_to_rename) < len(displayed_images):
-                    lowest = self._get_lowest_sequence_in_directory(prefix, target_directory, increment_length)
-                    effective_start_override = max(starting_number, lowest) if lowest is not None else starting_number
-                    prefer_source_number = True
+                # Partial selection: start at max(occupied)+1 so vacated slots are not reused.
                 target_mappings = self._calculate_target_names(
                     images_to_rename, prefix, target_directory, increment_length, starting_number,
                     progress_callback=calc_progress_callback,
-                    effective_start_override=effective_start_override,
-                    prefer_source_number=prefer_source_number
+                    append_after_occupied=is_partial_selection
                 )
                 progress_dialog.setValue(50)
                 progress_dialog.setLabelText("Building rename plan...")
