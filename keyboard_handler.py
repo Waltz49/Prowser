@@ -1238,9 +1238,6 @@ class ThumbnailKeyboardHandler(BaseKeyboardHandler):
 
     def _handle_ctrl_l_lock(self, event: QKeyEvent, context_data: Dict[str, Any]) -> bool:
         """Handle cmd-L for locking files - only works when allow_thumbnail_locking is enabled"""
-        if getattr(self.main_window, 'current_view_mode', None) == 'browse':
-            # Browse reserves Cmd+L for File ▸ Last Image (Tools menu clears Lock shortcut in browse)
-            return False
         from config import get_config
         config = get_config()
         settings = config.load_settings()

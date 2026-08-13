@@ -529,10 +529,8 @@ class MenuManager:
         exit_action.triggered.connect(self.main_window.close)
         file_menu.addAction(exit_action)
 
-        # Last Image (browse): swap F3 history [0]↔[1], show new first — Cmd+L (Tools Lock uses another key in browse)
+        # Last Image (browse): swap F3 history [0]↔[1], show new first — Cmd+; (Cmd+L is Tools Lock)
         self.main_window.last_image_action = QAction("Last Image", self.main_window)
-        self.main_window.last_image_action.setShortcut(QKeySequence("Ctrl+L"))
-        self.main_window.last_image_action.setShortcutContext(Qt.ShortcutContext.WindowShortcut)
         self.main_window.last_image_action.triggered.connect(
             self.main_window.swap_browse_image_history_first_two_and_show
         )
@@ -832,6 +830,17 @@ class MenuManager:
         self.main_window.toggle_shortcuts_sidebar_action.setChecked(shortcuts_checked)
         self.main_window.toggle_shortcuts_sidebar_action.triggered.connect(self.main_window.toggle_shortcuts_display)
         view_menu.addAction(self.main_window.toggle_shortcuts_sidebar_action)
+
+        # View Last Image (browse only): swap F3 history [0]↔[1] — Cmd+;
+        self.main_window.view_last_image_action = QAction("View Last Image", self.main_window)
+        self.main_window.view_last_image_action.setShortcut(QKeySequence("Ctrl+;"))
+        self.main_window.view_last_image_action.setShortcutContext(Qt.ShortcutContext.WindowShortcut)
+        self.main_window.view_last_image_action.triggered.connect(
+            self.main_window.swap_browse_image_history_first_two_and_show
+        )
+        self.main_window.view_last_image_action.setVisible(False)
+        self.main_window.view_last_image_action.setEnabled(False)
+        view_menu.addAction(self.main_window.view_last_image_action)
 
         # Theme submenu (Light / Dark / User / system)
         theme_menu = view_menu.addMenu("Theme")
@@ -2819,11 +2828,7 @@ class MenuManager:
             mw.lock_files_action.setVisible(should_show)
             mw.lock_files_action.setEnabled(should_show)
             if should_show:
-                if (getattr(mw, 'browse_image_history_action', None) is not None and
-                        mw.current_view_mode == 'browse'):
-                    mw.lock_files_action.setShortcut(QKeySequence())
-                else:
-                    mw.lock_files_action.setShortcut(QKeySequence("Ctrl+L"))
+                mw.lock_files_action.setShortcut(QKeySequence("Ctrl+L"))
                 # Update text based on selection count
                 if hasattr(mw, 'selection_manager'):
                     selected_files = mw.selection_manager.get_selected_files()
@@ -2920,7 +2925,7 @@ class MenuManager:
         self.update_file_menu_last_image_action()
     
     def update_file_menu_last_image_action(self):
-        """File ▸ Last Image: browse only; Cmd+L swaps history [0] and [1] then shows new first."""
+        """File ▸ Last Image: browse only; shortcut lives on View ▸ View Last Image (Cmd+;)."""
         mw = self.main_window
         if not hasattr(mw, 'last_image_action'):
             return
@@ -2929,18 +2934,11 @@ class MenuManager:
             mw.last_image_action.setVisible(True)
             if not in_browse:
                 mw.last_image_action.setEnabled(False)
-                mw.last_image_action.setShortcut(QKeySequence())
                 return
             if hasattr(mw, '_prune_browse_image_history'):
                 mw._prune_browse_image_history()
             hist = getattr(mw, 'browse_image_history', None) or []
-            can_swap = len(hist) >= 2
-            mw.last_image_action.setEnabled(can_swap)
-            if not can_swap:
-                mw.last_image_action.setShortcut(QKeySequence())
-            else:
-                mw.last_image_action.setShortcut(QKeySequence("Ctrl+L"))
-                mw.last_image_action.setShortcutContext(Qt.ShortcutContext.WindowShortcut)
+            mw.last_image_action.setEnabled(len(hist) >= 2)
         except RuntimeError:
             pass  # C++ object may be deleted (macOS native menu bar)
     
@@ -3147,6 +3145,7 @@ class MenuManager:
             'toggle_chat_action',
             'toggle_status_bar_action',
             'browse_view_action',
+            'view_last_image_action',
             'macos_display_mode_action',
             'toggle_filename_action',
             'actual_size_action',
@@ -3178,6 +3177,7 @@ class MenuManager:
                 'toggle_chat_action': True,
                 'toggle_status_bar_action': True,
                 'browse_view_action': True,
+                'view_last_image_action': False,
                 'macos_display_mode_action': True,
                 'toggle_filename_action': True,
                 'actual_size_action': False,
@@ -3206,6 +3206,7 @@ class MenuManager:
                 'toggle_chat_action': True,
                 'toggle_status_bar_action': True,
                 'browse_view_action': True,
+                'view_last_image_action': True,
                 'macos_display_mode_action': True,
                 'toggle_filename_action': False,
                 'actual_size_action': True,
@@ -3235,6 +3236,7 @@ class MenuManager:
                 'toggle_chat_action': True,
                 'toggle_status_bar_action': False,
                 'browse_view_action': True,
+                'view_last_image_action': False,
                 'macos_display_mode_action': True,
                 'toggle_filename_action': False,
                 'actual_size_action': False,
@@ -3263,6 +3265,7 @@ class MenuManager:
                 'toggle_chat_action': True,
                 'toggle_status_bar_action': False,
                 'browse_view_action': True,
+                'view_last_image_action': False,
                 'macos_display_mode_action': True,
                 'toggle_filename_action': False,
                 'actual_size_action': False,
@@ -3291,6 +3294,7 @@ class MenuManager:
                 'toggle_chat_action': True,
                 'toggle_status_bar_action': False,
                 'browse_view_action': True,
+                'view_last_image_action': False,
                 'macos_display_mode_action': True,
                 'toggle_filename_action': False,
                 'actual_size_action': False,
@@ -3319,6 +3323,7 @@ class MenuManager:
                 'toggle_chat_action': True,  # Enable F9 to toggle chat pane
                 'toggle_status_bar_action': True,
                 'browse_view_action': True,
+                'view_last_image_action': False,
                 'macos_display_mode_action': True,
                 'toggle_filename_action': True,  # Enable I key to toggle Information sidebar
                 'actual_size_action': False,
@@ -3371,6 +3376,24 @@ class MenuManager:
         if hasattr(mw, 'browse_view_action'):
             try:
                 mw.browse_view_action.setShortcut(QKeySequence("F"))
+            except RuntimeError:
+                pass  # C++ object may be deleted (macOS native menu bar)
+        # View Last Image: Cmd+; only in browse when history can swap
+        if hasattr(mw, 'view_last_image_action'):
+            try:
+                if mw.current_view_mode != 'browse':
+                    mw.view_last_image_action.setShortcut(QKeySequence())
+                else:
+                    if hasattr(mw, '_prune_browse_image_history'):
+                        mw._prune_browse_image_history()
+                    hist = getattr(mw, 'browse_image_history', None) or []
+                    can_swap = len(hist) >= 2
+                    mw.view_last_image_action.setEnabled(can_swap)
+                    if can_swap:
+                        mw.view_last_image_action.setShortcut(QKeySequence("Ctrl+;"))
+                        mw.view_last_image_action.setShortcutContext(Qt.ShortcutContext.WindowShortcut)
+                    else:
+                        mw.view_last_image_action.setShortcut(QKeySequence())
             except RuntimeError:
                 pass  # C++ object may be deleted (macOS native menu bar)
         # If in browse, update actual_size_action check state

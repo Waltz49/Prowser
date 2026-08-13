@@ -3559,13 +3559,17 @@ class ImageBrowserWindow(QMainWindow):
             list_container.refresh_theme_styles()
 
     def refresh_custom_theme_menu(self, custom_themes: Optional[dict] = None) -> None:
+        from PySide6.QtCore import QTimer
         from theme.theme_service import rebuild_view_custom_theme_menu
 
-        rebuild_view_custom_theme_menu(
-            self,
-            self.config,
-            custom_themes=custom_themes,
-        )
+        def _rebuild() -> None:
+            rebuild_view_custom_theme_menu(
+                self,
+                self.config,
+                custom_themes=custom_themes,
+            )
+
+        QTimer.singleShot(0, _rebuild)
 
     def refresh_theme_styles(self):
         """Re-apply theme-dependent widget styles after global palette change."""

@@ -200,7 +200,9 @@ Toggle with **F12** from thumbnail view. In list view, **+** / **=** and **-** a
 | Cmd+E | Edit in external editor |
 | Cmd+Backspace | Delete current file |
 | Cmd+Z | Undo deletion |
-| Cmd+L | Last image (swap history) |
+| Cmd+L | Lock files (when locking enabled) |
+| Cmd+Shift+L | Unlock files |
+| Cmd+; | Last image (swap history) |
 
 ### View Options
 | Key | Action |
@@ -336,5 +338,5 @@ These work from most views via the menu bar:
 - **Cmd** in this document is ⌘ (Command). Qt `Ctrl+` shortcuts in code map to ⌘ on macOS.
 - **⌃** is the physical Control key (`Meta+` in Qt).
 - Some shortcuts are context-sensitive (view mode, settings, or feature flags).
-- **Cmd+L** means lock files in thumbnail view and last-image swap in browse view.
+- **Cmd+L** locks files (when locking is enabled). **Cmd+;** is Last Image in browse view.
 - The in-app help dialog (F1) is built from runtime bindings and may differ slightly from this file.

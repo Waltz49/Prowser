@@ -572,6 +572,66 @@ def sync_view_theme_menu_actions(main_window: Any, ui_theme_id: str) -> None:
         action.setChecked(tid == slug)
 
 
+def resolve_theme_menu(main_window: Any):
+    """Return View > Theme submenu, re-resolving if the cached pointer went stale."""
+    from shiboken6 import isValid
+
+    cached = getattr(main_window, "theme_menu", None)
+    if cached is not None and isValid(cached):
+        return cached
+
+    menubar = main_window.menuBar()
+    if menubar is None or not isValid(menubar):
+        return None
+
+    for view_action in menubar.actions():
+        if not isValid(view_action):
+            continue
+        view_menu = view_action.menu()
+        if view_menu is None or not isValid(view_menu):
+            continue
+        for action in view_menu.actions():
+            if not isValid(action):
+                continue
+            if action.text().replace("\u2060", "").strip() != "Theme":
+                continue
+            theme_menu = action.menu()
+            if theme_menu is None or not isValid(theme_menu):
+                continue
+            main_window.theme_menu = theme_menu
+            system_action = getattr(main_window, "theme_system_action", None)
+            for theme_action in theme_menu.actions():
+                if not isValid(theme_action):
+                    continue
+                if theme_action.isSeparator():
+                    main_window.theme_menu_separator = theme_action
+                elif (
+                    system_action is not None
+                    and isValid(system_action)
+                    and theme_action is system_action
+                ):
+                    main_window.theme_system_action = theme_action
+            return theme_menu
+    return None
+
+
+def _safe_remove_menu_action(menu, action, action_group=None) -> None:
+    from shiboken6 import isValid
+
+    if action is None or not isValid(action):
+        return
+    if menu is not None and isValid(menu):
+        try:
+            menu.removeAction(action)
+        except RuntimeError:
+            pass
+    if action_group is not None and isValid(action_group):
+        try:
+            action_group.removeAction(action)
+        except RuntimeError:
+            pass
+
+
 def rebuild_view_custom_theme_menu(
     main_window: Any,
     config: Any,
@@ -579,18 +639,35 @@ def rebuild_view_custom_theme_menu(
     custom_themes: Optional[dict] = None,
 ) -> None:
     """Rebuild dynamic View > Theme entries for user-defined themes."""
-    from PySide6.QtGui import QAction
+    try:
+        _rebuild_view_custom_theme_menu_impl(
+            main_window,
+            config,
+            custom_themes=custom_themes,
+        )
+    except RuntimeError:
+        # macOS native menu bar can invalidate cached QMenu pointers mid-dialog.
+        pass
 
-    theme_menu = getattr(main_window, "theme_menu", None)
+
+def _rebuild_view_custom_theme_menu_impl(
+    main_window: Any,
+    config: Any,
+    *,
+    custom_themes: Optional[dict] = None,
+) -> None:
+    """Rebuild dynamic View > Theme entries for user-defined themes."""
+    from PySide6.QtGui import QAction
+    from shiboken6 import isValid
+
+    theme_menu = resolve_theme_menu(main_window)
     if theme_menu is None:
         return
 
     old_actions = getattr(main_window, "theme_custom_actions", None) or {}
     theme_group = getattr(main_window, "theme_action_group", None)
     for action in old_actions.values():
-        theme_menu.removeAction(action)
-        if theme_group is not None:
-            theme_group.removeAction(action)
+        _safe_remove_menu_action(theme_menu, action, theme_group)
 
     if custom_themes is None:
         try:
@@ -603,9 +680,11 @@ def rebuild_view_custom_theme_menu(
     main_window.theme_custom_actions = {}
     system_action = getattr(main_window, "theme_system_action", None)
     menu_separator = getattr(main_window, "theme_menu_separator", None)
-    insert_before = menu_separator or system_action
-    if menu_separator is not None:
-        menu_separator.setVisible(bool(custom_themes))
+    insert_before = None
+    if menu_separator is not None and isValid(menu_separator):
+        insert_before = menu_separator
+    elif system_action is not None and isValid(system_action):
+        insert_before = system_action
 
     def _apply_ui_theme(theme_id: str) -> None:
         apply_theme(
@@ -625,19 +704,20 @@ def rebuild_view_custom_theme_menu(
         label = str(entry.get("display_name") or slug)
         action = QAction(label, main_window)
         action.setCheckable(True)
-        if theme_group is not None:
+        if theme_group is not None and isValid(theme_group):
             theme_group.addAction(action)
-        if insert_before is not None:
+        if insert_before is not None and isValid(insert_before) and isValid(theme_menu):
             theme_menu.insertAction(insert_before, action)
         else:
             theme_menu.addAction(action)
         action.triggered.connect(lambda _checked=False, tid=slug: _apply_ui_theme(tid))
         main_window.theme_custom_actions[slug] = action
 
-    sync_view_theme_menu_actions(
-        main_window,
-        (config.load_settings() or {}).get("ui_theme", "dark"),
-    )
+    try:
+        ui_theme = (config.load_settings() or {}).get("ui_theme", "dark")
+    except Exception:
+        ui_theme = "dark"
+    sync_view_theme_menu_actions(main_window, ui_theme)
 
 
 def connect_system_theme_listener() -> None:

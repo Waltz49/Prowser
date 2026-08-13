@@ -8512,12 +8512,6 @@ class SettingsDialog(QDialog):
                 mw = self.parent()
                 if mw is not None and hasattr(mw, "refresh_open_imagegen_dim_limits"):
                     mw.refresh_open_imagegen_dim_limits()
-            if "custom_themes" in changed_keys:
-                mw = self.parent()
-                if mw is not None and hasattr(mw, "refresh_custom_theme_menu"):
-                    mw.refresh_custom_theme_menu(
-                        custom_themes=new_settings.get("custom_themes"),
-                    )
             
             # Emit only changed settings so handlers skip unrelated work
             if has_changes:
