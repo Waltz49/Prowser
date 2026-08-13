@@ -10,7 +10,9 @@ Package restructure (Steps 0–12) is complete; see `docs/restructure-plan.md` f
 - Frozen workers: `--model-tasks-worker`, `--imagegen-worker` (see `prowser.py` `_frozen_subprocess_bootstrap`)
 - `--profile` / `-p DIR` — alternate profile root (default `~/.prowser`)
 - `--background {default,thread,process}` — model-tasks worker thread vs subprocess (`workers/model_tasks_launch.py`)
+- `--min` — hide image generation, LM Studio, voice, and related UI (same as a `--min` bundle)
 - `--test-create-deps` — frozen-only diagnostic for Create/Image menu dependencies
+- `--env` — print `PROWSER_*` exit environment variables and exit
 - Settings: `~/.prowser/data/settings.json` via `config.ImageBrowserConfig`
 - Logs: `~/.prowser/logs` (early stdout also routed via `print_log_redirect.py`)
 
@@ -37,20 +39,21 @@ Root-level UI wiring (not under `browser_window/`): `menu_manager.py`, `keyboard
 
 | Subpackage | Role |
 |------------|------|
-| `managers/` | Main-window managers (navigation, files, thumbnails, config sync, …) |
+| `managers/` | Main-window managers (navigation, files, thumbnails, directory watch, …) |
 | `dialogs/` | About, help, EXIF, find references, … |
-| `sidebar/` | Right sidebar (`right_sidebar_combined`, `preview_widget`, `shortcuts_sidebar`, `sidebar_jobs_widget`) |
+| `sidebar/` | Right sidebar (`right_sidebar_combined`, `preview_widget`, `shortcuts_sidebar`, `sidebar_jobs_widget`, `sidebar_chat_widget`) |
 | `infra/` | `window_model_bridge`, `mvc_controller` |
 
 ### Managers (representative)
 
 - **Navigation / display:** `navigation_manager`, `image_display_manager`, `view_mode_manager`, `selection_manager`, `directory_history_handler`, `event_handler`, `navigation_ui_subscriber`
-- **Files:** `directory_loader`, `refresh_manager`, `lock_manager`, `rename_status_manager`, `resize_images`, `exif_operations_manager`
+- **Files:** `directory_loader`, `refresh_manager`, `directory_watch_manager`, `lock_manager`, `rename_status_manager`, `resize_images`, `exif_operations_manager`
 - **Thumbnails / views:** `thumbnail_display_manager`, `thumbnail_context_menu`, `thumbnail_highlight_subscriber`, `sidebar_manager`, `ui_layout_manager`, `wallpaper_manager`, `window_event_filters`
 - **AI / similarity:** `similarity_search_manager`, `background_clip_controller`, `lmstudio_launcher`
-- **Chrome:** `configuration_sync_manager`, `status_notification`
-- **Settings UI:** `settings_dialog.py` (root) + `settings/widgets/multi_row_tab_widget.py`
+- **Chrome:** `status_notification`
+- **Settings UI:** `settings_dialog.py` (root) + `settings/widgets/` (`multi_row_tab_widget`, theme groups, macOS preferences)
 - **Image generation:** `imagegen_plugins/` (registry, worker, dialogs, `image_gen_controller.py`)
+- **Chat:** `chat_plugins/` (pane, session, LM Studio, persistence) + `browser_window/sidebar/sidebar_chat_widget.py`
 - **Workers / background:** `workers/` (model tasks, CLIP worker, message pipe, beachball guards, idle detector)
 
 Domain packages (imported by managers; not all listed):
@@ -85,7 +88,9 @@ Flat feature packages at repo root (see `docs/restructure-plan.md`):
 |---------|------|
 | `browser_window/` | Main-window managers, dialogs, sidebar, infra |
 | `imagegen_plugins/` | Image generation UI, registry, `pipelines/`, `lora_catalogs/` |
+| `chat_plugins/` | Chat pane, session, LM Studio, persistence |
 | `slideshow/`, `search/`, `cache/`, `faces/`, `workers/`, `files/`, `thumbnails/`, `theme/`, `exif/`, `settings/` | Domain-specific modules |
+| `widgets/` | Shared small UI controls (gear buttons, hover icons) |
 | `file_ops/` | Placeholder for future `file_operations_manager` slices |
 | `mtcnn_face_torch/` | Vendored face-detection code |
 

@@ -9,6 +9,12 @@ source venv_image_browser/bin/activate
 python tools/<script>.py
 ```
 
+## Scripts in `tools/`
+
+| Script | Purpose |
+|--------|---------|
+| `profile_imagegen_availability.py` | Profile image-gen plugin/pipeline availability checks |
+
 Some older scripts still live at the repo root; they are listed below for reference.
 
 ## Root-level scripts (not imported by the app)
@@ -19,7 +25,9 @@ Some older scripts still live at the repo root; they are listed below for refere
 | `fast_test.py` | Quick performance checks |
 | `jit_test.py` | JIT compilation tests |
 | `create_sample_images.py` | Generate sample images for manual testing |
+| `documentation_screencaps.py` | Capture documentation screenshots (Tools → Debug) |
 | `gemma4_voice_vision_demo.py` | Standalone voice + vision demo (not the image browser) |
+| `generate_minimal_requirements.py` | Generate `minimal_requirements.txt` from `requirements.txt` |
 | `hfmodels.py` | Hugging Face model utilities |
 | `list_models.py` | List / manage Hugging Face models |
 | `prowser_say_exit.py` | Speech exit environment reporter |

@@ -37,7 +37,7 @@ Press **F1** or **/** in the app for context-sensitive help. Menu items also sho
 |-----|--------|
 | Enter/Space | Open in fullscreen (image viewer) |
 | F | Enter image viewer (menu) |
-| Esc | Navigate backward in directory history |
+| Esc | Clear selection, or navigate backward in directory history |
 | Shift+Esc | Navigate forward in directory history |
 | F10 | Clear forward and backward history stacks |
 | Click | Select image |
@@ -82,6 +82,7 @@ Press **F1** or **/** in the app for context-sensitive help. Menu items also sho
 | Cmd+Shift+Z | Resize images |
 | Cmd+L | Lock files (when locking enabled) |
 | Cmd+Shift+L | Unlock files |
+| Cmd+X | Exclude selected thumbs from the current view |
 
 ### View Options
 | Key | Action |
@@ -94,6 +95,7 @@ Press **F1** or **/** in the app for context-sensitive help. Menu items also sho
 | T | Toggle file tree |
 | P | Toggle preview widget |
 | J | Toggle jobs pane (when enabled) |
+| F9 or , | Toggle chat pane (when enabled) |
 | F4, ., Cmd+. | Toggle chrome (menu bar, etc.) |
 | F12 | Toggle list view |
 | Cmd+Return | Collapse file tree |
@@ -148,12 +150,15 @@ Press **F1** or **/** in the app for context-sensitive help. Menu items also sho
 | Shift+F | Find duplicate images (recursive) |
 | Cmd+P | Search by person |
 | ⌃⌘P | Quick person search |
-| Cmd+= | Cache Faces |
+| Cmd+Shift+P | Extract faces |
+| Cmd+= | Cache subdirectory faces |
+| Cmd+Shift+N | Toggle naming-consistency marks in the file tree |
+| ⌃L | View log (Tools → Debug) |
 | F5 | Show reference graph for active image |
 
 ## List View
 
-Toggle with **F12** from thumbnail view. In list view, **+** / **=** and **-** adjust row height; **0** resets row height to the default. Most thumbnail shortcuts (navigation, sorting, file ops) also apply in list view.
+Toggle with **F12** from thumbnail view. In list view, **+** / **=** and **-** adjust row height; **0** resets row height to the default; **Q** closes list view. Most thumbnail shortcuts (navigation, sorting, file ops) also apply in list view.
 
 ## Browse View (Fullscreen)
 
@@ -210,7 +215,9 @@ Toggle with **F12** from thumbnail view. In list view, **+** / **=** and **-** a
 | I | Toggle information sidebar |
 | O | Toggle organize sidebar |
 | B | Toggle status bar |
-| Cmd+I | Toggle number overlay |
+| Cmd+I | Toggle filename/number overlay |
+| J | Toggle jobs pane (when enabled) |
+| F9 or , | Toggle chat pane (when enabled) |
 | F3 | Image history |
 | F5 | Show reference graph for active image |
 | F4, ., Cmd+. | Toggle chrome |
@@ -330,7 +337,7 @@ These work from most views via the menu bar:
 - **Cmd+Shift+M** — Quick mass rename (when enabled)
 - **Cmd+Shift+E** — Edit EXIF user comment
 - **Cmd+Shift+U** — Create screen-size copy
-- **Cmd+Option+H** — Open home directory
+- **⌃H** — Open home directory
 - **Shift+W** — Wallpaper → resize window
 
 ## Notes
@@ -340,3 +347,4 @@ These work from most views via the menu bar:
 - Some shortcuts are context-sensitive (view mode, settings, or feature flags).
 - **Cmd+L** locks files (when locking is enabled). **Cmd+;** is Last Image in browse view.
 - The in-app help dialog (F1) is built from runtime bindings and may differ slightly from this file.
+- Modifier+click and drag actions are listed in **Help → Hidden Gems**.

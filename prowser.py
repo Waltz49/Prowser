@@ -712,11 +712,6 @@ which stores PROWSER_DEFAULT_ARGV in Info.plist. Explicit CLI args override.
         action='store_true',
         help='Report PROWSER_* exit environment variables and exit',
     )
-    parser.add_argument(
-        '--splash',
-        action='store_true',
-        help='Reset splash preference and show the startup splash screen',
-    )
 
     return parser.parse_args()
 
@@ -909,7 +904,7 @@ def main():
             print(f"Error: Cannot write to profile directory: {profile_dir}")
             sys.exit(1)
     
-    # Initialize config early so splash and other startup paths share one profile.
+    # Initialize config early so startup paths share one profile.
     config = get_config(profile_dir=profile_dir)
 
     lock_path = str(config.data_dir / "instance.lock")
@@ -1024,20 +1019,6 @@ def main():
     connect_system_theme_listener()
     _ui_theme = config.load_settings().get("ui_theme", "dark")
     apply_theme(_ui_theme, app=app, persist=False, config=config)
-
-    if getattr(args, 'splash', False):
-        config.update_setting('show_splash', True)
-    from splash_dialog import (
-        dismiss_splash,
-        on_main_window_shown,
-        on_startup_refresh_complete,
-        on_startup_refresh_scheduled,
-        should_show_startup_splash,
-        show_splash_async,
-    )
-    if should_show_startup_splash(config, args):
-        show_splash_async(config)
-        app.aboutToQuit.connect(dismiss_splash)
 
     # Connect quit handler to ensure proper cleanup
     app.aboutToQuit.connect(handle_application_quit)
@@ -1168,7 +1149,6 @@ def main():
                 args.paths = open_directory_dialog(args)
                 continue  # Try again with new paths
             except SystemExit:
-                dismiss_splash()
                 return 0  # User canceled dialog
         
         # Update args.paths with resolved paths
@@ -1302,7 +1282,6 @@ def main():
                 args.paths = open_directory_dialog(args)
                 continue  # Try again with new paths
             except SystemExit:
-                dismiss_splash()
                 return 0  # User canceled dialog
         
         # If we get here, validation passed - break out of the loop
@@ -1500,7 +1479,6 @@ def main():
        
         window.show()
         _startup_profile_mark("window_show")
-        on_main_window_shown(window)
         
         # If --fullscreen was explicitly passed OR restoring from fullscreen state,
         # also try entering fullscreen directly here as a backup
@@ -1540,7 +1518,6 @@ def main():
 
         # Refresh the browser with the configuration after window is shown
         if configuration:
-            on_startup_refresh_scheduled()
             # Use a longer delay to ensure the window is fully initialized
             def delayed_refresh():
                 try:
@@ -1683,23 +1660,17 @@ def main():
                     pass
                 finally:
                     _startup_profile_mark("on_startup_refresh_complete")
-                    on_startup_refresh_complete(window)
             
             QTimer.singleShot(100, delayed_refresh)
             # delayed_refresh()  # DGN This seems to be OK w/o the qtimer.singleShot(500, delayed_refresh)
         else:
-            def _startup_refresh_complete_no_config():
-                _startup_profile_mark("on_startup_refresh_complete")
-                on_startup_refresh_complete(window)
-
-            QTimer.singleShot(0, _startup_refresh_complete_no_config)
+            _startup_profile_mark("on_startup_refresh_complete")
         
         # Run the application
         result = app.exec()
         return result
         
     except Exception as e:
-        dismiss_splash()
         display_entry_error(message_title="Application Error", message=f"Failed to start application:\n{str(e)}")
         print(f"Failed to start application:\n{str(e)}")
         clipboard = QApplication.clipboard()

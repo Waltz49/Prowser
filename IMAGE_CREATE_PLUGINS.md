@@ -13,7 +13,7 @@ This guide explains how the system works and how to add a new model without touc
    - Pick the model in the dialog dropdown for that function.
    - **Image → Create or Modify — …** (or **⌥/**) opens the dialog for the **last-used function**.
 3. Fill in the prompt and settings, then click **Generate**.
-4. When generation finishes, the new image opens in browse view. Files are named `imagegen-0001.png`, `imagegen-0002.png`, and so on, in your image creation folder (by default `~/Downloads`, or a custom folder from settings).
+4. When generation finishes, the new image opens in browse view. Files are named `imagegen-0001.png`, `imagegen-0002.webp`, and so on (PNG or WebP from the dialog **output format**), in your image creation folder (by default `~/Downloads`, or a custom folder from settings).
 5. While a job runs, use **Image → Cancel Generation / Caption** or the status-bar indicator to cancel.
 6. **Image → Job Queue…** (**Cmd+J**) shows queued and running jobs.
 
@@ -89,17 +89,22 @@ imagegen_plugins/
   image_gen_model_availability.py  # “Download model?” before first run
   image_gen_install_hint.py   # Message when backend package is missing
   image_gen_job_queue_dialog.py  # Job queue UI
-  lora_catalogs/              # Per-host LoRA catalogs (FLUX1 T2I/Fill, Klein, SD15)
+  image_gen_output_format.py  # PNG / WebP output helpers
+  lora_catalogs/              # Per-host LoRA catalogs (FLUX1 T2I/Fill, Klein, SD15, SDXL, Z-Image)
   lora_catalog.py             # Unified catalog facade
   lora_catalog_settings.py    # by_host / by_model state in settings.json
   lora_host_registry.py       # Which catalog applies to which pipeline
   lora_model_registry.py      # Per-base-model LoRA compatibility
   mflux_lora_presets.py       # MFLUX LoRA download, key check, payload wiring
   sd15_lora_presets.py        # SD 1.5 LoRA (peft) download and payload wiring
-  sd15_plugin_shared.py       # Shared SD 1.5 create dialog field layout
+  sdxl_lora_presets.py        # SDXL LoRA download and payload wiring
+  sd15_plugin_shared.py       # Shared SD 1.5 / SDXL create dialog field layout
   sceneworks_klein_mlx.py     # SceneWorks MLX tier helpers (Q4/Q8/BF16)
   flux_schnell_mflux.py       # Example create plugin (thin)
   sana_sprint_600m.py         # Example create plugin (thin)
+  z_image_turbo_sdnq.py       # Z-Image Turbo 8-bit (diffusers/SDNQ)
+  z_image_turbo_mflux_4bit.py # Z-Image Turbo 4-bit (MFLUX)
+  sdxl_base_plugin.py         # SDXL 1.0 Base
   flux_klein_create.py        # FLUX.2 Klein create variants
   flux_klein_edit.py            # FLUX.2 Klein edit variants
   flux_klein_expand.py          # FLUX.2 Klein expand variants
@@ -112,7 +117,9 @@ imagegen_plugins/
     mflux_schnell.py            # FLUX via MFLUX/MLX
     sana_sprint.py              # SANA via diffusers
     sd15_diffusers.py           # Stable Diffusion 1.5 (+ peft LoRA)
+    sdxl_diffusers.py           # Stable Diffusion XL
     z_image_turbo.py            # Z-Image Turbo SDNQ
+    mflux_z_image_turbo.py      # Z-Image Turbo MFLUX 4-bit
     mflux_fill_expand.py        # FLUX Fill expand/infill
     mflux_flux2_klein_create.py # FLUX.2 Klein create
     mflux_flux2_klein_edit.py   # FLUX.2 Klein edit/expand
@@ -162,10 +169,10 @@ LoRA dropdowns appear when a plugin declares a `lora_host_id`. Which adapters ap
 
 | Piece | Role |
 |-------|------|
-| `imagegen_plugins/lora_catalogs/` | Curated catalogs per host (FLUX1 T2I, FLUX1 Fill, FLUX2 Klein, SD15) |
+| `imagegen_plugins/lora_catalogs/` | Curated catalogs per host (FLUX1 T2I, FLUX1 Fill, FLUX2 Klein, SD15, SDXL, Z-Image Turbo) |
 | `imagegen_plugins/lora_catalog_settings.py` | `by_host`, `by_model`, `user_entries`, `entry_overrides` in settings |
 | `settings.json` → `imagegen.lora_catalog` | Enabled/hidden ids per host and per base model |
-| `imagegen_plugins/mflux_lora_presets.py` / `sd15_lora_presets.py` | Download weights, compatibility check, payload wiring |
+| `imagegen_plugins/mflux_lora_presets.py` / `sd15_lora_presets.py` / `sdxl_lora_presets.py` | Download weights, compatibility check, payload wiring |
 
 **Behavior:**
 
@@ -173,7 +180,7 @@ LoRA dropdowns appear when a plugin declares a `lora_host_id`. Which adapters ap
 - Trash an entry to hide it; hidden ids are stored in `hidden_ids` (per host and per model slice).
 - Weights download from Hugging Face on first generate.
 - Only **MFLUX verified** entries are known good for MFLUX pipelines; untested entries need a successful local run.
-- SD 1.5 LoRAs use **peft** in `sd15_diffusers.py`; Klein Edit does not expose LoRA (different architecture).
+- SD 1.5 and SDXL LoRAs use **peft** in `sd15_diffusers.py` / `sdxl_diffusers.py`; Klein Edit does not expose LoRA (different architecture).
 - Import custom LoRAs via **Settings → LoRA → Import** (`lora_import_dialog.py`).
 
 To add catalog entries at dev time, inspect repos with `scripts/build_flux_lora_catalog_snippet.py` and edit the appropriate file under `lora_catalogs/`.
@@ -220,10 +227,10 @@ pip install -r requirements.txt
 
 | Backend | Packages | Used by |
 |---------|----------|---------|
-| MFLUX / MLX | `mflux` (and MLX stack it pulls in) | FLUX Schnell, Fill, Klein, SceneWorks plugins |
-| diffusers | `diffusers`, `accelerate`, `torch` | SANA Sprint, SD 1.5 plugins |
-| SD 1.5 LoRA | `peft` | SD 1.5 pipelines with LoRA adapters |
-| SDNQ | `sdnq` (via Z-Image pipeline) | Z-Image Turbo plugin |
+| MFLUX / MLX | `mflux` (and MLX stack it pulls in) | FLUX Schnell, Fill, Klein, SceneWorks, Z-Image Turbo 4-bit |
+| diffusers | `diffusers`, `accelerate`, `torch` | SANA Sprint, SD 1.5, SDXL plugins |
+| SD 1.5 / SDXL LoRA | `peft` | SD 1.5 and SDXL pipelines with LoRA adapters |
+| SDNQ | `sdnq` (via Z-Image pipeline) | Z-Image Turbo 8-bit plugin |
 
 If a backend is missing, that model appears disabled with a tooltip pointing at `requirements.txt`.
 
@@ -277,7 +284,7 @@ Add new Python packages to `requirements.txt` (and regenerate `minimal_requireme
 
 1. Restart Prowser.
 2. Confirm **Image** lists your function and model is enabled when deps are installed.
-3. Generate an image; confirm `imagegen-NNNN.png` appears and browse opens.
+3. Generate an image; confirm `imagegen-NNNN.png` or `.webp` appears and browse opens.
 4. Test ⌥/ and per-function model persistence.
 
 ---
@@ -292,8 +299,10 @@ Add new Python packages to `requirements.txt` (and regenerate `minimal_requireme
 | FLUX.1-dev (LoRA preset) | `flux_sldr_nsfw_v2_lora` | `flux_schnell_mflux_play` |
 | SANA Sprint 0.6B 1024px | `sana_sprint_600m` | `sana_sprint_600m` |
 | Z-Image Turbo (8-bit) | `z_image_turbo_sdnq_int8` | `z_image_turbo_sdnq` |
+| Z-Image Turbo (4-bit) | `z_image_turbo_mflux_4bit` | `mflux_z_image_turbo` |
 | Realistic Vision V4.0 | `realistic_vision_v4_sd15` | `sd15_diffusers` |
 | Anything Furry | `anything_furry_sd15` | `sd15_diffusers` |
+| SDXL 1.0 Base | `sdxl_base_1_0` | `sdxl_diffusers` |
 | FLUX.2-klein-4B / 9B / 9b-kv | `flux_klein_*_create` | `mflux_flux2_klein_create` |
 | FLUX.2 Klein 9B KV MLX (SceneWorks) | `sceneworks_klein_9b_kv_mlx_create` | `mflux_flux2_klein_create` |
 
@@ -349,6 +358,8 @@ Relevant keys in `~/.prowser/data/settings.json`:
 ```
 
 Per-function dialog values are stored under `imagegen.dialogs.<function>.<plugin_id>`. Legacy flat `imagegen.models` keys are still read for migration. LoRA state migrates from legacy `enabled_ids` / `deleted_ids` to `by_host` / `by_model` with `hidden_ids` on load.
+
+PNG vs WebP for generated files is stored at the top level as `imagegen_output_format` (see `image_gen_output_format.py`).
 
 ---
 

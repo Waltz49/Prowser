@@ -10,11 +10,12 @@ The first time you use AI-based features (similarity sort, text search, or Creat
 
 ## Features (partial list)
 
-- Browse images in a grid or fullscreen with keyboard and mouse
+- Browse images in a grid, list, or fullscreen with keyboard and mouse
 - Move, copy, rename, delete (to Trash), lock files, and undo deletes
 - Search by image similarity, image description, duplicates, and face recognition
 - Slideshows, EXIF tools, external editor integration, set desktop wallpaper
-- Local AI image generation and manipulation (**Image** menu) when dependencies are installed
+- Chat pane and local AI image generation/manipulation (**Image** menu) when dependencies are installed
+- Light, Dark, User, and saved custom themes (**View → Theme**)
 - Models for similarity sort, text search, and face recognition and AI image manipulation are downloaded automatically the first time you use them.
 
 Press **F1** or **/** in the app for keyboard shortcuts for the current view. See [KEYBOARD.md](KEYBOARD.md) for a full list.
@@ -40,6 +41,17 @@ From the installed app: Any normal app launch method (Finder, Spotlight, Dock, e
 From source (GitHub or a copy of the source folder in the DMG): ./setup.sh (once) and ./run.sh <with parameters>
 
 Use `-h` or `--help` for command-line options.
+
+| Flag | Purpose |
+|------|---------|
+| paths | Directory or image files to open |
+| `-f`, `--filter` PATTERN | Session-only glob filter |
+| `-p`, `--profile` DIR | Alternate profile root (default `~/.prowser`) |
+| `--background {default,thread,process}` | Model-tasks worker mode (default: thread in the app, process from source) |
+| `--min` | Hide image generation, LM Studio, voice, and related UI (same as a `--min` bundle) |
+| `--no-fullscreen` | Launch windowed (OS fullscreen is the default) |
+| `--debug` | Enable debug mode |
+| `--env` | Print `PROWSER_*` exit environment variables and exit |
 
 ## Install and run — from source
    You can pass a folder or other arguments, for example:
@@ -160,6 +172,7 @@ By default, the app uses threads when bundled into an app, and processes when ru
 - [API.md](API.md) — pipe API for controlling a running instance
 - [IMAGE_CREATE_PLUGINS.md](IMAGE_CREATE_PLUGINS.md) — **Image** menu and local generation
 - [ARCHITECTURE.md](ARCHITECTURE.md) — code structure and module map (for contributors)
+- [keyboard_hierarchy.md](keyboard_hierarchy.md) — keyboard event routing (for contributors)
 - [tools/README.md](tools/README.md) — standalone dev scripts (not part of the app bundle)
 
 ## License

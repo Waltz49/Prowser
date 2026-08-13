@@ -1438,7 +1438,7 @@ class MenuManager:
 
         self.main_window.open_home_directory_action = QAction("Open Home Directory", self.main_window)
         # Was Shift+H; that chord is reserved in thumbnail/list for "select range to first" (same as Shift+Home).
-        self.main_window.open_home_directory_action.setShortcut(QKeySequence("Ctrl+Alt+H"))
+        self.main_window.open_home_directory_action.setShortcut(QKeySequence("Meta+H"))
         self.main_window.open_home_directory_action.setShortcutContext(Qt.ShortcutContext.WindowShortcut)
         self.main_window.open_home_directory_action.triggered.connect(self.main_window.open_home_directory)
         tools_menu.addAction(self.main_window.open_home_directory_action)
