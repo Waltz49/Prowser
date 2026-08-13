@@ -709,6 +709,10 @@ def restore_dialog_geometry_hex(dialog, geom_hex: str, parent=None) -> bool:
         return False
     if not ok:
         return False
+    # Never reopen a dialog as a macOS Space from saved window state.
+    st = dialog.windowState()
+    if st & Qt.WindowState.WindowFullScreen:
+        dialog.setWindowState(st & ~Qt.WindowState.WindowFullScreen)
     ensure_dialog_fits_screen(dialog, parent)
     return True
 
@@ -752,21 +756,35 @@ def dialog_main_window(dialog: QWidget) -> Optional[QWidget]:
 
 def host_is_macos_space_mode(host: Optional[QWidget]) -> bool:
     """True when the host window is in native macOS fullscreen (Space) mode."""
-    return host is not None and hasattr(host, "isFullScreen") and host.isFullScreen()
+    if host is not None and hasattr(host, "isFullScreen") and host.isFullScreen():
+        return True
+    return is_macos_space_mode()
+
+
+def _clear_dialog_fullscreen_button(widget: QWidget) -> None:
+    """Drop the macOS green-button Space hint if Qt added it."""
+    if widget.windowFlags() & Qt.WindowType.WindowFullscreenButtonHint:
+        widget.setWindowFlag(Qt.WindowType.WindowFullscreenButtonHint, False)
+
+
+def _strip_widget_fullscreen_state(widget: QWidget) -> None:
+    st = widget.windowState()
+    if st & Qt.WindowState.WindowFullScreen:
+        widget.setWindowState(st & ~Qt.WindowState.WindowFullScreen)
 
 
 def fix_macos_dialog_same_space(widget: QWidget) -> None:
-    """Keep a dialog on the active macOS Space when the host is fullscreen."""
+    """Keep a dialog windowed on the active Space; never let it become a fullscreen Space."""
     if not isinstance(widget, QDialog) or not widget.isWindow():
         return
-    if not host_is_macos_space_mode(dialog_main_window(widget)):
-        return
+    _strip_widget_fullscreen_state(widget)
     try:
         from ctypes import c_void_p
 
         import objc
         from AppKit import (
             NSWindowCollectionBehaviorFullScreenAuxiliary,
+            NSWindowCollectionBehaviorFullScreenNone,
             NSWindowCollectionBehaviorFullScreenPrimary,
             NSWindowCollectionBehaviorMoveToActiveSpace,
         )
@@ -782,6 +800,7 @@ def fix_macos_dialog_same_space(widget: QWidget) -> None:
     behavior = int(ns_window.collectionBehavior())
     behavior &= ~int(NSWindowCollectionBehaviorFullScreenPrimary)
     behavior |= int(NSWindowCollectionBehaviorFullScreenAuxiliary)
+    behavior |= int(NSWindowCollectionBehaviorFullScreenNone)
     behavior |= int(NSWindowCollectionBehaviorMoveToActiveSpace)
     ns_window.setCollectionBehavior_(behavior)
 
@@ -789,8 +808,8 @@ def fix_macos_dialog_same_space(widget: QWidget) -> None:
 def raise_dialog_without_space_hop(dialog: QDialog) -> None:
     """Raise a dialog; avoid activateWindow in macOS Space mode."""
     dialog.raise_()
+    fix_macos_dialog_same_space(dialog)
     if host_is_macos_space_mode(dialog_main_window(dialog)):
-        fix_macos_dialog_same_space(dialog)
         dialog.setFocus(Qt.FocusReason.ActiveWindowFocusReason)
     else:
         dialog.activateWindow()
@@ -799,17 +818,23 @@ def raise_dialog_without_space_hop(dialog: QDialog) -> None:
 def raise_passive_floating_dialog(dialog: QDialog) -> None:
     """Raise a floating dialog without stealing keyboard focus from the host."""
     dialog.raise_()
+    fix_macos_dialog_same_space(dialog)
     host = dialog_main_window(dialog)
-    if host_is_macos_space_mode(host):
-        fix_macos_dialog_same_space(dialog)
     if host is not None:
         host.activateWindow()
 
 
 def present_auxiliary_dialog(dialog: QDialog) -> None:
-    """Show a non-modal auxiliary dialog."""
+    """Show a non-modal auxiliary dialog as a windowed window (never a macOS Space)."""
+    _clear_dialog_fullscreen_button(dialog)
+    _strip_widget_fullscreen_state(dialog)
+    # Native window + collection behavior must be set before show(); otherwise macOS
+    # may assign a new Space when the host is already fullscreen.
+    dialog.winId()
+    fix_macos_dialog_same_space(dialog)
     dialog.show()
     raise_dialog_without_space_hop(dialog)
+    QTimer.singleShot(0, lambda d=dialog: fix_macos_dialog_same_space(d))
 
 
 def present_passive_floating_dialog(dialog: QDialog) -> None:

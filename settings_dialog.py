@@ -801,13 +801,15 @@ class SettingsDialog(QDialog):
         self.setObjectName("settingsDialog")
         self.setWindowTitle("Prowser Preferences")
         self.setModal(False)
+        # Dialog (not Window): stay windowed in the host Space; never a new fullscreen Space.
         self.setWindowFlags(
-            Qt.WindowType.Window
+            Qt.WindowType.Dialog
             | Qt.WindowType.WindowTitleHint
             | Qt.WindowType.WindowSystemMenuHint
             | Qt.WindowType.WindowCloseButtonHint
             | Qt.WindowType.WindowMinMaxButtonsHint
         )
+        self.setWindowFlag(Qt.WindowType.WindowFullscreenButtonHint, False)
         self.setFocusPolicy(Qt.StrongFocus)
         self.setMinimumSize(400, 300)
         self._sync_theme_context()

@@ -17,7 +17,12 @@ from PySide6.QtCore import QObject, QSize, QTimer, Qt, Signal
 from PySide6.QtGui import QPainter, QPixmap
 from PySide6.QtWidgets import QApplication
 
-from utils import activate_application_window, present_auxiliary_dialog, show_styled_warning
+from utils import (
+    activate_application_window,
+    path_matches_active_filter,
+    present_auxiliary_dialog,
+    show_styled_warning,
+)
 
 DOC_SCREENCAP_WIDTH = 1642
 DOC_SCREENCAP_HEIGHT = 1300
@@ -229,6 +234,8 @@ class DocumentationScreencapRunner(QObject):
             self.dialog = None
 
         mw = self.main_window
+        if self.saved:
+            self._open_output_directory()
         if self.failed:
             lines = "\n".join(
                 f"  {filename}: {reason}" for _tab_id, filename, reason in self.failed
@@ -247,6 +254,19 @@ class DocumentationScreencapRunner(QObject):
             )
 
         self.finished.emit()
+
+    def _open_output_directory(self) -> None:
+        """Browse the screencap output dir; widen filter to * if it would hide any saves."""
+        mw = self.main_window
+        if not all(path_matches_active_filter(mw, name) for name in self.saved):
+            if hasattr(mw, "set_filter_pattern"):
+                mw.set_filter_pattern("*", persist=True, notify=False)
+        fth = getattr(mw, "file_tree_handler", None)
+        if fth is not None and hasattr(fth, "request_directory_opening"):
+            fth.request_directory_opening(DOC_SCREENCAP_OUTPUT_DIR)
+        elif hasattr(mw, "open_directory"):
+            mw.open_directory(DOC_SCREENCAP_OUTPUT_DIR)
+        activate_application_window(mw, force=True)
 
 
 _active_runner: Optional[DocumentationScreencapRunner] = None
