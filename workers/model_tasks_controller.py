@@ -145,6 +145,24 @@ class ModelTasksController(QObject):
             return False
         return self._is_worker_alive()
 
+    def worker_is_killable(self) -> bool:
+        """QProcess workers can be killed; frozen inline threads cannot."""
+        return not self._use_inline_worker()
+
+    def nudge_worker_shutdown(self) -> None:
+        """Re-send stop if the inline worker is between commands (no-op if mid-generate)."""
+        thread = self._inline_thread
+        if thread is None or not thread.isRunning():
+            return
+        try:
+            thread.send_command_json('{"command":"shutdown"}')
+        except Exception:
+            pass
+        try:
+            thread.request_stop()
+        except Exception:
+            pass
+
     def start_generate_job(self, payload: Dict[str, Any]) -> bool:
         if self.is_running():
             return False

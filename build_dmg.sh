@@ -120,6 +120,7 @@ PYINSTALLER_MIN_BUILD_PATHS=(
     pyinstaller_runtime_hook.py
     bundle_capabilities.py
     list_runtime_assets.py
+    pyinstaller_bundle_prune.py
     requirements_min.txt
     pyinstaller_hooks/hook-imagegen_plugins.py
     pyinstaller_hooks/hook-transformers.py

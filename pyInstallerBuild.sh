@@ -87,6 +87,8 @@ DEPENDENCY_ANALYSIS_FILE="$SCRIPT_DIR/pyinstaller_dependencies.py"
 REUSE_FLAG_FILE="$SCRIPT_DIR/.pyinstaller_reuse_flag"
 FACE_MODEL_DIR="$SCRIPT_DIR/.pyinstaller_face_models"
 FACE_MODEL_BASE="https://github.com/ageitgey/face_recognition_models/raw/master/face_recognition_models/models"
+# Single-architecture slice (avoid universal2 fat Mach-O). arm64 or x86_64.
+TARGET_ARCH="$(uname -m)"
 # All 4 models required by face_recognition_models (pose_predictor, pose_predictor_five_point, face_recognition, cnn_face_detector)
 FACE_MODEL_FILES="shape_predictor_68_face_landmarks.dat shape_predictor_5_face_landmarks.dat dlib_face_recognition_resnet_model_v1.dat mmod_human_face_detector.dat"
 WHISPER_MODEL_SCRIPT="$SCRIPT_DIR/pyinstaller_whisper_models.py"
@@ -621,7 +623,7 @@ create_spec_file() {
         for pkg in $COLLECT_ALL; do
             if [ "$pkg" = "PySide6" ]; then
                 # For PySide6, only collect essential modules to avoid framework conflicts
-                PYINSTALLER_CMD="$PYINSTALLER_CMD --hidden-import PySide6.QtCore --hidden-import PySide6.QtGui --hidden-import PySide6.QtWidgets"
+                PYINSTALLER_CMD="$PYINSTALLER_CMD --hidden-import PySide6.QtCore --hidden-import PySide6.QtGui --hidden-import PySide6.QtWidgets --hidden-import PySide6.QtSvg"
             else
                 PYINSTALLER_CMD="$PYINSTALLER_CMD --collect-all \"$pkg\""
             fi
@@ -693,7 +695,7 @@ EOF
 
 # Write the final macOS spec file (optionally without a pyinstaller CLI base spec).
 customize_spec_file() {
-    print_status "Customizing spec file for macOS..."
+    print_status "Customizing spec file for macOS (target_arch=$TARGET_ARCH, bundle prune enabled)..."
     
     if [ -f "$SPEC_FILE" ]; then
         cp "$SPEC_FILE" "${SPEC_FILE}.backup"
@@ -778,8 +780,12 @@ customize_spec_file() {
     cat > "$SPEC_FILE" << EOF
 # -*- mode: python ; coding: utf-8 -*-
 
+import sys
+sys.path.insert(0, r'$SCRIPT_DIR')
+
 from PyInstaller.utils.hooks import collect_all as _pyi_collect_all
 from PyInstaller.utils.hooks import copy_metadata as _pyi_copy_metadata
+from pyinstaller_bundle_prune import prune_analysis
 
 # COLLECT_ALL from directives was never merged into Analysis; collect backends here.
 _imagegen_collect_datas = []
@@ -822,6 +828,7 @@ $WHISPER_MODEL_DATAS
     cipher=None,
     noarchive=False,
 )
+prune_analysis(a)
 
 pyz = PYZ(a.pure, a.zipped_data, cipher=None)
 
@@ -838,7 +845,7 @@ exe = EXE(
     console=False,
     disable_windowed_traceback=False,
     argv_emulation=True,
-    target_arch=None,
+    target_arch='$TARGET_ARCH',
     codesign_identity=None,
     entitlements_file='Prowser.entitlements',
     icon='Prowser.icns'
@@ -1016,6 +1023,11 @@ verify_build() {
         # Check file size
         APP_SIZE=$(du -sh "$BUILD_DIR/${APP_NAME}.app" | cut -f1)
         print_status "App bundle size: $APP_SIZE"
+        if command -v lipo >/dev/null 2>&1; then
+            print_status "Executable arch: $(lipo -info "$BUILD_DIR/${APP_NAME}.app/Contents/MacOS/Prowser" 2>/dev/null || file "$BUILD_DIR/${APP_NAME}.app/Contents/MacOS/Prowser")"
+        fi
+        print_status "Largest bundled files:"
+        find "$BUILD_DIR/${APP_NAME}.app" -type f -size +10M -exec du -h {} \; 2>/dev/null | sort -h | tail -20
         
         # List contents
         print_status "App bundle contents:"

@@ -8,11 +8,111 @@ import os
 MIN_BUILD_ENV = "PYINSTALLER_MIN_BUILD"
 
 # Unused in application code — never bundle (all builds).
+# cv2/matplotlib are hard pip deps of mflux but only imported by ControlNet /
+# concept-attention variants that Prowser does not run.
 ALWAYS_EXCLUDE_IMPORT_ROOTS: frozenset[str] = frozenset(
     {
         "skimage",
         "imagehash",
+        "cv2",
+        "matplotlib",
+        "mpl_toolkits",
+        "contourpy",
+        "kiwisolver",
+        "cycler",
+        "IPython",
+        "ipykernel",
+        "ipywidgets",
+        "jupyter",
+        "jupyterlab",
+        "notebook",
+        "pytest",
+        "_pytest",
+        "pandas",
+        "scipy",
+        "tensorboard",
+        "tensorboardX",
+        "twine",
+        "keyring",
+        "PyQt5",
+        "PyQt6",
     }
+)
+
+# PyInstaller --exclude-module names applied to every build (in addition to
+# ALWAYS_EXCLUDE_IMPORT_ROOTS). Unused Qt bindings are huge; keep QtCore/QtGui/
+# QtWidgets/QtSvg/QtNetwork/QtDBus.
+ALWAYS_EXCLUDE_MODULES: tuple[str, ...] = (
+    "IPython",
+    "ipykernel",
+    "ipywidgets",
+    "jupyter",
+    "jupyterlab",
+    "notebook",
+    "pytest",
+    "_pytest",
+    "pandas",
+    "scipy",
+    "tensorboard",
+    "tensorboardX",
+    "matplotlib",
+    "mpl_toolkits",
+    "contourpy",
+    "kiwisolver",
+    "cycler",
+    "cv2",
+    "twine",
+    "keyring",
+    "PyQt5",
+    "PyQt6",
+    "tkinter",
+    "turtle",
+    "PySide6.QtWebEngine",
+    "PySide6.QtWebEngineCore",
+    "PySide6.QtWebEngineWidgets",
+    "PySide6.QtWebEngineQuick",
+    "PySide6.QtWebChannel",
+    "PySide6.QtWebSockets",
+    "PySide6.QtQuick",
+    "PySide6.QtQuick3D",
+    "PySide6.QtQuickControls2",
+    "PySide6.QtQuickWidgets",
+    "PySide6.QtQml",
+    "PySide6.QtPdf",
+    "PySide6.QtPdfWidgets",
+    "PySide6.QtVirtualKeyboard",
+    "PySide6.Qt3DAnimation",
+    "PySide6.Qt3DCore",
+    "PySide6.Qt3DExtras",
+    "PySide6.Qt3DInput",
+    "PySide6.Qt3DLogic",
+    "PySide6.Qt3DRender",
+    "PySide6.QtBluetooth",
+    "PySide6.QtCharts",
+    "PySide6.QtDataVisualization",
+    "PySide6.QtDesigner",
+    "PySide6.QtGraphs",
+    "PySide6.QtGraphsWidgets",
+    "PySide6.QtHelp",
+    "PySide6.QtHttpServer",
+    "PySide6.QtLocation",
+    "PySide6.QtMultimedia",
+    "PySide6.QtMultimediaWidgets",
+    "PySide6.QtNfc",
+    "PySide6.QtPositioning",
+    "PySide6.QtPrintSupport",
+    "PySide6.QtRemoteObjects",
+    "PySide6.QtScxml",
+    "PySide6.QtSensors",
+    "PySide6.QtSerialBus",
+    "PySide6.QtSerialPort",
+    "PySide6.QtSpatialAudio",
+    "PySide6.QtSql",
+    "PySide6.QtStateMachine",
+    "PySide6.QtTest",
+    "PySide6.QtTextToSpeech",
+    "PySide6.QtUiTools",
+    "PySide6.QtXml",
 )
 
 # Dev / demo modules excluded from import-tree analysis.
@@ -221,6 +321,7 @@ MANDATORY_PYOBJC_HIDDEN: tuple[str, ...] = (
 
 MANDATORY_HIDDEN: tuple[str, ...] = (
     "pyinstaller_frozen_support",
+    "PySide6.QtSvg",
 )
 
 # --collect-submodules CLI args (after feature packages) for the initial pyinstaller run.
@@ -261,6 +362,8 @@ def filter_hidden_imports(names: list[str] | set[str], *, min_build: bool | None
         if import_root_is_excluded(root, min_build=min_flag):
             continue
         if root in ALWAYS_EXCLUDE_IMPORT_ROOTS:
+            continue
+        if any(name == ex or name.startswith(ex + ".") for ex in ALWAYS_EXCLUDE_MODULES):
             continue
         out.add(name)
     return sorted(out)

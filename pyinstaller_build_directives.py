@@ -9,6 +9,7 @@ import sys
 
 from pyinstaller_optional_packages import (
     ALWAYS_EXCLUDE_IMPORT_ROOTS,
+    ALWAYS_EXCLUDE_MODULES,
     FULL_BUILD_COLLECT_ALL,
     FULL_BUILD_EXTRA_HIDDEN,
     FULL_EXTRA_COLLECT_SUBMODULES,
@@ -118,6 +119,7 @@ def merged_directives() -> tuple[list[str], list[str], list[str]]:
         collect_all.discard("transformers")
     excludes.update(_WINDOWS_EXCLUDES)
     excludes.update(ALWAYS_EXCLUDE_IMPORT_ROOTS)
+    excludes.update(ALWAYS_EXCLUDE_MODULES)
     excludes.update({"skimage", "imagehash"})
 
     return sorted(hidden), sorted(collect_all), sorted(excludes)

@@ -1010,6 +1010,59 @@ class ImageGenController(QObject):
         cancelled = error_message == "Cancelled"
         self._finish_copy_batch(cancelled=cancelled)
 
+    def _generation_launch_abandoned(
+        self, *, from_queue: bool, queue_job_id: str | None
+    ) -> bool:
+        """True when a deferred launch should stop (cancel, reset, or queue moved)."""
+        if self._copy_batch_cancelled or self._queue_advance_suppressed:
+            return True
+        if self._active_plugin is None:
+            return True
+        if from_queue and queue_job_id:
+            if self._active_queue_job_id not in ("", queue_job_id):
+                return True
+            if (
+                self._active_queue_job_id != queue_job_id
+                and (not self._queue or self._queue[0].job_id != queue_job_id)
+            ):
+                return True
+        return False
+
+    def _defer_until_worker_cleanup(
+        self,
+        *,
+        worker_wait_attempts: int,
+        manage_batch_on_failure: bool,
+        from_queue: bool,
+        queue_job_id: str | None,
+    ) -> bool | None:
+        """Wait for the previous worker to exit. Frozen inline threads cannot be killed."""
+        if self._generation_launch_abandoned(
+            from_queue=from_queue, queue_job_id=queue_job_id
+        ):
+            self._set_gpu_cleanup_status(False)
+            return False
+        killable = self._tasks.worker_is_killable()
+        if killable and worker_wait_attempts >= self._GPU_CLEANUP_MAX_ATTEMPTS:
+            self._tasks.force_terminate_worker()
+            self._release_main_process_gpu_memory()
+            if not self._tasks.worker_needs_cleanup():
+                return True
+            return False
+        self._set_gpu_cleanup_status(True)
+        if not killable and worker_wait_attempts == 0:
+            self._tasks.nudge_worker_shutdown()
+        QTimer.singleShot(
+            self._GPU_CLEANUP_POLL_MS,
+            lambda: self._launch_generation_job(
+                _worker_wait_attempts=worker_wait_attempts + 1,
+                manage_batch_on_failure=manage_batch_on_failure,
+                from_queue=from_queue,
+                queue_job_id=queue_job_id,
+            ),
+        )
+        return None
+
     def _launch_generation_job(
         self,
         *,
@@ -1022,33 +1075,38 @@ class ImageGenController(QObject):
         values = self._pending_values
         if plugin is None:
             return False
+        if self._generation_launch_abandoned(
+            from_queue=from_queue, queue_job_id=queue_job_id
+        ):
+            self._set_gpu_cleanup_status(False)
+            return False
 
         if self._tasks.worker_needs_cleanup():
-            if _worker_wait_attempts < self._GPU_CLEANUP_MAX_ATTEMPTS:
-                self._set_gpu_cleanup_status(True)
-                QTimer.singleShot(
-                    self._GPU_CLEANUP_POLL_MS,
-                    lambda: self._launch_generation_job(
-                        _worker_wait_attempts=_worker_wait_attempts + 1,
-                        manage_batch_on_failure=manage_batch_on_failure,
-                        from_queue=from_queue,
-                        queue_job_id=queue_job_id,
-                    ),
-                )
+            waited = self._defer_until_worker_cleanup(
+                worker_wait_attempts=_worker_wait_attempts,
+                manage_batch_on_failure=manage_batch_on_failure,
+                from_queue=from_queue,
+                queue_job_id=queue_job_id,
+            )
+            if waited is None:
                 return None
-            self._tasks.force_terminate_worker()
-            self._release_main_process_gpu_memory()
-            if self._tasks.worker_needs_cleanup():
-                self._set_gpu_cleanup_status(False)
-                show_styled_critical(
-                    self.main_window,
-                    "Generation failed",
-                    "The previous model is still releasing GPU memory. "
-                    "Wait a moment and try again.",
+            if waited is True:
+                return self._launch_generation_job(
+                    _worker_wait_attempts=0,
+                    manage_batch_on_failure=manage_batch_on_failure,
+                    from_queue=from_queue,
+                    queue_job_id=queue_job_id,
                 )
-                if manage_batch_on_failure:
-                    self._finish_copy_batch()
-                return False
+            self._set_gpu_cleanup_status(False)
+            show_styled_critical(
+                self.main_window,
+                "Generation failed",
+                "The previous model is still releasing GPU memory. "
+                "Wait a moment and try again.",
+            )
+            if manage_batch_on_failure:
+                self._finish_copy_batch()
+            return False
 
         self._set_gpu_cleanup_status(False)
         self._release_main_process_gpu_memory()
@@ -1185,20 +1243,21 @@ class ImageGenController(QObject):
         self._snapshot_copy_cycle_for_exif(plugin)
         if not self._tasks.start_generate_job(payload):
             if self._tasks.worker_needs_cleanup():
-                if _worker_wait_attempts < self._GPU_CLEANUP_MAX_ATTEMPTS:
-                    self._set_gpu_cleanup_status(True)
-                    QTimer.singleShot(
-                        self._GPU_CLEANUP_POLL_MS,
-                        lambda: self._launch_generation_job(
-                            _worker_wait_attempts=_worker_wait_attempts + 1,
-                            manage_batch_on_failure=manage_batch_on_failure,
-                            from_queue=from_queue,
-                            queue_job_id=queue_job_id,
-                        ),
-                    )
+                waited = self._defer_until_worker_cleanup(
+                    worker_wait_attempts=_worker_wait_attempts,
+                    manage_batch_on_failure=manage_batch_on_failure,
+                    from_queue=from_queue,
+                    queue_job_id=queue_job_id,
+                )
+                if waited is None:
                     return None
-                self._tasks.force_terminate_worker()
-                self._release_main_process_gpu_memory()
+                if waited is True:
+                    return self._launch_generation_job(
+                        _worker_wait_attempts=0,
+                        manage_batch_on_failure=manage_batch_on_failure,
+                        from_queue=from_queue,
+                        queue_job_id=queue_job_id,
+                    )
             show_styled_critical(
                 self.main_window,
                 "Generation failed",
@@ -2167,6 +2226,9 @@ class ImageGenController(QObject):
             self._finish_copy_batch(cancelled=True)
             return
         self._tasks.cancel_task()
+        # Frozen inline worker may still be alive; stop waiting to start a follow-up job.
+        if self._gpu_cleanup_active and not self._tasks.is_running():
+            self._finish_copy_batch(cancelled=True)
 
     def prepare_for_shutdown(self, *, suppress_failure_ui: bool = True) -> None:
         """Stop any in-flight task without confirmation or failure dialogs."""

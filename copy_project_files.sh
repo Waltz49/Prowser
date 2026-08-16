@@ -94,6 +94,7 @@ PYINSTALLER_BUILD_PATHS=(
     pyinstaller_imagegen_paths.py
     pyinstaller_runtime_hook.py
     pyinstaller_whisper_models.py
+    pyinstaller_bundle_prune.py
     bundle_capabilities.py
     list_runtime_assets.py
     requirements_min.txt
@@ -284,6 +285,7 @@ import bundle_capabilities
 import pyinstaller_optional_packages
 import pyinstaller_build_directives
 import pyinstaller_dependencies
+import pyinstaller_bundle_prune
 " 2>/dev/null; then
         print_error "PyInstaller --min helper modules failed to import"
         return 1
@@ -370,6 +372,7 @@ for py in \
     pyinstaller_imagegen_paths.py \
     pyinstaller_runtime_hook.py \
     pyinstaller_whisper_models.py \
+    pyinstaller_bundle_prune.py \
     list_runtime_assets.py
 do
     copy_and_count "$py"
