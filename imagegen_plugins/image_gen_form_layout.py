@@ -1361,6 +1361,39 @@ def create_image_gen_prompt_speak_button(
     return btn
 
 
+def _append_favorite_prompt_text(existing: str, addition: str) -> str:
+    addition = addition.strip()
+    if not addition:
+        return existing
+    if not existing.strip():
+        return addition
+    if existing[-1].isspace():
+        return existing + addition
+    return existing + " " + addition
+
+
+def _on_favorite_prompts_clicked_for_edit(edit: QPlainTextEdit) -> None:
+    from chat_plugins.chat_named_user_prompts import run_chat_user_prompt_library
+    from imagegen_plugins.image_gen_source_nav import resolve_image_gen_main_window
+
+    existing = edit.toPlainText()
+    parent = edit.window() if edit.window() is not None else edit
+    entry = run_chat_user_prompt_library(
+        parent,
+        suggestion_text=existing,
+        main_window=resolve_image_gen_main_window(edit),
+    )
+    if entry is None:
+        return
+    combined = _append_favorite_prompt_text(existing, entry.text or "")
+    if combined == existing:
+        return
+    edit.setPlainText(combined)
+    cursor = edit.textCursor()
+    cursor.movePosition(QTextCursor.MoveOperation.End)
+    edit.setTextCursor(cursor)
+
+
 def append_image_gen_prompt_label_action_buttons(
     layout: QHBoxLayout,
     edit: QPlainTextEdit,
@@ -1372,13 +1405,14 @@ def append_image_gen_prompt_label_action_buttons(
     clear_object_name: str = "imageGenPromptClearBtn",
     default_text: str = IMAGE_GEN_PROMPT_RESET_DEFAULT_TEXT,
     include_stretch: bool = True,
+    include_favorite: bool = False,
 ) -> tuple[
     QPushButton,
     Optional[QPushButton],
     Optional[QPushButton],
     QPushButton,
 ]:
-    """Right-justify copy / read-aloud / mic / reset on a prompt label row."""
+    """Right-justify copy / read-aloud / favorite / mic / reset on a prompt label row."""
     if include_stretch:
         layout.addStretch(1)
     align = Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
@@ -1391,6 +1425,12 @@ def append_image_gen_prompt_label_action_buttons(
     )
     if speak_btn is not None:
         layout.addWidget(speak_btn, 0, align)
+    if include_favorite:
+        fav_btn = create_image_gen_favorite_prompts_button(parent)
+        fav_btn.clicked.connect(
+            lambda: _on_favorite_prompts_clicked_for_edit(edit)
+        )
+        layout.addWidget(fav_btn, 0, align)
     mic_btn = create_image_gen_prompt_voice_mic_button(
         edit, parent, object_name=mic_object_name
     )
@@ -1417,6 +1457,7 @@ def make_image_gen_prompt_label_row(
     mic_object_name: str = "imageGenPromptVoiceMicBtn",
     clear_object_name: str = "imageGenPromptClearBtn",
     default_text: str = IMAGE_GEN_PROMPT_RESET_DEFAULT_TEXT,
+    include_favorite: bool = False,
 ) -> QWidget:
     """Field heading with prompt actions right-justified to the field edge."""
     row = QWidget(parent)
@@ -1435,6 +1476,7 @@ def make_image_gen_prompt_label_row(
         mic_object_name=mic_object_name,
         clear_object_name=clear_object_name,
         default_text=default_text,
+        include_favorite=include_favorite,
     )
     return row
 
@@ -1514,6 +1556,61 @@ def create_image_gen_prompt_voice_mic_button(
     )
     btn.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
     return btn
+
+
+def image_gen_favorite_prompts_btn_dialog_stylesheet() -> str:
+    return image_gen_prompt_copy_btn_stylesheet(
+        selector="#imageGenDialog QPushButton#imageGenFavoritePromptsBtn"
+    )
+
+
+class _ImageGenFavoritePromptsButton(QPushButton):
+    """Star icon that opens the favorite prompts library for the image prompt field."""
+
+    def __init__(self, parent: Optional[QWidget] = None) -> None:
+        super().__init__("", parent)
+        self.setObjectName("imageGenFavoritePromptsBtn")
+        self.setToolTip("Favorite prompts...")
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        from chat_plugins.chat_ui_common import _load_chat_asset_icon_pixmap
+
+        icon_px = _IMAGE_GEN_TRASH_ICON_PX
+        normal_pm = _load_chat_asset_icon_pixmap(
+            "chatfav.png", size_px=icon_px, matte_black=True
+        )
+        hover_pm = _load_chat_asset_icon_pixmap(
+            "chatfav_hover.png", size_px=icon_px, matte_black=True
+        )
+        self._normal_icon = QIcon(normal_pm)
+        self._hover_icon = QIcon(
+            hover_pm if not hover_pm.isNull() else normal_pm
+        )
+        self.setAttribute(Qt.WidgetAttribute.WA_Hover, True)
+        self.setIcon(self._normal_icon)
+        self.setIconSize(QSize(icon_px, icon_px))
+        self.setStyleSheet(
+            image_gen_prompt_copy_btn_stylesheet(
+                selector="QPushButton#imageGenFavoritePromptsBtn"
+            )
+        )
+        self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        self.setFixedSize(
+            IMAGE_GEN_FIELD_RESET_BTN_SIZE, IMAGE_GEN_FIELD_RESET_BTN_SIZE
+        )
+
+    def enterEvent(self, event: QEnterEvent) -> None:
+        self.setIcon(self._hover_icon)
+        super().enterEvent(event)
+
+    def leaveEvent(self, event: QEvent) -> None:
+        self.setIcon(self._normal_icon)
+        super().leaveEvent(event)
+
+
+def create_image_gen_favorite_prompts_button(
+    parent: Optional[QWidget] = None,
+) -> QPushButton:
+    return _ImageGenFavoritePromptsButton(parent)
 
 
 def create_image_gen_prompt_copy_button(
@@ -2411,6 +2508,7 @@ class ImageGenFieldsPanel:
                     control,
                     group,
                     default_text=default_text,
+                    include_favorite=True,
                 ),
                 0,
             )
@@ -2781,6 +2879,6 @@ def image_gen_field_label_stylesheet() -> str:
     #imageGenDialog QLineEdit {{
         padding: 5px 8px;
     }}
-    """ + image_gen_custom_size_group_stylesheet() + image_gen_field_reset_btn_dialog_stylesheet() + image_gen_gear_settings_btn_dialog_stylesheet() + image_gen_prompt_copy_btn_dialog_stylesheet() + image_gen_prompt_clear_btn_dialog_stylesheet() + image_gen_prompt_voice_mic_btn_dialog_stylesheet() + image_gen_system_prompt_copy_btn_dialog_stylesheet() + image_gen_system_prompt_clear_btn_dialog_stylesheet() + image_gen_system_prompt_voice_mic_btn_dialog_stylesheet()
+    """ + image_gen_custom_size_group_stylesheet() + image_gen_field_reset_btn_dialog_stylesheet() + image_gen_gear_settings_btn_dialog_stylesheet() + image_gen_prompt_copy_btn_dialog_stylesheet() + image_gen_prompt_clear_btn_dialog_stylesheet() + image_gen_prompt_voice_mic_btn_dialog_stylesheet() + image_gen_favorite_prompts_btn_dialog_stylesheet() + image_gen_system_prompt_copy_btn_dialog_stylesheet() + image_gen_system_prompt_clear_btn_dialog_stylesheet() + image_gen_system_prompt_voice_mic_btn_dialog_stylesheet()
 
 
