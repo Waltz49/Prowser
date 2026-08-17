@@ -1287,6 +1287,14 @@ class MenuManager:
         )
         tools_menu.addAction(self.main_window.favorite_prompts_action)
 
+        self.main_window.pre_post_strings_action = QAction(
+            "Prefix/Postfix Strings...", self.main_window
+        )
+        self.main_window.pre_post_strings_action.triggered.connect(
+            self._open_pre_post_strings
+        )
+        tools_menu.addAction(self.main_window.pre_post_strings_action)
+
         # Map Location (cmd-G)
         self.main_window.map_location_action = QAction("Show GPS Location on Map", self.main_window)
         self.main_window.map_location_action.setShortcut(QKeySequence("Ctrl+G"))
@@ -1579,6 +1587,16 @@ class MenuManager:
             self.main_window,
             main_window=self.main_window,
         )
+
+    def _open_pre_post_strings(self):
+        """Tools > Miscellaneous > Prefix/Postfix Strings…"""
+        chat = getattr(self.main_window, "sidebar_chat_widget", None)
+        if chat is not None and hasattr(chat, "open_prefix_postfix_text"):
+            chat.open_prefix_postfix_text()
+            return
+        from chat_plugins.chat_prefix_postfix import run_chat_prefix_postfix_library
+
+        run_chat_prefix_postfix_library(self.main_window)
 
     def _debug_list_models(self):
         """Tools > Debug > List Models — browse cached HF and LM Studio models."""
