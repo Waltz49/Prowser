@@ -446,7 +446,10 @@ class ImageBrowserConfig:
             'browse_image_history_save_after_ms': 3000,
             'wrap_around': True,  # Wrap around when navigating past first/last image
             'raise_status_bar_on_cursor_near_bottom': True,  # Peek hidden status bar when cursor nears bottom
-            'use_prompt_filter_exits': False,  # Run PROWSER_TEXT_AI_EXIT / PROWSER_IMAGE_AI_EXIT hooks
+            'use_prompt_filter_exits': False,  # Run text/image exit scripts before model calls
+            'text_ai_exit': '',  # External script for LM Studio / caption prompts
+            'image_ai_exit': '',  # External script for image generation prompts
+            'say_exit': '',  # External script for speak buttons
             'slideshow_rate': 5000,
             'slideshow_transition_speed': 1300,
             'slideshow_direction': 'right',

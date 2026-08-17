@@ -710,7 +710,7 @@ which stores PROWSER_DEFAULT_ARGV in Info.plist. Explicit CLI args override.
     parser.add_argument(
         '--env',
         action='store_true',
-        help='Report PROWSER_* exit environment variables and exit',
+        help='Report configured exit scripts and exit',
     )
 
     return parser.parse_args()

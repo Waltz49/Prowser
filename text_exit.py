@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Example PROWSER_TEXT_AI_EXIT / PROWSER_IMAGE_AI_EXIT hook script."""
+"""Example text/image AI exit hook script (configure in Settings → Exit Scripts)."""
 import argparse
 
 p = argparse.ArgumentParser()

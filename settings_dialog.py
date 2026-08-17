@@ -2549,15 +2549,16 @@ class SettingsDialog(QDialog):
             subtitle=f"Enter debug mode. Meaning varies. Use {CTRL_SYMBOL}-L to view log.",
         )
 
-        self.use_prompt_filter_exits_checkbox = general_panel.add_toggle(
+        self.use_prompt_filter_exits_checkbox = general_panel.add_gear_toggle(
             "Use prompt filter exits",
+            on_gear_clicked=self._open_exit_scripts_dialog,
             tooltip=(
                 "When enabled, run external prompt filter scripts\n"
-                "configured via PROWSER_TEXT_AI_EXIT (LMStudio / caption\n"
-                "prompts) and PROWSER_IMAGE_AI_EXIT (image generation\n"
-                "prompts) before model calls."
+                "for LM Studio / caption prompts and image generation\n"
+                "prompts before model calls."
             ),
-            subtitle="Use Exit code to modify prompt data before model calls.",
+            subtitle="Use exit scripts to modify prompt data before model calls.",
+            gear_tooltip="Configure exit scripts",
         )
 
         inner_layout.addWidget(general_group)
@@ -3879,6 +3880,11 @@ class SettingsDialog(QDialog):
         from chat_plugins.chat_prefix_postfix import run_chat_prefix_postfix_library
 
         run_chat_prefix_postfix_library(self)
+
+    def _open_exit_scripts_dialog(self) -> None:
+        from exit_scripts_dialog import run_exit_scripts_dialog
+
+        run_exit_scripts_dialog(self)
 
     @staticmethod
     def _browse_rgb3_tuple(val, default):

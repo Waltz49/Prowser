@@ -51,7 +51,7 @@ Use `-h` or `--help` for command-line options.
 | `--min` | Hide image generation, LM Studio, voice, and related UI (same as a `--min` bundle) |
 | `--no-fullscreen` | Launch windowed (OS fullscreen is the default) |
 | `--debug` | Enable debug mode |
-| `--env` | Print `PROWSER_*` exit environment variables and exit |
+| `--env` | Print configured exit scripts and exit |
 
 ## Install and run — from source
    You can pass a folder or other arguments, for example:

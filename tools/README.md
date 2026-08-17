@@ -30,7 +30,7 @@ Some older scripts still live at the repo root; they are listed below for refere
 | `generate_minimal_requirements.py` | Generate `minimal_requirements.txt` from `requirements.txt` |
 | `hfmodels.py` | Hugging Face model utilities |
 | `list_models.py` | List / manage Hugging Face models |
-| `prowser_say_exit.py` | Speech exit environment reporter |
+| `prowser_say_exit.py` | Example say exit hook script |
 | `qt_key_debug.py` | Qt keyboard event debugging |
 | `quick_person_search.py` | Person search utility (also used from menus) |
 | `random_images_launcher.py` | Launch browser with random images from recents |

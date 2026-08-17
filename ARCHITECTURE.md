@@ -12,7 +12,7 @@ Package restructure (Steps 0–12) is complete; see `docs/restructure-plan.md` f
 - `--background {default,thread,process}` — model-tasks worker thread vs subprocess (`workers/model_tasks_launch.py`)
 - `--min` — hide image generation, LM Studio, voice, and related UI (same as a `--min` bundle)
 - `--test-create-deps` — frozen-only diagnostic for Create/Image menu dependencies
-- `--env` — print `PROWSER_*` exit environment variables and exit
+- `--env` — print configured exit scripts and exit
 - Settings: `~/.prowser/data/settings.json` via `config.ImageBrowserConfig`
 - Logs: `~/.prowser/logs` (early stdout also routed via `print_log_redirect.py`)
 
