@@ -103,6 +103,13 @@ class FileDataModel(QObject):
                 elif self._current_index >= n:
                     self._current_index = n - 1
                     self._current_image_path = self._displayed_images[self._current_index]
+                elif (
+                    self._current_image_path
+                    and self._current_image_path not in self._displayed_images
+                    and n > 0
+                ):
+                    # Current path was removed (e.g. delete) but index still in range — slide to slot
+                    self._current_image_path = self._displayed_images[self._current_index]
                 
                 if notify:
                     self.displayed_images_changed.emit(self._displayed_images.copy())
