@@ -462,7 +462,7 @@ class MacPreferenceFormRow(QWidget):
 
         label = QLabel(label_text)
         label.setObjectName("macPreferenceRowTitle")
-        label.setWordWrap(True)
+        label.setWordWrap(False) # DGN
         if tooltip:
             label.setToolTip(tooltip)
             control.setToolTip(tooltip)
