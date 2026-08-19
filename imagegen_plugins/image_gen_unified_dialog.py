@@ -426,7 +426,32 @@ class ImageGenUnifiedDialog(QDialog):
 
             self._update_chrome()
             if auto_import_available and hasattr(panel, "_on_import_available"):
+                from imagegen_plugins.debug_exif_lora_trace import agent_exif_lora_dbg
+
+                lora_field = getattr(panel, "_lora_field", None)
+                agent_exif_lora_dbg(
+                    "H1",
+                    "image_gen_unified_dialog:switch_to_function",
+                    "before_auto_import",
+                    {
+                        "function": function,
+                        "selected_ids_before": (
+                            lora_field.selected_ids() if lora_field is not None else None
+                        ),
+                    },
+                )
                 panel._on_import_available()
+                agent_exif_lora_dbg(
+                    "H1",
+                    "image_gen_unified_dialog:switch_to_function",
+                    "after_auto_import",
+                    {
+                        "function": function,
+                        "selected_ids_after": (
+                            lora_field.selected_ids() if lora_field is not None else None
+                        ),
+                    },
+                )
             if auto_generate:
                 self._schedule_auto_generate()
             self._activate_panel_layouts()

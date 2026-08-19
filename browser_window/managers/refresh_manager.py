@@ -32,6 +32,7 @@ class RefreshManager:
             main_window: Reference to the main ImageBrowserWindow instance
         """
         self.main_window = main_window
+        self._pending_browse_exit_files_refresh = False
         # Subscribe to refresh events via event bus
         if hasattr(main_window, 'event_bus') and main_window.event_bus:
             main_window.event_bus.subscribe(REFRESH_REQUESTED, self._on_refresh_requested)
@@ -46,6 +47,15 @@ class RefreshManager:
         current = getattr(self.main_window, 'current_directory', None)
         if directory and current and self._directory_paths_match(directory, current):
             self._check_and_refresh_if_changed()
+
+    def flush_pending_browse_exit_refresh(self):
+        """Run a files-changed check deferred during browse exit, then load empty thumbs."""
+        pending = self._pending_browse_exit_files_refresh
+        self._pending_browse_exit_files_refresh = False
+        if pending:
+            self._check_and_refresh_if_changed()
+        if hasattr(self.main_window, 'start_background_thumbnail_loading_if_needed'):
+            self.main_window.start_background_thumbnail_loading_if_needed()
 
     @staticmethod
     def _directory_paths_match(left: str, right: str) -> bool:
@@ -71,6 +81,11 @@ class RefreshManager:
     def _check_and_refresh_if_changed(self):
         """Check if directory files changed and only refresh if necessary - prevents unnecessary flashing"""
         if getattr(self.main_window, '_refresh_in_progress', False):
+            return
+        if getattr(self.main_window, 'browse_view_exit_in_progress', False):
+            # Defer until browse exit finishes. Rebuilding the canvas here races
+            # with placeholder restore and can leave empty thumbs until scroll/refresh.
+            self._pending_browse_exit_files_refresh = True
             return
         browse_mode = getattr(self.main_window, 'current_view_mode', None) == 'browse'
         # CRITICAL: In specific files mode, refresh only the specific files set

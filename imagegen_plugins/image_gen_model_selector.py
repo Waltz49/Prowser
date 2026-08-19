@@ -441,25 +441,90 @@ def switch_image_gen_dialog_plugin(
     plugin: ImageGenModelPlugin,
 ) -> bool:
     """Select a model in the dialog combo (triggers persisted plugin switch)."""
+    from imagegen_plugins.debug_exif_lora_trace import agent_exif_lora_dbg
+
     combo = getattr(dialog, "_model_combo", None)
     if combo is None:
+        agent_exif_lora_dbg("H4", "image_gen_model_selector:switch_plugin", "no_combo")
         return False
     current = getattr(dialog, "plugin", None)
     if current is not None and current.plugin_id == plugin.plugin_id:
+        agent_exif_lora_dbg(
+            "H4",
+            "image_gen_model_selector:switch_plugin",
+            "already_current",
+            {"plugin_id": plugin.plugin_id},
+        )
         return True
     idx = combo.findData(plugin.plugin_id)
     if idx < 0:
+        agent_exif_lora_dbg(
+            "H4",
+            "image_gen_model_selector:switch_plugin",
+            "plugin_not_in_combo",
+            {"plugin_id": plugin.plugin_id},
+        )
         return False
+    agent_exif_lora_dbg(
+        "H4",
+        "image_gen_model_selector:switch_plugin",
+        "setCurrentIndex",
+        {
+            "from_plugin_id": getattr(current, "plugin_id", None),
+            "to_plugin_id": plugin.plugin_id,
+            "idx": idx,
+        },
+    )
     combo.setCurrentIndex(idx)
     return True
+
+
+def resolve_plugin_for_restore(
+    plugins_by_id: Dict[str, ImageGenModelPlugin],
+    plugin_id: str,
+    values: Optional[Dict[str, Any]] = None,
+) -> Optional[ImageGenModelPlugin]:
+    """Match a session plugin id, then fall back to snapshotted hf_model_id."""
+    plugin = plugins_by_id.get(str(plugin_id or ""))
+    if plugin is not None:
+        return plugin
+    hf = str((values or {}).get("hf_model_id") or "").strip()
+    if not hf:
+        return None
+    for candidate in plugins_by_id.values():
+        if str(candidate.hf_model_id or "").strip() == hf:
+            return candidate
+    return None
+
+
+def apply_restored_dialog_plugin(dialog: Any, plugin: Optional[ImageGenModelPlugin]) -> None:
+    """Set the model combo and plugin without persisting a user-driven switch."""
+    if plugin is None:
+        return
+    combo = getattr(dialog, "_model_combo", None)
+    if combo is not None:
+        idx = combo.findData(plugin.plugin_id)
+        if idx >= 0 and combo.currentIndex() != idx:
+            combo.blockSignals(True)
+            combo.setCurrentIndex(idx)
+            combo.blockSignals(False)
+    dialog.plugin = plugin
+    comment = getattr(dialog, "_model_comment_label", None)
+    if comment is not None:
+        sync_model_comment_label(comment, plugin)
 
 
 
 def sync_image_gen_lora_field(dialog: Any) -> None:
     """Show the LoRA control and register it in ``_widgets`` for the active plugin."""
     from imagegen_plugins.imagegen_control_tooltips import field_tooltip
+    from imagegen_plugins.job_values_snapshot import (
+        LORA_SCALES_BY_ID_KEY,
+        job_values_snapshotted,
+    )
     from imagegen_plugins.mflux_lora_presets import (
         coerce_lora_preset_id,
+        lora_ids_and_scales_from_payload_paths,
         normalize_lora_stack_from_values,
     )
 
@@ -500,11 +565,22 @@ def sync_image_gen_lora_field(dialog: Any) -> None:
                 {"mflux_lora_stack": raw_stack},
                 pop=False,
             )
-        if lora_field.is_stack_mode():
+        # Keep the live widget stack across catalog refreshes, but never when
+        # restoring a snapshotted job — those values are the source of truth.
+        if lora_field.is_stack_mode() and not job_values_snapshotted(values):
             live_stack = lora_field.selected_ids()
             if live_stack:
                 stack = live_stack
     legacy = coerce_lora_preset_id(values.get("mflux_lora", "none"))
+    recovered_scales: Dict[str, float] = {}
+    if (not stack and legacy == "none") or (not use_stack and legacy == "none"):
+        recovered_ids, recovered_scales = lora_ids_and_scales_from_payload_paths(values)
+        if recovered_ids:
+            stack = recovered_ids
+            if not use_stack:
+                legacy = recovered_ids[0]
+    if not use_stack and legacy == "none" and stack:
+        legacy = coerce_lora_preset_id(stack[0])
     if lora_spec is None:
         lora_spec = FieldSpec(
             key="mflux_lora",
@@ -520,9 +596,34 @@ def sync_image_gen_lora_field(dialog: Any) -> None:
         current_stack=stack,
         current_preset_id=legacy,
     )
-    from imagegen_plugins.job_values_snapshot import LORA_SCALES_BY_ID_KEY
+    from imagegen_plugins.debug_exif_lora_trace import agent_exif_lora_dbg
 
+    agent_exif_lora_dbg(
+        "H5",
+        "image_gen_model_selector:sync_lora_field",
+        "after_populate",
+        {
+            "stack_input": stack,
+            "legacy_input": legacy,
+            "selected_ids": lora_field.selected_ids(),
+            "values_mflux_lora": values.get("mflux_lora"),
+            "values_mflux_lora_stack": values.get("mflux_lora_stack"),
+            "values_sd15_lora_paths": values.get("sd15_lora_paths"),
+            "live_stack_used": bool(
+                use_stack
+                and lora_field.is_stack_mode()
+                and not job_values_snapshotted(values)
+                and lora_field.selected_ids()
+            ),
+        },
+    )
     scales_raw = values.get(LORA_SCALES_BY_ID_KEY)
+    if not isinstance(scales_raw, dict):
+        scales_raw = recovered_scales
+    elif recovered_scales:
+        merged_scales = dict(recovered_scales)
+        merged_scales.update(scales_raw)
+        scales_raw = merged_scales
     if isinstance(scales_raw, dict) and hasattr(lora_field, "apply_scale_overrides"):
         lora_field.apply_scale_overrides(scales_raw)
     if not getattr(dialog, "_lora_popup_values_connected", False):

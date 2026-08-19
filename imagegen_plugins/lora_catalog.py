@@ -747,10 +747,13 @@ def match_exif_lora_names_to_ids_and_scales(
     plugin: "ImageGenModelPlugin",
     settings: Optional[Dict[str, Any]] = None,
 ) -> Tuple[List[str], Dict[str, float]]:
-    """Map EXIF LoRA name(s) to catalog ids and optional per-id weights.
+    """Map EXIF LoRA name(s) to installed catalog ids and optional per-id weights.
 
-    Weights are included only when present in EXIF (``name [0.9]``).
+    Matches installed catalog entries by EXIF display name (including user-imported
+    LoRAs whose host_id may differ from the active plugin). Weights are included only
+    when present in EXIF (``name [0.9]``).
     """
+    from imagegen_plugins.debug_exif_lora_trace import agent_exif_lora_dbg
     from imagegen_plugins.image_gen_naming import parse_exif_lora_name_and_weight
 
     target = str(lora_text or "").strip()
@@ -761,11 +764,7 @@ def match_exif_lora_names_to_ids_and_scales(
     if settings is None:
         settings = get_config().load_settings()
     model_key = lora_model_key_for_plugin(plugin) or ""
-    choice_ids = {
-        lora_id
-        for _label, lora_id in lora_choices_for_plugin(plugin, settings)
-        if lora_id and lora_id != "none"
-    }
+    entries = catalog_entries_sorted(settings)
     parts = [p.strip() for p in re.split(r"\s*\+\s*", target) if p.strip()]
     if len(parts) <= 1:
         parts = [target]
@@ -773,22 +772,38 @@ def match_exif_lora_names_to_ids_and_scales(
     scales_by_id: Dict[str, float] = {}
     for part in parts:
         _name, weight = parse_exif_lora_name_and_weight(part)
-        part_token = _normalize_exif_lora_token(part)
+        part_token = _normalize_exif_lora_token(_name or part)
         if not part_token:
             continue
         found_id: Optional[str] = None
-        for entry in catalog_entries_sorted(settings):
-            if entry.lora_id not in choice_ids:
+        model_match_id: Optional[str] = None
+        for entry in entries:
+            if not is_lora_installed(entry.lora_id, settings, entry=entry):
                 continue
-            if not is_lora_installed(entry.lora_id):
+            if part_token not in _exif_lora_match_keys(entry, model_key=model_key):
                 continue
-            if part_token in _exif_lora_match_keys(entry, model_key=model_key):
+            if entry_matches_lora_model(entry, model_key, settings=settings):
                 found_id = entry.lora_id
                 break
+            if model_match_id is None:
+                model_match_id = entry.lora_id
+        if found_id is None:
+            found_id = model_match_id
         if found_id is not None and found_id not in matched_ids:
             matched_ids.append(found_id)
             if weight is not None:
                 scales_by_id[found_id] = float(weight)
+    agent_exif_lora_dbg(
+        "H3",
+        "lora_catalog:match_exif_lora",
+        "done",
+        {
+            "target": target,
+            "model_key": model_key,
+            "matched_ids": matched_ids,
+            "catalog_entries": len(entries),
+        },
+    )
     return matched_ids, scales_by_id
 
 

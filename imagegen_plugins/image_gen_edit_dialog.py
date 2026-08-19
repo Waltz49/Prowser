@@ -73,10 +73,12 @@ from imagegen_plugins.image_gen_source_nav import (
 )
 from imagegen_plugins.image_gen_model_selector import (
     apply_mflux_lora_collection_guard,
+    apply_restored_dialog_plugin,
     collect_lora_field_values,
     build_model_selector_row,
     mount_image_gen_lora_field,
     refresh_dialog_mflux_lora_combo,
+    resolve_plugin_for_restore,
     sync_image_gen_generate_enabled,
     sync_image_gen_lora_field,
     resolve_initial_plugin,
@@ -1535,16 +1537,10 @@ class ImageGenEditDialog(ImageGenDimensionAspectMixin, QDialog):
                 self._set_edit_source_paths(state.source_paths)
             elif state.source_path:
                 self._set_edit_source_paths([state.source_path])
-            plugin = self._plugins_by_id.get(state.plugin_id)
-            if plugin is not None and (
-                self.plugin is None or plugin.plugin_id != self.plugin.plugin_id
-            ):
-                idx = self._model_combo.findData(plugin.plugin_id)
-                if idx >= 0:
-                    self._model_combo.blockSignals(True)
-                    self._model_combo.setCurrentIndex(idx)
-                    self._model_combo.blockSignals(False)
-                    self.plugin = plugin
+            plugin = resolve_plugin_for_restore(
+                self._plugins_by_id, state.plugin_id, state.values
+            )
+            apply_restored_dialog_plugin(self, plugin)
             if self.plugin is not None:
                 self._load_plugin_state(saved_override=state.values)
                 self._populate_field_rows()

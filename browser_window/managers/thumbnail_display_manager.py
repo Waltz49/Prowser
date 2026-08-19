@@ -29,6 +29,8 @@ class ThumbnailDisplayManager:
             return
         if getattr(self.main_window, 'current_view_mode', None) == 'browse':
             return
+        if getattr(self.main_window, 'browse_view_exit_in_progress', False):
+            return
         self.generate_thumbnails(force_refresh=False)
 
     def generate_thumbnails(self, force_refresh=False):

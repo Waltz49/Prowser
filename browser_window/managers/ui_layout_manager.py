@@ -173,7 +173,7 @@ class UILayoutManager:
         # The highlight should already be set correctly by the time this is called
         # CRITICAL: Reset the flag here to avoid needing another timer call (which causes GIL deadlock)
         if getattr(self.main_window, 'browse_view_exit_in_progress', False):
-            self.main_window.browse_view_exit_in_progress = False
+            self.main_window._clear_browse_view_exit_in_progress()
             return
         
         # Recalculate optimal thumbnail size for both canvas and non-canvas implementations

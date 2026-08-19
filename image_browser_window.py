@@ -9882,6 +9882,15 @@ class ImageBrowserWindow(QMainWindow):
         
         return pixmap
 
+    def _clear_browse_view_exit_in_progress(self) -> None:
+        """End browse-exit suppression and load any thumbs left as placeholders."""
+        self.browse_view_exit_in_progress = False
+        rm = getattr(self, 'refresh_manager', None)
+        if rm is not None and hasattr(rm, 'flush_pending_browse_exit_refresh'):
+            rm.flush_pending_browse_exit_refresh()
+        else:
+            self.start_background_thumbnail_loading_if_needed()
+
     def _handle_resize(self):
         """Handle resize after delay"""
         if self.current_view_mode == 'thumbnail':
@@ -9889,7 +9898,7 @@ class ImageBrowserWindow(QMainWindow):
             # The highlight should already be set correctly by the time this is called
             # CRITICAL: Reset the flag here to avoid needing another timer call (which causes GIL deadlock)
             if getattr(self, 'browse_view_exit_in_progress', False):
-                self.browse_view_exit_in_progress = False
+                self._clear_browse_view_exit_in_progress()
                 return
                 
             # Always recalculate thumbnail size on resize to ensure proper dynamic sizing
@@ -9983,7 +9992,7 @@ class ImageBrowserWindow(QMainWindow):
         # Layout was already updated by _immediate_splitter_update from VIEW_MODE_CHANGED.
         if event.size() == event.oldSize():
             if getattr(self, 'browse_view_exit_in_progress', False):
-                self.browse_view_exit_in_progress = False
+                self._clear_browse_view_exit_in_progress()
             return
         # Update MAX_THUMBNAIL_SIZE based on new container dimensions
         self.ui_layout_manager.update_max_thumbnail_size()

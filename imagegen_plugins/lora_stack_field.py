@@ -188,16 +188,22 @@ class LoraSelectionPopup(QFrame):
             Qt.WindowType.Popup | Qt.WindowType.FramelessWindowHint,
         )
         self.setObjectName("imageGenLoraSelectionPopup")
-        self._apply_theme()
         root = QVBoxLayout(self)
         root.setContentsMargins(1, 0, 1, 1)
         root.setSpacing(0)
 
         self._scroll = QScrollArea(self)
+        self._scroll.setObjectName("loraPopupScroll")
         self._scroll.setWidgetResizable(True)
         self._scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self._scroll.setFrameShape(QFrame.Shape.NoFrame)
         self._checks_host = QWidget()
+        self._checks_host.setObjectName("loraPopupList")
+        self._checks_host.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        viewport = self._scroll.viewport()
+        if viewport is not None:
+            viewport.setObjectName("loraPopupViewport")
+            viewport.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self._grid = QGridLayout(self._checks_host)
         self._grid.setContentsMargins(
             _POPUP_PADDING, _POPUP_PADDING, _POPUP_PADDING, _POPUP_PADDING
@@ -207,6 +213,7 @@ class LoraSelectionPopup(QFrame):
         self._grid.setColumnStretch(1, 1)
         self._scroll.setWidget(self._checks_host)
         root.addWidget(self._scroll, 0)
+        self._apply_theme()
 
         self._rows: List[Tuple[str, QAbstractButton, Optional[QLineEdit]]] = []
         self._fallback_scales: Dict[str, float] = {}
@@ -221,44 +228,49 @@ class LoraSelectionPopup(QFrame):
 
     def _apply_theme(self) -> None:
         t = get_active_theme()
-        bg = t.dialog_input_background_hex
+        dropdown_bg = t.button_bg_default_hex
+        input_bg = t.dialog_input_background_hex
         border = t.border_default_hex
         text = t.dialog_text_color_hex
         self.setStyleSheet(
             f"QFrame#imageGenLoraSelectionPopup {{"
-            f" background-color: {bg};"
+            f" background-color: {dropdown_bg};"
             f" color: {text};"
             f" border: 1px solid {border};"
             f" border-top: none;"
             f"}}"
-            f"QFrame#imageGenLoraSelectionPopup QScrollArea {{"
-            f" background-color: {bg};"
+            f"QFrame#imageGenLoraSelectionPopup QScrollArea#loraPopupScroll,"
+            f"QFrame#imageGenLoraSelectionPopup QWidget#loraPopupViewport,"
+            f"QFrame#imageGenLoraSelectionPopup QWidget#loraPopupList {{"
+            f" background-color: {dropdown_bg};"
             f" border: none;"
             f"}}"
             f"QFrame#imageGenLoraSelectionPopup QCheckBox,"
             f"QFrame#imageGenLoraSelectionPopup QRadioButton {{"
             f" color: {text};"
+            f" background-color: transparent;"
             f"}}"
             f"QFrame#imageGenLoraSelectionPopup QLabel#loraPopupHeader {{"
             f" color: {text};"
             f" font-size: 11px;"
+            f" background-color: transparent;"
             f"}}"
             f"QFrame#imageGenLoraSelectionPopup QLabel#loraPopupEmpty {{"
             f" color: {text};"
             f" font-size: 12px;"
+            f" background-color: transparent;"
             f"}}"
             f"QFrame#imageGenLoraSelectionPopup QLineEdit#loraPopupWeightEdit {{"
-            f" background-color: {bg};"
+            f" background-color: {input_bg};"
             f" color: {text};"
             f" border: 1px solid {border};"
             f" border-radius: 3px;"
             f" padding: 2px 4px;"
             f"}}"
             f"QFrame#imageGenLoraSelectionPopup QLineEdit#loraPopupWeightEdit:disabled {{"
-            f" background-color: {bg};"
+            f" background-color: {dropdown_bg};"
             f" color: {text};"
             f" border: 1px solid transparent;"
-            f" opacity: 0.45;"
             f"}}"
         )
 
@@ -696,17 +708,59 @@ class LoraStackField(QWidget):
                 continue
             self._scale_overrides[pid] = max(_SCALE_MIN, min(_SCALE_MAX, scale))
 
+    def _ensure_catalog_choice(self, preset_id: str) -> bool:
+        """Add a catalog LoRA to the popup even if it is not in the current enabled list."""
+        pid = coerce_lora_preset_id(preset_id)
+        if not pid or pid == "none":
+            return False
+        if pid in self._label_by_id:
+            return True
+        from imagegen_plugins.lora_catalog import get_lora_entry
+
+        entry = get_lora_entry(pid)
+        if entry is None:
+            return False
+        label = str(entry.display_name or pid)
+        self._choices.append((label, pid))
+        self._label_by_id[pid] = label
+        return True
+
     def set_stack(self, ids: List[str]) -> None:
+        from imagegen_plugins.debug_exif_lora_trace import agent_exif_lora_dbg
+
+        cleaned: List[str] = []
+        for raw in ids:
+            pid = coerce_lora_preset_id(raw)
+            if not pid or pid == "none":
+                continue
+            self._ensure_catalog_choice(pid)
+            cleaned.append(pid)
+        agent_exif_lora_dbg(
+            "H3",
+            "lora_stack_field:set_stack",
+            "called",
+            {
+                "input_ids": list(ids),
+                "cleaned_ids": cleaned,
+                "popup_mode": self._popup_mode,
+                "stack_mode": self._stack_mode,
+                "before_selected": list(self._selected_ids),
+            },
+        )
         if self._popup_mode:
             if self._stack_mode:
-                self._selected_ids = list(ids)
+                self._selected_ids = cleaned
             else:
-                preset = ids[0] if ids else "none"
-                self._selected_ids = [] if preset == "none" else [preset]
+                self._selected_ids = cleaned[:1]
             self._update_summary_text()
             return
-        preset = ids[0] if ids else "none"
+        preset = cleaned[0] if cleaned else "none"
         idx = self.summary_combo.findData(preset)
+        if idx < 0 and preset != "none":
+            self.summary_combo.addItem(
+                self._label_by_id.get(preset, preset), preset
+            )
+            idx = self.summary_combo.findData(preset)
         if idx >= 0:
             self.summary_combo.setCurrentIndex(idx)
 
@@ -792,15 +846,23 @@ class LoraStackField(QWidget):
         self._choices = list(choices)
         self._label_by_id = {pid: str(label) for label, pid in choices if pid != "none"}
 
+        def _ensure_choice(preset_id: str, valid_ids: set[str]) -> set[str]:
+            if self._ensure_catalog_choice(preset_id):
+                valid_ids.add(coerce_lora_preset_id(preset_id))
+            return valid_ids
+
         if use_stack:
             self._configure_stack_mode_combo()
             self.summary_combo.setEnabled(True)
             valid_ids = {pid for _, pid in choices}
-            stack = [pid for pid in (current_stack or []) if pid in valid_ids]
-            if not stack and current_preset_id is not None:
+            requested = list(current_stack or [])
+            if not requested and current_preset_id is not None:
                 pid = coerce_lora_preset_id(current_preset_id)
-                if pid in valid_ids and pid != "none":
-                    stack = [pid]
+                if pid != "none":
+                    requested = [pid]
+            for pid in requested:
+                valid_ids = _ensure_choice(coerce_lora_preset_id(pid), valid_ids)
+            stack = [pid for pid in requested if pid in valid_ids]
             self._selected_ids = stack
             self._scale_overrides = {
                 pid: scale
@@ -822,6 +884,13 @@ class LoraStackField(QWidget):
             preset = coerce_lora_preset_id(
                 current_preset_id if current_preset_id is not None else "none"
             )
+            if preset == "none":
+                for pid in current_stack or []:
+                    candidate = coerce_lora_preset_id(pid)
+                    if candidate != "none":
+                        preset = candidate
+                        break
+            valid_ids = _ensure_choice(preset, valid_ids)
             if preset in valid_ids and preset != "none":
                 self._selected_ids = [preset]
             else:

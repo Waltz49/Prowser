@@ -191,7 +191,10 @@ class BrowseViewHandler:
     
     def reset_browse_view_exit_tracking(self):
         """Reset browse view exit tracking state"""
-        self.main_window.browse_view_exit_in_progress = False
+        if hasattr(self.main_window, '_clear_browse_view_exit_in_progress'):
+            self.main_window._clear_browse_view_exit_in_progress()
+        else:
+            self.main_window.browse_view_exit_in_progress = False
     
     def enter_macos_space_mode(self):
         """Enter macOS Space display mode (native fullscreen / separate Space)."""

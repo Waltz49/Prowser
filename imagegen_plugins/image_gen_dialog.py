@@ -53,10 +53,12 @@ from imagegen_plugins.image_gen_parameter_panel import (
 )
 from imagegen_plugins.image_gen_model_selector import (
     apply_mflux_lora_collection_guard,
+    apply_restored_dialog_plugin,
     collect_lora_field_values,
     build_model_selector_row,
     mount_image_gen_lora_field,
     resolve_initial_plugin,
+    resolve_plugin_for_restore,
     switch_plugin_persisted_settings_preserving_prompt,
     sync_image_gen_generate_enabled,
     sync_image_gen_lora_field,
@@ -217,44 +219,119 @@ def connect_import_button_with_option_modifier(
 
 def apply_import_extras_from_image_path(dialog: Any, image_path: str) -> None:
     """Import seed/steps/quantization/LoRA/guidance/model from EXIF when present."""
+    from imagegen_plugins.debug_exif_lora_trace import agent_exif_lora_dbg
+
     if not image_path:
+        agent_exif_lora_dbg("H1", "image_gen_dialog:apply_import_extras", "skip_no_path")
         return
     raw_bytes = get_usercomment_from_path(image_path)
     if not raw_bytes:
+        agent_exif_lora_dbg(
+            "H1",
+            "image_gen_dialog:apply_import_extras",
+            "skip_no_usercomment",
+            {"image_path": image_path},
+        )
         return
     full_text = decode_usercomment(raw_bytes)
-    params = _gated_exif_params_for_dialog(
-        dialog, parse_exif_generation_metadata(full_text)
+    parsed = parse_exif_generation_metadata(full_text)
+    params = _gated_exif_params_for_dialog(dialog, parsed)
+    agent_exif_lora_dbg(
+        "H2",
+        "image_gen_dialog:apply_import_extras",
+        "parsed_and_gated",
+        {
+            "image_path": image_path,
+            "parsed_keys": sorted(parsed.keys()),
+            "parsed_model": parsed.get("model"),
+            "parsed_lora": parsed.get("lora"),
+            "gated_keys": sorted(params.keys()),
+            "gated_lora": params.get("lora"),
+        },
     )
+    lora_field = getattr(dialog, "_lora_field", None)
+    before_ids = lora_field.selected_ids() if lora_field is not None else None
     apply_exif_generation_params_to_dialog(dialog, params)
+    after_ids = lora_field.selected_ids() if lora_field is not None else None
+    values = getattr(dialog, "_values", None) or {}
+    agent_exif_lora_dbg(
+        "H3",
+        "image_gen_dialog:apply_import_extras",
+        "after_apply_exif",
+        {
+            "before_selected_ids": before_ids,
+            "after_selected_ids": after_ids,
+            "values_mflux_lora": values.get("mflux_lora"),
+            "values_mflux_lora_stack": values.get("mflux_lora_stack"),
+            "values_sd15_lora_paths": values.get("sd15_lora_paths"),
+        },
+    )
 
 
 def _gated_exif_params_for_dialog(
     dialog: Any,
     params: Dict[str, Any],
 ) -> Dict[str, Any]:
-    """Resolve model from EXIF; gate LoRA import per installed-model rules."""
+    """Apply EXIF model/LoRA/params only when the comment has Image Model data."""
+    from imagegen_plugins.debug_exif_lora_trace import agent_exif_lora_dbg
+
     if not params:
+        agent_exif_lora_dbg("H2", "image_gen_dialog:gated_exif", "empty_params")
+        return {}
+    model_text = params.get("model")
+    if not model_text:
+        agent_exif_lora_dbg(
+            "H2",
+            "image_gen_dialog:gated_exif",
+            "no_model_section",
+            {"param_keys": sorted(params.keys())},
+        )
         return {}
     out = dict(params)
-    model_text = out.get("model")
     plugins = getattr(dialog, "_plugins", None) or []
-    resolved = None
-    if model_text:
-        from imagegen_plugins.image_gen_model_selector import (
-            resolve_installed_plugin_for_exif_model,
-            switch_image_gen_dialog_plugin,
-        )
+    from imagegen_plugins.image_gen_model_selector import (
+        resolve_installed_plugin_for_exif_model,
+        switch_image_gen_dialog_plugin,
+    )
 
-        resolved = resolve_installed_plugin_for_exif_model(str(model_text), plugins)
-    if model_text and not resolved:
+    resolved = resolve_installed_plugin_for_exif_model(str(model_text), plugins)
+    switched = False
+    if resolved is not None:
+        switched = switch_image_gen_dialog_plugin(dialog, resolved)
+    if "lora" not in out:
+        out["lora"] = "none"
+    elif resolved is None:
         out.pop("lora", None)
-    elif resolved is not None:
-        switch_image_gen_dialog_plugin(dialog, resolved)
-    else:
-        out.pop("lora", None)
+    agent_exif_lora_dbg(
+        "H2",
+        "image_gen_dialog:gated_exif",
+        "gated_out",
+        {
+            "model_text": model_text,
+            "resolved_plugin_id": getattr(resolved, "plugin_id", None),
+            "switched": switched,
+            "out_lora": out.get("lora"),
+            "had_lora_key": "lora" in params,
+        },
+    )
     out.pop("model", None)
     return out
+
+
+def _clear_exif_import_lora_path_recovery(values: Dict[str, Any]) -> None:
+    """Drop snapshotted path lists so sync_image_gen_lora_field cannot restore old LoRAs."""
+    from imagegen_plugins.job_values_snapshot import LORA_SCALES_BY_ID_KEY
+
+    for key in (
+        "mflux_lora_paths",
+        "mflux_lora_scales",
+        "sdxl_lora_paths",
+        "sdxl_lora_scales",
+        "sd15_lora_paths",
+        "sd15_lora_scales",
+        LORA_SCALES_BY_ID_KEY,
+    ):
+        values.pop(key, None)
 
 
 def apply_exif_generation_params_to_dialog(
@@ -354,7 +431,22 @@ def apply_exif_generation_params_to_dialog(
         lora_field = getattr(dialog, "_lora_field", None)
         target = str(params["lora"]).strip()
         plugin = getattr(dialog, "plugin", None)
-        if not target or target.lower() == "none":
+        from imagegen_plugins.debug_exif_lora_trace import agent_exif_lora_dbg
+
+        agent_exif_lora_dbg(
+            "H3",
+            "image_gen_dialog:apply_exif_lora",
+            "lora_branch_enter",
+            {
+                "target": target,
+                "popup_mode": bool(lora_field and lora_field.is_popup_mode()),
+                "stack_mode": bool(lora_field and lora_field.is_stack_mode()),
+                "plugin_id": getattr(plugin, "plugin_id", None),
+                "widget_keys": sorted(widgets.keys()),
+            },
+        )
+
+        def _clear_lora_selection() -> None:
             if lora_field is not None and lora_field.is_popup_mode():
                 lora_field.set_stack([])
             elif stack_entry is None:
@@ -366,6 +458,12 @@ def apply_exif_generation_params_to_dialog(
                         none_idx = combo.findData("none")
                         if none_idx >= 0:
                             combo.setCurrentIndex(none_idx)
+            values_dict = getattr(dialog, "_values", None)
+            if isinstance(values_dict, dict):
+                _clear_exif_import_lora_path_recovery(values_dict)
+
+        if not target or target.lower() == "none":
+            _clear_lora_selection()
         elif plugin is not None:
             from imagegen_plugins.lora_catalog import (
                 match_exif_lora_names_to_ids_and_scales,
@@ -373,6 +471,16 @@ def apply_exif_generation_params_to_dialog(
 
             matched_ids, scales_by_id = match_exif_lora_names_to_ids_and_scales(
                 target, plugin
+            )
+            agent_exif_lora_dbg(
+                "H3",
+                "image_gen_dialog:apply_exif_lora",
+                "match_result",
+                {
+                    "target": target,
+                    "matched_ids": matched_ids,
+                    "scales_by_id": scales_by_id,
+                },
             )
             if matched_ids and lora_field is not None and lora_field.is_popup_mode():
                 lora_field.set_stack(matched_ids)
@@ -386,6 +494,9 @@ def apply_exif_generation_params_to_dialog(
                         combo = choice_field_widget(widget)
                         preset_id = matched_ids[0]
                         idx = combo.findData(preset_id)
+                        if idx < 0:
+                            combo.addItem(preset_id, preset_id)
+                            idx = combo.findData(preset_id)
                         if idx >= 0:
                             combo.setCurrentIndex(idx)
                 if (
@@ -394,6 +505,8 @@ def apply_exif_generation_params_to_dialog(
                     and hasattr(lora_field, "apply_scale_overrides")
                 ):
                     lora_field.apply_scale_overrides(scales_by_id)
+            else:
+                _clear_lora_selection()
 
         values = getattr(dialog, "_values", None)
         if lora_field is not None and isinstance(values, dict):
@@ -1861,8 +1974,24 @@ class ImageGenDialog(ImageGenDimensionAspectMixin, QDialog):
             self.state_changed.emit()
 
     def _on_import_available(self) -> None:
+        from imagegen_plugins.debug_exif_lora_trace import agent_exif_lora_dbg
+
         mw = self._main_window()
+        agent_exif_lora_dbg(
+            "H1",
+            "image_gen_dialog:_on_import_available",
+            "enter",
+            {
+                "view_mode": getattr(mw, "current_view_mode", None) if mw else None,
+                "function": self._function,
+            },
+        )
         if mw is not None and mw.current_view_mode not in ("browse", "thumbnail"):
+            agent_exif_lora_dbg(
+                "H1",
+                "image_gen_dialog:_on_import_available",
+                "abort_bad_view_mode",
+            )
             show_styled_warning(
                 self,
                 "Import Rest",
@@ -1871,10 +2000,26 @@ class ImageGenDialog(ImageGenDimensionAspectMixin, QDialog):
             )
             return
         if not self._import_prompt_text_from_active_image():
+            agent_exif_lora_dbg(
+                "H1",
+                "image_gen_dialog:_on_import_available",
+                "abort_prompt_import_failed",
+            )
             return
         image_path = self._active_image_path_for_import()
         if not image_path:
+            agent_exif_lora_dbg(
+                "H1",
+                "image_gen_dialog:_on_import_available",
+                "abort_no_image_path",
+            )
             return
+        agent_exif_lora_dbg(
+            "H1",
+            "image_gen_dialog:_on_import_available",
+            "calling_apply_import_extras",
+            {"image_path": image_path},
+        )
         apply_import_extras_from_image_path(self, image_path)
         if self._panel_mode:
             self.state_changed.emit()
@@ -2002,16 +2147,10 @@ class ImageGenDialog(ImageGenDimensionAspectMixin, QDialog):
 
     def restore_state(self, state, *, initial_prompt: Optional[str] = None) -> None:
         if state is not None:
-            plugin = self._plugins_by_id.get(state.plugin_id)
-            if plugin is not None and (
-                self.plugin is None or plugin.plugin_id != self.plugin.plugin_id
-            ):
-                idx = self._model_combo.findData(plugin.plugin_id)
-                if idx >= 0:
-                    self._model_combo.blockSignals(True)
-                    self._model_combo.setCurrentIndex(idx)
-                    self._model_combo.blockSignals(False)
-                    self.plugin = plugin
+            plugin = resolve_plugin_for_restore(
+                self._plugins_by_id, state.plugin_id, state.values
+            )
+            apply_restored_dialog_plugin(self, plugin)
             if self.plugin is not None:
                 self._load_plugin_state(saved_override=state.values)
                 self._populate_field_rows()

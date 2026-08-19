@@ -52,6 +52,13 @@ def _snapshot_lora_for_job(values: Dict[str, Any], pipeline_id: str) -> None:
         values.pop("sdxl_lora_paths", None)
         values.pop("sdxl_lora_scales", None)
         values.pop(LORA_TRIGGER_WORDS_KEY, None)
+        values.pop(LORA_SCALES_BY_ID_KEY, None)
+        if host == HOST_SD15:
+            values["mflux_lora"] = "none"
+            values.pop("mflux_lora_stack", None)
+        else:
+            values["mflux_lora_stack"] = []
+            values.pop("mflux_lora", None)
         return
 
     paths: List[str] = []
@@ -68,7 +75,12 @@ def _snapshot_lora_for_job(values: Dict[str, Any], pipeline_id: str) -> None:
             trigger_words.append(trigger)
 
     values[LORA_TRIGGER_WORDS_KEY] = trigger_words
+    values[LORA_SCALES_BY_ID_KEY] = {
+        preset_id: scales[i] for i, preset_id in enumerate(stack)
+    }
     if host == HOST_SD15:
+        values["mflux_lora"] = stack[0]
+        values.pop("mflux_lora_stack", None)
         values["sd15_lora_paths"] = paths
         values["sd15_lora_scales"] = scales
         values.pop("mflux_lora_paths", None)
@@ -76,6 +88,8 @@ def _snapshot_lora_for_job(values: Dict[str, Any], pipeline_id: str) -> None:
         values.pop("sdxl_lora_paths", None)
         values.pop("sdxl_lora_scales", None)
     elif host == HOST_SDXL:
+        values["mflux_lora_stack"] = list(stack)
+        values.pop("mflux_lora", None)
         values["sdxl_lora_paths"] = paths
         values["sdxl_lora_scales"] = scales
         values.pop("mflux_lora_paths", None)
@@ -83,6 +97,8 @@ def _snapshot_lora_for_job(values: Dict[str, Any], pipeline_id: str) -> None:
         values.pop("sd15_lora_paths", None)
         values.pop("sd15_lora_scales", None)
     else:
+        values["mflux_lora_stack"] = list(stack)
+        values.pop("mflux_lora", None)
         values["mflux_lora_paths"] = paths
         values["mflux_lora_scales"] = scales
         values.pop("sd15_lora_paths", None)

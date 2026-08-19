@@ -418,8 +418,8 @@ def _lora_scale_for_exif(values: Dict[str, Any], preset_id: str, index: int) -> 
     return float(_lora_scale_for_preset(values, preset_id))
 
 
-def _display_name_for_lora_path(path: str) -> str:
-    """Best-effort catalog display name for an on-disk LoRA path."""
+def lora_id_for_weights_path(path: str) -> Optional[str]:
+    """Catalog preset id for an on-disk LoRA weights path, if known."""
     from pathlib import Path as _Path
 
     from imagegen_plugins.lora_catalog import (
@@ -429,13 +429,12 @@ def _display_name_for_lora_path(path: str) -> str:
 
     raw = str(path or "").strip()
     if not raw:
-        return ""
+        return None
     try:
         resolved = str(_Path(raw).expanduser().resolve())
     except OSError:
         resolved = raw
     filename = _Path(raw).name
-    stem = _Path(raw).stem
     for entry in catalog_entries_sorted():
         weights = local_lora_weights_path(entry.lora_id, entry=entry)
         if weights is not None:
@@ -444,17 +443,64 @@ def _display_name_for_lora_path(path: str) -> str:
             except OSError:
                 entry_path = str(weights)
             if entry_path in (resolved, raw) or weights.name == filename:
-                return entry.display_name
+                return entry.lora_id
         if entry.filename and entry.filename == filename:
-            return entry.display_name
+            return entry.lora_id
         if entry.local_path:
             try:
                 local = str(_Path(entry.local_path).expanduser().resolve())
             except OSError:
                 local = str(entry.local_path)
             if local in (resolved, raw) or _Path(local).name == filename:
-                return entry.display_name
-    return stem or filename
+                return entry.lora_id
+    return None
+
+
+def lora_ids_and_scales_from_payload_paths(
+    values: Dict[str, Any],
+) -> Tuple[List[str], Dict[str, float]]:
+    """Recover preset ids/scales from snapshotted host path lists (SD1.5/SDXL/MFLUX)."""
+    ids: List[str] = []
+    scales_by_id: Dict[str, float] = {}
+    for paths_key, scales_key in (
+        ("sd15_lora_paths", "sd15_lora_scales"),
+        ("sdxl_lora_paths", "sdxl_lora_scales"),
+        ("mflux_lora_paths", "mflux_lora_scales"),
+    ):
+        paths = values.get(paths_key)
+        if not isinstance(paths, list) or not paths:
+            continue
+        scale_list = values.get(scales_key) if isinstance(values.get(scales_key), list) else []
+        for i, raw_path in enumerate(paths):
+            preset_id = lora_id_for_weights_path(str(raw_path or ""))
+            if not preset_id or preset_id in ids:
+                continue
+            ids.append(preset_id)
+            if i < len(scale_list):
+                try:
+                    scales_by_id[preset_id] = float(scale_list[i])
+                except (TypeError, ValueError):
+                    pass
+        if ids:
+            break
+    return ids, scales_by_id
+
+
+def _display_name_for_lora_path(path: str) -> str:
+    """Best-effort catalog display name for an on-disk LoRA path."""
+    from pathlib import Path as _Path
+
+    from imagegen_plugins.lora_catalog import get_lora_entry
+
+    preset_id = lora_id_for_weights_path(path)
+    if preset_id:
+        entry = get_lora_entry(preset_id)
+        if entry is not None:
+            return entry.display_name
+    raw = str(path or "").strip()
+    if not raw:
+        return ""
+    return _Path(raw).stem or _Path(raw).name
 
 
 def lora_name_for_exif_from_paths_and_scales(
