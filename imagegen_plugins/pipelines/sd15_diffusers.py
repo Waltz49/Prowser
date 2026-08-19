@@ -50,6 +50,43 @@ def _hf_hub_token_kwargs() -> Dict[str, Any]:
     return {"token": False}
 
 
+def _cached_hf_snapshot_path(repo_id: str) -> Optional[str]:
+    """Local HF hub snapshot dir when weights are already cached (no hub access)."""
+    rid = (repo_id or "").strip()
+    if not rid:
+        return None
+    if os.path.isdir(rid):
+        return rid
+    try:
+        from huggingface_hub.constants import HF_HUB_CACHE
+    except ImportError:
+        return None
+    snapshots = Path(HF_HUB_CACHE) / f"models--{rid.replace('/', '--')}" / "snapshots"
+    if not snapshots.is_dir():
+        return None
+    for snap in sorted(
+        (p for p in snapshots.iterdir() if p.is_dir()),
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    ):
+        for root, _dirs, files in os.walk(snap):
+            for name in files:
+                if not name.endswith((".safetensors", ".bin", ".pt")):
+                    continue
+                full = os.path.join(root, name)
+                if os.path.isfile(full) and os.path.getsize(full) > 0:
+                    return str(snap)
+    return None
+
+
+def _from_pretrained_source(repo_id: str) -> Tuple[str, Dict[str, Any]]:
+    """Prefer a local snapshot so from_pretrained does not HEAD huggingface.co."""
+    local = _cached_hf_snapshot_path(repo_id)
+    if local:
+        return local, {"local_files_only": True}
+    return repo_id, {}
+
+
 def _pick_torch_device() -> Tuple[str, Any]:
     import torch
 
@@ -183,19 +220,23 @@ def _ensure_pipeline(hf_model_id: str, vae_hf_model_id: str) -> Any:
     load_t0 = time.perf_counter()
     device, torch_dtype = _pick_torch_device()
     tok_kwargs = _hf_hub_token_kwargs()
+    model_src, model_local_kwargs = _from_pretrained_source(hf_model_id)
     pipe_kwargs: Dict[str, Any] = {
         "torch_dtype": torch_dtype,
         "safety_checker": None,
         "requires_safety_checker": False,
         **tok_kwargs,
+        **model_local_kwargs,
     }
     if vae_hf_model_id:
+        vae_src, vae_local_kwargs = _from_pretrained_source(vae_hf_model_id)
         pipe_kwargs["vae"] = AutoencoderKL.from_pretrained(
-            vae_hf_model_id,
+            vae_src,
             torch_dtype=torch_dtype,
             **tok_kwargs,
+            **vae_local_kwargs,
         )
-    _pipe = StableDiffusionPipeline.from_pretrained(hf_model_id, **pipe_kwargs)
+    _pipe = StableDiffusionPipeline.from_pretrained(model_src, **pipe_kwargs)
     _pipe.to(device)
     if hasattr(_pipe, "enable_attention_slicing"):
         try:
