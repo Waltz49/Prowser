@@ -2661,7 +2661,7 @@ class SettingsDialog(QDialog):
         )
 
         self.imagegen_fast_open_action_combo = SettingsListCombo()
-        self.imagegen_fast_open_action_combo.addItem("Pronpt Only", userData="from_text")
+        self.imagegen_fast_open_action_combo.addItem("Prompt Only", userData="from_text")
         self.imagegen_fast_open_action_combo.addItem("Image and Prompt", userData="edit_image")
         configure_settings_list_combo(self.imagegen_fast_open_action_combo)
         self.imagegen_fast_open_action_combo.setToolTip(
