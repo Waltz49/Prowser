@@ -2334,6 +2334,67 @@ class SettingsDialog(QDialog):
         inner_layout.setContentsMargins(20, 12, 20, 20)
         inner_layout.setSpacing(18)
 
+        # ----- General -----
+        general_group, general_panel = mac_preference_section("General", inner)
+
+        self.confirm_delete_checkbox = general_panel.add_toggle(
+            f"Delete confirmation on {CMD_SYMBOL}-Delete",
+            tooltip="Show confirmation dialog when deleting files.",
+            subtitle=f"Show confirmation dialog when deleting files with {CMD_SYMBOL}-Delete.",
+        )
+
+        self.wrap_around_checkbox = general_panel.add_toggle(
+            "Wrap around",
+            tooltip=(
+                "Allow navigation to wrap from end to beginning and\n"
+                "vice versa."
+            ),
+            subtitle="Allow cursor navigation to wrap from end to beginning.",
+        )
+
+        self.raise_status_bar_on_cursor_near_bottom_checkbox = general_panel.add_toggle(
+            "Raise status bar when cursor nears bottom",
+            tooltip=(
+                "When the status bar is hidden, move the cursor near the\n"
+                "bottom edge of the window to temporarily show it."
+            ),
+            subtitle=(
+                "When off, a hidden status bar stays hidden near the bottom edge."
+            ),
+        )
+
+        self.ignore_exif_rotation_checkbox = general_panel.add_toggle(
+            "Use EXIF rotation",
+            tooltip=(
+                "Apply automatic EXIF rotation correction.\n"
+                "When unchecked, images are displayed without rotation\n"
+                "correction.\n"
+                "Manual rotation (Shift+arrow keys) still works in\n"
+                "fullscreen."
+            ),
+            subtitle="Rotate images based on EXIF data if available.",
+        )
+
+        self.debug_checkbox = general_panel.add_toggle(
+            f"Debug mode ({SHIFT_SYMBOL}-{CMD_SYMBOL}-D)",
+            tooltip="Show key popup overlay for debugging keyboard events.",
+            subtitle=f"Enter debug mode. Meaning varies. Use {CTRL_SYMBOL}-L to view log.",
+        )
+
+        self.use_prompt_filter_exits_checkbox = general_panel.add_gear_toggle(
+            "Use prompt filter exits",
+            on_gear_clicked=self._open_exit_scripts_dialog,
+            tooltip=(
+                "When enabled, run external prompt filter scripts\n"
+                "for LM Studio / caption prompts and image generation\n"
+                "prompts before model calls."
+            ),
+            subtitle="Use exit scripts to modify prompt data before model calls.",
+            gear_tooltip="Configure exit scripts",
+        )
+
+        inner_layout.addWidget(general_group)
+
         # ----- Thumbnails -----
         thumb_group, thumb_panel = mac_preference_section("Thumbnails", inner)
 
@@ -2440,7 +2501,7 @@ class SettingsDialog(QDialog):
         inner_layout.addWidget(thumb_group)
 
         # ----- Browse -----
-        browse_group, browse_panel = mac_preference_section("Browse", inner)
+        browse_group, browse_panel = mac_preference_section("Image Viewing", inner)
 
         self.space_mode_combo = SettingsListCombo()
         self.space_mode_combo.addItem("Exit to thumbnails", userData="exit")
@@ -2501,67 +2562,6 @@ class SettingsDialog(QDialog):
         )
 
         inner_layout.addWidget(browse_group)
-
-        # ----- General -----
-        general_group, general_panel = mac_preference_section("General", inner)
-
-        self.confirm_delete_checkbox = general_panel.add_toggle(
-            f"Delete confirmation on {CMD_SYMBOL}-Delete",
-            tooltip="Show confirmation dialog when deleting files.",
-            subtitle=f"Show confirmation dialog when deleting files with {CMD_SYMBOL}-Delete.",
-        )
-
-        self.wrap_around_checkbox = general_panel.add_toggle(
-            "Wrap around",
-            tooltip=(
-                "Allow navigation to wrap from end to beginning and\n"
-                "vice versa."
-            ),
-            subtitle="Allow cursor navigation to wrap from end to beginning.",
-        )
-
-        self.raise_status_bar_on_cursor_near_bottom_checkbox = general_panel.add_toggle(
-            "Raise status bar when cursor nears bottom",
-            tooltip=(
-                "When the status bar is hidden, move the cursor near the\n"
-                "bottom edge of the window to temporarily show it."
-            ),
-            subtitle=(
-                "When off, a hidden status bar stays hidden near the bottom edge."
-            ),
-        )
-
-        self.ignore_exif_rotation_checkbox = general_panel.add_toggle(
-            "Use EXIF rotation",
-            tooltip=(
-                "Apply automatic EXIF rotation correction.\n"
-                "When unchecked, images are displayed without rotation\n"
-                "correction.\n"
-                "Manual rotation (Shift+arrow keys) still works in\n"
-                "fullscreen."
-            ),
-            subtitle="Rotate images based on EXIF data if available.",
-        )
-
-        self.debug_checkbox = general_panel.add_toggle(
-            f"Debug mode ({SHIFT_SYMBOL}-{CMD_SYMBOL}-D)",
-            tooltip="Show key popup overlay for debugging keyboard events.",
-            subtitle=f"Enter debug mode. Meaning varies. Use {CTRL_SYMBOL}-L to view log.",
-        )
-
-        self.use_prompt_filter_exits_checkbox = general_panel.add_gear_toggle(
-            "Use prompt filter exits",
-            on_gear_clicked=self._open_exit_scripts_dialog,
-            tooltip=(
-                "When enabled, run external prompt filter scripts\n"
-                "for LM Studio / caption prompts and image generation\n"
-                "prompts before model calls."
-            ),
-            subtitle="Use exit scripts to modify prompt data before model calls.",
-            gear_tooltip="Configure exit scripts",
-        )
-
-        inner_layout.addWidget(general_group)
 
         # ----- Image generation -----
         from imagegen_plugins.image_gen_dim_limits import (
