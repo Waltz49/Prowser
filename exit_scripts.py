@@ -18,6 +18,12 @@ SETTING_TEXT_AI_EXIT = "text_ai_exit"
 SETTING_IMAGE_AI_EXIT = "image_ai_exit"
 SETTING_SAY_EXIT = "say_exit"
 
+_LEGACY_ENV_BY_SETTING = {
+    SETTING_TEXT_AI_EXIT: "PROWSER_TEXT_AI_EXIT",
+    SETTING_IMAGE_AI_EXIT: "PROWSER_IMAGE_AI_EXIT",
+    SETTING_SAY_EXIT: "PROWSER_SAY_EXIT",
+}
+
 _EXIT_SETTING_LABELS = {
     SETTING_TEXT_AI_EXIT: "Text AI exit",
     SETTING_IMAGE_AI_EXIT: "Image AI exit",
@@ -135,20 +141,48 @@ def validate_exit_script_command(raw: str) -> tuple[bool, str]:
     return False, f"File is not usable{detail}:\n{full_path}"
 
 
+def _shlex_parts(raw: str) -> list[str]:
+    text = (raw or "").strip()
+    if not text:
+        return []
+    try:
+        return shlex.split(text)
+    except ValueError:
+        return []
+
+
 def resolve_exit_script_argv(raw: str) -> list[str]:
     """Return argv for the configured script (without ``-p`` prompt text)."""
-    parsed = parse_exit_script_command(raw)
-    if not parsed.path:
+    parts = _shlex_parts(raw)
+    if not parts:
         return []
-    script_path = normalize_exit_script_path(parsed.path)
-    if not exit_script_path_usable(script_path):
-        return []
-    if parsed.prefix:
-        interpreter = shutil.which(parsed.prefix) or parsed.prefix
-        return [interpreter, script_path]
-    if script_path.endswith(".py") and not os.access(script_path, os.X_OK):
-        return [sys.executable, script_path]
-    return [script_path]
+
+    matched = _prefix_token(parts[0])
+    if matched is not None:
+        if len(parts) < 2:
+            return []
+        script_path = normalize_exit_script_path(parts[1])
+        if not exit_script_path_usable(script_path):
+            return []
+        # Use the running app's interpreter for python/python3 so GUI launches
+        # do not depend on shell pyenv shims from shutil.which("python").
+        if matched in ("python", "python3"):
+            interpreter = sys.executable
+        else:
+            interpreter = shutil.which(matched) or matched
+        return [interpreter, script_path, *parts[2:]]
+
+    script_path = normalize_exit_script_path(parts[0])
+    if os.path.isfile(script_path):
+        if not exit_script_path_usable(script_path):
+            return []
+        if script_path.endswith(".py") and not os.access(script_path, os.X_OK):
+            return [sys.executable, script_path, *parts[1:]]
+        return [script_path, *parts[1:]]
+
+    if shutil.which(parts[0]):
+        return parts
+    return []
 
 
 def build_exit_script_argv(raw: str, text: str) -> list[str]:
@@ -161,7 +195,23 @@ def build_exit_script_argv(raw: str, text: str) -> list[str]:
 
 
 def get_exit_script_setting(key: str) -> str:
-    return str(get_config().load_settings().get(key, "") or "").strip()
+    value = str(get_config().load_settings().get(key, "") or "").strip()
+    if value:
+        return value
+    env_key = _LEGACY_ENV_BY_SETTING.get(key)
+    if env_key:
+        legacy = os.environ.get(env_key, "").strip()
+        if legacy:
+            return legacy
+    return ""
+
+
+def any_prompt_filter_exit_configured() -> bool:
+    """True when a text or image prompt exit script is configured."""
+    return bool(
+        get_exit_script_setting(SETTING_TEXT_AI_EXIT)
+        or get_exit_script_setting(SETTING_IMAGE_AI_EXIT)
+    )
 
 
 def describe_exit_script_setting(key: str) -> str:

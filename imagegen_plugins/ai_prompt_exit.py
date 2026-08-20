@@ -3,12 +3,15 @@
 
 from __future__ import annotations
 
+import logging
+import os
 import subprocess
 
 from config import get_config
 from exit_scripts import (
     SETTING_IMAGE_AI_EXIT,
     SETTING_TEXT_AI_EXIT,
+    any_prompt_filter_exit_configured,
     build_exit_script_argv,
     get_exit_script_setting,
 )
@@ -71,21 +74,40 @@ def print_ai_exit_env_report() -> None:
 
 
 def _prompt_filter_exits_enabled() -> bool:
-    return bool(get_config().load_settings().get("use_prompt_filter_exits", False))
+    settings = get_config().load_settings()
+    if settings.get("use_prompt_filter_exits"):
+        return True
+    if any_prompt_filter_exit_configured():
+        return True
+    for env_var in ("PROWSER_TEXT_AI_EXIT", "PROWSER_IMAGE_AI_EXIT"):
+        if os.environ.get(env_var, "").strip():
+            return True
+    return False
 
 
 def _invoke_exit_for_setting(text: str, setting_key: str) -> str:
     if not _prompt_filter_exits_enabled():
+        logging.debug(
+            "prompt filter exit skipped (%s): use_prompt_filter_exits disabled "
+            "and no exit script configured",
+            setting_key,
+        )
         return text
     raw = get_exit_script_setting(setting_key)
     if not raw:
+        logging.debug("prompt filter exit skipped (%s): no script configured", setting_key)
         return text
-    return _invoke_exit_script(raw, text)
+    return _invoke_exit_script(raw, text, setting_key=setting_key)
 
 
-def _invoke_exit_script(raw: str, text: str) -> str:
+def _invoke_exit_script(raw: str, text: str, *, setting_key: str = "") -> str:
     argv = build_exit_script_argv(raw, text)
     if not argv:
+        logging.debug(
+            "prompt filter exit skipped (%s): could not resolve command %r",
+            setting_key or "exit",
+            raw,
+        )
         return text
 
     try:
@@ -95,10 +117,23 @@ def _invoke_exit_script(raw: str, text: str) -> str:
             text=True,
             timeout=_EXIT_TIMEOUT_SEC,
         )
-    except (OSError, subprocess.TimeoutExpired):
+    except (OSError, subprocess.TimeoutExpired) as e:
+        logging.debug(
+            "prompt filter exit failed (%s): %s argv=%r",
+            setting_key or "exit",
+            e,
+            argv,
+        )
         return text
 
     if result.returncode != 0:
+        logging.debug(
+            "prompt filter exit nonzero (%s): code=%s stderr=%r argv=%r",
+            setting_key or "exit",
+            result.returncode,
+            (result.stderr or "").strip(),
+            argv,
+        )
         return text
 
     return result.stdout.rstrip("\n")

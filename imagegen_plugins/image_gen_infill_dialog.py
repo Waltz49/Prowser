@@ -54,6 +54,9 @@ class ImageGenInfillDialog(ImageGenDialog):
 
     def _prepare_pixelmator_values(self) -> Optional[Dict[str, Any]]:
         values = finalize_run_values(self.plugin.pipeline_id, self.collect_values())
+        from imagegen_plugins.ai_prompt_exit import apply_image_ai_exit_to_prompt_values
+
+        apply_image_ai_exit_to_prompt_values(values)
         if not validate_copies_require_random_seed(self, values):
             return None
 

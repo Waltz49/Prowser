@@ -260,13 +260,21 @@ class ExitScriptsDialog(QDialog):
         self.setStyleSheet(get_dialog_shell_stylesheet() + get_button_style())
 
     def accept(self) -> None:
-        get_config().update_settings(
-            {
-                SETTING_TEXT_AI_EXIT: self._text_row.value(),
-                SETTING_IMAGE_AI_EXIT: self._image_row.value(),
-                SETTING_SAY_EXIT: self._say_row.value(),
-            }
-        )
+        text_exit = self._text_row.value()
+        image_exit = self._image_row.value()
+        updates = {
+            SETTING_TEXT_AI_EXIT: text_exit,
+            SETTING_IMAGE_AI_EXIT: image_exit,
+            SETTING_SAY_EXIT: self._say_row.value(),
+        }
+        if text_exit or image_exit:
+            updates["use_prompt_filter_exits"] = True
+        get_config().update_settings(updates)
+        parent = self.parent()
+        if parent is not None and (text_exit or image_exit):
+            setattr(parent, "use_prompt_filter_exits", True)
+            if hasattr(parent, "use_prompt_filter_exits_checkbox"):
+                parent.use_prompt_filter_exits_checkbox.setChecked(True)
         super().accept()
 
 

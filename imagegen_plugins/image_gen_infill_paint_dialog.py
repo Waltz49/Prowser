@@ -166,6 +166,9 @@ class InfillPaintSettingsDialog(ImageGenDialog):
         values = finalize_run_values(
             self.plugin.pipeline_id, self.collect_values()
         )
+        from imagegen_plugins.ai_prompt_exit import apply_image_ai_exit_to_prompt_values
+
+        apply_image_ai_exit_to_prompt_values(values)
         if not validate_copies_require_random_seed(self, values):
             return
         save_plugin_dialog_settings(
@@ -359,9 +362,13 @@ class ImageGenInfillPaintDialog(QDialog):
     def _collect_run_values(self) -> Dict[str, Any]:
         if self._settings is None or self._settings.plugin is None:
             return {}
-        return finalize_run_values(
+        values = finalize_run_values(
             self._settings.plugin.pipeline_id, self._settings.collect_values()
         )
+        from imagegen_plugins.ai_prompt_exit import apply_image_ai_exit_to_prompt_values
+
+        apply_image_ai_exit_to_prompt_values(values)
+        return values
 
     def run_generate(self) -> bool:
         if self._settings is not None and self._settings.plugin is None:
