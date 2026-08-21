@@ -740,6 +740,14 @@ def refresh_dialog_mflux_lora_combo(dialog: Any) -> None:
         refresh()
 
 
+_PRESERVE_ON_PLUGIN_SWITCH_KEYS = (
+    "width",
+    "height",
+    "use_custom_size",
+    "aspect_ratio_lock",
+)
+
+
 def switch_plugin_persisted_settings_preserving_prompt(
     function: str,
     outgoing_plugin_id: Optional[str],
@@ -748,7 +756,7 @@ def switch_plugin_persisted_settings_preserving_prompt(
     *,
     preserved_prompt: str,
 ) -> Dict[str, Any]:
-    """Save outgoing plugin state and load incoming settings, keeping the UI prompt."""
+    """Save outgoing plugin state; load incoming settings; keep prompt and output dims."""
     from imagegen_plugins.image_gen_persistence import (
         load_plugin_dialog_settings,
         switch_plugin_persisted_settings,
@@ -769,4 +777,7 @@ def switch_plugin_persisted_settings_preserving_prompt(
         except Exception:
             incoming = load_plugin_dialog_settings(function, incoming_plugin_id)
     incoming["prompt"] = preserved_prompt
+    for key in _PRESERVE_ON_PLUGIN_SWITCH_KEYS:
+        if key in outgoing_values:
+            incoming[key] = outgoing_values[key]
     return incoming

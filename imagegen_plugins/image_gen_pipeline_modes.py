@@ -300,6 +300,23 @@ def job_run_uses_source_image(pipeline_id: str, values: Dict[str, Any]) -> bool:
     return bool(resolve_source_image_paths(values))
 
 
+def scale_dims_to_max_side(
+    width: int,
+    height: int,
+    *,
+    effective_max_side: int,
+) -> tuple[int, int]:
+    """Scale down proportionally when either edge exceeds effective max; no pipeline snap."""
+    w, h = int(width), int(height)
+    max_side = int(effective_max_side)
+    if w <= 0 or h <= 0 or max_side <= 0:
+        return w, h
+    scale = min(1.0, max_side / w, max_side / h)
+    if scale >= 1.0:
+        return w, h
+    return int(w * scale), int(h * scale)
+
+
 def align_dims_for_pipeline(
     pipeline_id: str,
     width: int,
@@ -309,12 +326,8 @@ def align_dims_for_pipeline(
 ) -> tuple[int, int]:
     """Snap dialog dimensions to pipeline bounds; scale down proportionally when over max."""
     mode = get_pipeline(pipeline_id)
-    w, h = int(width), int(height)
     max_side = int(effective_max_side)
-    if w > 0 and h > 0 and max_side > 0:
-        scale = min(1.0, max_side / w, max_side / h)
-        w = int(w * scale)
-        h = int(h * scale)
+    w, h = scale_dims_to_max_side(width, height, effective_max_side=max_side)
     if pipeline_id == "flux_schnell_mflux_play":
         from imagegen_plugins.pipelines.mflux_schnell import align_mflux_dims
 
@@ -359,12 +372,7 @@ def clamp_output_dims_in_values(
         h = int(out.get("height", 1024))
     except (TypeError, ValueError):
         return values
-    w, h = align_dims_for_pipeline(
-        pipeline_id,
-        w,
-        h,
-        effective_max_side=effective_max_side,
-    )
+    w, h = scale_dims_to_max_side(w, h, effective_max_side=effective_max_side)
     out["width"] = w
     out["height"] = h
     return out

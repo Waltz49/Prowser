@@ -896,7 +896,7 @@ class ImageGenDimensionAspectMixin:
         return effective_max_for_plugin(self.plugin)
 
     def _apply_effective_max_to_dim_sliders(self) -> None:
-        """Fit width/height to effective max edge, preserving aspect ratio."""
+        """Scale width/height down only when over the effective max edge."""
         if not self._has_dim_fields():
             return
         width = self._get_int_slider("width")
@@ -911,8 +911,9 @@ class ImageGenDimensionAspectMixin:
             src_w, src_h = width, height
         if src_w <= 0 or src_h <= 0:
             return
-        w, h = align_dims_for_pipeline(
-            self.plugin.pipeline_id,
+        from imagegen_plugins.image_gen_pipeline_modes import scale_dims_to_max_side
+
+        w, h = scale_dims_to_max_side(
             src_w,
             src_h,
             effective_max_side=self._effective_max_side(),
