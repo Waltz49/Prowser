@@ -948,10 +948,10 @@ IMAGEGEN_DEFAULTS = {
                 "height": 1024,
                 "steps": 4,
                 "guidance_scale": 3.5,
-                "mflux_quantize": 3,
+                "mflux_quantize": 4,
                 "seed": 0,
                 "random_seed": True,
-                "low_ram": False,
+                "low_ram": True,
             },
             "z_image_turbo_sdnq_int8": {
                 "prompt": "",

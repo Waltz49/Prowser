@@ -11,8 +11,8 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from imagegen_plugins.image_gen_registry import ImageGenModelPlugin
 
-_MAX_ENTRIES = 200
-_FILE_VERSION = 2
+_MAX_ENTRIES = 3000
+_FILE_VERSION = 3
 GenerationTimingKey = Tuple[Any, ...]
 
 _store: OrderedDict[GenerationTimingKey, "_TimingEntry"] = OrderedDict()

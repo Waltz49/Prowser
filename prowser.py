@@ -1472,10 +1472,10 @@ def main():
         if window.debug_mode:
             from debug_log import debug_timestamp
 
-            print(f"\n{debug_timestamp()} Window.show is starting with configuration: {CYAN}{configuration}{RESET}")
+            print(f"\n{debug_timestamp()} Window.show is starting with configuration: {CYAN}{json.dumps(configuration,indent=2)}{RESET}")
        
         else:
-            print(f"\nWindow.show is starting with configuration: {CYAN}{configuration}{RESET}")
+            print(f"\nWindow.show is starting with configuration: {CYAN}{json.dumps(configuration,indent=2)}{RESET}")
        
         window.show()
         _startup_profile_mark("window_show")

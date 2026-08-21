@@ -9,6 +9,8 @@ from typing import Any, Dict, Iterable, List
 from imagegen_plugins.lora_catalog import get_lora_entry
 from imagegen_plugins.mflux_lora_presets import effective_lora_ids_from_values
 
+TRIGGER_USER_PROMPT_SEPARATOR = "------"
+
 
 def prompt_contains_lora_trigger(prompt: str, trigger: str) -> bool:
     """True when trigger appears in prompt as a phrase or whole token."""
@@ -33,11 +35,12 @@ def _format_prompt_with_triggers(prompt_s: str, trigger_block: str) -> str:
         return prompt_s
     if not prompt_s:
         return block
+    sep = TRIGGER_USER_PROMPT_SEPARATOR
     if TRIGGER_POSITION == 0:
-        return f"{block}\n\n{prompt_s}"
+        return f"{block}\n\n{sep}\n\n{prompt_s}"
     if TRIGGER_POSITION == 2:
-        return f"{block}\n\n{prompt_s}\n\n{block}"
-    return f"{prompt_s}\n\n{block}"
+        return f"{block}\n\n{sep}\n\n{prompt_s}\n\n{sep}\n\n{block}"
+    return f"{prompt_s}\n\n{sep}\n\n{block}"
 
 
 def ensure_triggers_in_prompt(prompt: str, triggers: Iterable[str]) -> str:

@@ -2020,11 +2020,26 @@ class ImageGenController(QObject):
         enabled = bool(enabled)
         save_show_progressive_images(enabled)
         self._pending_values["show_progressive_images"] = enabled
-        if enabled and self._tasks.is_running() and self._output_path:
+        if (
+            enabled
+            and self._tasks.is_running()
+            and self._output_path
+            and not self._slideshow_is_active()
+        ):
             self._refresh_progressive_image(self._output_path)
 
     def _show_progressive_images_enabled(self) -> bool:
         return load_show_progressive_images()
+
+    _SLIDESHOW_VIEW_MODES = frozenset({"slideshow", "slideshow2", "slideshow3"})
+
+    def _slideshow_is_active(self) -> bool:
+        mode = getattr(self.main_window, "current_view_mode", None)
+        return mode in self._SLIDESHOW_VIEW_MODES
+
+    def _should_display_progressive_images(self) -> bool:
+        """Honor show_progressive_images unless a slideshow is running."""
+        return self._show_progressive_images_enabled() and not self._slideshow_is_active()
 
     def _active_generation_in_progress_or_cooldown(self) -> bool:
         return self._tasks.is_running() or (
@@ -2966,7 +2981,7 @@ class ImageGenController(QObject):
             )
             self.task_status_info_changed.emit()
         path = msg.get("path")
-        if path and self._show_progressive_images_enabled():
+        if path and self._should_display_progressive_images():
             step_i = int(step) if step is not None else -1
             if step_i != 0:
                 self._refresh_progressive_image(str(path))
@@ -2997,8 +3012,18 @@ class ImageGenController(QObject):
     ) -> None:
         if not output_path or not os.path.isfile(output_path):
             return
-        # Stepwise previews: match final Image Model / Prompt EXIF (skip last step).
         mw = self.main_window
+        if self._slideshow_is_active():
+            if getattr(mw, "debug_mode", False):
+                from debug_log import debug_timestamp
+
+                print(
+                    f"{debug_timestamp()} [imagegen] skip progressive browse "
+                    f"(slideshow active path={output_path})",
+                    flush=True,
+                )
+            return
+        # Stepwise previews: match final Image Model / Prompt EXIF (skip last step).
         if not force_fullscreen:
             step = self._live_step
             total = self._live_step_total

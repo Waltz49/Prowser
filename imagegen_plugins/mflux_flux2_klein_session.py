@@ -36,14 +36,12 @@ def _image_stat_key(path: str) -> tuple[str, int]:
 
 def _reference_cache_key(
     image_paths: list[str],
-    width: int,
-    height: int,
+    batch_size: int,
     session_key: tuple[Any, ...],
 ) -> tuple[Any, ...]:
     return (
         session_key,
-        int(width),
-        int(height),
+        int(batch_size),
         tuple(_image_stat_key(p) for p in image_paths),
     )
 
@@ -68,7 +66,7 @@ class _VaeEncodeCache:
                 "vae_cache",
                 action="evict",
                 cache_size=self._maxsize,
-                key_basename=str(evicted_key[3])[:120] if len(evicted_key) > 3 else "",
+                key_basename=str(evicted_key[2])[:120] if len(evicted_key) > 2 else "",
             )
 
     def clear(self) -> None:
@@ -342,23 +340,20 @@ def _reference_conditioning(
     model: Any,
     image_paths: list[str],
     *,
-    width: int,
-    height: int,
     batch_size: int,
     session_key: tuple[Any, ...],
 ) -> tuple[mx.array | None, mx.array | None]:
     if not image_paths:
         return None, None
 
-    cache_key = _reference_cache_key(image_paths, width, height, session_key)
+    cache_key = _reference_cache_key(image_paths, batch_size, session_key)
     cached = _vae_cache.get(cache_key)
     if cached is not None:
         perf_log_kv(
             "vae_reference",
             cache="hit",
             num_images=len(image_paths),
-            width=width,
-            height=height,
+            batch_size=batch_size,
         )
         return cached
 
@@ -371,8 +366,6 @@ def _reference_conditioning(
         vae=model.vae,
         tiling_config=model.tiling_config,
         image_paths=[Path(p) for p in image_paths],
-        height=height,
-        width=width,
         batch_size=batch_size,
     )
     elapsed = time.perf_counter() - t0
@@ -381,8 +374,7 @@ def _reference_conditioning(
         "vae_reference",
         cache="miss",
         num_images=len(image_paths),
-        width=width,
-        height=height,
+        batch_size=batch_size,
         elapsed=elapsed,
     )
     return image_latents, image_latent_ids
@@ -464,8 +456,6 @@ def generate_flux2_klein_edit(
         image_latents, image_latent_ids = _reference_conditioning(
             model,
             image_paths,
-            width=config.width,
-            height=config.height,
             batch_size=latents.shape[0],
             session_key=session_key,
         )
