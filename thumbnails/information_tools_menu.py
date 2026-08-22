@@ -8,7 +8,7 @@ from PySide6.QtWidgets import QMenu, QPushButton
 
 from theme.theme_service import get_active_theme
 
-_MENU_ACTION_ORDER = ("edit", "copy", "speak", "delete", "create", "editai")
+_MENU_ACTION_ORDER = ("edit", "copy", "speak", "create", "editai", "delete")
 
 
 def _audio_output_ui_enabled() -> bool:

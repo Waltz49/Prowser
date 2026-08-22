@@ -285,7 +285,7 @@ class EditExifUserCommentDialog(QDialog):
         self._action_nav = InformationActionNavBar(
             self,
             action_order=INFO_NAV_ACTION_ORDER_NO_EDIT,
-            include_stretch=False,
+            include_stretch=True,
             contents_margins=(0, 6, 0, 0),
         )
         self._action_nav.action_triggered.connect(self._on_info_action)
@@ -303,8 +303,7 @@ class EditExifUserCommentDialog(QDialog):
         header_action_row = QHBoxLayout()
         header_action_row.setContentsMargins(0, 0, 0, 0)
         header_action_row.setSpacing(4)
-        header_action_row.addWidget(self._action_nav, 0, Qt.AlignmentFlag.AlignLeft)
-        header_action_row.addStretch(1)
+        header_action_row.addWidget(self._action_nav, 1)
         header_info_col.addLayout(header_action_row)
 
         header_row.addLayout(header_info_col, 1)

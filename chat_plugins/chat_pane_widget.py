@@ -77,6 +77,7 @@ from chat_plugins.chat_named_system_prompts import (
     run_chat_system_prompt_library,
 )
 from chat_plugins.chat_tools_menu import show_chat_context_menu, show_chat_tools_menu
+from chat_plugins.chat_toolbar import ChatPaneToolbar
 from chat_plugins.chat_worker import ChatLmStudioService
 from speech_utils import is_speaking, register_speech_state_listener, unregister_speech_state_listener
 from theme.theme_service import get_active_theme
@@ -286,6 +287,9 @@ class ChatPaneWidget(QWidget):
         self._generating_assistant_widget: ChatMessageWidget | None = None
         self._lm_available_on_show = True
         self._chat_started = False
+        settings = main_window.config.load_settings()
+        self._show_toolbar = bool(settings.get("chat_show_toolbar", True))
+        self._toolbar: ChatPaneToolbar | None = None
         self._setup_ui()
         register_speech_state_listener(self._on_speech_state_changed)
         install_chat_redo_key_filter(self)
@@ -348,6 +352,10 @@ class ChatPaneWidget(QWidget):
         self._unavailable_host.hide()
         self._style_unavailable_panel()
 
+        self._toolbar = ChatPaneToolbar(self)
+        self._toolbar.set_toolbar_visible(self._show_toolbar)
+        self._update_chat_toolbar_state()
+
         self._scroll = QScrollArea()
         self._scroll.setWidgetResizable(True)
         self._scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
@@ -388,6 +396,7 @@ class ChatPaneWidget(QWidget):
         self._style_system_prompt_info()
 
         layout.addWidget(self._unavailable_host, 1)
+        layout.addWidget(self._toolbar, 0)
         layout.addWidget(self._scroll, 1)
         layout.addWidget(self._prompt_input, 0)
         layout.addWidget(self._system_prompt_info, 0)
@@ -395,6 +404,63 @@ class ChatPaneWidget(QWidget):
         self.customContextMenuRequested.connect(
             lambda pos: show_chat_context_menu(self, self.mapToGlobal(pos))
         )
+
+    def is_chat_toolbar_visible(self) -> bool:
+        return bool(self._show_toolbar)
+
+    def set_chat_toolbar_visible(self, visible: bool) -> None:
+        visible = bool(visible)
+        if self._show_toolbar == visible:
+            return
+        self._show_toolbar = visible
+        self.main_window.config.update_setting("chat_show_toolbar", visible)
+        if self._toolbar is not None:
+            self._toolbar.set_toolbar_visible(visible)
+
+    def chat_toolbar_action_specs(self) -> list[dict[str, object]]:
+        return [
+            {
+                "action_id": "system_prompt",
+                "label": "System prompt for chat",
+                "visible": True,
+                "enabled": True,
+            },
+            {
+                "action_id": "copy_images",
+                "label": "Copy images to Assistant's reply",
+                "visible": True,
+                "enabled": True,
+                "checkable": True,
+                "checked": self._copy_images_to_assistant,
+            },
+            {
+                "action_id": "clear_chat",
+                "label": "Clear Chat",
+                "visible": True,
+                "enabled": True,
+            },
+        ]
+
+    def trigger_chat_toolbar_action(
+        self, action_id: str, checked: bool | None = None
+    ) -> None:
+        if action_id == "system_prompt":
+            self.edit_system_prompt()
+        elif action_id == "copy_images":
+            if checked is None:
+                btn = None if self._toolbar is None else self._toolbar.button("copy_images")
+                checked = btn.isChecked() if btn is not None else (
+                    not self._copy_images_to_assistant
+                )
+            self.set_copy_images_to_assistant(bool(checked))
+        elif action_id == "clear_chat":
+            self.clear_chat()
+
+    def _update_chat_toolbar_state(self) -> None:
+        if self._toolbar is None:
+            return
+        self._toolbar.set_copy_images_checked(self._copy_images_to_assistant)
+        self._toolbar.refresh_theme_styles()
 
     def _style_system_prompt_info(self) -> None:
         th = get_active_theme()
@@ -484,6 +550,8 @@ class ChatPaneWidget(QWidget):
         for widget in self._message_widgets:
             widget.refresh_theme_styles()
         self._prompt_input.refresh_theme_styles()
+        if self._toolbar is not None:
+            self._toolbar.refresh_theme_styles()
 
     def discard_all_data(self) -> None:
         """Remove in-memory history, temp images, and chat API log entries."""
@@ -568,6 +636,7 @@ class ChatPaneWidget(QWidget):
             return
         self._copy_images_to_assistant = enabled
         persist_copy_images_to_assistant(enabled)
+        self._update_chat_toolbar_state()
         if not enabled:
             self._clear_assistant_message_images(refresh_widgets=True)
             self._maybe_persist_session()

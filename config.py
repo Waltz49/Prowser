@@ -495,6 +495,7 @@ class ImageBrowserConfig:
             'thumbnail_filename_visible': False,  # Default to hiding thumbnail filenames
             'preview_visible': True,  # Default to showing preview panel
             'chat_visible': False,  # Default to hiding chat pane
+            'chat_show_toolbar': True,  # Chat pane action toolbar
             'jobs_visible': True,  # Default to showing jobs pane in right combined sidebar
             'jobs_display_mode': 'pane',  # 'pane' (sidebar) or 'panel' (floating dialog)
             'sidebar_width': 300,  # Default width for combined sidebar (tree + preview)

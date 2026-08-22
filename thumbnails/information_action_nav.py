@@ -18,8 +18,9 @@ from widgets.icon_hover_swap import (
 
 INFO_ACTION_ICON_PX = 18
 INFO_ACTION_BTN_PX = 26
-INFO_NAV_ACTION_ORDER = ("edit", "copy", "speak", "delete", "create", "editai")
-INFO_NAV_ACTION_ORDER_NO_EDIT = ("copy", "speak", "delete", "create", "editai")
+INFO_NAV_ACTION_ORDER = ("edit", "copy", "speak", "create", "editai", "delete")
+INFO_NAV_ACTION_ORDER_NO_EDIT = ("copy", "speak", "create", "editai", "delete")
+_RIGHT_PINNED_ACTION_IDS = frozenset({"delete"})
 
 INFO_ACTION_TOOLTIPS = {
     "speak": "Read aloud (click again to stop)",
@@ -121,7 +122,18 @@ class InformationActionNavBar(QWidget):
         layout.setContentsMargins(*contents_margins)
         layout.setSpacing(4)
 
-        for action_id in self._action_order:
+        left_ids = [
+            action_id
+            for action_id in self._action_order
+            if action_id not in _RIGHT_PINNED_ACTION_IDS
+        ]
+        right_ids = [
+            action_id
+            for action_id in self._action_order
+            if action_id in _RIGHT_PINNED_ACTION_IDS
+        ]
+
+        for action_id in left_ids + right_ids:
             text = _TEXT_ACTION_SYMBOLS.get(action_id, "")
             btn = QPushButton(text)
             btn.setToolTip(INFO_ACTION_TOOLTIPS.get(action_id, ""))
@@ -133,10 +145,15 @@ class InformationActionNavBar(QWidget):
                 lambda _checked=False, aid=action_id: self.action_triggered.emit(aid)
             )
             self._buttons[action_id] = btn
-            layout.addWidget(btn)
 
-        if include_stretch:
+        for action_id in left_ids:
+            layout.addWidget(self._buttons[action_id])
+
+        if include_stretch or right_ids:
             layout.addStretch(1)
+
+        for action_id in right_ids:
+            layout.addWidget(self._buttons[action_id])
 
         self.refresh_theme_styles()
 

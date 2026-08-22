@@ -2862,10 +2862,10 @@ class SettingsDialog(QDialog):
         preset_row.addWidget(self.theme_preset_combo)
         self.theme_preset_add_btn = self._create_theme_add_button()
         preset_row.addWidget(self.theme_preset_add_btn)
+        preset_row.addStretch()
         self.theme_preset_delete_btn = self._create_theme_delete_button()
         preset_row.addWidget(self.theme_preset_delete_btn)
         self._refresh_theme_preset_combo()
-        preset_row.addStretch()
         outer.addWidget(preset_group)
 
         self._user_theme_color_hex: dict = {}
@@ -5198,8 +5198,8 @@ class SettingsDialog(QDialog):
                 self._faces_subjects.remove(subject)
                 self._faces_rebuild_cards()
         delete_btn.clicked.connect(_delete)
-        row1.addWidget(delete_btn)
         row1.addStretch()
+        row1.addWidget(delete_btn)
         card_layout.addLayout(row1)
         # Row 2: images in a line, each with trash button underneath
         samples_row = QHBoxLayout()
@@ -6940,16 +6940,16 @@ class SettingsDialog(QDialog):
                 row_layout.addWidget(
                     install_btn, 0, Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignRight
                 )
-            if del_btn is not None:
-                row_layout.addWidget(
-                    del_btn, 0, Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignRight
-                )
             row_layout.addWidget(
                 edit_btn, 0, Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignRight
             )
             row_layout.addWidget(
                 cb, 0, Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignRight
             )
+            if del_btn is not None:
+                row_layout.addWidget(
+                    del_btn, 0, Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignRight
+                )
             row_w.setSizePolicy(
                 QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum
             )
@@ -6958,10 +6958,10 @@ class SettingsDialog(QDialog):
             row_widgets = [desc_w]
             if install_btn is not None:
                 row_widgets.append(install_btn)
-            if del_btn is not None:
-                row_widgets.append(del_btn)
             row_widgets.append(edit_btn)
             row_widgets.append(cb)
+            if del_btn is not None:
+                row_widgets.append(del_btn)
             self._lora_row_widgets[entry.lora_id] = tuple(row_widgets)
             row_count += 1
         if row_count == 0:
