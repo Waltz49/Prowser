@@ -8,13 +8,13 @@ import os
 MIN_BUILD_ENV = "PYINSTALLER_MIN_BUILD"
 
 # Unused in application code — never bundle (all builds).
-# cv2/matplotlib are hard pip deps of mflux but only imported by ControlNet /
-# concept-attention variants that Prowser does not run.
+# matplotlib is only imported by unused mflux ControlNet / concept-attention paths.
+# cv2 is bundled in full builds: mflux.models.z_image.variants imports controlnet at
+# package init, so Z-Image Turbo (MFLUX) needs OpenCV even without ControlNet runs.
 ALWAYS_EXCLUDE_IMPORT_ROOTS: frozenset[str] = frozenset(
     {
         "skimage",
         "imagehash",
-        "cv2",
         "matplotlib",
         "mpl_toolkits",
         "contourpy",
@@ -60,7 +60,6 @@ ALWAYS_EXCLUDE_MODULES: tuple[str, ...] = (
     "contourpy",
     "kiwisolver",
     "cycler",
-    "cv2",
     "twine",
     "keyring",
     "PyQt5",
@@ -290,6 +289,7 @@ SIMILARITY_EXTRA_HIDDEN: tuple[str, ...] = (
 FULL_BUILD_EXTRA_HIDDEN: tuple[str, ...] = SIMILARITY_EXTRA_HIDDEN + (
     "face_recognition",
     "face_recognition_models",
+    "cv2",
     "mflux",
     "mlx",
     "mlx._reprlib_fix",

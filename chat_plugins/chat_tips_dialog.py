@@ -25,13 +25,6 @@ _CHAT_TIPS_HTML = """
     <b>Triggers</b>
     <ul style="margin-top: 0; margin-bottom: 0; padding-left: 1.2em; list-style-type: none;">
       <li style="margin-bottom: 1em; list-style-type: none;">
-        <b>/create</b>
-        <div style="margin-left: 1.2em;margin-bottom: 0.5em;">
-          Automatically create an image upon reply completion.  <code>/cr</code><br>
-          Uses the <b>Edit</b> dialog if images are attached, <b>Create</b> dialog if not.
-          <p><b>Note:</b> The context menu's <b>Automatic /create</b> option implies /create.
-      </li>
-      <li style="margin-bottom: 1em; list-style-type: none;">
         <b>/source</b>
         <div style="margin-left: 1.2em;margin-bottom: 0.5em;">
           Copy source image references onto the assistant reply, without starting generation.<br>

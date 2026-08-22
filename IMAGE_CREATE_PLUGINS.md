@@ -336,7 +336,7 @@ Relevant keys in `~/.prowser/data/settings.json`:
     },
     "dialog_geometry": "...",
     "dialogs": {
-      "create": { "flux_schnell_mflux": { "steps": 4, "mflux_quantize": 3 } },
+      "create": { "flux_schnell_mflux": { "steps": 4, "mflux_quantize": 4 } },
       "edit": { }
     },
     "lora_catalog": {
@@ -350,7 +350,7 @@ Relevant keys in `~/.prowser/data/settings.json`:
       "entry_overrides": {}
     },
     "models": {
-      "flux_schnell_mflux": { "steps": 4, "mflux_quantize": 3 },
+      "flux_schnell_mflux": { "steps": 4, "mflux_quantize": 4 },
       "sana_sprint_600m": { "steps": 2, "guidance_scale": 4.5 }
     }
   }

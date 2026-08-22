@@ -6,8 +6,8 @@ if os.environ.get("PYINSTALLER_MIN_BUILD", "").strip() in ("1", "true", "yes"):
 else:
     from PyInstaller.utils.hooks import collect_submodules
 
-    # ControlNet / concept-attention import cv2 and matplotlib; Prowser does not
-    # use those mflux variants, and bundling them pulls ~120MB of unused libs.
+    # Skip flux ControlNet / concept-attention submodules (matplotlib, unused paths).
+    # cv2 is still bundled: z_image.variants __init__ imports controlnet at load time.
     hiddenimports = [
         name
         for name in collect_submodules("mflux")

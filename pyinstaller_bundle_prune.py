@@ -11,8 +11,6 @@ from __future__ import annotations
 
 # dest-name prefixes (POSIX, case-sensitive as collected on macOS).
 _DROP_PREFIXES: tuple[str, ...] = (
-    "cv2/",
-    "cv2.",
     "matplotlib/",
     "mpl_toolkits/",
     "mpl-data/",
@@ -33,7 +31,6 @@ _DROP_PREFIXES: tuple[str, ...] = (
 
 _DROP_ROOTS: frozenset[str] = frozenset(
     {
-        "cv2",
         "matplotlib",
         "mpl_toolkits",
         "contourpy",

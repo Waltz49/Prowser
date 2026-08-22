@@ -84,7 +84,7 @@ FLUX_SLDR_NSFW_V2_LORA_PLUGIN = ImageGenModelPlugin(
     max_generation_dimension=1440,
     field_layout_builder=flux_sldr_nsfw_v2_lora_field_layout,
     model_defaults={
-        "mflux_quantize": 3,
+        "mflux_quantize": 4,
         "guidance_scale": 3.5,
         "steps": 20,
         "width": 1024,

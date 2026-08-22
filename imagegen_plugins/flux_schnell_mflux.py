@@ -84,7 +84,7 @@ FLUX_SCHNELL_MFLUX_PLUGIN = ImageGenModelPlugin(
     max_generation_dimension=1440,
     field_layout_builder=flux_schnell_mflux_field_layout,
     model_defaults={
-        "mflux_quantize": 3,
+        "mflux_quantize": 4,
         "guidance_scale": 3.5,
         "steps": 4,
         "width": 1024,

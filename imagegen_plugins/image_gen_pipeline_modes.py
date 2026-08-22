@@ -590,7 +590,7 @@ def merge_defaults(
         "negative_prompt": "",
         "steps": mode.steps_default,
         "guidance_scale": mode.guidance_default,
-        "mflux_quantize": 3,
+        "mflux_quantize": 4,
         "seed": 0,
         "random_seed": True,
         "copies": 1,
