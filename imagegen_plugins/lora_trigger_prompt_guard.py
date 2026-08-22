@@ -63,11 +63,6 @@ def ensure_triggers_in_prompt(prompt: str, triggers: Iterable[str]) -> str:
     return _format_prompt_with_triggers(prompt_s, "\n\n".join(missing))
 
 
-def prompt_with_lora_trigger_added(prompt: str, trigger: str) -> str:
-    """Add the trigger to the prompt when it is missing (placement from TRIGGER_POSITION)."""
-    return ensure_triggers_in_prompt(prompt, [trigger])
-
-
 def _missing_lora_trigger_words(values: Dict[str, Any]) -> List[str]:
     from imagegen_plugins.job_values_snapshot import (
         LORA_TRIGGER_WORDS_KEY,

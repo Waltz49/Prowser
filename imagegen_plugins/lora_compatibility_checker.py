@@ -353,10 +353,6 @@ def _count_probes_in_plan(
     return total
 
 
-def _probeable_local_models(_entry: FluxLoraEntry) -> List[str]:
-    return installed_probeable_models()
-
-
 def _probe_models_for_entry(
     entry: FluxLoraEntry,
     local_models: List[str],
@@ -778,14 +774,6 @@ def _downloads_probe_candidates(
     return remaining
 
 
-def count_local_lora_probes(entries: List[FluxLoraEntry]) -> int:
-    """Probe count for progress UI (installed, probeable base models only)."""
-    local_models = installed_probeable_models()
-    if not local_models:
-        return 0
-    return len(entries) * len(local_models)
-
-
 def _probe_plan_item_choice_key(item: LoraProbePlanItem) -> str:
     if item.history_key:
         return item.history_key
@@ -808,12 +796,6 @@ def _probe_plan_item_selection_keys(item: LoraProbePlanItem) -> Set[str]:
         keys.add(path)
         keys.add(f"path:{path}")
     return keys
-
-
-def _probe_plan_item_choice_label(item: LoraProbePlanItem) -> str:
-    if item.from_downloads:
-        return (item.entry.display_name or "").strip() or item.entry.lora_id
-    return lora_choice_label(item.entry)
 
 
 def _selected_lora_key_set(options: CheckLorasOptions) -> Optional[Set[str]]:

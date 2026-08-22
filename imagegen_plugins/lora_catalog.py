@@ -58,7 +58,6 @@ _MODEL_SIZE_TAG_BY_KEY: Dict[str, str] = {
 from imagegen_plugins.lora_host_registry import (
     HOST_FLUX2_KLEIN,
     LORA_HOST_ORDER,
-    lora_hosts_for_settings,
 )
 
 if TYPE_CHECKING:
@@ -120,18 +119,6 @@ def merged_lora_catalog(settings: Optional[Dict[str, Any]] = None) -> Dict[str, 
         if override:
             merged[lora_id] = apply_entry_overrides(entry, override)
     return merged
-
-
-def entries_for_host(
-    host_id: str,
-    settings: Optional[Dict[str, Any]] = None,
-) -> Tuple[FluxLoraEntry, ...]:
-    return tuple(
-        sorted(
-            (e for e in merged_lora_catalog(settings).values() if e.host_id == host_id),
-            key=lambda x: x.display_name.lower(),
-        )
-    )
 
 
 def catalog_entries_sorted(
@@ -332,42 +319,6 @@ def lora_status_label(
     return "deleted"
 
 
-def lora_delete_is_uninstall(
-    entry: FluxLoraEntry,
-    model_key: str,
-    settings: Optional[Dict[str, Any]] = None,
-    *,
-    draft_by_model: Optional[Dict[str, Any]] = None,
-) -> bool:
-    """True when delete should remove weights only (Uninstalled), not erase the entry."""
-    if not is_lora_installed(entry.lora_id, settings):
-        return False
-    return has_recovery_source(entry)
-
-
-def lora_delete_is_remove_from_library(
-    entry: FluxLoraEntry,
-    model_key: str,
-    settings: Optional[Dict[str, Any]] = None,
-    *,
-    draft_by_model: Optional[Dict[str, Any]] = None,
-) -> bool:
-    """True when delete should hide/remove the library entry (Deleted state)."""
-    from imagegen_plugins.lora_user_entries import is_user_lora_id
-
-    state = lora_lifecycle_state(
-        entry.lora_id, model_key, settings, draft_by_model=draft_by_model
-    )
-    if state == LORA_LIFECYCLE_UNINSTALLED:
-        return True
-    if is_user_lora_id(entry.lora_id) and not has_recovery_source(entry):
-        return True
-    if not is_user_lora_id(entry.lora_id) and not has_recovery_source(entry):
-        return True
-    return False
-
-
-
 def lora_model_support(settings: Optional[Dict[str, Any]] = None) -> Dict[str, Tuple[str, ...]]:
     if settings is None:
         from config import get_config
@@ -552,12 +503,6 @@ def lora_probe_passed_for_model(
 
 
 
-def probe_models_for_lora_entry(entry: FluxLoraEntry) -> Tuple[str, ...]:
-    """Probe keys for Check LoRAs (full hf_model_id per base model)."""
-    return lora_models_for_entry(entry)
-
-
-
 def catalog_entries_for_model(
     settings: Optional[Dict[str, Any]] = None,
     model_key: str = "",
@@ -581,23 +526,6 @@ def catalog_entries_for_model(
         )
         and (is_user_lora_id(e.lora_id) or e.lora_id not in deleted)
     )
-
-
-def catalog_entries_for_settings(
-    settings: Optional[Dict[str, Any]] = None,
-    host_id: Optional[str] = None,
-    *,
-    model_key: Optional[str] = None,
-) -> Tuple[FluxLoraEntry, ...]:
-    if model_key:
-        return catalog_entries_for_model(settings, model_key)
-    entries = (
-        entries_for_host(host_id, settings)
-        if host_id
-        else catalog_entries_sorted(settings)
-    )
-    return tuple(e for e in entries if e.mflux_compatible is not False)
-
 
 
 def lora_visible_for_run(
@@ -805,19 +733,6 @@ def match_exif_lora_names_to_ids_and_scales(
         },
     )
     return matched_ids, scales_by_id
-
-
-def match_exif_lora_names_to_ids(
-    lora_text: str,
-    plugin: "ImageGenModelPlugin",
-    settings: Optional[Dict[str, Any]] = None,
-) -> List[str]:
-    """Map EXIF LoRA name(s) to installed catalog ids for the active plugin."""
-    matched_ids, _scales = match_exif_lora_names_to_ids_and_scales(
-        lora_text, plugin, settings
-    )
-    return matched_ids
-
 
 
 def lora_choices_for_pipeline(

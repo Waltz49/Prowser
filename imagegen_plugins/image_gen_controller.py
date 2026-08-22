@@ -443,21 +443,6 @@ class ImageGenController(QObject):
             return True
         return plugin.pipeline_id == "mflux_fill_infill"
 
-    def move_queued_job(self, job_id: str, to_queue_index: int) -> bool:
-        """Reorder a pending job within ``_queue`` by pending-list index."""
-        if not job_id or job_id == self._active_queue_job_id:
-            return False
-        pending_count = len(self._queue)
-        if pending_count <= 1:
-            return False
-        to_queue_index = max(0, min(int(to_queue_index), pending_count - 1))
-        if self._active_queue_job_id:
-            idx = self._active_display_index
-            display_row = to_queue_index if to_queue_index < idx else to_queue_index + 1
-        else:
-            display_row = to_queue_index
-        return self.move_job_to_display_row(job_id, display_row)
-
     def move_job_to_display_row(self, job_id: str, target_display_row: int) -> bool:
         """Move any queue row (including the active job) to a display insert index."""
         rows = self.queue_snapshot()

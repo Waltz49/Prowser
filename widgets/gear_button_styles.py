@@ -12,40 +12,10 @@ from widgets.gear_icon_button import GearIconButton
 if TYPE_CHECKING:
     from settings.widgets.settings_dialog_theme import SettingsDialogChrome
 
-CHAT_GEAR_BTN_SIZE = 26
-CHAT_GEAR_ICON_PX = 18
 DIALOG_GEAR_BTN_SIZE = 24
 DIALOG_GEAR_ICON_PX = 16
 TREE_TOOLBAR_GEAR_BTN_SIZE = 26
 TREE_TOOLBAR_GEAR_ICON_PX = 20
-
-
-def chat_gear_button_stylesheet() -> str:
-    t = get_active_theme()
-    sz = CHAT_GEAR_BTN_SIZE
-    return f"""
-        QPushButton#chatSystemPromptGearBtn {{
-            background-color: {t.dialog_background_hex};
-            border: 1px solid {t.border_default_hex};
-            border-radius: 3px;
-            padding: 0px;
-            min-width: {sz}px;
-            max-width: {sz}px;
-            min-height: {sz}px;
-            max-height: {sz}px;
-        }}
-        QPushButton#chatSystemPromptGearBtn:focus {{
-            border: 1px solid {t.current_image_border_color_hex};
-            outline: none;
-        }}
-        QPushButton#chatSystemPromptGearBtn:hover {{
-            background-color: {t.tab_button_hover_bg_hex};
-            border: 1px solid {t.tab_button_hover_bg_hex};
-        }}
-        QPushButton#chatSystemPromptGearBtn:pressed {{
-            background-color: {t.sidebar_splitter_handle_hex};
-        }}
-    """
 
 
 def dialog_gear_button_stylesheet() -> str:
@@ -98,21 +68,6 @@ def settings_gear_button_stylesheet(chrome: "SettingsDialogChrome") -> str:
             background-color: {chrome.tab_checked_bg_hex};
         }}
     """
-
-
-def create_chat_gear_button(
-    parent: Optional[QWidget] = None,
-    *,
-    tooltip: str = "",
-) -> GearIconButton:
-    return GearIconButton(
-        parent,
-        size_px=CHAT_GEAR_BTN_SIZE,
-        icon_px=CHAT_GEAR_ICON_PX,
-        tooltip=tooltip,
-        object_name="chatSystemPromptGearBtn",
-        stylesheet=chat_gear_button_stylesheet(),
-    )
 
 
 def tree_toolbar_gear_button_stylesheet() -> str:

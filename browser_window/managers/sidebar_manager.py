@@ -168,11 +168,6 @@ class SidebarManager:
         show_jobs_pane(self.main_window)
         return True
 
-    def set_jobs_display_mode(self, mode: str) -> str:
-        from imagegen_plugins.jobs_display_mode import set_jobs_display_mode
-
-        return set_jobs_display_mode(self.main_window, mode)
-
     def toggle_jobs_display_mode(self) -> str:
         from imagegen_plugins.jobs_display_mode import toggle_jobs_display_mode
 

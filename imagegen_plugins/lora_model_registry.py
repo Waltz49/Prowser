@@ -326,14 +326,6 @@ def _probe_supported_on_model(
     return any(str(m) in supported_set for m in aliases)
 
 
-def _user_lora_supported_on_model(
-    entry: FluxLoraEntry,
-    model_key: str,
-    model_support: Dict[str, Any],
-) -> bool:
-    return _probe_supported_on_model(entry, model_key, model_support)
-
-
 def entry_matches_lora_model(
     entry: FluxLoraEntry,
     model_key: str,

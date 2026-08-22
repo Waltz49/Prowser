@@ -178,12 +178,6 @@ def refresh_settings_list_combo(
     )
 
 
-def settings_list_combo_minimum_width(
-    combo: QComboBox, *, font_size_px: int = 12
-) -> int:
-    return settings_list_combo_width(combo, font_size_px=font_size_px)
-
-
 class MacToggleSwitch(QCheckBox):
     """macOS-style on/off switch (no text; pair with a separate label)."""
 
@@ -577,13 +571,6 @@ class MacPreferencePanel(QFrame):
             self._add_divider()
         self._rows_layout.addWidget(widget)
         self._row_count += 1
-
-
-def mac_preference_section_title(text: str, parent: Optional[QWidget] = None) -> QLabel:
-    """Small caps-style section header (legacy; prefer titled QGroupBox)."""
-    label = QLabel(text.upper(), parent)
-    label.setObjectName("macPreferenceSectionTitle")
-    return label
 
 
 def mac_preference_section(

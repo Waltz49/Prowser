@@ -2885,10 +2885,6 @@ class ImageBrowserWindow(QMainWindow):
         """Handle splitter resize to update thumbnail layout when sidebar width changes"""
         return self.ui_layout_manager._on_splitter_moved(pos, index)
     
-    def _immediate_splitter_update(self):
-        """Provide immediate visual feedback during splitter dragging"""
-        self.ui_layout_manager._immediate_splitter_update()
-    
     def update_layout_after_splitter_resize(self):
         """Update thumbnail layout after splitter resize is complete"""
         return self.ui_layout_manager.update_layout_after_splitter_resize()

@@ -113,32 +113,6 @@ def _inline_field_sep_before(label: str, previous_label: str | None) -> str:
     return _QUEUE_FIELD_SEP
 
 
-def _inline_field_suffix(
-    label: str, value: str, *, previous_label: str | None = None
-) -> str:
-    prefix = _inline_field_sep_before(label, previous_label)
-    return (
-        f"{prefix}<b>{_escape(label)}</b>{_LABEL_VALUE_NBSP}<b>{_escape(value)}</b>\u00A0 "
-    )
-
-
-def _table_row_primary_plus_inline(
-    label: str, value: str, inline_parts: list[tuple[str, str]]
-) -> str:
-    """Primary label/value in cols 1–2, extra label/value pairs inline in col 2."""
-    cell = f"<b>{_escape(value)}</b>"
-    previous: str | None = None
-    for extra_label, extra_value in inline_parts:
-        cell += _inline_field_suffix(
-            extra_label, extra_value, previous_label=previous
-        )
-        previous = extra_label
-    return (
-        f"<tr><td><b>{_escape(label)}</b></td>"
-        f"<td>{cell}</td></tr>"
-    )
-
-
 def _normalize_reference_paths(*path_groups: list[str] | str | None) -> list[str]:
     """Unique existing paths in order (for task reference thumbnails)."""
     out: list[str] = []

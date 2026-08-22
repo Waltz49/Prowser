@@ -99,8 +99,3 @@ def lora_host_for_pipeline(pipeline_id: str) -> str | None:
         if pipeline_id in host.pipeline_ids:
             return host.host_id
     return None
-
-
-def lora_hosts_for_settings() -> Tuple[LoraHost, ...]:
-    """Hosts shown in Settings → LoRA model-family dropdown."""
-    return tuple(LORA_HOSTS[hid] for hid in LORA_HOST_ORDER if hid in LORA_HOSTS)

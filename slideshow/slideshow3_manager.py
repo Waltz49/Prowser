@@ -204,13 +204,6 @@ class Slideshow3Manager:
         self.image_pool: List[str] = []  # Prerandomized list of images for frame assignment
         self.frames_container: Optional[QWidget] = None
         self.cursor_overlay: Optional[QWidget] = None
-        # Dedicated cursor hiding timer for slideshow3
-        self.cursor_hide_timer = QTimer()
-        self.cursor_hide_timer.timeout.connect(self._check_cursor_hide)
-        self.cursor_hide_interval_ms = 100  # Check every 100ms
-        self.last_mouse_activity_time = 0.0
-        self.mouse_activity_timeout_ms = 2000  # Hide after 2 seconds of inactivity
-        self.cursor_is_hidden = False
 
     def __getattr__(self, name):
         """Proxy attributes to window"""
@@ -224,9 +217,7 @@ class Slideshow3Manager:
                       'displayed_images_cache', 'current_image_index', 'image_pool',
                       'frames_container', 'cursor_overlay', 'main_window', 'config',
                       'frame_size_min_percent', 'frame_size_max_percent',
-                      'speed_min_seconds', 'speed_max_seconds', 'max_simultaneous_frames',
-                      'cursor_hide_timer', 'cursor_hide_interval_ms', 'last_mouse_activity_time',
-                      'mouse_activity_timeout_ms', 'cursor_is_hidden']:
+                      'speed_min_seconds', 'speed_max_seconds', 'max_simultaneous_frames']:
             super().__setattr__(name, value)
         else:
             setattr(self.window, name, value)
@@ -354,46 +345,11 @@ class Slideshow3Manager:
         browse_view_widget.update()
         browse_view_widget.repaint()
 
-    def _start_cursor_hiding(self):
-        """Start cursor hiding system for slideshow3"""
-        # Initialize mouse activity tracking
-        self.last_mouse_activity_time = time.time()
-        self.cursor_is_hidden = False
-        # Start timer to check and hide cursor after inactivity
-        self.cursor_hide_timer.start(self.cursor_hide_interval_ms)
-    
-    def _check_cursor_hide(self):
-        """Check if cursor should be hidden based on inactivity"""
-        if self.window.current_view_mode != 'slideshow3':
-            return
-        
-        current_time = time.time()
-        time_since_activity = (current_time - self.last_mouse_activity_time) * 1000  # Convert to ms
-        
-        if time_since_activity >= self.mouse_activity_timeout_ms:
-            # Hide cursor if not already hidden
-            if not self.cursor_is_hidden:
-                self.main_window.setCursor(Qt.BlankCursor)
-                app = QApplication.instance()
-                if app:
-                    app.setOverrideCursor(Qt.BlankCursor)
-                self.cursor_is_hidden = True
-    
     def _on_mouse_activity_overlay(self):
         """Called by overlay widget when mouse activity is detected."""
         cm = getattr(self.main_window, "cursor_manager", None)
         if cm is not None:
             cm.on_mouse_activity()
-    
-    def _force_restore_cursor(self):
-        """Force restore cursor - called after widget operations complete"""
-        app = QApplication.instance()
-        if app:
-            # Clear all override cursors
-            while app.overrideCursor():
-                app.restoreOverrideCursor()
-        self.main_window.setCursor(Qt.ArrowCursor)
-        self.cursor_is_hidden = False
     
     def _start_timers(self):
         """Start animation and spawn timers"""
@@ -1080,16 +1036,6 @@ class Slideshow3Manager:
             return
         if not self.frames_container:
             return
-        
-        # Re-apply cursor hiding if it should be hidden (widget operations reset it)
-        if self.cursor_is_hidden:
-            current_time = time.time()
-            time_since_activity = (current_time - self.last_mouse_activity_time) * 1000
-            if time_since_activity >= self.mouse_activity_timeout_ms:
-                self.main_window.setCursor(Qt.BlankCursor)
-                app = QApplication.instance()
-                if app:
-                    app.setOverrideCursor(Qt.BlankCursor)
         
         dt = ANIMATION_INTERVAL_MS / 1000.0  # Convert to seconds
         frames_to_remove = []

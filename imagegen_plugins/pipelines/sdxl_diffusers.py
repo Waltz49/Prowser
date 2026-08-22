@@ -427,12 +427,6 @@ def _ensure_pipeline(hf_model_id: str) -> Any:
     return _pipe
 
 
-def probe_lora_weights(hf_model_id: str, lora_path: str, lora_scale: float) -> None:
-    """Load pipeline + LoRA weights without running inference (import compatibility probe)."""
-    pipe = _ensure_pipeline(hf_model_id)
-    _sync_lora_weights(pipe, [lora_path], [lora_scale])
-
-
 def _preview_image_from_latents(pipe: Any, latents: Any) -> Any:
     """Decode denoised latents to a PIL preview (VAE decode; used for progressive display)."""
     import torch

@@ -462,15 +462,6 @@ class ImageGenJobQueueDialog(QDialog):
         finally:
             self._syncing_shell_geometry = False
 
-    def _sync_dialog_height_to_panel(self) -> None:
-        if not self.isVisible() or self._syncing_shell_geometry:
-            return
-        self._syncing_shell_geometry = True
-        try:
-            self._sync_dialog_height_to_panel_impl()
-        finally:
-            self._syncing_shell_geometry = False
-
     def _sync_dialog_height_to_panel_impl(self) -> None:
         if not self.isVisible():
             return
@@ -616,9 +607,3 @@ def open_imagegen_job_queue_dialog(main_window) -> None:
         dlg = ImageGenJobQueueDialog(main_window)
         main_window._imagegen_job_queue_dialog = dlg
     present_passive_floating_dialog(dlg)
-
-
-def show_imagegen_job_queue_dialog(main_window) -> None:
-    from imagegen_plugins.jobs_display_mode import toggle_jobs_panel
-
-    toggle_jobs_panel(main_window)

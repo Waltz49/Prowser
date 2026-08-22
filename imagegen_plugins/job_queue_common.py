@@ -6,7 +6,7 @@ from __future__ import annotations
 import os
 
 from PySide6.QtCore import Qt, QSize, QTimer
-from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QWidget
 
 from imagegen_plugins.image_gen_dialog import connect_import_button_with_option_modifier
 from imagegen_plugins.image_gen_source_nav import open_image_in_browse
@@ -20,7 +20,6 @@ from theme.theme_service import get_active_theme
 from theme.titlebar_icons import titlebar_chip_colors
 from widgets.icon_hover_swap import attach_icon_hover_swap, icon_pair_from_assets
 
-_ACTION_COL_WIDTH = 36  # legacy export; cards no longer use side action column
 _ICON_BTN_SIZE = 22
 _ACTION_BAR_HEIGHT = 28
 _ACTION_BAR_OBJECT_NAME = "jobQueueActionBar"
@@ -438,141 +437,6 @@ class JobQueueActionBar(QWidget):
         )
 
 
-def build_job_queue_action_widget(
-    main_window,
-    controller,
-    row_idx: int,
-    *,
-    is_active: bool,
-) -> QWidget:
-    """Action column: series controls, edit, cancel (active and queued rows)."""
-    _ = is_active
-    edit_btn = QPushButton()
-    edit_btn.setToolTip(
-        "Replicate job settings…\n"
-        "For a pending job, use Replace in the dialog to update it in place.\n"
-        "For a running batch job, use Update to change remaining copies."
-    )
-    _configure_icon_push_button(edit_btn, "edit_icon.png")
-    edit_btn.clicked.connect(
-        lambda _checked=False, r=row_idx: job_queue_edit_row(main_window, controller, r)
-    )
-    cancel_btn = QPushButton()
-    cancel_btn.setToolTip(
-        "Cancel job\n"
-        "Option+click to cancel this job and all jobs after it (no confirmation)."
-    )
-    _configure_icon_push_button(
-        cancel_btn, "trash_icon.png", hover_icon_name="trash_icon_hover.png"
-    )
-    connect_import_button_with_option_modifier(
-        cancel_btn,
-        lambda option_held=False, r=row_idx: job_queue_cancel_row(
-            main_window, controller, r, option_held=option_held
-        ),
-    )
-    action_wrap = QWidget()
-    action_wrap.setObjectName(_ACTION_BAR_OBJECT_NAME)
-    _apply_job_queue_action_bar_background(action_wrap)
-    action_layout = QVBoxLayout(action_wrap)
-    action_layout.setContentsMargins(2, 0, 2, 0)
-    action_layout.setSpacing(2)
-
-    plus_btn = QPushButton()
-    plus_btn.setToolTip("Add another image to this series")
-    _configure_icon_push_button(plus_btn, "series_plus_icon.png")
-    plus_btn.setEnabled(controller.can_add_series_cycle_for_row(row_idx))
-    plus_btn.clicked.connect(
-        lambda _checked=False, r=row_idx: controller.add_series_cycle_for_row(r)
-    )
-    has_waiting_cycles = controller.series_remaining_after_for_row(row_idx) > 0
-    action_layout.addWidget(plus_btn, alignment=Qt.AlignmentFlag.AlignCenter)
-    if has_waiting_cycles:
-        minus_btn = QPushButton()
-        minus_btn.setToolTip(
-            "Remove one pending image from the series.\n"
-            "Option+click to remove all remaining images."
-        )
-        _configure_icon_push_button(minus_btn, "series_minus_icon.png")
-        connect_import_button_with_option_modifier(
-            minus_btn,
-            lambda option_held=False, r=row_idx: (
-                controller.clear_series_remaining_for_row(r)
-                if option_held
-                else controller.subtract_series_remaining_for_row(r)
-            ),
-        )
-        image_ok = controller.job_row_supports_image_series_refinement(row_idx)
-        text_ok = controller.job_row_supports_text_series_refinement(row_idx)
-        action_layout.addWidget(minus_btn, alignment=Qt.AlignmentFlag.AlignCenter)
-        if image_ok:
-            image_refine_btn = QPushButton()
-            image_refine_btn.setToolTip(
-                "Image Based Refinement:\n\n"
-                "Base subsequent image copies on previous result image.\n\n"
-                "Other source images keep their order."
-            )
-            _configure_series_toggle_push_button(
-                image_refine_btn, "series_image_refinement_icon.png"
-            )
-            image_refine_btn.blockSignals(True)
-            image_refine_btn.setChecked(
-                controller.series_refinement_enabled_for_row(row_idx)
-            )
-            image_refine_btn.blockSignals(False)
-            image_refine_btn.toggled.connect(
-                lambda checked, r=row_idx, btn=image_refine_btn: _apply_series_refinement_toggle(
-                    btn,
-                    "series_image_refinement_icon.png",
-                    checked,
-                    lambda enabled, row=r: controller.set_series_refinement_for_row(
-                        row, enabled
-                    ),
-                )
-            )
-            _sync_series_toggle_button_style(
-                image_refine_btn, "series_image_refinement_icon.png"
-            )
-            action_layout.addWidget(
-                image_refine_btn, alignment=Qt.AlignmentFlag.AlignCenter
-            )
-        if text_ok:
-            text_refine_btn = QPushButton()
-            text_refine_btn.setToolTip(
-                "Text Based Refinement:\n\n"
-                "Re-run the previous prompt through Gen Prompt AI before each\n"
-                "subsequent copy in the series."
-            )
-            _configure_series_toggle_push_button(
-                text_refine_btn, "series_text_refinement_icon.png"
-            )
-            text_refine_btn.blockSignals(True)
-            text_refine_btn.setChecked(
-                controller.series_prompt_refinement_enabled_for_row(row_idx)
-            )
-            text_refine_btn.blockSignals(False)
-            text_refine_btn.toggled.connect(
-                lambda checked, r=row_idx, btn=text_refine_btn: _apply_series_refinement_toggle(
-                    btn,
-                    "series_text_refinement_icon.png",
-                    checked,
-                    lambda enabled, row=r: controller.set_series_prompt_refinement_for_row(
-                        row, enabled
-                    ),
-                )
-            )
-            _sync_series_toggle_button_style(
-                text_refine_btn, "series_text_refinement_icon.png"
-            )
-            action_layout.addWidget(
-                text_refine_btn, alignment=Qt.AlignmentFlag.AlignCenter
-            )
-    action_layout.addWidget(edit_btn, alignment=Qt.AlignmentFlag.AlignCenter)
-    action_layout.addWidget(cancel_btn, alignment=Qt.AlignmentFlag.AlignCenter)
-    action_wrap.setFixedWidth(_ACTION_COL_WIDTH)
-    return action_wrap
-
-
 def open_reference_thumbnail_paths(main_window, paths: list[str]) -> None:
     """One image → browse; multiple → new thumbnail level."""
     valid = _valid_preview_paths(paths)
@@ -697,22 +561,3 @@ def _sync_series_toggle_button_style(btn: QPushButton, icon_name: str) -> None:
     else:
         _attach_icon_hover_swap(btn, icon_name)
 
-
-def _trash_button_stylesheet() -> str:
-    return _job_queue_action_button_stylesheet()
-
-
-def _edit_button_stylesheet() -> str:
-    return _job_queue_action_button_stylesheet()
-
-
-def _series_plus_button_stylesheet() -> str:
-    return _job_queue_action_button_stylesheet()
-
-
-def _series_minus_button_stylesheet() -> str:
-    return _job_queue_action_button_stylesheet()
-
-
-def _series_refinement_button_stylesheet() -> str:
-    return _job_queue_action_button_stylesheet()

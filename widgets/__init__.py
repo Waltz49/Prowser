@@ -1,8 +1,6 @@
 """Shared small icon buttons (gear, trash, etc.)."""
 
 from widgets.gear_button_styles import (
-    chat_gear_button_stylesheet,
-    create_chat_gear_button,
     create_dialog_gear_button,
     create_tree_toolbar_gear_button,
     dialog_gear_button_stylesheet,
@@ -17,8 +15,6 @@ __all__ = [
     "IconHoverSwap",
     "attach_icon_hover_swap",
     "icon_pair_from_assets",
-    "chat_gear_button_stylesheet",
-    "create_chat_gear_button",
     "create_dialog_gear_button",
     "create_tree_toolbar_gear_button",
     "dialog_gear_button_stylesheet",

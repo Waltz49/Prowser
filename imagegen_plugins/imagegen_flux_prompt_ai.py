@@ -232,21 +232,6 @@ class ImageGenFluxPromptAi:
             self._ai_btn = None
             self._undo_btn = None
 
-    def _hide_import_row_buttons(self) -> None:
-        """Keep detached Gen Prompt / Undo off the dialog surface when not in the import row."""
-        for btn in (self._ai_btn, self._undo_btn):
-            if _flux_prompt_widget_alive(btn):
-                btn.hide()
-
-    def detach_import_row_buttons(self) -> None:
-        """Reparent Gen Prompt / Undo so import-row rebuild does not delete them."""
-        self._reset_stale_ai_widgets()
-        for btn in (self._ai_btn, self._undo_btn):
-            if not _flux_prompt_widget_alive(btn):
-                continue
-            btn.setParent(self._dialog)
-        self._hide_import_row_buttons()
-
     def _ensure_ai_widgets(
         self,
         owner: Any,
@@ -308,10 +293,6 @@ class ImageGenFluxPromptAi:
 
         refresh_flux_prompt_keyboard_shortcuts(owner)
         return True
-
-    def import_row_buttons(self, owner: Any) -> list[QPushButton]:
-        """Gen Prompt / Undo live in the AI Prompt Enhancement section, not the import row."""
-        return []
 
     def create_toolbar(
         self,

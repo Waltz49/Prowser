@@ -95,7 +95,6 @@ from theme.theme_service import (
     default_user_theme_colors,
     get_active_theme,
     get_custom_theme_entry,
-    is_builtin_theme_id,
     is_custom_theme_id,
     is_editable_theme_id,
     merge_custom_theme_browse_transparency,

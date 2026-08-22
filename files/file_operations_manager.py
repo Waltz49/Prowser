@@ -1693,44 +1693,6 @@ class FileOperationsManager:
 
         return {'phase0': phase0_renames, 'phase1': phase1_renames, 'phase2': phase2_renames}
 
-    def _get_lowest_sequence_in_directory(
-        self, prefix: str, target_directory: str, increment_length: int
-    ) -> Optional[int]:
-        """Return the lowest sequence number found in files matching the rename pattern in directory.
-        Returns None if no matching files exist. Used for subset+order rename to set effective start."""
-        _dash_pat = re.compile(rf'^{re.escape(prefix)}-(\d+)$', re.IGNORECASE)
-        _nodash_pat = re.compile(rf'^{re.escape(prefix)}(\d+)$', re.IGNORECASE)
-
-        def extract_number(fn: str) -> Optional[int]:
-            name, _ = os.path.splitext(fn)
-            m = _dash_pat.match(name)
-            if m and len(m.group(1)) == increment_length:
-                try:
-                    return int(m.group(1))
-                except Exception:
-                    return None
-            m = _nodash_pat.match(name)
-            if m and len(m.group(1)) == increment_length:
-                try:
-                    return int(m.group(1))
-                except Exception:
-                    return None
-            return None
-
-        lowest = None
-        try:
-            for filename in os.listdir(target_directory):
-                filepath = os.path.join(target_directory, filename)
-                if not os.path.isfile(filepath):
-                    continue
-                num = extract_number(filename)
-                if num is not None:
-                    if lowest is None or num < lowest:
-                        lowest = num
-        except Exception:
-            pass
-        return lowest
-
     def _calculate_target_names(
         self,
         images_to_rename: List[str],

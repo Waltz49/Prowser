@@ -1642,72 +1642,6 @@ def create_image_gen_prompt_copy_button(
     return btn
 
 
-def build_image_gen_prompt_field_action_column(
-    edit: QPlainTextEdit,
-    parent: QWidget,
-    *,
-    copy_object_name: str = "imageGenPromptCopyBtn",
-    mic_object_name: str = "imageGenPromptVoiceMicBtn",
-    action_column_object_name: str = "imageGenPromptActionCol",
-) -> tuple[QWidget, QVBoxLayout, QPushButton, Optional[QPushButton]]:
-    """Copy and optional mic buttons stacked to the right of a prompt field."""
-    action_col = QWidget(parent)
-    action_col.setObjectName(action_column_object_name)
-    action_layout = QVBoxLayout(action_col)
-    action_layout.setContentsMargins(0, 0, 0, 0)
-    action_layout.setSpacing(4)
-    copy_btn = create_image_gen_prompt_copy_button(
-        edit, action_col, object_name=copy_object_name
-    )
-    action_layout.addWidget(
-        copy_btn,
-        0,
-        Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignHCenter,
-    )
-    mic_btn = create_image_gen_prompt_voice_mic_button(
-        edit, action_col, object_name=mic_object_name
-    )
-    if mic_btn is not None:
-        action_layout.addWidget(
-            mic_btn,
-            0,
-            Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignHCenter,
-        )
-    return action_col, action_layout, copy_btn, mic_btn
-
-
-def wrap_image_gen_prompt_row_with_copy(
-    display_control: QWidget,
-    edit: QPlainTextEdit,
-    *,
-    copy_object_name: str = "imageGenPromptCopyBtn",
-    mic_object_name: str = "imageGenPromptVoiceMicBtn",
-    action_column_object_name: str = "imageGenPromptActionCol",
-) -> QWidget:
-    """Prompt editor with copy and optional voice-input buttons to the right."""
-    row_w = QWidget()
-    row = QHBoxLayout(row_w)
-    row.setContentsMargins(0, 0, 0, 0)
-    row.setSpacing(4)
-    row.addWidget(display_control, 1)
-    action_col, _, _, _ = build_image_gen_prompt_field_action_column(
-        edit,
-        row_w,
-        copy_object_name=copy_object_name,
-        mic_object_name=mic_object_name,
-        action_column_object_name=action_column_object_name,
-    )
-    row.addWidget(
-        action_col,
-        0,
-        Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignRight,
-    )
-    row_w.setSizePolicy(
-        QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum
-    )
-    return row_w
-
-
 def image_gen_dim_helper_icon_stylesheet(
     icon_name: str,
     *,
@@ -2395,11 +2329,6 @@ class ImageGenFieldsPanel:
                 self._mount_group_in_layout(self._controls_layout, group)
 
         self._sync_minimum_widths()
-
-    def prepend_control_group(self, group: QWidget) -> None:
-        self._ensure_below_row_in_layout()
-        self._control_groups.insert(0, group)
-        self._schedule_reflow()
 
     def prepend_full_width_control_header(self, header: QWidget) -> None:
         """Full-width row above the flowing control columns (e.g. section headers)."""

@@ -599,18 +599,6 @@ class RightSidebarCombinedWidget(QWidget):
             if self.jobs_widget is not None:
                 self.jobs_widget._reflow_all()
 
-    def _jobs_running_content_height(self) -> int:
-        if not self.jobs_visible or self.jobs_widget is None:
-            return 0
-        mode = self.jobs_widget.queue_size_mode()
-        if mode == QUEUE_SIZE_STRIP:
-            return self.jobs_widget.compact_content_height()
-        if mode == QUEUE_SIZE_ONE:
-            return self.jobs_widget.content_height_for_size_mode(QUEUE_SIZE_ONE)
-        if self.jobs_widget.should_shrink_wrap_client():
-            return self.jobs_widget.content_height_for_size_mode()
-        return self.jobs_widget.strip_only_content_height()
-
     def jobs_pane_geometry_adjusting(self) -> bool:
         return self._adjusting_jobs_geometry
 

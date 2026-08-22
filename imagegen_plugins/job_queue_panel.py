@@ -1861,10 +1861,6 @@ class JobQueuePanelWidget(QWidget):
             self._queue_size_mode = mode
         self._apply_queue_size_layout()
 
-    def set_queue_compact(self, compact: bool) -> None:
-        """Sidebar compact toggle: strip-only vs show queue list."""
-        self.set_queue_size_mode(QUEUE_SIZE_STRIP if compact else QUEUE_SIZE_ALL)
-
     def is_queue_compact(self) -> bool:
         return self._queue_size_mode == QUEUE_SIZE_STRIP
 

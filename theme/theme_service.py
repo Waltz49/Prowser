@@ -342,10 +342,6 @@ def apply_view_chrome_splitter_theme(splitter) -> None:
 
 
 
-def is_builtin_theme_id(theme_id: Optional[str]) -> bool:
-    return (theme_id or "").lower() in BUILTIN_THEME_IDS
-
-
 def is_editable_theme_id(theme_id: Optional[str], custom_themes: Optional[dict] = None) -> bool:
     tid = (theme_id or "").lower()
     if tid in EDITABLE_BUILTIN_THEME_IDS:
@@ -475,20 +471,6 @@ def build_theme_from_custom_entry(tid: str, entry: Dict[str, Any]) -> ThemeType:
     if base == "user":
         return replace(build_user_theme_from_colors(merged), theme_id=tid)
     return replace(build_dark_theme_from_colors(merged), theme_id=tid)
-
-
-def colors_for_theme_id(theme_id: str, settings: dict) -> Dict[str, Any]:
-    tid = (theme_id or "dark").lower()
-    if tid == "user":
-        return merge_user_theme_colors(settings.get("user_theme_colors"))
-    if tid == "dark":
-        return merge_dark_theme_colors(settings.get("dark_theme_colors"))
-    if tid == "light":
-        return merge_light_theme_colors(settings.get("light_theme_colors"))
-    entry = get_custom_theme_entry(settings.get("custom_themes"), tid)
-    if entry:
-        return deepcopy(entry.get("colors") or {})
-    return merge_dark_theme_colors(None)
 
 
 def _load_custom_themes_for_normalize(config: Any = None) -> Dict[str, Dict[str, Any]]:

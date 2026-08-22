@@ -2382,7 +2382,6 @@ class CustomFileSystemFilter(QSortFilterProxyModel):
         self._cached_always_show_work: bool = False
         self._cached_show_hidden: Optional[bool] = None
         self._pending_deep_checks: Set[str] = set()
-        self._batch_filter_updates: int = 0
         self._icon_cache: Dict[Tuple, QIcon] = {}
         self._max_icon_cache_size: int = 2000
         self._discovery_service: Optional[TreeImageDiscoveryService] = None
@@ -2412,8 +2411,7 @@ class CustomFileSystemFilter(QSortFilterProxyModel):
         """Clear derived caches and re-filter after filter settings model changes."""
         self._clear_image_caches()
         self.refresh_filter_settings()
-        if self._batch_filter_updates == 0:
-            self._invalidate_filter_now()
+        self._invalidate_filter_now()
 
     def attach_discovery_service(self, service: Optional[TreeImageDiscoveryService]) -> None:
         """Wire background image discovery (main thread only)."""
@@ -2454,32 +2452,11 @@ class CustomFileSystemFilter(QSortFilterProxyModel):
             enabled_root_dirs=self._enabled_root_dirs,
         )
 
-    def begin_batch_filter_update(self) -> None:
-        self._batch_filter_updates += 1
-
-    def end_batch_filter_update(self) -> None:
-        if self._batch_filter_updates > 0:
-            self._batch_filter_updates -= 1
-        if self._batch_filter_updates == 0:
-            self._invalidate_filter_now()
-            handler = None
-            if self.main_window:
-                handler = getattr(self.main_window, "file_tree_handler", None)
-            if handler:
-                handler._flush_deferred_filter_invalidate()
-
     def _invalidate_filter_now(self) -> None:
         self.invalidateFilter()
         self.layoutChanged.emit()
 
     def _schedule_invalidate_filter(self) -> None:
-        if self._batch_filter_updates > 0:
-            handler = None
-            if self.main_window:
-                handler = getattr(self.main_window, "file_tree_handler", None)
-            if handler:
-                handler._deferred_filter_invalidate = True
-            return
         handler = None
         if self.main_window:
             handler = getattr(self.main_window, "file_tree_handler", None)

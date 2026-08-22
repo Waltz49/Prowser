@@ -119,11 +119,6 @@ _INFO_ELAPSED_IN_MODEL_RE = re.compile(
 _INFO_ELAPSED_PER_ITER_SUFFIX_RE = re.compile(
     r'\s*\(\d+:\d{2}:\d{2}/iter\)', re.IGNORECASE
 )
-_INFO_LORA_ROW_IN_HTML_RE = re.compile(
-    r'(?i)(^|<br>)((?:LoRA:\s*.+?)|(?:'
-    + "\u00a0{6}"
-    + r".+?))(?=<br>|$)"
-)
 _INFO_MODEL_PARAM_LINE_RE = re.compile(
     r'^(Seed|Steps|Quantization|Guidance|LoRA|Elapsed)\s*:\s*(.*)$',
     re.IGNORECASE,
@@ -1284,36 +1279,6 @@ class InformationSidebar(QWidget):
             Qt.TextElideMode.ElideRight,
             width_px,
         )
-
-    def _wrap_elided_info_line_html(self, lead: str, plain_line: str, width_px: int) -> str:
-        elided = escape(self._elide_info_monospace_line(plain_line, width_px))
-        block = (
-            f'<div style="white-space: nowrap; overflow: hidden; '
-            f'text-overflow: ellipsis; max-width: {width_px}px;">{elided}</div>'
-        )
-        if lead.startswith("<br>"):
-            return block
-        return lead + block
-
-    def _elide_lora_lines_in_info_html(self, disp: str) -> str:
-        """Elide LoRA stack rows to the information pane content width."""
-        pos = disp.find(_INFO_IMAGE_MODEL_H4)
-        if pos < 0:
-            return disp
-        body_start = pos + len(_INFO_IMAGE_MODEL_H4)
-        next_h4 = disp.find("<h4>", body_start)
-        end = len(disp) if next_h4 < 0 else next_h4
-        middle = disp[body_start:end]
-        width_px = self._info_content_width_px()
-
-        def repl(match: re.Match[str]) -> str:
-            line_html = match.group(2)
-            plain = unescape(line_html)
-            return self._wrap_elided_info_line_html(match.group(1), plain, width_px)
-
-        middle = _INFO_LORA_ROW_IN_HTML_RE.sub(repl, middle)
-        self._last_info_elide_width_px = width_px
-        return disp[:body_start] + middle + disp[end:]
 
     def _update_overlay_image_model_flag(
         self, image_path: str, speakable_plain_text: Optional[str]

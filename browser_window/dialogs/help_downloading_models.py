@@ -662,11 +662,6 @@ class DownloadingAIModelsHelpDialog(QDialog):
                 break
 
 
-def show_downloading_models_help(parent=None) -> None:
-    dialog = DownloadingAIModelsHelpDialog(parent)
-    dialog.exec()
-
-
 def main() -> None:
     app = QApplication(sys.argv)
     dialog = DownloadingAIModelsHelpDialog()

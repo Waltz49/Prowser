@@ -2125,51 +2125,6 @@ def validate_image_file(file_path: str) -> bool:
     return is_image_extension(ext)
 
 
-def directory_has_images(dir_path: str, filter_pattern: Optional[str] = None) -> bool:
-    """
-    Check if directory contains any image files matching optional filter.
-    
-    Args:
-        dir_path: Directory path to check
-        filter_pattern: Optional glob pattern to filter filenames (e.g., 'image*', '*.jpg')
-        
-    Returns:
-        True if directory contains at least one matching image file
-    """
-    if not dir_path or not os.path.isdir(dir_path):
-        return False
-    
-    try:
-        from thumbnails.thumbnail_constants import get_image_extensions
-        from config import ImageBrowserConfig
-        
-        image_exts = get_image_extensions()
-        if not image_exts:
-            return False
-        
-        # Normalize filter pattern for matching
-        match_pattern = None
-        if filter_pattern:
-            match_pattern = ImageBrowserConfig.get_filter_pattern_for_matching(filter_pattern)
-        
-        # Check directory contents
-        for entry in os.scandir(dir_path):
-            if entry.is_file():
-                ext = get_file_extension(entry.name)
-                if ext in image_exts:
-                    # If filter pattern provided, check if filename matches
-                    if match_pattern and match_pattern != '*':
-                        if fnmatch.fnmatch(entry.name.lower(), match_pattern.lower()):
-                            return True
-                    else:
-                        # No filter or filter is '*', any image file matches
-                        return True
-        
-        return False
-    except Exception:
-        return False
-
-
 def path_matches_active_filter(main_window, file_path: str) -> bool:
     """Return True if file_path's basename matches the active filter_pattern."""
     if not hasattr(main_window, 'filter_pattern') or not main_window.filter_pattern:
