@@ -36,6 +36,10 @@ from chat_plugins.chat_prompt_grammar import (
     add_chat_prompt_button_row,
     apply_chat_prompt_save_format_to_widget,
 )
+from chat_plugins.chat_prompt_library_common import (
+    create_prompt_library_preview_editor,
+    prompt_radio_tooltip,
+)
 from chat_plugins.chat_ui_common import (
     ChatImageThumbRow,
     _local_paths_from_mime,
@@ -43,7 +47,6 @@ from chat_plugins.chat_ui_common import (
     chat_library_trash_button_stylesheet,
     chat_prompt_edit_stylesheet,
     install_cmd_enter_accept,
-    prompt_library_preview_height_px,
 )
 from imagegen_plugins.image_gen_form_layout import (
     IMAGE_GEN_FIELD_RESET_BTN_SIZE,
@@ -319,12 +322,7 @@ class ChatUserPromptLibraryDialog(QDialog):
         header_layout.addStretch(1)
         layout.addWidget(header_row)
 
-        self._preview = QPlainTextEdit(self)
-        self._preview.setLineWrapMode(QPlainTextEdit.LineWrapMode.WidgetWidth)
-        self._preview.setStyleSheet(chat_prompt_edit_stylesheet())
-        self._preview.setMinimumHeight(
-            max(120, prompt_library_preview_height_px(self._preview.font(), 6))
-        )
+        self._preview = create_prompt_library_preview_editor(self)
         layout.addWidget(self._preview)
 
         scroll = QScrollArea()
@@ -434,7 +432,7 @@ class ChatUserPromptLibraryDialog(QDialog):
                 if image_count:
                     label = f"{label} ({image_count} image{'s' if image_count != 1 else ''})"
                 radio = QRadioButton(label)
-                tip = entry.text[:200] + ("…" if len(entry.text) > 200 else "")
+                tip = prompt_radio_tooltip(entry.text)
                 radio.setToolTip(tip)
                 self._button_group.addButton(radio)
                 self._radio_by_id[entry.id] = radio

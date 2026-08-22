@@ -7,7 +7,6 @@ import uuid
 from copy import deepcopy
 from dataclasses import dataclass, field
 
-from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QButtonGroup,
     QDialog,
@@ -32,8 +31,12 @@ from chat_plugins.chat_prompt_grammar import (
     add_chat_prompt_button_row,
     apply_chat_prompt_save_format_to_widget,
 )
+from chat_plugins.chat_prompt_library_common import (
+    create_prompt_library_preview_editor,
+    prompt_radio_tooltip,
+    reorder_entries_mru,
+)
 from chat_plugins.chat_ui_common import (
-    ChatPromptLibraryPreview,
     chat_library_edit_button_stylesheet,
     chat_library_trash_button_stylesheet,
     chat_prompt_edit_stylesheet,
@@ -94,6 +97,11 @@ class ChatPromptStore:
         return cls(active_id=active_id, prompts=prompts, system_prompt=system_prompt)
 
     def save(self) -> None:
+        self.prompts = reorder_entries_mru(
+            self.prompts,
+            self.active_id,
+            lambda entry: entry.id,
+        )
         config = load_system_prompt_config()
         config["system_prompt"] = self.system_prompt
         config["named_prompts"] = [
@@ -117,24 +125,62 @@ class ChatPromptStore:
                 return entry.text
         return self.system_prompt or _persisted_system_prompt_text()
 
-
-def _edit_button_stylesheet() -> str:
-    return chat_library_edit_button_stylesheet()
-
-
-def _trash_button_stylesheet() -> str:
-    return chat_library_trash_button_stylesheet()
+    def active_prompt_name(self) -> str:
+        if not self.active_id or self.active_id == SYSTEM_DEFAULT_ID:
+            return "System default"
+        entry = self.find_prompt(self.active_id)
+        return entry.name if entry else "System default"
 
 
-class ChatPromptEditDialog(QDialog):
+def active_system_prompt_label(session_text: str) -> str:
+    """Return the active saved prompt name, or ``Custom`` when session text differs."""
+    store = ChatPromptStore.load()
+    saved_text = store.active_prompt_text()
+    if (session_text or "").strip() != (saved_text or "").strip():
+        return "Custom"
+    return store.active_prompt_name()
+
+
+class ChatPromptNameEditDialog(QDialog):
+    """Edit only the display name for a saved system prompt."""
+
     def __init__(
         self,
         parent: QWidget | None = None,
         *,
-        title: str = "Edit prompt",
+        title: str = "Edit prompt name",
+        name: str = "",
+    ) -> None:
+        super().__init__(parent)
+        self.setWindowTitle(title)
+        self.setMinimumWidth(360)
+
+        layout = QVBoxLayout(self)
+        layout.addWidget(QLabel("Name:"))
+        self.name_edit = QLineEdit(name)
+        layout.addWidget(self.name_edit)
+
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+        self.setStyleSheet(get_dialog_shell_stylesheet() + get_button_style())
+        install_cmd_enter_accept(self, self.name_edit)
+
+    def name(self) -> str:
+        return self.name_edit.text().strip()
+
+
+class ChatPromptAddDialog(QDialog):
+    def __init__(
+        self,
+        parent: QWidget | None = None,
+        *,
+        title: str = "New prompt",
         name: str = "",
         text: str = "",
-        name_editable: bool = True,
     ) -> None:
         super().__init__(parent)
         self.setWindowTitle(title)
@@ -143,7 +189,6 @@ class ChatPromptEditDialog(QDialog):
         layout = QVBoxLayout(self)
         layout.addWidget(QLabel("Name:"))
         self.name_edit = QLineEdit(name)
-        self.name_edit.setReadOnly(not name_editable)
         layout.addWidget(self.name_edit)
         layout.addWidget(QLabel("System prompt:"))
         self.text_edit = QTextEdit()
@@ -205,16 +250,20 @@ class ChatSystemPromptLibraryDialog(QDialog):
         new_prompt_suggestion: str = "",
     ) -> None:
         super().__init__(parent)
-        self.setWindowTitle("System prompts")
+        self.setWindowTitle("System Prompt for Chat")
         self.setMinimumSize(480, 360)
         self._store = deepcopy(store)
         self._new_prompt_suggestion = new_prompt_suggestion
         self._radio_by_id: dict[str, QRadioButton] = {}
+        self._preview_prompt_id: str | None = None
+        self._button_group = QButtonGroup(self)
+        self._button_group.setExclusive(True)
+        self._button_group.buttonToggled.connect(self._on_prompt_radio_toggled)
 
         layout = QVBoxLayout(self)
         layout.addWidget(QLabel("Active system prompt:"))
 
-        self._preview = ChatPromptLibraryPreview(self)
+        self._preview = create_prompt_library_preview_editor(self)
         layout.addWidget(self._preview)
 
         scroll = QScrollArea()
@@ -227,9 +276,6 @@ class ChatSystemPromptLibraryDialog(QDialog):
         scroll.setWidget(list_host)
         layout.addWidget(scroll, stretch=1)
 
-        self._button_group = QButtonGroup(self)
-        self._button_group.setExclusive(True)
-        self._button_group.buttonToggled.connect(self._on_prompt_radio_toggled)
         self._rebuild_prompt_list()
 
         add_btn = QPushButton("Add System Prompt…")
@@ -248,6 +294,8 @@ class ChatSystemPromptLibraryDialog(QDialog):
         return self._store
 
     def selected_prompt_text(self) -> str:
+        self._commit_preview_edits()
+        self._sync_active_from_ui()
         return self._store.active_prompt_text()
 
     def _prompt_text_for_id(self, prompt_id: str) -> str:
@@ -258,16 +306,35 @@ class ChatSystemPromptLibraryDialog(QDialog):
 
     def _on_prompt_radio_toggled(self, _button: QRadioButton, checked: bool) -> None:
         if checked:
+            self._commit_preview_edits()
             self._update_preview()
 
+    def _commit_preview_edits(self) -> None:
+        if not self._preview_prompt_id:
+            return
+        text = self._preview.toPlainText()
+        if self._preview_prompt_id == SYSTEM_DEFAULT_ID:
+            self._store.system_prompt = text
+            return
+        entry = self._store.find_prompt(self._preview_prompt_id)
+        if entry is not None:
+            entry.text = text
+
     def _update_preview(self) -> None:
+        self._preview.setReadOnly(False)
+        self._preview.setPlaceholderText("")
         for prompt_id, radio in self._radio_by_id.items():
             if radio.isChecked():
-                self._preview.set_prompt_text(self._prompt_text_for_id(prompt_id))
+                text = self._prompt_text_for_id(prompt_id)
+                self._preview_prompt_id = prompt_id
+                if self._preview.toPlainText() != text:
+                    self._preview.setPlainText(text)
                 return
-        self._preview.set_prompt_text(self._store.system_prompt)
+        self._preview_prompt_id = None
+        self._preview.setPlainText("")
 
     def _rebuild_prompt_list(self) -> None:
+        self._preview_prompt_id = None
         while self._list_layout.count():
             item = self._list_layout.takeAt(0)
             if item.widget():
@@ -280,21 +347,11 @@ class ChatSystemPromptLibraryDialog(QDialog):
         default_row = QWidget()
         default_row_layout = QHBoxLayout(default_row)
         default_row_layout.setContentsMargins(0, 0, 0, 0)
-        default_edit_btn = QPushButton()
-        default_edit_btn.setFixedSize(ICON_BTN_SIZE, ICON_BTN_SIZE)
-        default_edit_btn.setToolTip("Edit system default")
-        default_edit_btn.setStyleSheet(_edit_button_stylesheet())
-        default_edit_btn.clicked.connect(self._edit_system_default)
-        default_row_layout.addWidget(default_edit_btn)
-
         default_radio = QRadioButton("System default")
-        default_radio.setToolTip(
-            default_text[:200] + ("…" if len(default_text) > 200 else "")
-        )
+        default_radio.setToolTip(prompt_radio_tooltip(default_text))
         self._button_group.addButton(default_radio)
         self._radio_by_id[SYSTEM_DEFAULT_ID] = default_radio
         default_row_layout.addWidget(default_radio, stretch=1)
-
         self._list_layout.addWidget(default_row)
 
         for entry in self._store.prompts:
@@ -302,23 +359,23 @@ class ChatSystemPromptLibraryDialog(QDialog):
             row_layout = QHBoxLayout(row)
             row_layout.setContentsMargins(0, 0, 0, 0)
 
-            edit_btn = QPushButton()
-            edit_btn.setFixedSize(ICON_BTN_SIZE, ICON_BTN_SIZE)
-            edit_btn.setToolTip("Edit prompt")
-            edit_btn.setStyleSheet(_edit_button_stylesheet())
-            edit_btn.clicked.connect(lambda _=False, pid=entry.id: self._edit_prompt(pid))
-            row_layout.addWidget(edit_btn)
-
             radio = QRadioButton(entry.name or "Untitled")
-            radio.setToolTip(entry.text[:200] + ("…" if len(entry.text) > 200 else ""))
+            radio.setToolTip(prompt_radio_tooltip(entry.text))
             self._button_group.addButton(radio)
             self._radio_by_id[entry.id] = radio
             row_layout.addWidget(radio, stretch=1)
 
+            edit_btn = QPushButton()
+            edit_btn.setFixedSize(ICON_BTN_SIZE, ICON_BTN_SIZE)
+            edit_btn.setToolTip("Edit name")
+            edit_btn.setStyleSheet(chat_library_edit_button_stylesheet())
+            edit_btn.clicked.connect(lambda _=False, pid=entry.id: self._edit_prompt_name(pid))
+            row_layout.addWidget(edit_btn)
+
             del_btn = QPushButton()
             del_btn.setFixedSize(ICON_BTN_SIZE, ICON_BTN_SIZE)
             del_btn.setToolTip("Delete prompt")
-            del_btn.setStyleSheet(_trash_button_stylesheet())
+            del_btn.setStyleSheet(chat_library_trash_button_stylesheet())
             del_btn.clicked.connect(lambda _=False, pid=entry.id: self._delete_prompt(pid))
             row_layout.addWidget(del_btn)
 
@@ -341,8 +398,9 @@ class ChatSystemPromptLibraryDialog(QDialog):
                 return
 
     def _add_prompt(self) -> None:
+        self._commit_preview_edits()
         suggestion = self._new_prompt_suggestion or _persisted_system_prompt_text()
-        dlg = ChatPromptEditDialog(
+        dlg = ChatPromptAddDialog(
             self,
             title="New prompt",
             name="New prompt",
@@ -358,33 +416,23 @@ class ChatSystemPromptLibraryDialog(QDialog):
         self._store.active_id = entry.id
         self._rebuild_prompt_list()
 
-    def _edit_system_default(self) -> None:
-        dlg = ChatPromptEditDialog(
-            self,
-            title="Edit system default",
-            name="System default",
-            text=self._store.system_prompt,
-            name_editable=False,
-        )
-        if dlg.exec() != QDialog.DialogCode.Accepted:
-            return
-        _, text = dlg.values()
-        self._store.system_prompt = text
-        self._rebuild_prompt_list()
-
-    def _edit_prompt(self, prompt_id: str) -> None:
+    def _edit_prompt_name(self, prompt_id: str) -> None:
+        self._commit_preview_edits()
         entry = self._store.find_prompt(prompt_id)
         if entry is None:
             return
-        dlg = ChatPromptEditDialog(self, title="Edit prompt", name=entry.name, text=entry.text)
+        dlg = ChatPromptNameEditDialog(
+            self,
+            title="Edit prompt name",
+            name=entry.name,
+        )
         if dlg.exec() != QDialog.DialogCode.Accepted:
             return
-        name, text = dlg.values()
-        entry.name = name or "Untitled"
-        entry.text = text
+        entry.name = dlg.name() or "Untitled"
         self._rebuild_prompt_list()
 
     def _delete_prompt(self, prompt_id: str) -> None:
+        self._commit_preview_edits()
         entry = self._store.find_prompt(prompt_id)
         if entry is None:
             return
@@ -397,6 +445,8 @@ class ChatSystemPromptLibraryDialog(QDialog):
         self._rebuild_prompt_list()
 
     def accept(self) -> None:
+        apply_chat_prompt_save_format_to_widget(self._preview)
+        self._commit_preview_edits()
         self._sync_active_from_ui()
         super().accept()
 
@@ -405,8 +455,8 @@ def run_chat_system_prompt_library(
     parent: QWidget | None,
     *,
     suggestion_text: str = "",
-) -> tuple[ChatPromptStore | None, str | None]:
-    """Show library dialog. Returns (store, selected_text) on OK, else (None, None)."""
+) -> str | None:
+    """Show library dialog. Returns active prompt text on OK, else None."""
     store = ChatPromptStore.load()
     dlg = ChatSystemPromptLibraryDialog(
         store,
@@ -414,7 +464,7 @@ def run_chat_system_prompt_library(
         new_prompt_suggestion=suggestion_text,
     )
     if dlg.exec() != QDialog.DialogCode.Accepted:
-        return None, None
+        return None
     result = dlg.result_store()
     result.save()
-    return result, dlg.selected_prompt_text()
+    return dlg.selected_prompt_text()

@@ -1277,6 +1277,7 @@ class CombinedSidebarWidget(QWidget):
         if not self._chat_feature_enabled:
             return
         if self.chat_visible != visible:
+            redirect_focus = not visible and self._chat_has_keyboard_focus()
             self.chat_visible = visible
             if visible:
                 self._enter_chat_cover()
@@ -1296,6 +1297,8 @@ class CombinedSidebarWidget(QWidget):
             self._update_chat_header_focus(self._chat_pane_has_focus())
             if not visible:
                 self._notify_cover_changed()
+                if redirect_focus:
+                    QTimer.singleShot(0, self._redirect_focus_after_chat_hidden)
         elif visible and self.chat_widget:
             self._enter_chat_cover()
             if self.isVisible():
@@ -1379,6 +1382,46 @@ class CombinedSidebarWidget(QWidget):
 
     def _on_application_focus_changed(self, _old, new) -> None:
         self._update_chat_header_focus(self._chat_pane_has_focus(new))
+
+    def _chat_has_keyboard_focus(self, focus_widget=None) -> bool:
+        """True when focus is in chat, including when the pane is about to be hidden."""
+        if focus_widget is None:
+            app = QApplication.instance()
+            focus_widget = app.focusWidget() if app is not None else None
+        if focus_widget is None:
+            return False
+        chat = getattr(self, "chat_widget", None)
+        if chat is not None and (
+            focus_widget is chat or chat.isAncestorOf(focus_widget)
+        ):
+            return True
+        mw = getattr(self, "main_window", None)
+        container = getattr(mw, "chat_container", None) if mw is not None else None
+        if container is not None and (
+            focus_widget is container or container.isAncestorOf(focus_widget)
+        ):
+            return True
+        return False
+
+    def _redirect_focus_after_chat_hidden(self) -> None:
+        """Move keyboard focus from the hidden chat pane to a visible main pane."""
+        mw = getattr(self, "main_window", None)
+        if mw is None:
+            return
+        mode = getattr(mw, "current_view_mode", None)
+        if mode == "browse":
+            if hasattr(mw, "focus_canvas"):
+                mw.focus_canvas()
+        elif (
+            self.is_tree_visible()
+            and getattr(mw, "tree_container", None) is not None
+            and mw.tree_container.isVisible()
+            and hasattr(mw, "focus_tree")
+        ):
+            mw.focus_tree()
+        elif hasattr(mw, "focus_canvas"):
+            mw.focus_canvas()
+        self._update_chat_header_focus(False)
 
     def _chat_pane_has_focus(self, focus_widget=None) -> bool:
         if not self._chat_feature_enabled or not self.is_chat_visible():

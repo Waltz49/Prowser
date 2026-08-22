@@ -21,7 +21,6 @@ from PySide6.QtGui import (
     QPalette,
     QPen,
     QPixmap,
-    QTextDocument,
     qGray,
 )
 from PySide6.QtWidgets import (
@@ -521,83 +520,13 @@ def chat_prompt_edit_stylesheet() -> str:
 
 
 
-CHAT_PROMPT_LIBRARY_PREVIEW_MAX_LINES = 4
 _PROMPT_PREVIEW_STYLE_PADDING_V = 12
 _PROMPT_PREVIEW_STYLE_BORDER_V = 2
 
 
-def chat_prompt_preview_stylesheet() -> str:
-    th = get_active_theme()
-    return f"""
-        QLabel#chatPromptLibraryPreview {{
-            background-color: {th.sidebar_background_color_hex};
-            color: {th.dialog_text_color_hex};
-            border: 1px solid {th.border_default_hex};
-            border-radius: 6px;
-            padding: 6px;
-        }}
-    """
-
-
-def _wrapped_line_count_at_width(text: str, font: QFont, width: int) -> int:
-    doc = QTextDocument()
-    doc.setDefaultFont(font)
-    doc.setPlainText(text.replace("\r\n", "\n").replace("\r", "\n"))
-    if width > 1:
-        doc.setTextWidth(float(width))
-    fm = QFontMetrics(font)
-    line_h = max(1, fm.lineSpacing())
-    layout = doc.documentLayout()
-    total = 0
-    block = doc.firstBlock()
-    while block.isValid():
-        br = layout.blockBoundingRect(block)
-        total += max(1, int((br.height() + line_h - 1) // line_h))
-        block = block.next()
-    return max(1, total)
-
-
-def elide_prompt_library_preview(
-    text: str,
-    font: QFont,
-    width: int,
-    max_lines: int = CHAT_PROMPT_LIBRARY_PREVIEW_MAX_LINES,
-) -> str:
-    plain = (text or "(empty prompt)").replace("\r\n", "\n").replace("\r", "\n")
-    if width <= 1 or _wrapped_line_count_at_width(plain, font, width) <= max_lines:
-        return plain
-
-    fm = QFontMetrics(font)
-    lo, hi = 0, len(plain)
-    best = 0
-    while lo <= hi:
-        mid = (lo + hi) // 2
-        candidate = plain[:mid].rstrip("\n")
-        if _wrapped_line_count_at_width(candidate, font, width) <= max_lines:
-            best = mid
-            lo = mid + 1
-        else:
-            hi = mid - 1
-
-    trimmed = plain[:best].rstrip("\n")
-    if not trimmed:
-        return fm.elidedText(plain, Qt.TextElideMode.ElideRight, width)
-
-    if best < len(plain.rstrip()):
-        lines = trimmed.split("\n")
-        last = lines[-1] if lines else ""
-        lines[-1] = fm.elidedText(
-            last.rstrip() + "…",
-            Qt.TextElideMode.ElideRight,
-            width,
-        )
-        return "\n".join(lines)
-    return trimmed
-
-
 def prompt_library_preview_height_px(
     font: QFont,
-    lines: int = CHAT_PROMPT_LIBRARY_PREVIEW_MAX_LINES,
+    lines: int = 6,
 ) -> int:
     fm = QFontMetrics(font)
     return (
@@ -605,41 +534,6 @@ def prompt_library_preview_height_px(
         + _PROMPT_PREVIEW_STYLE_PADDING_V
         + _PROMPT_PREVIEW_STYLE_BORDER_V
     )
-
-
-class ChatPromptLibraryPreview(QLabel):
-    """Read-only multi-line prompt preview for system/user prompt library dialogs."""
-
-    def __init__(self, parent: QWidget | None = None) -> None:
-        super().__init__(parent)
-        self.setObjectName("chatPromptLibraryPreview")
-        self._full_text = ""
-        self.setWordWrap(True)
-        self.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
-        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        self.setStyleSheet(chat_prompt_preview_stylesheet())
-
-    def set_prompt_text(self, text: str) -> None:
-        self._full_text = text
-        self._refresh()
-
-    def prompt_text(self) -> str:
-        return self._full_text
-
-    def resizeEvent(self, event) -> None:  # noqa: N802
-        super().resizeEvent(event)
-        self._refresh()
-
-    def _refresh(self) -> None:
-        font = self.font()
-        self.setFixedHeight(
-            prompt_library_preview_height_px(font, CHAT_PROMPT_LIBRARY_PREVIEW_MAX_LINES)
-        )
-        width = self.contentsRect().width()
-        if width > 1:
-            self.setText(elide_prompt_library_preview(self._full_text, font, width))
-        else:
-            self.setText(self._full_text or "(empty prompt)")
 
 
 _CHAT_LIBRARY_ICON_BTN_SIZE = 22

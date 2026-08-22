@@ -64,15 +64,6 @@ def imagegen_values_for_dialog_save(values: dict, panel) -> dict:
     return out
 
 
-def print_ai_exit_env_report() -> None:
-    """Print configured text/image exit diagnostics to stdout."""
-    from exit_scripts import describe_exit_script_setting
-
-    print()
-    print(describe_exit_script_setting(SETTING_TEXT_AI_EXIT))
-    print(describe_exit_script_setting(SETTING_IMAGE_AI_EXIT))
-
-
 def _prompt_filter_exits_enabled() -> bool:
     settings = get_config().load_settings()
     if settings.get("use_prompt_filter_exits"):

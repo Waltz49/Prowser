@@ -65,14 +65,17 @@ from chat_plugins.chat_lmstudio import (
     save_chat_system_prompt,
 )
 from chat_plugins.chat_message_widgets import ChatMessageWidget
-from chat_plugins.chat_prompt_input import ChatPromptInput
+from chat_plugins.chat_prompt_input import ChatPromptInput, CHAT_PROMPT_BOTTOM_PADDING_EXTRA_PX
 from chat_plugins.chat_session import ChatMessage, ChatSession
 from chat_plugins.chat_named_user_prompts import (
     run_chat_user_prompt_library,
     run_chat_user_prompt_save_dialog,
 )
 from chat_plugins.chat_prefix_postfix import run_chat_prefix_postfix_library
-from chat_plugins.chat_system_prompt_dialog import edit_chat_system_prompt
+from chat_plugins.chat_named_system_prompts import (
+    active_system_prompt_label,
+    run_chat_system_prompt_library,
+)
 from chat_plugins.chat_tools_menu import show_chat_context_menu, show_chat_tools_menu
 from chat_plugins.chat_worker import ChatLmStudioService
 from speech_utils import is_speaking, register_speech_state_listener, unregister_speech_state_listener
@@ -377,13 +380,38 @@ class ChatPaneWidget(QWidget):
         )
         self.ensure_input_focus_policy()
 
+        self._system_prompt_info = QLabel()
+        self._system_prompt_info.setAlignment(
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+        )
+        self._update_system_prompt_info()
+        self._style_system_prompt_info()
+
         layout.addWidget(self._unavailable_host, 1)
         layout.addWidget(self._scroll, 1)
         layout.addWidget(self._prompt_input, 0)
+        layout.addWidget(self._system_prompt_info, 0)
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.customContextMenuRequested.connect(
             lambda pos: show_chat_context_menu(self, self.mapToGlobal(pos))
         )
+
+    def _style_system_prompt_info(self) -> None:
+        th = get_active_theme()
+        muted = getattr(
+            th,
+            "information_action_icon_muted_hex",
+            th.shortcuts_note_muted_hex,
+        )
+        self._system_prompt_info.setStyleSheet(
+            f"color: {muted}; font-size: 11px;"
+            f" padding: 0px 8px {CHAT_PROMPT_BOTTOM_PADDING_EXTRA_PX}px 8px;"
+            f" margin: 0px;"
+        )
+
+    def _update_system_prompt_info(self) -> None:
+        label = active_system_prompt_label(self._session.system_prompt)
+        self._system_prompt_info.setText(f"System prompt: {label}")
 
     def _style_unavailable_panel(self) -> None:
         th = get_active_theme()
@@ -418,10 +446,12 @@ class ChatPaneWidget(QWidget):
             self._style_unavailable_panel()
             self._unavailable_host.show()
             self._scroll.hide()
+            self._system_prompt_info.hide()
             self._prompt_input.hide()
         else:
             self._unavailable_host.hide()
             self._scroll.show()
+            self._system_prompt_info.show()
             self._prompt_input.show()
 
     def ensure_input_focus_policy(self) -> None:
@@ -450,6 +480,7 @@ class ChatPaneWidget(QWidget):
         self._scroll.setStyleSheet(th.sidebar_pane_scroll_area_stylesheet())
         apply_scroll_area_viewport_background(self._scroll)
         self._style_unavailable_panel()
+        self._style_system_prompt_info()
         for widget in self._message_widgets:
             widget.refresh_theme_styles()
         self._prompt_input.refresh_theme_styles()
@@ -583,14 +614,15 @@ class ChatPaneWidget(QWidget):
             self._show_unavailable_only(True)
 
     def edit_system_prompt(self) -> None:
-        result = edit_chat_system_prompt(
+        selected_text = run_chat_system_prompt_library(
             self.main_window,
-            self._session.system_prompt,
+            suggestion_text=self._session.system_prompt,
         )
-        if result is None:
+        if selected_text is None:
             return
-        self._session.system_prompt = result
-        save_chat_system_prompt(result)
+        self._session.system_prompt = selected_text
+        save_chat_system_prompt(selected_text)
+        self._update_system_prompt_info()
 
     def open_favorite_user_prompts(self) -> None:
         current_text = self._prompt_input.text_edit().toPlainText()

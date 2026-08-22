@@ -35,18 +35,3 @@ def say_exit_argv(text: str) -> list[str]:
     argv.extend(["-p", text])
     return argv
 
-
-def describe_say_exit_env() -> str:
-    """One-line status for the configured say exit (for ``prowser.py --env``)."""
-    from exit_scripts import describe_exit_script_setting
-
-    line = describe_exit_script_setting(SETTING_SAY_EXIT)
-    voice = os.environ.get(ENV_SAY_VOICE, "").strip()
-    if voice and "Exists" in line:
-        return f"{line} voice={voice}"
-    return line
-
-
-def print_say_exit_env_report() -> None:
-    """Print speech exit diagnostics to stdout."""
-    print(describe_say_exit_env())

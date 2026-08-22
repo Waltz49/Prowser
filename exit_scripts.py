@@ -24,33 +24,11 @@ _LEGACY_ENV_BY_SETTING = {
     SETTING_SAY_EXIT: "PROWSER_SAY_EXIT",
 }
 
-_EXIT_SETTING_LABELS = {
-    SETTING_TEXT_AI_EXIT: "Text AI exit",
-    SETTING_IMAGE_AI_EXIT: "Image AI exit",
-    SETTING_SAY_EXIT: "Say exit",
-}
-
-_ANSI_RESET = "\033[0m"
-_ANSI_ORANGE = "\033[38;5;208m"
-
 
 class ParsedExitScript(NamedTuple):
     prefix: str
     path: str
     raw: str
-
-
-def _stdout_supports_color() -> bool:
-    if not sys.stdout.isatty():
-        return False
-    term = os.environ.get("TERM", "")
-    return bool(term) and term.lower() != "dumb"
-
-
-def _status_prefix(label: str) -> str:
-    if _stdout_supports_color():
-        return f"[{_ANSI_ORANGE}{label}{_ANSI_RESET}]"
-    return f"[{label}]"
 
 
 def _prefix_token(token: str) -> str | None:
@@ -212,42 +190,3 @@ def any_prompt_filter_exit_configured() -> bool:
         get_exit_script_setting(SETTING_TEXT_AI_EXIT)
         or get_exit_script_setting(SETTING_IMAGE_AI_EXIT)
     )
-
-
-def describe_exit_script_setting(key: str) -> str:
-    """One-line status for ``prowser.py --env``."""
-    label = _EXIT_SETTING_LABELS.get(key, key)
-    raw = get_exit_script_setting(key)
-    if not raw:
-        return f"{label}: Not configured"
-    display = raw
-    parsed = parse_exit_script_command(raw)
-    if not parsed.path:
-        return f"{_status_prefix('Invalid')}\t{label}: {display}"
-    full_path = normalize_exit_script_path(parsed.path)
-    if not os.path.isfile(full_path):
-        return f"{_status_prefix('Not Found')}\t{label}: {display}"
-    if os.path.isdir(full_path):
-        return f"{_status_prefix('Not file')}\t{label}: {display}"
-    if exit_script_path_usable(full_path):
-        issues = exit_script_path_issues(full_path)
-        if issues:
-            return (
-                f"{_status_prefix('Exists; ' + '; '.join(issues))}\t"
-                f"{label}: {display}"
-            )
-        return f"{_status_prefix('Exists')}\t{label}: {display}"
-    issues = exit_script_path_issues(full_path)
-    if issues:
-        return (
-            f"{_status_prefix('Exists; ' + '; '.join(issues))}\t"
-            f"{label}: {display}"
-        )
-    return f"{_status_prefix('Not usable')}\t{label}: {display}"
-
-
-def print_exit_scripts_env_report() -> None:
-    """Print configured exit-script diagnostics to stdout."""
-    print()
-    for key in (SETTING_TEXT_AI_EXIT, SETTING_IMAGE_AI_EXIT, SETTING_SAY_EXIT):
-        print(describe_exit_script_setting(key))

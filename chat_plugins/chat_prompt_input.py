@@ -176,7 +176,7 @@ class ChatPromptInput(QWidget):
     def __init__(self, parent=None, *, main_window=None):
         super().__init__(parent)
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(6, 4, 6, CHAT_PROMPT_BOTTOM_PADDING_EXTRA_PX)
+        layout.setContentsMargins(6, 4, 6, 0)
         layout.setSpacing(4)
         self._thumb_row = ChatImageThumbRow(
             self, compact_row=True, main_window=main_window
