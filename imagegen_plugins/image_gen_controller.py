@@ -2272,6 +2272,12 @@ class ImageGenController(QObject):
         """True when quitting would cancel an in-flight model worker task."""
         return self._tasks.is_running() or self._foreground_tasks.is_running()
 
+    def _deferred_quit_has_more_work_after_current(self) -> bool:
+        """True when wait-for-all would run more copies or queued jobs than quit-after-current."""
+        if self._queue:
+            return True
+        return self._pending_batch_copies() > 1
+
     def _deferred_quit_status_message(self) -> str:
         if self._deferred_quit_wait_all_jobs:
             return "Prowser will shut down after all queued jobs finish."
@@ -2288,12 +2294,21 @@ class ImageGenController(QObject):
         return "Wait for all"
 
     def _refresh_deferred_quit_dialog(self) -> None:
+        if (
+            not self._deferred_quit_has_more_work_after_current()
+            and self._deferred_quit_wait_all_jobs
+        ):
+            self._deferred_quit_wait_all_jobs = False
+            self._queue_advance_suppressed = True
         label = self._deferred_quit_status_label
         if label is not None:
             label.setText(self._deferred_quit_status_message())
         toggle_btn = self._deferred_quit_toggle_btn
         if toggle_btn is not None:
-            toggle_btn.setText(self._deferred_quit_toggle_button_label())
+            show_toggle = self._deferred_quit_has_more_work_after_current()
+            toggle_btn.setVisible(show_toggle)
+            if show_toggle:
+                toggle_btn.setText(self._deferred_quit_toggle_button_label())
 
     def _show_deferred_quit_dialog(self) -> None:
         from PySide6.QtCore import Qt
@@ -2324,7 +2339,10 @@ class ImageGenController(QObject):
         button_row = QHBoxLayout()
         toggle_btn = QPushButton(self._deferred_quit_toggle_button_label())
         toggle_btn.clicked.connect(self._toggle_deferred_quit_mode)
-        button_row.addWidget(toggle_btn)
+        show_toggle = self._deferred_quit_has_more_work_after_current()
+        toggle_btn.setVisible(show_toggle)
+        if show_toggle:
+            button_row.addWidget(toggle_btn)
         button_row.addStretch()
         cancel_btn = QPushButton("Cancel")
         cancel_btn.setDefault(True)
