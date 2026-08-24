@@ -246,6 +246,7 @@ class EditExifUserCommentDialog(QDialog):
         self._text_edit_container = None
         self.ai_btn = None
         self._action_nav: InformationActionNavBar | None = None
+        self._delete_action_nav: InformationActionNavBar | None = None
         self.settings_btn = None
 
         self.setWindowTitle("Edit EXIF User Comment")
@@ -289,7 +290,15 @@ class EditExifUserCommentDialog(QDialog):
             contents_margins=(0, 6, 0, 0),
         )
         self._action_nav.action_triggered.connect(self._on_info_action)
-        delete_btn = self._action_nav.button("delete")
+        self._delete_action_nav = InformationActionNavBar(
+            self,
+            action_order=("delete",),
+            right_pinned_action_ids=frozenset(),
+            include_stretch=False,
+            contents_margins=(0, 6, 0, 0),
+        )
+        self._delete_action_nav.action_triggered.connect(self._on_info_action)
+        delete_btn = self._delete_action_nav.button("delete")
         if delete_btn is not None:
             delete_btn.setToolTip("Clear comment text")
         from speech_utils import register_speech_state_listener
@@ -325,17 +334,17 @@ class EditExifUserCommentDialog(QDialog):
                 0,
                 Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
             )
+        if _is_lmstudio_services_available() or _lmstudio_ui_enabled():
             header_action_row.addWidget(
                 self.settings_btn,
                 0,
                 Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
             )
-        elif _lmstudio_ui_enabled():
-            header_action_row.addWidget(
-                self.settings_btn,
-                0,
-                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
-            )
+        header_action_row.addWidget(
+            self._delete_action_nav,
+            0,
+            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
+        )
 
         main_layout.addLayout(header_row)
 
@@ -423,6 +432,8 @@ class EditExifUserCommentDialog(QDialog):
             from speech_utils import is_speaking
 
             self._action_nav.set_speak_highlighted(is_speaking())
+        if self._delete_action_nav is not None:
+            self._delete_action_nav.refresh_theme_styles()
         if self.ai_btn is not None:
             self.ai_btn.setStyleSheet(_overlay_chip_stylesheet())
         if self._instructions_pane is not None:
@@ -502,7 +513,10 @@ class EditExifUserCommentDialog(QDialog):
     def _update_action_nav_state(self) -> None:
         if self._action_nav is None:
             return
-        self._action_nav.apply_specs(self._action_nav_specs())
+        specs = self._action_nav_specs()
+        self._action_nav.apply_specs(specs)
+        if self._delete_action_nav is not None:
+            self._delete_action_nav.apply_specs(specs)
 
     def _on_info_action(self, action_id: str) -> None:
         if action_id == "copy":

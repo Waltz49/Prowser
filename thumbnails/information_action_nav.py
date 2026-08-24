@@ -9,7 +9,7 @@ from PySide6.QtCore import Qt, QSize, Signal
 from PySide6.QtWidgets import QHBoxLayout, QPushButton, QWidget
 
 from theme.theme_service import get_active_theme
-from thumbnails.thumbnail_constants import COPY_SYMBOL, OPTION_SYMBOL
+from thumbnails.thumbnail_constants import OPTION_SYMBOL
 from widgets.icon_hover_swap import (
     IconHoverSwap,
     attach_icon_hover_swap,
@@ -19,7 +19,7 @@ from widgets.icon_hover_swap import (
 INFO_ACTION_ICON_PX = 18
 INFO_ACTION_BTN_PX = 26
 INFO_NAV_ACTION_ORDER = ("edit", "copy", "speak", "create", "editai", "delete")
-INFO_NAV_ACTION_ORDER_NO_EDIT = ("copy", "speak", "create", "editai", "delete")
+INFO_NAV_ACTION_ORDER_NO_EDIT = ("copy", "speak", "create", "editai")
 _RIGHT_PINNED_ACTION_IDS = frozenset({"delete"})
 
 INFO_ACTION_TOOLTIPS = {
@@ -34,16 +34,14 @@ INFO_ACTION_TOOLTIPS = {
     "delete": "Delete user comment",
 }
 
-_IMAGE_ACTION_IDS = frozenset({"edit", "create", "editai", "delete", "speak"})
+_IMAGE_ACTION_IDS = frozenset({"edit", "copy", "create", "editai", "delete", "speak"})
 _IMAGE_ICON_PATHS = {
     "edit": ("comment_icon.png", "comment_icon_hover.png"),
+    "copy": ("copy.png", "copy_hover.png"),
     "create": ("fromText.png", "fromText_hover.png"),
     "editai": ("editAI.png", "editAI_hover.png"),
     "delete": ("trash_icon.png", "trash_icon_hover.png"),
     "speak": ("bullhorn.png", "bullhorn_hover.png"),
-}
-_TEXT_ACTION_SYMBOLS = {
-    "copy": COPY_SYMBOL,
 }
 
 
@@ -108,6 +106,7 @@ class InformationActionNavBar(QWidget):
         parent: QWidget | None = None,
         *,
         action_order: Iterable[str] = INFO_NAV_ACTION_ORDER,
+        right_pinned_action_ids: frozenset[str] | None = None,
         include_stretch: bool = True,
         contents_margins: tuple[int, int, int, int] = (0, 4, 0, 0),
     ):
@@ -117,6 +116,11 @@ class InformationActionNavBar(QWidget):
         self._buttons: Dict[str, QPushButton] = {}
         self._speak_highlighted = False
         self._icon_hovers: Dict[str, IconHoverSwap] = {}
+        pinned_ids = (
+            right_pinned_action_ids
+            if right_pinned_action_ids is not None
+            else _RIGHT_PINNED_ACTION_IDS
+        )
 
         layout = QHBoxLayout(self)
         layout.setContentsMargins(*contents_margins)
@@ -125,17 +129,16 @@ class InformationActionNavBar(QWidget):
         left_ids = [
             action_id
             for action_id in self._action_order
-            if action_id not in _RIGHT_PINNED_ACTION_IDS
+            if action_id not in pinned_ids
         ]
         right_ids = [
             action_id
             for action_id in self._action_order
-            if action_id in _RIGHT_PINNED_ACTION_IDS
+            if action_id in pinned_ids
         ]
 
         for action_id in left_ids + right_ids:
-            text = _TEXT_ACTION_SYMBOLS.get(action_id, "")
-            btn = QPushButton(text)
+            btn = QPushButton()
             btn.setToolTip(INFO_ACTION_TOOLTIPS.get(action_id, ""))
             btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
             btn.setAttribute(Qt.WidgetAttribute.WA_Hover, True)
@@ -181,7 +184,6 @@ class InformationActionNavBar(QWidget):
         self.setStyleSheet(th.file_tree_nav_container_stylesheet())
         for action_id, btn in self._buttons.items():
             highlighted = self._speak_highlighted if action_id == "speak" else False
-            text_button = action_id in _TEXT_ACTION_SYMBOLS
             if action_id in _IMAGE_ACTION_IDS:
                 normal_name, hover_name = _IMAGE_ICON_PATHS[action_id]
                 normal, hover = icon_pair_from_assets(normal_name, hover_name)
@@ -193,8 +195,5 @@ class InformationActionNavBar(QWidget):
                 else:
                     swap.set_icons(normal, hover)
             btn.setStyleSheet(
-                info_action_button_stylesheet(
-                    highlighted=highlighted,
-                    text_button=text_button,
-                )
+                info_action_button_stylesheet(highlighted=highlighted)
             )

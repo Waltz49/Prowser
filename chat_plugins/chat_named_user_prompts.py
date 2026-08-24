@@ -8,7 +8,7 @@ import uuid
 from copy import deepcopy
 from dataclasses import dataclass, field
 
-from PySide6.QtCore import QEvent, QObject, Qt
+from PySide6.QtCore import QEvent, QObject, Qt, QSize
 from PySide6.QtGui import QDragEnterEvent, QDragMoveEvent, QDropEvent
 from PySide6.QtWidgets import (
     QButtonGroup,
@@ -52,7 +52,7 @@ from imagegen_plugins.image_gen_form_layout import (
     IMAGE_GEN_FIELD_RESET_BTN_SIZE,
     image_gen_prompt_copy_btn_stylesheet,
 )
-from thumbnails.thumbnail_constants import COPY_SYMBOL
+from widgets.icon_hover_swap import attach_icon_hover_swap, icon_pair_from_assets
 from utils import get_button_style, get_dialog_shell_stylesheet
 
 ICON_BTN_SIZE = 22
@@ -301,10 +301,14 @@ class ChatUserPromptLibraryDialog(QDialog):
         header_layout.setContentsMargins(0, 0, 0, 0)
         header_layout.setSpacing(6)
         header_layout.addWidget(QLabel("Select a favorite to use:"))
-        copy_btn = QPushButton(COPY_SYMBOL)
+        copy_btn = QPushButton()
         copy_btn.setObjectName("favoriteUserPromptCopyBtn")
         copy_btn.setToolTip("Copy to clipboard")
         copy_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        copy_btn.setAttribute(Qt.WidgetAttribute.WA_Hover, True)
+        copy_btn.setIconSize(QSize(16, 16))
+        normal, hover = icon_pair_from_assets("copy.png", "copy_hover.png")
+        attach_icon_hover_swap(copy_btn, normal, hover)
         copy_btn.setFixedSize(
             IMAGE_GEN_FIELD_RESET_BTN_SIZE, IMAGE_GEN_FIELD_RESET_BTN_SIZE
         )

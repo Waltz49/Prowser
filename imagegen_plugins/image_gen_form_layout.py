@@ -1619,12 +1619,16 @@ def create_image_gen_prompt_copy_button(
     *,
     object_name: str = "imageGenPromptCopyBtn",
 ) -> QPushButton:
-    from thumbnails.thumbnail_constants import COPY_SYMBOL
+    from widgets.icon_hover_swap import attach_icon_hover_swap, icon_pair_from_assets
 
-    btn = QPushButton(COPY_SYMBOL, parent)
+    btn = QPushButton("", parent)
     btn.setObjectName(object_name)
     btn.setToolTip("Copy to clipboard")
     btn.setCursor(Qt.CursorShape.PointingHandCursor)
+    btn.setAttribute(Qt.WidgetAttribute.WA_Hover, True)
+    btn.setIconSize(QSize(_IMAGE_GEN_TRASH_ICON_PX, _IMAGE_GEN_TRASH_ICON_PX))
+    normal, hover = icon_pair_from_assets("copy.png", "copy_hover.png")
+    attach_icon_hover_swap(btn, normal, hover)
     btn.setStyleSheet(
         image_gen_prompt_copy_btn_stylesheet(
             selector=f"QPushButton#{object_name}"
