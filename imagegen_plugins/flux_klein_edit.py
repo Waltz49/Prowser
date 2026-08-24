@@ -80,59 +80,39 @@ def _klein_edit_field_layout(
     )
 
 
-def flux_klein_4b_edit_field_layout(
-    plugin: "_Plugin",
-    values: dict[str, Any],
-    effective_max_side: int,
-) -> Tuple[FieldNode, ...]:
-    return _klein_edit_field_layout(plugin, values, effective_max_side)
+def _plugin(
+    plugin_id: str,
+    hf_model_id: str,
+    model_comment: str,
+) -> ImageGenModelPlugin:
+    return ImageGenModelPlugin(
+        plugin_id=plugin_id,
+        pipeline_id="mflux_flux2_klein_edit",
+        display_name=hf_model_id,
+        hf_model_id=hf_model_id,
+        function="edit",
+        lora_host_id=HOST_FLUX2_KLEIN,
+        model_comment=model_comment,
+        max_generation_dimension=2048,
+        field_layout_builder=_klein_edit_field_layout,
+        model_defaults=dict(_KLEIN_EDIT_DEFAULTS),
+    )
 
 
-def flux_klein_9b_edit_field_layout(
-    plugin: "_Plugin",
-    values: dict[str, Any],
-    effective_max_side: int,
-) -> Tuple[FieldNode, ...]:
-    return _klein_edit_field_layout(plugin, values, effective_max_side)
-
-
-FLUX_KLEIN_4B_EDIT_PLUGIN = ImageGenModelPlugin(
-    plugin_id="flux_klein_4b_edit",
-    pipeline_id="mflux_flux2_klein_edit",
-    display_name=FLUX2_KLEIN_4B,
-    hf_model_id=FLUX2_KLEIN_4B,
-    function="edit",
-    lora_host_id=HOST_FLUX2_KLEIN,
-    model_comment="Medium Quality",
-    max_generation_dimension=2048,
-    field_layout_builder=flux_klein_4b_edit_field_layout,
-    model_defaults=_KLEIN_EDIT_DEFAULTS,
+FLUX_KLEIN_4B_EDIT_PLUGIN = _plugin(
+    "flux_klein_4b_edit",
+    FLUX2_KLEIN_4B,
+    "Medium Quality",
 )
-
-FLUX_KLEIN_9B_EDIT_PLUGIN = ImageGenModelPlugin(
-    plugin_id="flux_klein_9b_edit",
-    pipeline_id="mflux_flux2_klein_edit",
-    display_name=FLUX2_KLEIN_9B,
-    hf_model_id=FLUX2_KLEIN_9B,
-    function="edit",
-    lora_host_id=HOST_FLUX2_KLEIN,
-    model_comment="High Quality, slower than 4B, Low RAM Mode suggested",
-    max_generation_dimension=2048,
-    field_layout_builder=flux_klein_9b_edit_field_layout,
-    model_defaults=_KLEIN_EDIT_DEFAULTS,
+FLUX_KLEIN_9B_EDIT_PLUGIN = _plugin(
+    "flux_klein_9b_edit",
+    FLUX2_KLEIN_9B,
+    "High Quality, slower than 4B, Low RAM Mode suggested",
 )
-
-FLUX_KLEIN_9B_KV_EDIT_PLUGIN = ImageGenModelPlugin(
-    plugin_id="flux_klein_9b_kv_edit",
-    pipeline_id="mflux_flux2_klein_edit",
-    display_name=FLUX2_KLEIN_9B_KV,
-    hf_model_id=FLUX2_KLEIN_9B_KV,
-    function="edit",
-    lora_host_id=HOST_FLUX2_KLEIN,
-    model_comment="9B KV-cache variant; faster than full 9B, shares 9B LoRAs",
-    max_generation_dimension=2048,
-    field_layout_builder=flux_klein_9b_edit_field_layout,
-    model_defaults=_KLEIN_EDIT_DEFAULTS,
+FLUX_KLEIN_9B_KV_EDIT_PLUGIN = _plugin(
+    "flux_klein_9b_kv_edit",
+    FLUX2_KLEIN_9B_KV,
+    "9B KV-cache variant; faster than full 9B, shares 9B LoRAs",
 )
 
 # Back-compat alias (was flux_klein_edit / flux_klein_4b naming in early wiring).

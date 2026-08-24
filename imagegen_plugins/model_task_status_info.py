@@ -6,6 +6,7 @@ from __future__ import annotations
 import html
 import os
 import re
+from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
 from imagegen_plugins.image_gen_model_availability import model_display_name
@@ -19,6 +20,36 @@ _AI_REFINE_PROGRESS_TOTAL = 100
 _AI_REFINE_PROGRESS_CHAR_BUDGET = 800
 # Refresh job progress UI when progress advances by this many percent.
 _AI_REFINE_PROGRESS_REFRESH_PERCENT = 20
+
+
+@dataclass(frozen=True)
+class ActiveJobStatusView:
+    """Structured live status for the active generation job (timing + progress bars)."""
+
+    elapsed_seconds: float | None
+    estimate_seconds: float | None
+    step: int | None
+    step_total: int | None
+    cooldown_seconds_remaining: int
+    series_progress: tuple[int, int] | None
+    queue_jobs_progress: tuple[int, int] | None
+    steps_label: str
+
+
+def build_active_job_status_view(controller) -> ActiveJobStatusView:
+    elapsed, estimate, step, step_total = (
+        controller.snapshot_generation_timing_for_info_panel()
+    )
+    return ActiveJobStatusView(
+        elapsed_seconds=elapsed,
+        estimate_seconds=estimate,
+        step=step,
+        step_total=step_total,
+        cooldown_seconds_remaining=controller.copy_cooldown_seconds_remaining(),
+        series_progress=controller.snapshot_series_progress_for_active_job_strip(),
+        queue_jobs_progress=controller.snapshot_queue_jobs_progress_for_active_job_strip(),
+        steps_label=controller.active_job_timing_steps_label(),
+    )
 
 
 def ai_refine_progress_step_from_chars(chars_received: int) -> int:

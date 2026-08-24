@@ -152,6 +152,11 @@ class ImageGenUnifiedDialog(QDialog):
         self._dirty_recheck_timer = QTimer(self)
         self._dirty_recheck_timer.setSingleShot(True)
         self._dirty_recheck_timer.timeout.connect(self._recheck_cancel_visibility)
+        self._layout_debounce_timer = QTimer(self)
+        self._layout_debounce_timer.setSingleShot(True)
+        self._layout_debounce_timer.setInterval(16)
+        self._layout_debounce_timer.timeout.connect(self._run_debounced_shell_layout)
+        self._layout_pass_in_progress = False
         self._replace_job_id = ""
         self._replace_queue_signal_connected = False
         self._panel_load_token = 0
@@ -380,11 +385,12 @@ class ImageGenUnifiedDialog(QDialog):
             if (
                 function == FUNCTION_EDIT
                 and self._edit_source_paths_override
-                and hasattr(self._current_panel, "_set_edit_source_paths")
             ):
-                self._current_panel._set_edit_source_paths(
-                    list(self._edit_source_paths_override)
-                )
+                setter = getattr(self._current_panel, "set_edit_source_paths", None)
+                if setter is None:
+                    setter = getattr(self._current_panel, "_set_edit_source_paths", None)
+                if callable(setter):
+                    setter(list(self._edit_source_paths_override))
             if initial_prompt is not None:
                 restore = getattr(self._current_panel, "restore_state", None)
                 if restore is not None:
@@ -425,7 +431,7 @@ class ImageGenUnifiedDialog(QDialog):
             remember_imagegen_last_function(self._main_window, function)
 
             self._update_chrome()
-            if auto_import_available and hasattr(panel, "_on_import_available"):
+            if auto_import_available:
                 from imagegen_plugins.debug_exif_lora_trace import agent_exif_lora_dbg
 
                 lora_field = getattr(panel, "_lora_field", None)
@@ -440,7 +446,11 @@ class ImageGenUnifiedDialog(QDialog):
                         ),
                     },
                 )
-                panel._on_import_available()
+                importer = getattr(panel, "import_available", None)
+                if callable(importer):
+                    importer()
+                elif hasattr(panel, "_on_import_available"):
+                    panel._on_import_available()
                 agent_exif_lora_dbg(
                     "H1",
                     "image_gen_unified_dialog:switch_to_function",
@@ -473,17 +483,20 @@ class ImageGenUnifiedDialog(QDialog):
         raise_dialog_without_space_hop(self)
         panel = self._current_panel
         if panel is not None:
-            getter = getattr(panel, "_prompt_edit_widget", None)
+            getter = getattr(panel, "prompt_edit_widget", None)
             if callable(getter):
                 edit = getter()
-                if (
-                    isinstance(edit, QPlainTextEdit)
-                    and edit.isVisible()
-                    and edit.isEnabled()
-                ):
-                    edit.setFocus(Qt.FocusReason.OtherFocusReason)
-                    return
-        gen = self.findChild(QPushButton, "imageGenGenerateButton")
+            else:
+                legacy = getattr(panel, "_prompt_edit_widget", None)
+                edit = legacy() if callable(legacy) else None
+            if (
+                isinstance(edit, QPlainTextEdit)
+                and edit.isVisible()
+                and edit.isEnabled()
+            ):
+                edit.setFocus(Qt.FocusReason.OtherFocusReason)
+                return
+        gen = self._generate_btn
         if gen is not None and gen.isVisible() and gen.isEnabled():
             gen.setFocus(Qt.FocusReason.OtherFocusReason)
 
@@ -617,7 +630,7 @@ class ImageGenUnifiedDialog(QDialog):
         if not self._cancel_dirty_fast:
             self._cancel_dirty_fast = True
             set_image_gen_cancel_visible(self._actions, True)
-        sync_image_gen_generate_enabled(self, panel=self._current_panel)
+        sync_image_gen_generate_enabled(self, panel=self._current_panel, generate_btn=self._generate_btn)
         self._dirty_recheck_timer.start(200)
 
     def _reset_cancel_dirty_fast_path(self) -> None:
@@ -657,8 +670,13 @@ class ImageGenUnifiedDialog(QDialog):
 
     def _plugin_installed_for_chrome(self) -> Optional[bool]:
         panel = self._current_panel
-        if panel is not None and hasattr(panel, "_selected_plugin_installed"):
-            return bool(panel._selected_plugin_installed())
+        if panel is not None:
+            checker = getattr(panel, "selected_plugin_installed", None)
+            if callable(checker):
+                return bool(checker())
+            legacy = getattr(panel, "_selected_plugin_installed", None)
+            if callable(legacy):
+                return bool(legacy())
         return None
 
     def _update_chrome(self) -> None:
@@ -673,6 +691,7 @@ class ImageGenUnifiedDialog(QDialog):
             self,
             panel=self._current_panel,
             plugin_installed=self._plugin_installed_for_chrome(),
+            generate_btn=self._generate_btn,
         )
 
     def _ensure_panel(
@@ -777,57 +796,19 @@ class ImageGenUnifiedDialog(QDialog):
         return True
 
     def _validate_function(self, function: str) -> bool:
+        from imagegen_plugins.image_gen_function_prerequisites import (
+            validate_function_prerequisites,
+        )
+
+        source_paths = None
         if function == FUNCTION_EDIT:
-            source_paths = self._resolve_edit_source_paths()
-            if source_paths:
-                if len(source_paths) > MAX_EDIT_SOURCE_IMAGES:
-                    show_styled_warning(
-                        self,
-                        "Edit",
-                        f"Select at most {MAX_EDIT_SOURCE_IMAGES} images before using edit.",
-                    )
-                    return False
-                return True
-            if (
-                self._main_window.current_view_mode == "thumbnail"
-                and hasattr(self._main_window, "selection_manager")
-                and self._main_window.selection_manager
-                and len(self._main_window.selection_manager.get_selected_files())
-                > MAX_EDIT_SOURCE_IMAGES
-            ):
-                show_styled_warning(
-                    self._main_window,
-                    "Edit",
-                    f"Select at most {MAX_EDIT_SOURCE_IMAGES} images before using edit.",
-                )
-                return False
-            if not active_image_paths_for_edit(self._main_window):
-                show_styled_warning(
-                    self._main_window,
-                    "Edit",
-                    "Select an image in browse view, or select up to "
-                    f"{MAX_EDIT_SOURCE_IMAGES} thumbnails, before using edit.",
-                )
-                return False
-        elif function == FUNCTION_EXPAND:
-            if not active_image_path_for_expand(self._main_window):
-                show_styled_warning(
-                    self._main_window,
-                    "Expand",
-                    "Select an image in browse view, or select a single thumbnail, "
-                    "before using expand.",
-                )
-                return False
-        elif function == FUNCTION_INFILL_PAINT:
-            if not active_image_path_for_infill(self._main_window):
-                show_styled_warning(
-                    self._main_window,
-                    "Infill",
-                    "Select an image in browse view, or select a single thumbnail, "
-                    "before using infill by painting.",
-                )
-                return False
-        return True
+            source_paths = self._resolve_edit_source_paths() or None
+        return validate_function_prerequisites(
+            function,
+            self._main_window,
+            parent=self,
+            source_image_paths=source_paths,
+        )
 
     def _schedule_auto_generate(self) -> None:
         QTimer.singleShot(0, self._run_auto_generate)
@@ -1081,19 +1062,28 @@ class ImageGenUnifiedDialog(QDialog):
         self._submit_notice.reposition()
         if self._replace_notice is not None:
             self._replace_notice.reposition()
-        QTimer.singleShot(0, self._on_shell_geometry_changed)
+        self._layout_debounce_timer.start()
 
-    def _on_shell_geometry_changed(self) -> None:
-        self._enforce_shell_minimum_width()
-        panel = self._current_panel
-        if panel is None:
+    def _run_debounced_shell_layout(self) -> None:
+        if self._layout_pass_in_progress:
             return
-        fp = getattr(panel, "_fields_panel", None)
-        if fp is None:
-            return
-        reflow = getattr(fp, "reflow_controls_for_shell_resize", None)
-        if callable(reflow):
-            reflow()
+        self._layout_pass_in_progress = True
+        try:
+            self._enforce_shell_minimum_width()
+            panel = self._current_panel
+            if panel is None:
+                return
+            reflow = getattr(panel, "reflow_for_shell_resize", None)
+            if callable(reflow):
+                reflow()
+                return
+            fp = getattr(panel, "_fields_panel", None)
+            if fp is not None:
+                legacy = getattr(fp, "reflow_controls_for_shell_resize", None)
+                if callable(legacy):
+                    legacy()
+        finally:
+            self._layout_pass_in_progress = False
 
     def keyPressEvent(self, event):
         key = event.key()
@@ -1102,7 +1092,11 @@ class ImageGenUnifiedDialog(QDialog):
             mods & Qt.KeyboardModifier.AltModifier
             and key in (Qt.Key.Key_Left, Qt.Key.Key_Right)
         ):
-            nav = getattr(self._current_panel, "_source_nav", None)
+            nav = getattr(self._current_panel, "get_source_nav", None)
+            if callable(nav):
+                nav = nav()
+            else:
+                nav = getattr(self._current_panel, "_source_nav", None)
             if nav is not None:
                 if key == Qt.Key.Key_Left:
                     nav.navigate_prev()

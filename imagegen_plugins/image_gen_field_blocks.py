@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Optional, Tuple
 
 from imagegen_plugins.image_gen_fields import FieldGroup, FieldNode, FieldSpec
 from imagegen_plugins.image_gen_pipeline_modes import MFLUX_FLOW_MATCH_MIN_STEPS, MFLUX_QUANT_CHOICES
@@ -12,6 +12,9 @@ from imagegen_plugins.mflux_lora_presets import (
     effective_steps_for_lora,
     lora_preset_min_steps,
 )
+
+if TYPE_CHECKING:
+    from imagegen_plugins.image_gen_registry import ImageGenModelPlugin as _Plugin
 
 
 def model_reset_default(
@@ -311,3 +314,119 @@ def sana_extra_fields(
 
 
 MFLUX_STEPS_MIN = MFLUX_FLOW_MATCH_MIN_STEPS
+
+
+def overlap_percentage_field(
+    values: dict[str, Any],
+    *,
+    model_defaults: Optional[dict[str, Any]] = None,
+    default: int = 2,
+) -> FieldSpec:
+    reset_default = int(
+        model_reset_default(model_defaults, "overlap_percentage", default)
+    )
+    return FieldSpec(
+        key="overlap_percentage",
+        label="Overlap %",
+        kind="int_slider",
+        default=int(values.get("overlap_percentage", reset_default)),
+        min_value=0,
+        max_value=20,
+        step=1,
+        reset_default=reset_default,
+    )
+
+
+def flux1_t2i_field_layout(
+    plugin: "_Plugin",
+    values: dict[str, Any],
+    effective_max_side: int,
+    *,
+    default_q: int = 3,
+    low_ram_default: bool = False,
+) -> Tuple[FieldNode, ...]:
+    """Shared create layout for FLUX.1 Schnell/Dev MFLUX text-to-image plugins."""
+    from imagegen_plugins.image_gen_pipeline_modes import get_pipeline
+
+    mode = get_pipeline(plugin.pipeline_id)
+    model_defaults = plugin.model_defaults
+    w_spec, h_spec = dim_slider_block(
+        values,
+        width_min=mode.width_min,
+        height_min=mode.height_min,
+        dim_max=effective_max_side,
+        dim_step=mode.dim_step,
+        model_defaults=model_defaults,
+    )
+    return (
+        FieldSpec(
+            key="prompt",
+            label=mode.prompt_label,
+            kind="text",
+            default=values.get("prompt", ""),
+            required=mode.prompt_required,
+        ),
+        w_spec,
+        h_spec,
+        seed_row_block(values),
+        steps_quant_row_block(
+            values,
+            steps_min=mode.steps_min,
+            steps_max=mode.steps_max,
+            steps_default=mode.steps_default,
+            pipeline_id=plugin.pipeline_id,
+            default_q=default_q,
+            model_defaults=model_defaults,
+        ),
+        guidance_slider_block(
+            values,
+            guidance_min=mode.guidance_min,
+            guidance_max=mode.guidance_max,
+            guidance_default=mode.guidance_default,
+            model_defaults=model_defaults,
+        ),
+        copies_slider_block(values, model_defaults=model_defaults),
+        bool_run_block(
+            low_ram_bool(values, default=low_ram_default),
+        ),
+    )
+
+
+def klein_expand_field_layout(
+    plugin: "_Plugin",
+    values: dict[str, Any],
+    effective_max_side: int,
+    *,
+    steps_node: FieldNode,
+) -> Tuple[FieldNode, ...]:
+    """Shared expand layout for FLUX.2 Klein and SceneWorks Klein expand plugins."""
+    from imagegen_plugins.image_gen_pipeline_modes import get_pipeline
+
+    mode = get_pipeline(plugin.pipeline_id)
+    model_defaults = plugin.model_defaults
+    w_spec, h_spec = dim_slider_block(
+        values,
+        width_min=mode.width_min,
+        height_min=mode.height_min,
+        dim_max=effective_max_side,
+        dim_step=mode.dim_step,
+        model_defaults=model_defaults,
+    )
+    return (
+        FieldSpec(
+            key="prompt",
+            label=mode.prompt_label,
+            kind="text",
+            default=values.get("prompt", ""),
+            required=mode.prompt_required,
+        ),
+        w_spec,
+        h_spec,
+        seed_row_block(values),
+        steps_node,
+        copies_slider_block(values, model_defaults=model_defaults),
+        overlap_percentage_field(values, model_defaults=model_defaults),
+        bool_run_block(
+            low_ram_bool(values, default=True),
+        ),
+    )

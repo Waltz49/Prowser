@@ -102,7 +102,6 @@ class ActiveJobStripWidget(QWidget):
         )
         self._layout_width_px = layout_width_px
         self._active_job_hovered_anchor: str | None = None
-        self._live_timer: QTimer | None = None
         self._cached_content_height = 0
         self._progress_row_count = 0
         self._deferred_remeasure_pending = False
@@ -209,10 +208,7 @@ class ActiveJobStripWidget(QWidget):
         self._controller.task_status_info_changed.connect(
             lambda: self.refresh(force=True)
         )
-        timer = QTimer(self)
-        timer.setInterval(500)
-        timer.timeout.connect(self._on_live_refresh_timer)
-        self._live_timer = timer
+        self._controller.live_status_tick.connect(self._on_live_refresh_timer)
 
     def _imagegen_dialog_building_active(self) -> bool:
         if not self._pause_when_imagegen_dialog_building:
@@ -354,12 +350,8 @@ class ActiveJobStripWidget(QWidget):
     def showEvent(self, event) -> None:
         super().showEvent(event)
         self.refresh(force=True)
-        if self._live_timer is not None:
-            self._live_timer.start()
 
     def hideEvent(self, event) -> None:
-        if self._live_timer is not None:
-            self._live_timer.stop()
         super().hideEvent(event)
 
     def eventFilter(self, obj, event) -> bool:

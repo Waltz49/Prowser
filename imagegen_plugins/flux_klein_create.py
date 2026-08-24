@@ -82,57 +82,37 @@ def _klein_create_field_layout(
     )
 
 
-def flux_klein_4b_create_field_layout(
-    plugin: "_Plugin",
-    values: dict[str, Any],
-    effective_max_side: int,
-) -> Tuple[FieldNode, ...]:
-    return _klein_create_field_layout(plugin, values, effective_max_side)
+def _plugin(
+    plugin_id: str,
+    hf_model_id: str,
+    model_comment: str,
+) -> ImageGenModelPlugin:
+    return ImageGenModelPlugin(
+        plugin_id=plugin_id,
+        pipeline_id="mflux_flux2_klein_create",
+        display_name=hf_model_id,
+        hf_model_id=hf_model_id,
+        function="create",
+        lora_host_id=HOST_FLUX2_KLEIN,
+        model_comment=model_comment,
+        max_generation_dimension=2048,
+        field_layout_builder=_klein_create_field_layout,
+        model_defaults=dict(_KLEIN_CREATE_DEFAULTS),
+    )
 
 
-def flux_klein_9b_create_field_layout(
-    plugin: "_Plugin",
-    values: dict[str, Any],
-    effective_max_side: int,
-) -> Tuple[FieldNode, ...]:
-    return _klein_create_field_layout(plugin, values, effective_max_side)
-
-
-FLUX_KLEIN_4B_CREATE_PLUGIN = ImageGenModelPlugin(
-    plugin_id="flux_klein_4b_create",
-    pipeline_id="mflux_flux2_klein_create",
-    display_name=FLUX2_KLEIN_4B,
-    hf_model_id=FLUX2_KLEIN_4B,
-    function="create",
-    lora_host_id=HOST_FLUX2_KLEIN,
-    model_comment="Medium Quality",
-    max_generation_dimension=2048,
-    field_layout_builder=flux_klein_4b_create_field_layout,
-    model_defaults=_KLEIN_CREATE_DEFAULTS,
+FLUX_KLEIN_4B_CREATE_PLUGIN = _plugin(
+    "flux_klein_4b_create",
+    FLUX2_KLEIN_4B,
+    "Medium Quality",
 )
-
-FLUX_KLEIN_9B_CREATE_PLUGIN = ImageGenModelPlugin(
-    plugin_id="flux_klein_9b_create",
-    pipeline_id="mflux_flux2_klein_create",
-    display_name=FLUX2_KLEIN_9B,
-    hf_model_id=FLUX2_KLEIN_9B,
-    function="create",
-    lora_host_id=HOST_FLUX2_KLEIN,
-    model_comment="High Quality, slower than 4B, Low RAM Mode suggested",
-    max_generation_dimension=2048,
-    field_layout_builder=flux_klein_9b_create_field_layout,
-    model_defaults=_KLEIN_CREATE_DEFAULTS,
+FLUX_KLEIN_9B_CREATE_PLUGIN = _plugin(
+    "flux_klein_9b_create",
+    FLUX2_KLEIN_9B,
+    "High Quality, slower than 4B, Low RAM Mode suggested",
 )
-
-FLUX_KLEIN_9B_KV_CREATE_PLUGIN = ImageGenModelPlugin(
-    plugin_id="flux_klein_9b_kv_create",
-    pipeline_id="mflux_flux2_klein_create",
-    display_name=FLUX2_KLEIN_9B_KV,
-    hf_model_id=FLUX2_KLEIN_9B_KV,
-    function="create",
-    lora_host_id=HOST_FLUX2_KLEIN,
-    model_comment="9B KV-cache variant; faster than full 9B, shares 9B LoRAs",
-    max_generation_dimension=2048,
-    field_layout_builder=flux_klein_9b_create_field_layout,
-    model_defaults=_KLEIN_CREATE_DEFAULTS,
+FLUX_KLEIN_9B_KV_CREATE_PLUGIN = _plugin(
+    "flux_klein_9b_kv_create",
+    FLUX2_KLEIN_9B_KV,
+    "9B KV-cache variant; faster than full 9B, shares 9B LoRAs",
 )

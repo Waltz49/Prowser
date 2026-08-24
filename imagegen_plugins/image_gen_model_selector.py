@@ -89,6 +89,19 @@ def build_installed_plugin_maps(
     return installed, by_id, flags
 
 
+def warm_installed_cache(plugins: List[ImageGenModelPlugin]) -> None:
+    """Prime pipeline_model_is_local for each unique (pipeline_id, hf_model_id)."""
+    seen: set[tuple[str, str]] = set()
+    for plugin in plugins:
+        if not plugin.is_available():
+            continue
+        key = (plugin.pipeline_id, plugin.hf_model_id)
+        if key in seen:
+            continue
+        seen.add(key)
+        plugin_model_is_installed(plugin)
+
+
 def sync_model_combo_width(combo: QComboBox) -> None:
     """Keep the closed model combo wide enough for every plugin label."""
     if combo.count() < 1:
@@ -351,6 +364,7 @@ def sync_image_gen_generate_enabled(
     *,
     panel: Optional[Any] = None,
     plugin_installed: Optional[bool] = None,
+    generate_btn: Optional[Any] = None,
 ) -> None:
     """Enable Generate only when the panel has an installed model selected."""
     from PySide6.QtWidgets import QPushButton
@@ -361,10 +375,12 @@ def sync_image_gen_generate_enabled(
         enabled = plugin is not None and plugin_model_is_installed(plugin)
     else:
         enabled = plugin is not None and bool(plugin_installed)
-    root = host
-    while root.parentWidget() is not None:
-        root = root.parentWidget()
-    btn = root.findChild(QPushButton, "imageGenGenerateButton")
+    btn = generate_btn
+    if btn is None:
+        root = host
+        while root.parentWidget() is not None:
+            root = root.parentWidget()
+        btn = root.findChild(QPushButton, "imageGenGenerateButton")
     if btn is not None:
         btn.setEnabled(enabled)
 

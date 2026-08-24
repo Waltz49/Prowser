@@ -28,12 +28,8 @@ from imagegen_plugins.image_gen_active_model import (
 )
 from imagegen_plugins.image_gen_controller import get_imagegen_controller
 from imagegen_plugins.jobs_display_mode import toggle_jobs_panel
-from imagegen_plugins.image_gen_edit_dialog import (
-    MAX_EDIT_SOURCE_IMAGES,
-    active_image_paths_for_edit,
-)
-from imagegen_plugins.image_gen_expand_dialog import active_image_path_for_expand
-from imagegen_plugins.image_gen_infill_paint_dialog import active_image_path_for_infill
+from imagegen_plugins.image_gen_edit_dialog import MAX_EDIT_SOURCE_IMAGES
+from imagegen_plugins.image_gen_function_prerequisites import normalize_edit_source_paths
 from imagegen_plugins.image_gen_naming import resolve_source_image_paths
 from imagegen_plugins.image_gen_session_state import FunctionSessionState
 from imagegen_plugins.image_gen_unified_dialog import ImageGenUnifiedDialog
@@ -43,7 +39,8 @@ from imagegen_plugins.image_gen_persistence import (
     save_imagegen_dialog_geometry_hex,
 )
 from imagegen_plugins.image_gen_model_availability import confirm_model_download_if_needed
-from imagegen_plugins.image_gen_model_selector import available_plugins
+from imagegen_plugins.image_gen_model_selector import available_plugins, warm_installed_cache
+from imagegen_plugins.image_gen_pipeline_modes import warm_pipeline_availability_cache
 from imagegen_plugins.image_gen_registry import ImageGenModelPlugin
 from imagegen_plugins.pixelmator_export import (
     is_paint_infill_job_values,
@@ -464,18 +461,6 @@ def imagegen_edit_from_text_available() -> bool:
         return False
 
 
-def _normalize_edit_source_paths(
-    paths: Optional[List[str]],
-) -> List[str]:
-    if not paths:
-        return []
-    return [
-        os.path.abspath(p)
-        for p in paths
-        if p and os.path.isfile(p)
-    ][:MAX_EDIT_SOURCE_IMAGES]
-
-
 def imagegen_create_from_text_available() -> bool:
     """True when Create-from-text can run (plugin registered and pipeline backend installed)."""
     try:
@@ -565,7 +550,7 @@ def open_imagegen_edit_from_text_dialog(
     source_image_paths: Optional[List[str]] = None,
 ) -> None:
     """Open Edit > Edit image with AI..., optionally primed from chat."""
-    paths = _normalize_edit_source_paths(source_image_paths)
+    paths = normalize_edit_source_paths(source_image_paths, max_count=MAX_EDIT_SOURCE_IMAGES)
     if not paths:
         return
     if not function_has_plugins(FUNCTION_EDIT):
@@ -659,55 +644,17 @@ def _open_dialog_for_function(
         )
         return
 
-    if function == FUNCTION_INFILL_PAINT and not active_image_path_for_infill(main_window):
-        show_styled_warning(
-            main_window,
-            "Infill",
-            "Select an image in browse view, or select a single thumbnail, "
-            "before using infill by painting.",
-        )
+    from imagegen_plugins.image_gen_function_prerequisites import (
+        validate_function_prerequisites,
+    )
+
+    if not validate_function_prerequisites(
+        function,
+        main_window,
+        parent=main_window,
+        source_image_paths=source_image_paths,
+    ):
         return
-    if function == FUNCTION_EXPAND and not active_image_path_for_expand(main_window):
-        show_styled_warning(
-            main_window,
-            "Expand",
-            "Select an image in browse view, or select a single thumbnail, "
-            "before using expand.",
-        )
-        return
-    if function == FUNCTION_EDIT:
-        explicit_paths = _normalize_edit_source_paths(source_image_paths)
-        if explicit_paths:
-            if len(explicit_paths) > MAX_EDIT_SOURCE_IMAGES:
-                show_styled_warning(
-                    main_window,
-                    "Edit",
-                    f"Select at most {MAX_EDIT_SOURCE_IMAGES} images before using edit.",
-                )
-                return
-        else:
-            if (
-                main_window.current_view_mode == "thumbnail"
-                and hasattr(main_window, "selection_manager")
-                and main_window.selection_manager
-                and getattr(main_window, "selected_files", None)
-                and len(main_window.selection_manager.get_selected_files())
-                > MAX_EDIT_SOURCE_IMAGES
-            ):
-                show_styled_warning(
-                    main_window,
-                    "Edit",
-                    f"Select at most {MAX_EDIT_SOURCE_IMAGES} images before using edit.",
-                )
-                return
-            if not active_image_paths_for_edit(main_window):
-                show_styled_warning(
-                    main_window,
-                    "Edit",
-                    "Select an image in browse view, or select up to "
-                    f"{MAX_EDIT_SOURCE_IMAGES} thumbnails, before using edit.",
-                )
-                return
 
     _open_or_switch_unified_dialog(
         main_window,
@@ -718,7 +665,10 @@ def _open_dialog_for_function(
         auto_generate=auto_generate,
         geometry_hex=geometry_hex,
         function_plugins=function_plugins,
-        source_image_paths=_normalize_edit_source_paths(source_image_paths) or None,
+        source_image_paths=normalize_edit_source_paths(
+            source_image_paths, max_count=MAX_EDIT_SOURCE_IMAGES
+        )
+        or None,
     )
 
 
@@ -754,14 +704,12 @@ def _refresh_create_menu_availability(main_window) -> None:
     actions = getattr(main_window, "imagegen_function_actions", None) or {}
     if not actions:
         return
-    from imagegen_plugins import discover_plugins
-    from imagegen_plugins.image_gen_pipeline_modes import warm_pipeline_availability_cache
-
     all_plugins = discover_plugins()
     warm_pipeline_availability_cache(all_plugins)
+    warm_installed_cache(all_plugins)
     any_usable = False
     for function, action in actions.items():
-        plugins = plugins_for_function(function)
+        plugins = plugins_for_function(function, all_plugins)
         usable = available_plugins(plugins)
         action.setEnabled(bool(plugins))
         if usable:

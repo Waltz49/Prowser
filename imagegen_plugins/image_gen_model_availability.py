@@ -109,43 +109,10 @@ def pipeline_model_is_local(
     key = (pipeline_id, hf_model_id)
     if use_cache and key in _model_local_cache:
         return _model_local_cache[key]
-    if pipeline_id == "flux_schnell_mflux_play":
-        result = _mflux_flux_weights_are_local(hf_model_id)
-    elif pipeline_id in ("mflux_fill_expand", "mflux_fill_infill"):
-        result = _hf_repo_snapshot_is_complete(hf_model_id)
-    elif pipeline_id in (
-        "mflux_flux2_klein_edit",
-        "mflux_flux2_klein_create",
-        "mflux_flux2_klein_expand",
-    ):
-        from imagegen_plugins.sceneworks_klein_mlx import (
-            is_sceneworks_klein_mlx_repo,
-            sceneworks_model_is_local,
-        )
+    from imagegen_plugins.pipeline_check_registry import pipeline_model_local_checker
 
-        if is_sceneworks_klein_mlx_repo(hf_model_id):
-            result = sceneworks_model_is_local(hf_model_id)
-        else:
-            result = _hf_repo_snapshot_is_complete(hf_model_id, _FLUX2_KLEIN_WEIGHT_SUBDIRS)
-    elif pipeline_id == "sana_sprint_600m":
-        result = _hf_repo_snapshot_has_weights(hf_model_id)
-    elif pipeline_id == "z_image_turbo_sdnq":
-        result = _hf_repo_snapshot_is_complete(hf_model_id, _Z_IMAGE_WEIGHT_SUBDIRS)
-    elif pipeline_id == "mflux_z_image_turbo":
-        result = _hf_repo_snapshot_is_complete(hf_model_id, _Z_IMAGE_WEIGHT_SUBDIRS)
-    elif pipeline_id == "sd15_diffusers":
-        from imagegen_plugins.hf_model_ids import SD15_DEFAULT_VAE
-
-        if not _hf_repo_snapshot_is_complete(hf_model_id, _SD15_WEIGHT_SUBDIRS):
-            result = False
-        elif _hf_repo_snapshot_is_complete(hf_model_id, ("vae",)):
-            result = True
-        else:
-            result = _hf_repo_snapshot_has_weights(SD15_DEFAULT_VAE)
-    elif pipeline_id == "sdxl_diffusers":
-        result = _hf_repo_snapshot_is_complete(hf_model_id, _SDXL_WEIGHT_SUBDIRS)
-    else:
-        result = True
+    checker = pipeline_model_local_checker(pipeline_id)
+    result = bool(checker(hf_model_id))
     if use_cache:
         _model_local_cache[key] = result
     return result

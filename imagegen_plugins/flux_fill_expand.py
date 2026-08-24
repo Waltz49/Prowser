@@ -11,7 +11,7 @@ from imagegen_plugins.image_gen_field_blocks import (
     dim_slider_block,
     guidance_slider_block,
     low_ram_bool,
-    model_reset_default,
+    overlap_percentage_field,
     seed_row_block,
     steps_quant_row_block,
 )
@@ -70,23 +70,7 @@ def flux_fill_expand_field_layout(
             model_defaults=model_defaults,
         ),
         copies_slider_block(values, model_defaults=model_defaults),
-        FieldSpec(
-            key="overlap_percentage",
-            label="Overlap %",
-            kind="int_slider",
-            default=int(
-                values.get(
-                    "overlap_percentage",
-                    model_reset_default(model_defaults, "overlap_percentage", 2),
-                )
-            ),
-            min_value=0,
-            max_value=20,
-            step=1,
-            reset_default=int(
-                model_reset_default(model_defaults, "overlap_percentage", 2)
-            ),
-        ),
+        overlap_percentage_field(values, model_defaults=model_defaults),
         bool_run_block(
             low_ram_bool(values, default=True),
         ),

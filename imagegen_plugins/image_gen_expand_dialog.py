@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from imagegen_plugins.image_gen_panel_base import ImageGenPanelMixin
 from imagegen_plugins.image_gen_edit_custom_size import mount_custom_size_section
 from imagegen_plugins.expand_placement_canvas import ExpandPlacementCanvas
 from imagegen_plugins.image_gen_dialog import (
@@ -111,7 +112,7 @@ def active_image_path_for_expand(main_window) -> Optional[str]:
     return active_image_path_for_browse_or_thumbnail(main_window)
 
 
-class ImageGenExpandDialog(ImageGenDimensionAspectMixin, QDialog):
+class ImageGenExpandDialog(ImageGenPanelMixin, ImageGenDimensionAspectMixin, QDialog):
     """Graphical expand placement + dynamically built configuration fields."""
 
     state_changed = Signal()
@@ -355,7 +356,6 @@ class ImageGenExpandDialog(ImageGenDimensionAspectMixin, QDialog):
                 create_image_gen_dialog_footer(self, self._function, actions)
             )
 
-        self._connect_canvas_dimension_fields()
         if self._canvas is not None and self._panel_mode:
             self._canvas.placementChanged.connect(self.state_changed.emit)
 
@@ -419,7 +419,6 @@ class ImageGenExpandDialog(ImageGenDimensionAspectMixin, QDialog):
         self._repopulate_side_buttons()
         self._connect_canvas_dimension_fields()
         self._connect_dim_aspect_lock()
-        self._restore_aspect_lock_from_values()
         self._apply_effective_max_to_dim_sliders()
         if self._canvas is not None:
             values = self.collect_values()
@@ -432,11 +431,7 @@ class ImageGenExpandDialog(ImageGenDimensionAspectMixin, QDialog):
         self._connect_panel_dirty_tracking()
 
     def _connect_panel_dirty_tracking(self) -> None:
-        if not self._panel_mode:
-            return
-        from imagegen_plugins.image_gen_panel_dirty import connect_panel_field_widgets
-
-        connect_panel_field_widgets(self, self.state_changed.emit)
+        self.connect_panel_dirty_tracking()
 
     def _on_model_combo_changed(self, _index: int = 0) -> None:
         plugin_id = self._model_combo.currentData()
@@ -465,6 +460,12 @@ class ImageGenExpandDialog(ImageGenDimensionAspectMixin, QDialog):
         sync_image_gen_generate_enabled(self, panel=self)
 
     def _connect_canvas_dimension_fields(self) -> None:
+        from imagegen_plugins.image_gen_panel_dirty import (
+            clear_widget_connection_ids,
+            connect_spin_value_changed_once,
+        )
+
+        clear_widget_connection_ids(self, "_canvas_spin_connected_widget_ids")
         for key in ("width", "height"):
             entry = self._widgets.get(key)
             if entry is None:
@@ -474,7 +475,12 @@ class ImageGenExpandDialog(ImageGenDimensionAspectMixin, QDialog):
                 continue
             inner = widget.layout()
             spin = inner.itemAt(1).widget()
-            spin.valueChanged.connect(self._on_canvas_dimension_changed)
+            connect_spin_value_changed_once(
+                self,
+                spin,
+                self._on_canvas_dimension_changed,
+                attr="_canvas_spin_connected_widget_ids",
+            )
 
     def _on_canvas_dimension_changed(self, _value: int) -> None:
         if self._canvas is None:

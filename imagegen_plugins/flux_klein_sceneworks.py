@@ -10,6 +10,7 @@ from imagegen_plugins.image_gen_field_blocks import (
     bool_run_block,
     copies_slider_block,
     dim_slider_block,
+    klein_expand_field_layout,
     klein_edit_copies_group,
     low_ram_bool,
     model_reset_default,
@@ -184,48 +185,12 @@ def sceneworks_klein_expand_field_layout(
     values: dict[str, Any],
     effective_max_side: int,
 ) -> Tuple[FieldNode, ...]:
-    mode = get_pipeline(plugin.pipeline_id)
-    model_defaults = plugin.model_defaults
-    w_spec, h_spec = dim_slider_block(
+    return klein_expand_field_layout(
+        plugin,
         values,
-        width_min=mode.width_min,
-        height_min=mode.height_min,
-        dim_max=effective_max_side,
-        dim_step=mode.dim_step,
-        model_defaults=model_defaults,
-    )
-    return (
-        FieldSpec(
-            key="prompt",
-            label=mode.prompt_label,
-            kind="text",
-            default=values.get("prompt", ""),
-            required=mode.prompt_required,
-        ),
-        w_spec,
-        h_spec,
-        seed_row_block(values),
-        _sceneworks_steps_tier_row(plugin, values, model_defaults=model_defaults),
-        copies_slider_block(values, model_defaults=model_defaults),
-        FieldSpec(
-            key="overlap_percentage",
-            label="Overlap %",
-            kind="int_slider",
-            default=int(
-                values.get(
-                    "overlap_percentage",
-                    model_reset_default(model_defaults, "overlap_percentage", 2),
-                )
-            ),
-            min_value=0,
-            max_value=20,
-            step=1,
-            reset_default=int(
-                model_reset_default(model_defaults, "overlap_percentage", 2)
-            ),
-        ),
-        bool_run_block(
-            low_ram_bool(values, default=True),
+        effective_max_side,
+        steps_node=_sceneworks_steps_tier_row(
+            plugin, values, model_defaults=plugin.model_defaults
         ),
     )
 

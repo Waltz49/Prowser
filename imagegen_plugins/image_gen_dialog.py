@@ -1261,6 +1261,12 @@ class ImageGenDimensionAspectMixin:
     def _connect_dim_aspect_lock(self) -> None:
         if not self._has_dim_fields():
             return
+        from imagegen_plugins.image_gen_panel_dirty import (
+            clear_widget_connection_ids,
+            connect_spin_value_changed_once,
+        )
+
+        clear_widget_connection_ids(self, "_dim_lock_spin_connected_widget_ids")
         for key in ("width", "height"):
             entry = self._widgets.get(key)
             if entry is None:
@@ -1270,8 +1276,11 @@ class ImageGenDimensionAspectMixin:
                 continue
             inner = widget.layout()
             spin = inner.itemAt(1).widget()
-            spin.valueChanged.connect(
-                lambda value, k=key: self._on_dim_value_changed(k, int(value))
+            connect_spin_value_changed_once(
+                self,
+                spin,
+                lambda value, k=key: self._on_dim_value_changed(k, int(value)),
+                attr="_dim_lock_spin_connected_widget_ids",
             )
         self._restore_aspect_lock_from_values()
         self._sync_aspect_lock_prev_dims()

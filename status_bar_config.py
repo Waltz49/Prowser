@@ -1036,8 +1036,8 @@ class ClickableImageGenIndicatorLabel(QLabel):
         super().__init__(text, parent)
         self.main_window = None
         self._live_task_info_browser: Optional[QTextBrowser] = None
-        self._live_task_info_timer: Optional[QTimer] = None
         self._live_task_info_signal_connected = False
+        self._live_task_info_tick_connected = False
         self._single_click_timer = QTimer(self)
         self._single_click_timer.setSingleShot(True)
         self._single_click_timer.timeout.connect(self._on_single_click_timeout)
@@ -1165,33 +1165,20 @@ class ClickableImageGenIndicatorLabel(QLabel):
             controller.task_status_info_changed.connect(
                 self._refresh_live_task_info_on_signal
             )
+            controller.live_status_tick.connect(
+                self._refresh_live_task_info_on_timer
+            )
             self._live_task_info_signal_connected = True
+            self._live_task_info_tick_connected = True
         except ImportError:
             pass
-        timer = QTimer(self)
-        timer.setInterval(500)
-        timer.timeout.connect(self._refresh_live_task_info_on_timer)
-        timer.start()
-        self._live_task_info_timer = timer
         menu.aboutToHide.connect(self._stop_live_task_info_updates)
 
     def _stop_live_task_info_updates(self) -> None:
         from shiboken6 import isValid
 
         self._live_task_info_browser = None
-        timer = self._live_task_info_timer
-        self._live_task_info_timer = None
-        if timer is not None:
-            try:
-                timer.stop()
-            except (RuntimeError, SystemError):
-                pass
-            try:
-                if isValid(timer):
-                    timer.deleteLater()
-            except (RuntimeError, SystemError):
-                pass
-        if self._live_task_info_signal_connected:
+        if self._live_task_info_signal_connected or self._live_task_info_tick_connected:
             try:
                 if isValid(self) and self.main_window:
                     from imagegen_plugins.image_gen_controller import (
@@ -1199,13 +1186,19 @@ class ClickableImageGenIndicatorLabel(QLabel):
                     )
 
                     controller = get_imagegen_controller(self.main_window)
-                    controller.task_status_info_changed.disconnect(
-                        self._refresh_live_task_info_on_signal
-                    )
+                    if self._live_task_info_signal_connected:
+                        controller.task_status_info_changed.disconnect(
+                            self._refresh_live_task_info_on_signal
+                        )
+                    if self._live_task_info_tick_connected:
+                        controller.live_status_tick.disconnect(
+                            self._refresh_live_task_info_on_timer
+                        )
             except (ImportError, TypeError, RuntimeError, SystemError):
                 pass
             finally:
                 self._live_task_info_signal_connected = False
+                self._live_task_info_tick_connected = False
 
     def _show_imagegen_menu(self):
         if not self.main_window:

@@ -94,8 +94,12 @@ LORA_HOST_ORDER: Tuple[str, ...] = (
 )
 
 
+_PIPELINE_TO_LORA_HOST: Dict[str, str] = {
+    pipeline_id: host.host_id
+    for host in LORA_HOSTS.values()
+    for pipeline_id in host.pipeline_ids
+}
+
+
 def lora_host_for_pipeline(pipeline_id: str) -> str | None:
-    for host in LORA_HOSTS.values():
-        if pipeline_id in host.pipeline_ids:
-            return host.host_id
-    return None
+    return _PIPELINE_TO_LORA_HOST.get(pipeline_id)

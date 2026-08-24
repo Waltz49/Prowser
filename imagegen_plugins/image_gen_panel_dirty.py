@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Callable
+from typing import Any, Callable, Set
 
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -12,6 +12,55 @@ from PySide6.QtWidgets import (
     QSlider,
 )
 from theme.spin_box import StepSpinBox
+
+
+def _connected_widget_ids(panel: Any, attr: str) -> Set[int]:
+    ids = getattr(panel, attr, None)
+    if ids is None:
+        ids = set()
+        setattr(panel, attr, ids)
+    return ids
+
+
+def clear_widget_connection_ids(panel: Any, attr: str) -> None:
+    """Drop tracked widget ids so repopulated controls can be reconnected."""
+    _connected_widget_ids(panel, attr).clear()
+
+
+def connect_widget_dirty_tracking_once(
+    panel: Any,
+    widget: Any,
+    emit: Callable[[], None],
+    *,
+    attr: str = "_dirty_connected_widget_ids",
+) -> None:
+    """Connect dirty tracking once per widget instance (survives field repopulate)."""
+    if widget is None:
+        return
+    ids = _connected_widget_ids(panel, attr)
+    wid = id(widget)
+    if wid in ids:
+        return
+    ids.add(wid)
+    connect_widget_dirty_tracking(widget, emit)
+
+
+def connect_spin_value_changed_once(
+    panel: Any,
+    spin: Any,
+    slot: Callable[..., None],
+    *,
+    attr: str = "_spin_connected_widget_ids",
+) -> None:
+    """Connect spin.valueChanged once per spin instance."""
+    if spin is None:
+        return
+    ids = _connected_widget_ids(panel, attr)
+    wid = id(spin)
+    if wid in ids:
+        return
+    ids.add(wid)
+    spin.valueChanged.connect(slot)
 
 
 def connect_widget_dirty_tracking(widget: Any, emit: Callable[[], None]) -> None:
@@ -28,6 +77,7 @@ def connect_widget_dirty_tracking(widget: Any, emit: Callable[[], None]) -> None
 
 
 def connect_panel_field_widgets(panel, emit: Callable[[], None]) -> None:
+    clear_widget_connection_ids(panel, "_dirty_connected_widget_ids")
     widgets = getattr(panel, "_widgets", None) or {}
     for _key, entry in widgets.items():
         widget = entry[0] if entry else None
@@ -38,18 +88,18 @@ def connect_panel_field_widgets(panel, emit: Callable[[], None]) -> None:
             for i in range(inner.count()):
                 child = inner.itemAt(i).widget()
                 if child is not None:
-                    connect_widget_dirty_tracking(child, emit)
+                    connect_widget_dirty_tracking_once(panel, child, emit)
         else:
-            connect_widget_dirty_tracking(widget, emit)
+            connect_widget_dirty_tracking_once(panel, widget, emit)
     series_cb = getattr(panel, "_series_refinement_cb", None)
     if series_cb is not None:
-        series_cb.toggled.connect(lambda _v: emit())
+        connect_widget_dirty_tracking_once(panel, series_cb, emit)
     aspect_cb = getattr(panel, "_aspect_checkbox", None)
     if aspect_cb is not None:
-        aspect_cb.toggled.connect(lambda _v: emit())
+        connect_widget_dirty_tracking_once(panel, aspect_cb, emit)
     pass_image_cb = getattr(panel, "_pass_image_to_ai_cb", None)
     if pass_image_cb is not None:
-        pass_image_cb.toggled.connect(lambda _v: emit())
+        connect_widget_dirty_tracking_once(panel, pass_image_cb, emit)
     model_combo = getattr(panel, "_model_combo", None)
     if model_combo is not None and not getattr(panel, "_model_combo_dirty_connected", False):
         model_combo.currentIndexChanged.connect(lambda _i: emit())

@@ -68,3 +68,7 @@ def sd15_create_field_layout(
         ),
         copies_slider_block(values, model_defaults=model_defaults),
     )
+
+
+# Neutral name for SD 1.5 and SDXL diffusers create layouts.
+diffusers_t2i_field_layout = sd15_create_field_layout

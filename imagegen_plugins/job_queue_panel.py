@@ -1017,7 +1017,6 @@ class JobQueuePanelWidget(QWidget):
         self._controller = get_imagegen_controller(main_window)
         self._job_cards: list[JobCard] = []
         self._refresh_table_timer: QTimer | None = None
-        self._live_timer: QTimer | None = None
         self._resize_timer: QTimer | None = None
         self._queue_size_mode = QUEUE_SIZE_ALL
         self._signal_connected = False
@@ -1526,11 +1525,7 @@ class JobQueuePanelWidget(QWidget):
         self._controller.task_status_info_changed.connect(
             self._on_task_status_info_changed
         )
-        timer = QTimer(self)
-        timer.setInterval(500)
-        timer.timeout.connect(self._on_live_refresh_timer)
-        timer.start()
-        self._live_timer = timer
+        self._controller.live_status_tick.connect(self._on_live_refresh_timer)
         self._update_header_status()
 
     def _on_task_status_info_changed(self) -> None:
@@ -1548,7 +1543,6 @@ class JobQueuePanelWidget(QWidget):
             prev_strip_h = self._active_job_strip.content_height()
         self._refresh_active_row(force=True)
         self._active_job_strip.refresh(force=True)
-        self._controller.mark_task_status_display_refreshed()
         if self._queue_size_mode in (QUEUE_SIZE_STRIP, QUEUE_SIZE_ONE):
             new_strip_h = (
                 self._active_job_strip.content_height()
@@ -1557,17 +1551,14 @@ class JobQueuePanelWidget(QWidget):
             )
             if abs(new_strip_h - prev_strip_h) > 1:
                 self._on_active_strip_content_height_changed()
+        self._controller.mark_task_status_display_refreshed()
 
     def pause_live_refresh(self) -> None:
         """Pause periodic refresh while image-gen dialog builds on the GUI thread."""
         self._live_refresh_paused = True
-        if self._live_timer is not None:
-            self._live_timer.stop()
 
     def resume_live_refresh(self) -> None:
         self._live_refresh_paused = False
-        if self.isVisible() and self._live_timer is not None:
-            self._live_timer.start()
 
     def _imagegen_dialog_building_active(self) -> bool:
         if getattr(self, "_live_refresh_paused", False):
@@ -1635,12 +1626,8 @@ class JobQueuePanelWidget(QWidget):
         self._schedule_refresh_table()
         self._update_header_status()
         self._refresh_active_job_strip(force=True)
-        if self._live_timer is not None:
-            self._live_timer.start()
 
     def hideEvent(self, event) -> None:
-        if self._live_timer is not None:
-            self._live_timer.stop()
         super().hideEvent(event)
 
     def mousePressEvent(self, event) -> None:

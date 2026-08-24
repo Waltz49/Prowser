@@ -32,7 +32,7 @@ _FUNCTION_INTRO_TEXT: dict[str, str] = {
         "Paint a mask to fill or replace part of an image."
     ),
     FUNCTION_INFILL: (
-        "" # something having to do with pixelmator
+        "Send the selected image to Pixelmator for infill workflows."
     ),
 }
 

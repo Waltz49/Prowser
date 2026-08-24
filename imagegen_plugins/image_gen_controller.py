@@ -89,6 +89,7 @@ class ImageGenController(QObject):
     generation_started = Signal()
     generation_finished = Signal(bool, str, str)  # success, output_path, error_message
     task_status_info_changed = Signal()
+    live_status_tick = Signal()
     queue_changed = Signal()
     hold_job_queue_changed = Signal()
     jobs_pane_title_changed = Signal()
@@ -187,12 +188,23 @@ class ImageGenController(QObject):
         self._queue_persist_timer.timeout.connect(self._persist_job_queue_now)
         self._queue_drain_total = 0
         self._gpu_cleanup_active = False
+        self._live_status_timer = QTimer(self)
+        self._live_status_timer.setInterval(500)
+        self._live_status_timer.timeout.connect(self._on_live_status_tick)
+        self._cached_pending_queue_key: tuple[tuple[str, str], ...] | None = None
+        self._cached_pending_rows: list[QueueRowSnapshot] | None = None
+        self._progress_ui_last_emit_at = 0.0
+        self._PROGRESS_UI_MIN_INTERVAL_S = 0.2
         self._restore_persisted_job_queue()
 
         # Keep background idle scanning paused for the full generation job lifetime.
         self.generation_started.connect(self._sync_idle_detector_generation_busy)
         self.generation_finished.connect(self._sync_idle_detector_generation_busy)
         self.queue_changed.connect(self._sync_idle_detector_generation_busy)
+        self.generation_started.connect(self._update_live_status_timer)
+        self.generation_finished.connect(self._update_live_status_timer)
+        self.queue_changed.connect(self._invalidate_pending_queue_snapshot_cache)
+        self.queue_changed.connect(self._sync_queue_drain_total)
 
     _GPU_CLEANUP_POLL_MS = 2000
     _GPU_CLEANUP_MAX_ATTEMPTS = 30
@@ -252,6 +264,7 @@ class ImageGenController(QObject):
             self._update_status_bar_indicator(None)
         self.task_status_info_changed.emit()
         self._emit_jobs_pane_title_changed()
+        self._update_live_status_timer()
 
     def _abort_queued_job_start(self) -> None:
         """Reset controller state after a queued job failed to start."""
@@ -266,6 +279,7 @@ class ImageGenController(QObject):
         self._reset_generation_state()
         self._sync_cancel_menu()
         self.queue_changed.emit()
+        self._update_live_status_timer()
 
     def _pop_queued_job(self, job_id: str) -> None:
         if not self._queue or self._queue[0].job_id != job_id:
@@ -342,7 +356,21 @@ class ImageGenController(QObject):
 
         return effective_job_prompt_for_tooltip(self._pending_values)
 
-    def queue_snapshot(self) -> list[QueueRowSnapshot]:
+    def _invalidate_pending_queue_snapshot_cache(self, *_args) -> None:
+        self._cached_pending_queue_key = None
+        self._cached_pending_rows = None
+
+    def _sync_queue_drain_total(self, *_args) -> None:
+        if not self._active_queue_job_id and not self._queue:
+            self._queue_drain_total = 0
+
+    def _pending_queue_snapshot_rows(self) -> list[QueueRowSnapshot]:
+        key = tuple((job.job_id, job.status_html) for job in self._queue)
+        if (
+            self._cached_pending_queue_key == key
+            and self._cached_pending_rows is not None
+        ):
+            return self._cached_pending_rows
         pending_rows: list[QueueRowSnapshot] = []
         for job in self._queue:
             pending_rows.append(
@@ -355,6 +383,12 @@ class ImageGenController(QObject):
                     references_invalid=job.references_invalid,
                 )
             )
+        self._cached_pending_queue_key = key
+        self._cached_pending_rows = pending_rows
+        return pending_rows
+
+    def queue_snapshot(self) -> list[QueueRowSnapshot]:
+        pending_rows = list(self._pending_queue_snapshot_rows())
         if not self._active_queue_job_id:
             return pending_rows
         active_row = QueueRowSnapshot(
@@ -823,6 +857,7 @@ class ImageGenController(QObject):
 
         self.queue_changed.emit()
         self.task_status_info_changed.emit()
+        self._update_live_status_timer()
         if self._pending_job_needs_ai_stage():
             result = self._begin_job_ai_stage()
             if result is False and from_queue:
@@ -1408,6 +1443,23 @@ class ImageGenController(QObject):
             return True
         remaining = self._cooldown_seconds_remaining()
         return remaining != self._last_cooldown_ui_second
+
+    def _update_live_status_timer(self, *_args) -> None:
+        if self.is_running():
+            if not self._live_status_timer.isActive():
+                self._live_status_timer.start()
+        elif self._live_status_timer.isActive():
+            self._live_status_timer.stop()
+
+    def _on_live_status_tick(self) -> None:
+        if not self.task_status_display_needs_refresh():
+            return
+        self.live_status_tick.emit()
+
+    def active_job_status_view(self):
+        from imagegen_plugins.model_task_status_info import build_active_job_status_view
+
+        return build_active_job_status_view(self)
 
     def mark_task_status_display_refreshed(self) -> None:
         """Record cooldown countdown after all task-status UI consumers have updated."""
@@ -2122,8 +2174,6 @@ class ImageGenController(QObject):
         """Completed and total jobs in the current queue drain (active + waiting)."""
         waiting = len(self._queue)
         if not self._active_queue_job_id or waiting == 0:
-            if not self._active_queue_job_id and not self._queue:
-                self._queue_drain_total = 0
             return None
         snapshot_total = 1 + waiting
         if self._queue_drain_total < snapshot_total:
@@ -2290,6 +2340,8 @@ class ImageGenController(QObject):
         self._reset_generation_state()
         self._update_status_bar_indicator(None)
         self._sync_idle_detector_generation_busy()
+        self._update_live_status_timer()
+        self._sync_queue_drain_total()
 
     def _quit_interrupts_active_worker(self) -> bool:
         """True when quitting would cancel an in-flight model worker task."""
@@ -2576,6 +2628,7 @@ class ImageGenController(QObject):
         self._active_thumbnail_paths = []
         self._reset_generation_state()
         self._sync_idle_detector_generation_busy()
+        self._sync_queue_drain_total()
 
     def _on_foreground_task_finished(self, kind: str, _success: bool, _err: str) -> None:
         if kind == "caption":
@@ -2987,9 +3040,13 @@ class ImageGenController(QObject):
     def _on_generate_progress(self, msg: Dict[str, Any]) -> None:
         step = msg.get("step")
         step_total = msg.get("step_total")
+        step_i = -1
+        total_i = 0
+        step_updated = False
         if step is not None and step_total is not None:
             step_i = int(step)
             total_i = int(step_total)
+            step_updated = True
             if step_i > 0 and self._step_progress_start_time is not None:
                 elapsed_seconds = self._live_generation_elapsed_seconds()
                 if elapsed_seconds is not None:
@@ -3002,17 +3059,26 @@ class ImageGenController(QObject):
                 and self._step_progress_completed_at is None
             ):
                 self._step_progress_completed_at = time.perf_counter()
-            self._task_status_info_html = self._apply_live_steps_progress(
-                self._task_status_info_html
-            )
-            self.task_status_info_changed.emit()
         path = msg.get("path")
         if path and self._should_display_progressive_images():
-            step_i = int(step) if step is not None else -1
-            if step_i != 0:
+            preview_step = step_i if step is not None else -1
+            if preview_step != 0:
                 self._refresh_progressive_image(str(path))
             else:
                 self._note_progressive_step_zero(str(path))
+        if not step_updated:
+            return
+        self._task_status_info_html = self._apply_live_steps_progress(
+            self._task_status_info_html
+        )
+        now = time.perf_counter()
+        if (
+            step_i < total_i
+            and now - self._progress_ui_last_emit_at < self._PROGRESS_UI_MIN_INTERVAL_S
+        ):
+            return
+        self._progress_ui_last_emit_at = now
+        self.task_status_info_changed.emit()
 
     def _note_progressive_step_zero(self, output_path: str) -> None:
         """Step 0 preview is empty or redundant; avoid a full browse refresh."""
@@ -3176,6 +3242,7 @@ class ImageGenController(QObject):
         timer.timeout.connect(self._on_copy_cooldown_elapsed)
         self._cooldown_timer = timer
         timer.start(cooldown_ms)
+        self._update_live_status_timer()
 
     def _on_copy_cooldown_elapsed(self) -> None:
         self._cooldown_timer = None
@@ -3279,6 +3346,7 @@ class ImageGenController(QObject):
             QTimer.singleShot(0, self._try_start_next_queued_job)
         # Re-evaluate after queue advance (and after worker clears its active job id).
         QTimer.singleShot(0, self._sync_idle_detector_generation_busy)
+        self._update_live_status_timer()
 
     def _try_start_next_queued_job(self) -> None:
         if self._quit_after_current_worker and not self._deferred_quit_wait_all_jobs:

@@ -103,6 +103,22 @@ def cycle_imagegen_function_dialog(dialog, delta: int) -> None:
     )
 
 
+def _apply_function_switcher_button_highlight(
+    btn: QPushButton,
+    *,
+    display_icon: str,
+    hover_icon_name: str,
+    border_width_px: int,
+) -> None:
+    btn.setStyleSheet(
+        _function_switcher_button_stylesheet(
+            display_icon,
+            hover_icon_name=hover_icon_name,
+            border_width_px=border_width_px,
+        )
+    )
+
+
 def _make_function_switcher_button(
     dialog,
     function: str,
@@ -120,12 +136,11 @@ def _make_function_switcher_button(
     btn.setToolTip(tooltip)
     btn.setCursor(Qt.CursorShape.PointingHandCursor)
     btn.setFlat(True)
-    btn.setStyleSheet(
-        _function_switcher_button_stylesheet(
-            display_icon,
-            hover_icon_name=hover_name,
-            border_width_px=border_width,
-        )
+    _apply_function_switcher_button_highlight(
+        btn,
+        display_icon=display_icon,
+        hover_icon_name=hover_name,
+        border_width_px=border_width,
     )
     btn.clicked.connect(
         lambda _checked=False, fn=function: switch_imagegen_function_dialog(
@@ -142,16 +157,20 @@ def add_image_gen_function_switcher_buttons(
 ) -> None:
     """Append four function-switcher icon buttons at the start of a footer row."""
     highlighted = _highlight_function(current_function)
+    buttons: dict[str, QPushButton] = {}
     for function, icon_name, tooltip in _SWITCHER_ENTRIES:
-        row.addWidget(
-            _make_function_switcher_button(
-                dialog,
-                function,
-                icon_name,
-                tooltip,
-                highlighted_function=highlighted,
-            )
+        btn = _make_function_switcher_button(
+            dialog,
+            function,
+            icon_name,
+            tooltip,
+            highlighted_function=highlighted,
         )
+        row.addWidget(btn)
+        buttons[function] = btn
+    footer = row.parentWidget()
+    if footer is not None:
+        footer._imagegen_switcher_buttons = buttons  # type: ignore[attr-defined]
 
 
 def refresh_image_gen_function_switcher_highlight(
@@ -159,28 +178,45 @@ def refresh_image_gen_function_switcher_highlight(
     dialog,
     current_function: str,
 ) -> None:
-    """Replace only switcher icon buttons; keep stretch and action buttons."""
-    row = footer.layout()
-    if row is None:
-        return
-    for _ in range(len(_SWITCHER_ENTRIES)):
-        item = row.takeAt(0)
-        if item is None:
-            break
-        widget = item.widget()
-        if widget is not None:
-            widget.deleteLater()
-    highlighted = _highlight_function(current_function)
-    for idx, (function, icon_name, tooltip) in enumerate(_SWITCHER_ENTRIES):
-        row.insertWidget(
-            idx,
-            _make_function_switcher_button(
+    """Update switcher icon highlight without rebuilding footer buttons."""
+    buttons = getattr(footer, "_imagegen_switcher_buttons", None)
+    if not buttons:
+        row = footer.layout()
+        if row is None:
+            return
+        for _ in range(len(_SWITCHER_ENTRIES)):
+            item = row.takeAt(0)
+            if item is None:
+                break
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
+        highlighted = _highlight_function(current_function)
+        buttons: dict[str, QPushButton] = {}
+        for idx, (function, icon_name, tooltip) in enumerate(_SWITCHER_ENTRIES):
+            btn = _make_function_switcher_button(
                 dialog,
                 function,
                 icon_name,
                 tooltip,
                 highlighted_function=highlighted,
-            ),
+            )
+            row.insertWidget(idx, btn)
+            buttons[function] = btn
+        footer._imagegen_switcher_buttons = buttons  # type: ignore[attr-defined]
+        return
+    highlighted = _highlight_function(current_function)
+    for function, icon_name, _tooltip in _SWITCHER_ENTRIES:
+        btn = buttons.get(function)
+        if btn is None:
+            continue
+        hover_name = icon_name.replace(".png", "_hover.png")
+        is_active = function == highlighted
+        _apply_function_switcher_button_highlight(
+            btn,
+            display_icon=hover_name if is_active else icon_name,
+            hover_icon_name=hover_name,
+            border_width_px=2 if is_active else 1,
         )
 
 

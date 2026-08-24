@@ -483,43 +483,10 @@ def pipeline_is_available(pipeline_id: str) -> bool:
     cached = _pipeline_available_cache.get(pipeline_id)
     if cached is not None:
         return cached
-    result = False
-    if pipeline_id == "flux_schnell_mflux_play":
-        from imagegen_plugins.pipelines.mflux_schnell import mflux_is_installed
+    from imagegen_plugins.pipeline_check_registry import pipeline_availability_checker
 
-        result = mflux_is_installed()
-    elif pipeline_id == "sana_sprint_600m":
-        from pyinstaller_frozen_support import sana_sprint_pipeline_is_installed
-
-        result = sana_sprint_pipeline_is_installed()
-    elif pipeline_id == "sd15_diffusers":
-        from pyinstaller_frozen_support import sd15_diffusers_pipeline_is_installed
-
-        result = sd15_diffusers_pipeline_is_installed()
-    elif pipeline_id == "sdxl_diffusers":
-        from pyinstaller_frozen_support import sdxl_diffusers_pipeline_is_installed
-
-        result = sdxl_diffusers_pipeline_is_installed()
-    elif pipeline_id == "z_image_turbo_sdnq":
-        from imagegen_plugins.pipelines.z_image_turbo import z_image_turbo_is_installed
-
-        result = z_image_turbo_is_installed()
-    elif pipeline_id == "mflux_z_image_turbo":
-        from imagegen_plugins.pipelines.mflux_z_image_turbo import mflux_is_installed
-
-        result = mflux_is_installed()
-    elif pipeline_id in ("mflux_fill_expand", "mflux_fill_infill"):
-        from imagegen_plugins.pipelines.mflux_fill_expand import mflux_is_installed
-
-        result = mflux_is_installed()
-    elif pipeline_id in (
-        "mflux_flux2_klein_edit",
-        "mflux_flux2_klein_create",
-        "mflux_flux2_klein_expand",
-    ):
-        from imagegen_plugins.pipelines.mflux_flux2_klein_edit import mflux_is_installed
-
-        result = mflux_is_installed()
+    checker = pipeline_availability_checker(pipeline_id)
+    result = bool(checker()) if checker is not None else False
     _pipeline_available_cache[pipeline_id] = result
     return result
 

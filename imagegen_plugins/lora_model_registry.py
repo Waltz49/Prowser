@@ -149,10 +149,11 @@ def lora_functions_for_model_key(model_key: str) -> Tuple[str, ...]:
 
     found: List[str] = []
     try:
-        from imagegen_plugins import plugins_for_function
+        from imagegen_plugins import discover_plugins, plugins_for_function
 
+        all_plugins = discover_plugins()
         for fn in _LORA_FUNCTION_DISPLAY_ORDER:
-            for plugin in plugins_for_function(fn):
+            for plugin in plugins_for_function(fn, all_plugins):
                 if (getattr(plugin, "hf_model_id", None) or "").strip() != mk:
                     continue
                 if not getattr(plugin, "lora_host_id", None):
