@@ -41,6 +41,8 @@ from imagegen_plugins.imagegen_control_tooltips import (
 
 _USE_CUSTOM_SIZE_BASE_LABEL = "Use Custom Size"
 _CUSTOM_SIZE_BASE_LABEL = "Custom Size"
+# Bottom spacer in area-button column: shifts buttons up by half this value from center.
+_CUSTOM_SIZE_AREA_BTN_BOTTOM_SPACING = 24
 _COLLAPSED_ARROW = "\u25b6"  # ▶
 _EXPANDED_ARROW = "\u25bc"  # ▼
 _COLLAPSE_ARROW_FONT_PX = 13
@@ -239,7 +241,7 @@ def _mount_collapsible_custom_size_section(
     panel: ImageGenFieldsPanel,
     *,
     collapse_header: _CustomSizeCollapseHeader,
-    group_box: QGroupBox,
+    group_body_widget: QWidget,
     expanded: bool,
     on_toggled: Any,
 ) -> QWidget:
@@ -253,7 +255,7 @@ def _mount_collapsible_custom_size_section(
         0,
         Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
     )
-    group_body = wrap_image_gen_field_control_indent(group_box, section)
+    group_body = wrap_image_gen_field_control_indent(group_body_widget, section)
     group_body.setVisible(expanded)
     section_col.addWidget(group_body, 0)
 
@@ -426,6 +428,68 @@ def _build_dim_helper_icon_buttons(dialog: Any, parent: QWidget) -> Tuple[QWidge
     return square_btn, reverse_btn, screen_btn, import_btn
 
 
+def _build_area_scale_buttons(dialog: Any, parent: QWidget) -> Tuple[QPushButton, QPushButton]:
+    x2_btn = create_image_gen_dim_helper_icon_button(
+        "sizeX2.png",
+        hover_icon_name="sizeX2_hover.png",
+        parent=parent,
+    )
+    x2_btn.clicked.connect(dialog._on_double_area_dims)
+    d2_btn = create_image_gen_dim_helper_icon_button(
+        "sizeD2.png",
+        hover_icon_name="sizeD2_hover.png",
+        parent=parent,
+    )
+    d2_btn.clicked.connect(dialog._on_half_area_dims)
+    apply_dim_helper_tooltips(double_area_btn=x2_btn, half_area_btn=d2_btn)
+    return x2_btn, d2_btn
+
+
+def _wrap_custom_size_group_with_area_buttons(
+    group_box: QGroupBox,
+    dialog: Any,
+) -> QWidget:
+    wrapper = QWidget()
+    wrapper.setObjectName("imageGenCustomSizeRow")
+    wrapper.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
+    row = QHBoxLayout(wrapper)
+    row.setContentsMargins(0, 0, 0, 0)
+    row.setSpacing(6)
+    row.addWidget(
+        group_box,
+        0,
+        Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+    )
+    btn_col = QWidget(wrapper)
+    col = QVBoxLayout(btn_col)
+    col.setContentsMargins(0, 0, 0, 0)
+    col.setSpacing(4)
+    x2_btn, d2_btn = _build_area_scale_buttons(dialog, btn_col)
+    col.addWidget(x2_btn, 0, Qt.AlignmentFlag.AlignHCenter)
+    col.addWidget(d2_btn, 0, Qt.AlignmentFlag.AlignHCenter)
+    btn_col.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+
+    btn_col_wrap = QWidget(wrapper)
+    btn_col_wrap.setMinimumHeight(group_box.sizeHint().height())
+    btn_col_wrap.setSizePolicy(
+        QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Expanding
+    )
+    btn_col_lay = QVBoxLayout(btn_col_wrap)
+    btn_col_lay.setContentsMargins(0, 0, 0, 0)
+    btn_col_lay.setSpacing(0)
+    btn_col_lay.addStretch(1)
+    btn_col_lay.addWidget(btn_col, 0, Qt.AlignmentFlag.AlignHCenter)
+    btn_col_lay.addSpacing(_CUSTOM_SIZE_AREA_BTN_BOTTOM_SPACING)
+    btn_col_lay.addStretch(1)
+
+    row.addWidget(
+        btn_col_wrap,
+        0,
+        Qt.AlignmentFlag.AlignRight,
+    )
+    return wrapper
+
+
 def _build_custom_size_group_box(
     dialog: Any,
     *,
@@ -575,6 +639,7 @@ def mount_custom_size_section(
         aspect_cb=aspect_cb,
         values=values,
     )
+    custom_size_row = _wrap_custom_size_group_with_area_buttons(group_box, dialog)
 
     if optional and use_spec is not None:
         use_checked = bool(use_spec.default)
@@ -595,7 +660,7 @@ def mount_custom_size_section(
             dialog,
             panel,
             collapse_header=use_widget,
-            group_box=group_box,
+            group_body_widget=custom_size_row,
             expanded=use_checked,
             on_toggled=_on_edit_custom_size_toggled,
         )
@@ -617,7 +682,7 @@ def mount_custom_size_section(
             dialog,
             panel,
             collapse_header=collapse_header,
-            group_box=group_box,
+            group_body_widget=custom_size_row,
             expanded=True,
             on_toggled=_on_create_custom_size_toggled,
         )

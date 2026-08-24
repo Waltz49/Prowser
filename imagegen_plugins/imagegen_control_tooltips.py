@@ -74,6 +74,16 @@ _DIM_HELPER_TOOLTIPS: dict[str, str] = {
     "square": "Square:\nMake width and height equal.",
     "reverse": "Reverse:\nSwap width and height.",
     "aspect":"Keep width and height proportional\nwhen either dimension is changed.",
+    "double_area": (
+        "Double the pixel area (width × height),\n"
+        "keeping aspect ratio.\n"
+        "Limited by min/max size and Settings."
+    ),
+    "half_area": (
+        "Halve the pixel area (width × height),\n"
+        "keeping aspect ratio.\n"
+        "Limited by min/max size and Settings."
+    ),
 }
 
 _DIALOG_BUTTON_TOOLTIPS: dict[str, str] = {
@@ -132,6 +142,8 @@ def apply_dim_helper_tooltips(
     reverse_btn: Optional[QPushButton] = None,
     aspect_checkbox: Optional[QCheckBox] = None,
     import_btn: Optional[QPushButton] = None,
+    double_area_btn: Optional[QPushButton] = None,
+    half_area_btn: Optional[QPushButton] = None,
 ) -> None:
     if screen_btn is not None:
         screen_btn.setToolTip(_DIM_HELPER_TOOLTIPS["screen_size"])
@@ -143,6 +155,10 @@ def apply_dim_helper_tooltips(
         aspect_checkbox.setToolTip(_DIM_HELPER_TOOLTIPS["aspect"])
     if import_btn is not None:
         import_btn.setToolTip(_DIM_HELPER_TOOLTIPS["import"])
+    if double_area_btn is not None:
+        double_area_btn.setToolTip(_DIM_HELPER_TOOLTIPS["double_area"])
+    if half_area_btn is not None:
+        half_area_btn.setToolTip(_DIM_HELPER_TOOLTIPS["half_area"])
 
 
 _EDIT_IMPORT_TEXT_TOOLTIP = (

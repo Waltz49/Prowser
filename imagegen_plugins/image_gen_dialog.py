@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import math
 import os
 import re
 from typing import Any, Dict, List, Optional
@@ -844,6 +845,56 @@ def _aspect_pair_from_height(
     return w, h
 
 
+def scale_dims_for_area_multiplier(
+    w: int,
+    h: int,
+    multiplier: float,
+    *,
+    pipeline_id: str,
+    effective_max_side: int,
+    w_bounds: tuple[int, int],
+    h_bounds: tuple[int, int],
+    step: int,
+    ratio: float,
+) -> tuple[int, int]:
+    """Scale width/height to approach target pixel area while honoring bounds."""
+    if w <= 0 or h <= 0 or multiplier <= 0:
+        return w, h
+    if ratio <= 0:
+        ratio = w / h if h else 1.0
+    target_area = w * h * multiplier
+    ideal_w = math.sqrt(target_area * ratio)
+    step = max(1, int(step))
+    w_lo, w_hi = w_bounds
+
+    def candidate(probe_w: int) -> tuple[int, int]:
+        cw, ch = _aspect_pair_from_width(
+            probe_w, ratio, w_bounds=w_bounds, h_bounds=h_bounds, step=step
+        )
+        aw, ah = align_dims_for_pipeline(
+            pipeline_id, cw, ch, effective_max_side=effective_max_side
+        )
+        return _aspect_pair_from_width(
+            aw, ratio, w_bounds=w_bounds, h_bounds=h_bounds, step=step
+        )
+
+    best_w, best_h = w, h
+    best_err = abs(w * h - target_area)
+    base_w = _snap_dim_floor(int(round(ideal_w)), step)
+    probe_span = step * 5
+    start = max(w_lo, base_w - probe_span)
+    end = min(w_hi, base_w + probe_span)
+    probe = start
+    while probe <= end:
+        cw, ch = candidate(probe)
+        err = abs(cw * ch - target_area)
+        if err < best_err:
+            best_err = err
+            best_w, best_h = cw, ch
+        probe += step
+    return best_w, best_h
+
+
 def next_aspect_locked_dims(
     changed: str,
     direction: int,
@@ -1289,6 +1340,46 @@ class ImageGenDimensionAspectMixin:
         finally:
             self._aspect_lock_updating = False
             self._sync_aspect_lock_prev_dims()
+
+    def _apply_area_scaled_dims(self, multiplier: float) -> None:
+        width = self._get_int_slider("width")
+        height = self._get_int_slider("height")
+        if width is None or height is None:
+            return
+        if self._aspect_lock_enabled():
+            ratio = self._aspect_ratio
+        else:
+            ratio = width / height if height else 1.0
+        w, h = scale_dims_for_area_multiplier(
+            width,
+            height,
+            multiplier,
+            pipeline_id=self.plugin.pipeline_id,
+            effective_max_side=self._effective_max_side(),
+            w_bounds=self._spin_slider_limits("width"),
+            h_bounds=self._spin_slider_limits("height"),
+            step=self._dim_align_step(),
+            ratio=ratio,
+        )
+        if w == width and h == height:
+            return
+        self._aspect_lock_updating = True
+        try:
+            self._set_int_slider("width", w)
+            self._set_int_slider("height", h)
+            if self._aspect_lock_enabled():
+                self._refresh_aspect_ratio_from_sliders()
+        finally:
+            self._aspect_lock_updating = False
+            self._sync_aspect_lock_prev_dims()
+        if getattr(self, "_panel_mode", False):
+            self.state_changed.emit()
+
+    def _on_double_area_dims(self) -> None:
+        self._apply_area_scaled_dims(2.0)
+
+    def _on_half_area_dims(self) -> None:
+        self._apply_area_scaled_dims(0.5)
 
 
 IMAGE_GEN_PREVIEW_CLIENT_OBJECT_NAME = "imageGenPreviewClient"

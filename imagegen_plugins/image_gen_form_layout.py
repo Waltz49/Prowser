@@ -1817,7 +1817,7 @@ def create_image_gen_dim_helper_icon_button(
         )
     )
     btn.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
-    btn.setFixedSize(IMAGE_GEN_DIM_HELPER_BTN_SIZE, IMAGE_GEN_DIM_HELPER_BTN_SIZE)
+    btn.setFixedSize(IMAGE_GEN_DIM_HELPER_BTN_SIZE+2, IMAGE_GEN_DIM_HELPER_BTN_SIZE+2)
     return btn
 
 
