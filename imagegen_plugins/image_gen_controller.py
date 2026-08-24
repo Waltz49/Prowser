@@ -839,15 +839,21 @@ class ImageGenController(QObject):
 
     def _pending_job_needs_ai_stage(self) -> bool:
         from imagegen_plugins.flux_prompt_job import (
+            ensure_flux_prompt_ai_job_for_series,
             flux_prompt_ai_job_meta,
             has_flux_prompt_ai_job,
         )
 
         values = self._pending_values
+        if self._copies_done > 0:
+            if not values.get("series_prompt_refinement"):
+                return False
+            plugin = self._active_plugin
+            if plugin is not None:
+                ensure_flux_prompt_ai_job_for_series(plugin, values)
+            return has_flux_prompt_ai_job(values)
         if not has_flux_prompt_ai_job(values):
             return False
-        if self._copies_done > 0:
-            return bool(values.get("series_prompt_refinement"))
         meta = flux_prompt_ai_job_meta(values)
         if meta is not None and meta.get("series_chain_only"):
             return False
@@ -889,11 +895,28 @@ class ImageGenController(QObject):
         self.task_status_info_changed.emit()
 
     def _begin_job_ai_stage(self) -> bool:
-        from imagegen_plugins.flux_prompt_job import flux_prompt_ai_job_meta
+        from imagegen_plugins.flux_prompt_job import (
+            ensure_flux_prompt_ai_job_for_series,
+            flux_prompt_ai_job_meta,
+            sync_flux_prompt_ai_user_prompt_for_next_copy,
+        )
 
-        meta = flux_prompt_ai_job_meta(self._pending_values)
         plugin = self._active_plugin
-        if meta is None or plugin is None:
+        if plugin is None:
+            return self._launch_generation_job() is not False
+        if self._copies_done > 0 and self._pending_values.get(
+            "series_prompt_refinement"
+        ):
+            if not ensure_flux_prompt_ai_job_for_series(
+                plugin, self._pending_values
+            ):
+                self._fail_job_ai_stage(
+                    "Could not prepare AI prompt refinement for the job."
+                )
+                return False
+            sync_flux_prompt_ai_user_prompt_for_next_copy(self._pending_values)
+        meta = flux_prompt_ai_job_meta(self._pending_values)
+        if meta is None:
             return self._launch_generation_job() is not False
 
         self._job_ai_stage_active = True

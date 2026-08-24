@@ -327,8 +327,10 @@ def build_flux_prompt_ai_job_meta_from_job(
 
 
 def ensure_flux_prompt_ai_job_for_series(plugin: Any, values: Dict[str, Any]) -> bool:
-    """Attach flux_prompt_ai_job for series text refinement when missing."""
-    if has_flux_prompt_ai_job(values):
+    """Attach or refresh flux_prompt_ai_job for job-pane series text refinement."""
+    existing = flux_prompt_ai_job_meta(values)
+    if existing is not None and not existing.get("series_chain_only"):
+        # Keep dialog-submitted job AI metadata for the first copy.
         return True
     meta = build_flux_prompt_ai_job_meta_from_job(
         plugin, values, series_chain_only=True
