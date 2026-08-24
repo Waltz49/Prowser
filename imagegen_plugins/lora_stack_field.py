@@ -683,6 +683,14 @@ class LoraStackField(QWidget):
         pid = coerce_lora_preset_id(self.summary_combo.currentData())
         return [] if pid == "none" else [pid]
 
+    def selected_display_text(self) -> str:
+        """Comma-separated display names for the info line under the LoRA pulldown."""
+        ids = self.selected_ids()
+        if not ids:
+            return ""
+        names = [self._label_by_id.get(pid, pid) for pid in ids]
+        return ", ".join(names)
+
     def scales_by_id(self) -> Dict[str, float]:
         """Effective weights for selected LoRAs (session overrides, else catalog)."""
         from imagegen_plugins.lora_catalog import get_lora_entry
@@ -723,6 +731,15 @@ class LoraStackField(QWidget):
         label = str(entry.display_name or pid)
         self._choices.append((label, pid))
         self._label_by_id[pid] = label
+        return True
+
+    def clear_selection(self) -> bool:
+        """Clear all selected LoRAs; returns True when selection changed."""
+        if not self.selected_ids():
+            return False
+        self.set_stack([])
+        self._scale_overrides.clear()
+        self.stack_changed.emit()
         return True
 
     def set_stack(self, ids: List[str]) -> None:
@@ -781,6 +798,7 @@ class LoraStackField(QWidget):
             le.setText(text)
         self.summary_combo.blockSignals(False)
         finalize_lora_combo_display(self.summary_combo)
+        self._apply_summary_combo_height()
         self._sync_combo_click_filters()
 
     def _configure_stack_mode_combo(self) -> None:
@@ -791,10 +809,19 @@ class LoraStackField(QWidget):
             le.setCursor(Qt.CursorShape.PointingHandCursor)
             le.setFrame(False)
             le.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
-        combo_h = self.summary_combo.fontMetrics().height() + 10
-        self.summary_combo.setFixedHeight(combo_h)
+        self._apply_summary_combo_height()
         self.summary_combo.setMaxVisibleItems(0)
         self._sync_combo_click_filters()
+
+    def _apply_summary_combo_height(self, base_height: Optional[int] = None) -> None:
+        """Reserve room for combo border/padding so the bottom edge is not clipped."""
+        combo = self.summary_combo
+        if base_height is None:
+            base_height = combo.fontMetrics().height() + 10
+        chrome_slack = 4  # dialog stylesheet border + padding
+        combo_h = max(28, int(base_height) + chrome_slack)
+        combo.setFixedHeight(combo_h)
+        self.setFixedHeight(combo_h)
 
     def _configure_single_mode_combo(self) -> None:
         self.summary_combo.setEditable(False)
@@ -803,6 +830,8 @@ class LoraStackField(QWidget):
             le.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, False)
         self.summary_combo.setMinimumHeight(0)
         self.summary_combo.setMaximumHeight(16777215)
+        self.setMinimumHeight(0)
+        self.setMaximumHeight(16777215)
         self.summary_combo.setMaxVisibleItems(12)
         self._sync_combo_click_filters()
 

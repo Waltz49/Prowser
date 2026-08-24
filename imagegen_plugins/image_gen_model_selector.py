@@ -17,8 +17,16 @@ from PySide6.QtWidgets import (
 
 from imagegen_plugins.image_gen_fields import FieldSpec
 from imagegen_plugins.image_gen_form_layout import (
+    IMAGE_GEN_FIELD_LABEL_OBJECT_NAME,
+    IMAGE_GEN_INLINE_FIELD_BLOCK_SPACING,
     ImageGenFieldsPanel,
+    build_image_gen_inline_labeled_row,
+    create_image_gen_lora_clear_button,
     create_image_gen_settings_gear_button,
+    create_image_gen_truncating_info_label,
+    image_gen_inline_field_label_width,
+    set_image_gen_truncating_info_text,
+    wrap_image_gen_inline_field_info_line,
 )
 from imagegen_plugins.image_gen_persistence import load_plugin_dialog_settings
 from imagegen_plugins.image_gen_registry import ImageGenModelPlugin
@@ -29,6 +37,7 @@ _MODEL_COMBO_MIN_WIDTH = 300
 _MODEL_COMBO_OBJECT_NAME = "imageGenModelCombo"
 _LORA_COMBO_OBJECT_NAME = "imageGenLoraCombo"
 _MODEL_COMMENT_LABEL_OBJECT_NAME = "imageGenModelCommentLabel"
+_LORA_INFO_LABEL_OBJECT_NAME = "imageGenLoraInfoLabel"
 NO_INSTALLED_MODELS_LABEL = "No models installed for this function."
 _NO_INSTALLED_MODELS_PLUGIN_ID = "__no_installed_models__"
 
@@ -244,8 +253,54 @@ def sync_model_comment_label(
 ) -> None:
     """Update the hint printed under the model pulldown for the selected plugin."""
     text = (plugin.model_comment or "").strip() if plugin is not None else ""
-    label.setText(f"Model Notes: {text}" if text else "")
+    set_image_gen_truncating_info_text(
+        label,
+        f"Model Notes: {text}" if text else "",
+    )
     label.setVisible(bool(text))
+
+
+def _style_lora_info_label(label: QLabel) -> None:
+    label.setObjectName(_LORA_INFO_LABEL_OBJECT_NAME)
+    t = get_active_theme()
+    label.setStyleSheet(
+        f"QLabel#{_LORA_INFO_LABEL_OBJECT_NAME} {{"
+        f" color: {t.text_disabled_hex};"
+        f" font-size: 11px;"
+        f" font-weight: normal;"
+        f"}}"
+    )
+
+
+def sync_image_gen_lora_field_accessories(lora_field: Any) -> None:
+    """Refresh LoRA clear button and selected-LoRA info line visibility/text."""
+    if lora_field is None:
+        return
+    clear_btn = getattr(lora_field, "_clear_all_btn", None)
+    info_label = getattr(lora_field, "_info_label", None)
+    has_selection = bool(lora_field.selected_ids()) and lora_field.summary_combo.isEnabled()
+    if clear_btn is not None:
+        clear_btn.setVisible(has_selection)
+    if info_label is not None:
+        if has_selection:
+            set_image_gen_truncating_info_text(
+                info_label,
+                lora_field.selected_display_text(),
+            )
+            info_label.setVisible(True)
+        else:
+            set_image_gen_truncating_info_text(info_label, "")
+            info_label.setVisible(False)
+
+
+def sync_image_gen_lora_heading_label(lora_field: Any) -> None:
+    """Use plural heading when the active model supports multi-LoRA stacking."""
+    if lora_field is None:
+        return
+    label = getattr(lora_field, "_heading_label", None)
+    if label is None:
+        return
+    label.setText("LoRAs" if lora_field.is_stack_mode() else "LoRA")
 
 
 def build_plugin_model_combo(
@@ -324,17 +379,53 @@ def mount_image_gen_lora_field(
 
     field = LoraStackField(parent)
     field.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
+    lora_clear_btn = create_image_gen_lora_clear_button(parent)
+    lora_clear_btn.hide()
     lora_settings_btn = create_image_gen_settings_gear_button(
         "lora_settings",
         parent,
         tooltip="Open LoRA settings",
     )
-    group = panel.add_labeled_field(
+    field._clear_all_btn = lora_clear_btn
+    info_label = create_image_gen_truncating_info_label(parent)
+    _style_lora_info_label(info_label)
+    info_label.hide()
+    field._info_label = info_label
+
+    def _on_lora_clear_clicked() -> None:
+        field.clear_selection()
+
+    lora_clear_btn.clicked.connect(_on_lora_clear_clicked)
+    field.stack_changed.connect(lambda: sync_image_gen_lora_field_accessories(field))
+
+    label_column_width = image_gen_inline_field_label_width(parent)
+    lora_row = build_image_gen_inline_labeled_row(
         "LoRA",
         field,
+        parent,
+        control_accessories=[lora_settings_btn, lora_clear_btn],
+        label_width=label_column_width,
+    )
+    field._heading_label = lora_row.findChild(QLabel, IMAGE_GEN_FIELD_LABEL_OBJECT_NAME)
+    lora_block = QWidget(parent)
+    lora_block.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+    lora_block_layout = QVBoxLayout(lora_block)
+    lora_block_layout.setContentsMargins(0, 0, 0, 0)
+    lora_block_layout.setSpacing(IMAGE_GEN_INLINE_FIELD_BLOCK_SPACING)
+    lora_block_layout.addWidget(lora_row, 0)
+    lora_block_layout.addWidget(
+        wrap_image_gen_inline_field_info_line(
+            info_label,
+            lora_block,
+            label_column_width=label_column_width,
+        ),
+        0,
+    )
+    group = panel.add_labeled_field(
+        None,
+        lora_block,
         to_outer=True,
-        stretch_control=False,
-        label_accessory=lora_settings_btn,
+        stretch_control=True,
     )
     group.hide()
     return group, field
@@ -347,6 +438,7 @@ def build_model_selector_row(
     parent: Optional[QWidget] = None,
     installed: Optional[List[ImageGenModelPlugin]] = None,
     plugins_by_id: Optional[Dict[str, ImageGenModelPlugin]] = None,
+    inline_label: bool = False,
 ) -> Tuple[QWidget, QComboBox, QLabel, Dict[str, ImageGenModelPlugin]]:
     """Block widget: model pulldown and optional model notes."""
     combo, plugins_by_id = build_plugin_model_combo(
@@ -356,22 +448,40 @@ def build_model_selector_row(
         installed=installed,
         plugins_by_id=plugins_by_id,
     )
-    comment_label = QLabel(parent)
-    comment_label.setWordWrap(True)
-    comment_label.setSizePolicy(
-        QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred
-    )
+    comment_label = create_image_gen_truncating_info_label(parent)
     _style_model_comment_label(comment_label)
     current_id = combo.currentData()
     plugin = plugins_by_id.get(current_id or "") if current_id else None
     sync_model_comment_label(comment_label, plugin)
 
     block = QWidget(parent)
+    block.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
     block_layout = QVBoxLayout(block)
     block_layout.setContentsMargins(0, 0, 0, 0)
-    block_layout.setSpacing(4)
-    block_layout.addWidget(combo, 0)
-    block_layout.addWidget(comment_label, 0)
+    block_layout.setSpacing(IMAGE_GEN_INLINE_FIELD_BLOCK_SPACING)
+    if inline_label:
+        label_column_width = image_gen_inline_field_label_width(block)
+        block_layout.addWidget(
+            build_image_gen_inline_labeled_row(
+                "Model",
+                combo,
+                block,
+                stretch_control=True,
+                label_width=label_column_width,
+            ),
+            0,
+        )
+        block_layout.addWidget(
+            wrap_image_gen_inline_field_info_line(
+                comment_label,
+                block,
+                label_column_width=label_column_width,
+            ),
+            0,
+        )
+    else:
+        block_layout.addWidget(combo, 0)
+        block_layout.addWidget(comment_label, 0)
     return block, combo, comment_label, plugins_by_id
 
 
@@ -596,6 +706,7 @@ def sync_image_gen_lora_field(dialog: Any) -> None:
         current_stack=stack,
         current_preset_id=legacy,
     )
+    sync_image_gen_lora_heading_label(lora_field)
     from imagegen_plugins.debug_exif_lora_trace import agent_exif_lora_dbg
 
     agent_exif_lora_dbg(
@@ -663,6 +774,7 @@ def sync_image_gen_lora_field(dialog: Any) -> None:
         widgets.pop("mflux_lora_stack", None)
 
     dialog._lora_combo = lora_field.summary_combo
+    sync_image_gen_lora_field_accessories(lora_field)
 
 
 def _write_lora_scales_by_id(

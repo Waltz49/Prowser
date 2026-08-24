@@ -311,10 +311,15 @@ class ImageGenExpandDialog(ImageGenDimensionAspectMixin, QDialog):
             parent=self._fields_panel.widget,
             installed=self._installed_list,
             plugins_by_id=self._prebuilt_plugins_by_id,
+            inline_label=self._panel_mode,
         )
         self._model_combo.currentIndexChanged.connect(self._on_model_combo_changed)
         apply_model_combo_tooltip(self._model_combo)
-        self._fields_panel.add_labeled_field("Model", model_row, to_outer=True)
+        self._fields_panel.add_labeled_field(
+            None if self._panel_mode else "Model",
+            model_row,
+            to_outer=True,
+        )
         sync_image_gen_generate_enabled(self, panel=self)
         self._lora_group, self._lora_field = mount_image_gen_lora_field(
             self._fields_panel,

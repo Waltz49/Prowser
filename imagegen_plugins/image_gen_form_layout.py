@@ -7,7 +7,16 @@ import re
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from PySide6.QtCore import QEvent, QObject, QTimer, Qt, QSize
-from PySide6.QtGui import QEnterEvent, QIcon, QTextBlock, QTextCursor, QTextLayout, QTextOption
+from PySide6.QtGui import (
+    QEnterEvent,
+    QFont,
+    QFontMetrics,
+    QIcon,
+    QTextBlock,
+    QTextCursor,
+    QTextLayout,
+    QTextOption,
+)
 from PySide6.QtWidgets import (
     QApplication,
     QHBoxLayout,
@@ -1091,6 +1100,102 @@ def create_image_gen_settings_gear_button(
     )
 
 
+class _ImageGenLoraClearButton(QPushButton):
+    """Trash icon that clears all selected LoRAs in the adjacent field."""
+
+    def __init__(
+        self,
+        parent: Optional[QWidget] = None,
+        *,
+        tooltip: str = "Clear all LoRAs",
+        object_name: str = "imageGenLoraClearBtn",
+    ) -> None:
+        super().__init__("", parent)
+        self.setObjectName(object_name)
+        self.setToolTip(tooltip)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._normal_icon = QIcon(asset_path("trash_icon.png"))
+        self._hover_icon = QIcon(asset_path("trash_icon_hover.png"))
+        self._hovered = False
+        self._apply_icon()
+        self.setStyleSheet(
+            image_gen_lora_clear_btn_stylesheet(selector="QPushButton")
+        )
+        self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        self.setFixedSize(
+            IMAGE_GEN_DIM_HELPER_BTN_SIZE, IMAGE_GEN_DIM_HELPER_BTN_SIZE
+        )
+
+    def _apply_icon(self) -> None:
+        icon = self._hover_icon if self._hovered else self._normal_icon
+        self.setIcon(icon)
+        self.setIconSize(QSize(_IMAGE_GEN_GEAR_ICON_PX, _IMAGE_GEN_GEAR_ICON_PX))
+
+    def enterEvent(self, event: QEnterEvent) -> None:
+        self._hovered = True
+        self._apply_icon()
+        super().enterEvent(event)
+
+    def leaveEvent(self, event: QEvent) -> None:
+        self._hovered = False
+        self._apply_icon()
+        super().leaveEvent(event)
+
+
+def image_gen_lora_clear_btn_stylesheet(
+    *,
+    selector: str = "QPushButton",
+) -> str:
+    """Small trash icon button beside the LoRA field heading."""
+    from imagegen_plugins.image_gen_dialog import image_gen_preview_client_background_hex
+
+    t = get_active_theme()
+    chrome_bg = image_gen_preview_client_background_hex()
+    sz = IMAGE_GEN_DIM_HELPER_BTN_SIZE
+    return f"""
+        {selector} {{
+            background-color: {chrome_bg};
+            border: 1px solid {t.border_default_hex};
+            border-radius: 3px;
+            padding: 0px;
+            min-width: {sz}px;
+            max-width: {sz}px;
+            min-height: {sz}px;
+            max-height: {sz}px;
+        }}
+        {selector}:focus {{
+            border: 1px solid {t.current_image_border_color_hex};
+            outline: none;
+        }}
+        {selector}:hover {{
+            background-color: {t.button_bg_hover_hex};
+            border: 1px solid {t.button_border_hover_hex};
+        }}
+        {selector}:pressed {{
+            background-color: {t.sidebar_splitter_handle_hex};
+        }}
+    """
+
+
+def image_gen_lora_clear_btn_dialog_stylesheet() -> str:
+    return image_gen_lora_clear_btn_stylesheet(
+        selector="#imageGenDialog QPushButton#imageGenLoraClearBtn"
+    )
+
+
+def create_image_gen_lora_clear_button(
+    parent: Optional[QWidget] = None,
+    *,
+    tooltip: str = "Clear all LoRAs",
+    object_name: str = "imageGenLoraClearBtn",
+) -> QPushButton:
+    return _ImageGenLoraClearButton(
+        parent,
+        tooltip=tooltip,
+        object_name=object_name,
+    )
+
+
 def make_image_gen_field_label_row(
     label_text: str,
     accessory: QWidget,
@@ -1784,7 +1889,110 @@ def make_image_gen_field_label(text: str, parent: Optional[QWidget] = None) -> Q
     return label
 
 
+class _ImageGenTruncatingInfoLabel(QLabel):
+    """Single-line info text: full width, truncated without ellipsis."""
+
+    def __init__(self, parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+        self._full_text = ""
+        self.setWordWrap(False)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+
+    def set_full_text(self, text: str) -> None:
+        self._full_text = str(text or "")
+        self._apply_truncation()
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self._apply_truncation()
+
+    def _apply_truncation(self) -> None:
+        if not self._full_text:
+            self.setText("")
+            return
+        width = self.contentsRect().width()
+        if width < 1:
+            width = self.width()
+        if width < 1:
+            self.setText(self._full_text)
+            return
+        metrics = self.fontMetrics()
+        self.setText(
+            metrics.elidedText(
+                self._full_text,
+                Qt.TextElideMode.ElideNone,
+                width,
+            )
+        )
+
+
+def create_image_gen_truncating_info_label(
+    parent: Optional[QWidget] = None,
+) -> _ImageGenTruncatingInfoLabel:
+    return _ImageGenTruncatingInfoLabel(parent)
+
+
+def set_image_gen_truncating_info_text(label: QLabel, text: str) -> None:
+    if hasattr(label, "set_full_text"):
+        label.set_full_text(text)
+    else:
+        label.setText(text)
+
+
 IMAGE_GEN_INLINE_LABEL_ROW_SPACING = 6
+IMAGE_GEN_INLINE_FIELD_BLOCK_SPACING = 6
+IMAGE_GEN_INLINE_FIELD_LABEL_TEXTS: Tuple[str, ...] = ("Model", "LoRAs")
+# Extra room so field labels (e.g. LoRAs) are not clipped beside the control.
+IMAGE_GEN_INLINE_FIELD_LABEL_PAD = 12
+
+
+def image_gen_inline_field_label_width(
+    parent: Optional[QWidget] = None,
+    *,
+    label_texts: Tuple[str, ...] = IMAGE_GEN_INLINE_FIELD_LABEL_TEXTS,
+) -> int:
+    """Label column width so Model and LoRA dropdowns share the same start X."""
+    longest = max(label_texts, key=len)
+    if parent is not None:
+        probe = make_image_gen_field_label(longest, parent)
+        metrics = probe.fontMetrics()
+        probe.deleteLater()
+    else:
+        font = QFont()
+        font.setPixelSize(IMAGE_GEN_FIELD_LABEL_FONT_SIZE)
+        metrics = QFontMetrics(font)
+    text_width = 0
+    for text in label_texts:
+        text_width = max(text_width, metrics.horizontalAdvance(text))
+        text_width = max(text_width, metrics.boundingRect(text).width())
+    return text_width + IMAGE_GEN_INLINE_FIELD_LABEL_PAD
+
+
+def wrap_image_gen_inline_field_info_line(
+    control: QWidget,
+    parent: Optional[QWidget] = None,
+    *,
+    label_column_width: Optional[int] = None,
+) -> QWidget:
+    """Full-width info line aligned with inline field controls (past the label column)."""
+    column_width = (
+        label_column_width
+        if label_column_width is not None
+        else image_gen_inline_field_label_width(parent)
+    )
+    host = QWidget(parent)
+    host.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+    row = QHBoxLayout(host)
+    row.setContentsMargins(0, 0, 0, 0)
+    row.setSpacing(IMAGE_GEN_INLINE_LABEL_ROW_SPACING)
+    spacer = QWidget(host)
+    spacer.setFixedWidth(column_width)
+    spacer.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+    row.addWidget(spacer, 0)
+    align = Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+    control.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+    row.addWidget(control, 1, align)
+    return host
 
 
 def build_image_gen_inline_labeled_row(
@@ -1793,7 +2001,9 @@ def build_image_gen_inline_labeled_row(
     parent: Optional[QWidget] = None,
     *,
     label_accessory: Optional[QWidget] = None,
+    control_accessories: Optional[List[QWidget]] = None,
     label_width: Optional[int] = None,
+    stretch_control: bool = False,
 ) -> QWidget:
     """Label and compact horizontal control on one row (unified dialog / custom size)."""
     row = QWidget(parent)
@@ -1814,17 +2024,25 @@ def build_image_gen_inline_labeled_row(
         0,
         Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
     )
-    hrow.addWidget(
-        control,
-        0,
-        Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
-    )
-    hp = control.sizePolicy().horizontalPolicy()
+    align = Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+    if stretch_control:
+        control.setSizePolicy(
+            QSizePolicy.Policy.Expanding, control.sizePolicy().verticalPolicy()
+        )
+        hrow.addWidget(control, 1, align)
+    else:
+        hrow.addWidget(control, 0, align)
+    for accessory in control_accessories or []:
+        hrow.addWidget(accessory, 0, align)
     vp = control.sizePolicy().verticalPolicy()
-    if hp == QSizePolicy.Policy.Expanding:
+    if stretch_control:
         row.setSizePolicy(QSizePolicy.Policy.Expanding, vp)
     else:
-        row.setSizePolicy(QSizePolicy.Policy.Maximum, vp)
+        hp = control.sizePolicy().horizontalPolicy()
+        if hp == QSizePolicy.Policy.Expanding:
+            row.setSizePolicy(QSizePolicy.Policy.Expanding, vp)
+        else:
+            row.setSizePolicy(QSizePolicy.Policy.Maximum, vp)
     return row
 
 
@@ -2812,6 +3030,6 @@ def image_gen_field_label_stylesheet() -> str:
     #imageGenDialog QLineEdit {{
         padding: 5px 8px;
     }}
-    """ + image_gen_custom_size_group_stylesheet() + image_gen_field_reset_btn_dialog_stylesheet() + image_gen_gear_settings_btn_dialog_stylesheet() + image_gen_prompt_copy_btn_dialog_stylesheet() + image_gen_prompt_clear_btn_dialog_stylesheet() + image_gen_prompt_voice_mic_btn_dialog_stylesheet() + image_gen_favorite_prompts_btn_dialog_stylesheet() + image_gen_system_prompt_copy_btn_dialog_stylesheet() + image_gen_system_prompt_clear_btn_dialog_stylesheet() + image_gen_system_prompt_voice_mic_btn_dialog_stylesheet()
+    """ + image_gen_custom_size_group_stylesheet() + image_gen_field_reset_btn_dialog_stylesheet() + image_gen_gear_settings_btn_dialog_stylesheet() + image_gen_lora_clear_btn_dialog_stylesheet() + image_gen_prompt_copy_btn_dialog_stylesheet() + image_gen_prompt_clear_btn_dialog_stylesheet() + image_gen_prompt_voice_mic_btn_dialog_stylesheet() + image_gen_favorite_prompts_btn_dialog_stylesheet() + image_gen_system_prompt_copy_btn_dialog_stylesheet() + image_gen_system_prompt_clear_btn_dialog_stylesheet() + image_gen_system_prompt_voice_mic_btn_dialog_stylesheet()
 
 
