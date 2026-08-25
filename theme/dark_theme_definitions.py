@@ -3,9 +3,9 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, fields, replace
 
-from theme.theme import ThemeStylesMixin
+from theme.theme import ThemeStylesMixin, blend_text_toward_background
 
 
 @dataclass(frozen=True)
@@ -25,6 +25,10 @@ class DarkTheme(ThemeStylesMixin):
     multiselect_border_width_index: int = 2
     # Splitter handles (main / sidebars) and QStatusBar top border (px)
     view_border_width_px: int = 2
+    # Muted secondary text: blend primary text toward surface background (0–100 % each)
+    dialog_muted_blend_percent: int = 50
+    sidebar_muted_blend_percent: int = 50
+    status_bar_muted_blend_percent: int = 50
 
     default_background_color_hex: str = general_bg_color_hex
     thumbnail_grid_background_color_hex: str = general_bg_color_hex
@@ -189,4 +193,34 @@ class DarkTheme(ThemeStylesMixin):
     information_icon_cell_border_muted_hex: str = "#555555"
 
 
-DEFAULT_DARK_THEME = DarkTheme()
+def _finalize_muted_text_fields(theme: DarkTheme) -> DarkTheme:
+    """Sync derived muted text/icon fields from primary text + blend percent."""
+    dm = blend_text_toward_background(
+        theme.dialog_text_color_hex,
+        theme.dialog_background_hex,
+        int(theme.dialog_muted_blend_percent),
+    )
+    sm = blend_text_toward_background(
+        theme.sidebar_text_color_hex,
+        theme.sidebar_background_color_hex,
+        int(theme.sidebar_muted_blend_percent),
+    )
+    sbm = blend_text_toward_background(
+        theme.status_bar_label_text_hex,
+        theme.main_status_bar_bg_hex,
+        int(theme.status_bar_muted_blend_percent),
+    )
+    return replace(
+        theme,
+        text_disabled_hex=dm,
+        shortcuts_note_muted_hex=sm,
+        status_bar_label_disabled_hex=sbm,
+        status_menu_grayed_hex=sbm,
+        file_tree_nav_button_text_dim_hex=sm,
+        information_action_icon_muted_hex=sm,
+        file_tree_filter_icon_unselected_hex=sm,
+        spinbox_disabled_text_hex=dm,
+    )
+
+
+DEFAULT_DARK_THEME = _finalize_muted_text_fields(DarkTheme())

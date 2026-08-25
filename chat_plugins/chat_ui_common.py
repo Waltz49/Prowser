@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 import os
-from typing import Callable
+from typing import Callable, Optional
 
 from PySide6.QtCore import QEvent, QObject, QSize, Qt, Signal
 from PySide6.QtGui import (
@@ -29,6 +29,8 @@ from PySide6.QtWidgets import (
     QGridLayout,
     QGroupBox,
     QLabel,
+    QLineEdit,
+    QPlainTextEdit,
     QPushButton,
     QSizePolicy,
     QWidget,
@@ -82,6 +84,98 @@ def install_cmd_enter_accept(dialog: QDialog, *widgets: QWidget) -> None:
     filt = CmdEnterAcceptFilter(dialog)
     for widget in widgets:
         widget.installEventFilter(filt)
+
+
+_CHAT_LINE_EDIT_BLUR_ATTR = "_chat_line_edit_blur"
+_CHAT_PROMPT_FIELD_BLUR_ATTR = "_chat_prompt_field_blur"
+
+
+class _ChatLineEditBlurFilter(QObject):
+    def __init__(
+        self,
+        edit: QLineEdit,
+        *,
+        on_blur: Optional[Callable[[], None]] = None,
+    ) -> None:
+        super().__init__(edit)
+        self._edit = edit
+        self._on_blur = on_blur
+
+    def eventFilter(self, obj: QObject, event: QEvent) -> bool:
+        if (
+            event.type() == QEvent.Type.FocusOut
+            and obj is self._edit
+            and isinstance(obj, QLineEdit)
+        ):
+            from imagegen_plugins.image_gen_form_layout import (
+                prepare_for_sentence_case,
+                sentence_case,
+            )
+
+            text = obj.text()
+            normalized = sentence_case(prepare_for_sentence_case(text))
+            if normalized != text:
+                obj.setText(normalized)
+            if self._on_blur is not None:
+                self._on_blur()
+        return super().eventFilter(obj, event)
+
+
+class _ChatPromptFieldBlurFilter(QObject):
+    def __init__(
+        self,
+        edit: QPlainTextEdit,
+        *,
+        per_line: bool = True,
+        on_blur: Optional[Callable[[], None]] = None,
+    ) -> None:
+        super().__init__(edit)
+        self._edit = edit
+        self._per_line = per_line
+        self._on_blur = on_blur
+
+    def eventFilter(self, obj: QObject, event: QEvent) -> bool:
+        if (
+            event.type() == QEvent.Type.FocusOut
+            and obj is self._edit
+            and isinstance(obj, QPlainTextEdit)
+            and not obj.isReadOnly()
+        ):
+            from imagegen_plugins.image_gen_form_layout import (
+                apply_sentence_case_to_plain_text_edit,
+            )
+
+            apply_sentence_case_to_plain_text_edit(obj, per_line=self._per_line)
+            if self._on_blur is not None:
+                self._on_blur()
+        return super().eventFilter(obj, event)
+
+
+def install_chat_line_edit_on_blur(
+    edit: QLineEdit,
+    *,
+    on_blur: Optional[Callable[[], None]] = None,
+) -> None:
+    if getattr(edit, _CHAT_LINE_EDIT_BLUR_ATTR, False):
+        return
+    filt = _ChatLineEditBlurFilter(edit, on_blur=on_blur)
+    edit.installEventFilter(filt)
+    edit._chat_line_edit_blur_filter = filt  # type: ignore[attr-defined]
+    setattr(edit, _CHAT_LINE_EDIT_BLUR_ATTR, True)
+
+
+def install_chat_prompt_field_on_blur(
+    edit: QPlainTextEdit,
+    *,
+    per_line: bool = True,
+    on_blur: Optional[Callable[[], None]] = None,
+) -> None:
+    if getattr(edit, _CHAT_PROMPT_FIELD_BLUR_ATTR, False):
+        return
+    filt = _ChatPromptFieldBlurFilter(edit, per_line=per_line, on_blur=on_blur)
+    edit.installEventFilter(filt)
+    edit._chat_prompt_field_blur_filter = filt  # type: ignore[attr-defined]
+    setattr(edit, _CHAT_PROMPT_FIELD_BLUR_ATTR, True)
 
 
 def _local_paths_from_mime(mime) -> list[str]:

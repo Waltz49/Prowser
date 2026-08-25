@@ -276,15 +276,11 @@ def _information_panel_nowrap_td(
     )
 
 
-def _queue_data_dim_color_hex() -> str:
+def _queue_data_dim_color_hex(*, running: bool = False) -> str:
     from theme.theme_service import get_active_theme
 
-    theme = get_active_theme()
-    return getattr(
-        theme,
-        "file_tree_nav_button_text_dim_hex",
-        theme.information_action_icon_muted_hex,
-    )
+    # All queue cards use the same label color as the active (running) job card.
+    return get_active_theme().job_queue_text_muted_hex(running=True)
 
 
 def _queue_data_bright_color_hex() -> str:
@@ -293,8 +289,8 @@ def _queue_data_bright_color_hex() -> str:
     return get_active_theme().sidebar_text_color_hex
 
 
-def _queue_label_html(label: str) -> str:
-    color = _queue_data_dim_color_hex()
+def _queue_label_html(label: str, *, running: bool = False) -> str:
+    color = _queue_data_dim_color_hex(running=running)
     return f'<span style="color:{color};">{_escape(label)}</span>'
 
 
@@ -304,30 +300,30 @@ def _queue_value_html(value: str) -> str:
 
 
 def _queue_inline_field_suffix(
-    label: str, value: str, *, previous_label: str | None = None
+    label: str, value: str, *, previous_label: str | None = None, running: bool = False
 ) -> str:
     prefix = _inline_field_sep_before(label, previous_label)
     return (
-        f"{prefix}{_queue_label_html(label)}{_LABEL_VALUE_NBSP}"
+        f"{prefix}{_queue_label_html(label, running=running)}{_LABEL_VALUE_NBSP}"
         f"{_queue_value_html(value)}\u00A0 "
     )
 
 
-def _queue_table_row(label: str, value: str) -> str:
+def _queue_table_row(label: str, value: str, *, running: bool = False) -> str:
     """Job-queue status row with fixed label column (matches active-job strip)."""
     return (
-        f"<tr>{_information_panel_nowrap_td(_INFO_PANEL_LABEL_W, _queue_label_html(label))}"
+        f"<tr>{_information_panel_nowrap_td(_INFO_PANEL_LABEL_W, _queue_label_html(label, running=running))}"
         f"<td>{_queue_value_html(value)}</td></tr>"
     )
 
 
 
-def _queue_table_row_prompt(label: str, value: str) -> str:
+def _queue_table_row_prompt(label: str, value: str, *, running: bool = False) -> str:
     m = TASK_STATUS_PROMPT_MARGIN_PX
     pad = f"padding-top:{m}px;padding-bottom:{m}px;"
     label_td = (
         f'<td width="{_INFO_PANEL_LABEL_W}" {_INFO_PANEL_NOWRAP} '
-        f'style="{pad}">{_queue_label_html(label)}</td>'
+        f'style="{pad}">{_queue_label_html(label, running=running)}</td>'
     )
     return (
         f"<tr>{label_td}"
@@ -336,17 +332,21 @@ def _queue_table_row_prompt(label: str, value: str) -> str:
 
 
 def _queue_table_row_primary_plus_inline(
-    label: str, value: str, inline_parts: list[tuple[str, str]]
+    label: str,
+    value: str,
+    inline_parts: list[tuple[str, str]],
+    *,
+    running: bool = False,
 ) -> str:
     cell = _queue_value_html(value)
     previous: str | None = None
     for extra_label, extra_value in inline_parts:
         cell += _queue_inline_field_suffix(
-            extra_label, extra_value, previous_label=previous
+            extra_label, extra_value, previous_label=previous, running=running
         )
         previous = extra_label
     return (
-        f"<tr>{_information_panel_nowrap_td(_INFO_PANEL_LABEL_W, _queue_label_html(label))}"
+        f"<tr>{_information_panel_nowrap_td(_INFO_PANEL_LABEL_W, _queue_label_html(label, running=running))}"
         f"<td>{cell}</td></tr>"
     )
 
@@ -812,14 +812,15 @@ def _generation_status_queue_table_rows(
     elapsed_seconds: float | None = None,
     estimate_seconds: float | None = None,
     omit_live_steps_row: bool = False,
+    running: bool = False,
 ) -> list[str]:
     """Compact job-queue rows: combine short fields on one line where possible."""
     rows: list[str] = []
     if fields.get("model"):
-        rows.append(_queue_table_row("Model:", fields["model"]))
+        rows.append(_queue_table_row("Model:", fields["model"], running=running))
 
     if fields.get("lora"):
-        rows.append(_queue_table_row("LoRA:", fields["lora"]))
+        rows.append(_queue_table_row("LoRA:", fields["lora"], running=running))
 
     quant = fields.get("quant")
     quant_on_size = False
@@ -827,12 +828,15 @@ def _generation_status_queue_table_rows(
         if quant:
             rows.append(
                 _queue_table_row_primary_plus_inline(
-                    "Size:", fields["size"], [(_QUANT_STATUS_LABEL, quant)]
+                    "Size:",
+                    fields["size"],
+                    [(_QUANT_STATUS_LABEL, quant)],
+                    running=running,
                 )
             )
             quant_on_size = True
         else:
-            rows.append(_queue_table_row("Size:", fields["size"]))
+            rows.append(_queue_table_row("Size:", fields["size"], running=running))
 
     if not omit_live_steps_row:
         steps_display = steps_value if steps_value is not None else fields.get("steps", "")
@@ -843,18 +847,24 @@ def _generation_status_queue_table_rows(
         )
         if steps_display and steps_inline:
             rows.append(
-                _queue_table_row_primary_plus_inline("Steps:", steps_display, steps_inline)
+                _queue_table_row_primary_plus_inline(
+                    "Steps:", steps_display, steps_inline, running=running
+                )
             )
         elif steps_display:
-            rows.append(_queue_table_row("Steps:", steps_display))
+            rows.append(_queue_table_row("Steps:", steps_display, running=running))
 
     if quant and not quant_on_size:
-        rows.append(_queue_table_row(_QUANT_STATUS_LABEL, quant))
+        rows.append(_queue_table_row(_QUANT_STATUS_LABEL, quant, running=running))
 
     if fields.get("prompt"):
-        rows.append(_queue_table_row_prompt(fields["prompt_label"], fields["prompt"]))
+        rows.append(
+            _queue_table_row_prompt(
+                fields["prompt_label"], fields["prompt"], running=running
+            )
+        )
     if fields.get("neg"):
-        rows.append(_queue_table_row("Neg:", fields["neg"]))
+        rows.append(_queue_table_row("Neg:", fields["neg"], running=running))
     return rows
 
 
@@ -1038,6 +1048,7 @@ def format_image_generation_queue_status_html(
         elapsed_seconds=elapsed_seconds if show_timing else None,
         estimate_seconds=estimate_seconds if show_timing else None,
         omit_live_steps_row=omit_live_steps_row,
+        running=running,
     )
 
     if series_copies_total is not None and series_copies_total > 1:
@@ -1047,6 +1058,7 @@ def format_image_generation_queue_status_html(
                 format_series_line_value(
                     _series_queued_value(series_copies_total), values
                 ),
+                running=running,
             )
         )
 
@@ -1086,6 +1098,7 @@ def format_job_ai_stage_queue_status_html(
             _queue_table_row_prompt(
                 get_pipeline(pipeline_id).prompt_status_label,
                 prompt,
+                running=running,
             )
         )
     ai_steps_value = _steps_display_with_progress(
@@ -1102,11 +1115,13 @@ def format_job_ai_stage_queue_status_html(
         )
         if ai_inline:
             rows.append(
-                _queue_table_row_primary_plus_inline("AI:", ai_steps_value, ai_inline)
+                _queue_table_row_primary_plus_inline(
+                    "AI:", ai_steps_value, ai_inline, running=running
+                )
             )
         else:
-            rows.append(_queue_table_row("AI:", ai_steps_value))
-    rows.append(_queue_table_row("Stage:", "AI prompt refinement"))
+            rows.append(_queue_table_row("AI:", ai_steps_value, running=running))
+    rows.append(_queue_table_row("Stage:", "AI prompt refinement", running=running))
     return _table_html(rows, title=title, running=running)
 
 

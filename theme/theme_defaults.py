@@ -36,6 +36,9 @@ def default_user_theme_colors() -> Dict[str, Any]:
         "current_image_border_width_index": 3,
         "multiselect_border_width_index": 3,
         "view_border_width_px": 2,
+        "dialog_muted_blend_percent": 50,
+        "sidebar_muted_blend_percent": 50,
+        "status_bar_muted_blend_percent": 50,
     }
 
 
@@ -71,6 +74,9 @@ def default_dark_theme_colors() -> Dict[str, Any]:
         "button_border_hover_hex": "#41a6c6",
         "button_text_default_hex": "#b0bfd6",
         "button_text_hover_hex": "#bbecff",
+        "dialog_muted_blend_percent": 50,
+        "sidebar_muted_blend_percent": 50,
+        "status_bar_muted_blend_percent": 50,
     }
 
 
@@ -106,4 +112,7 @@ def default_light_theme_colors() -> Dict[str, Any]:
         "button_border_hover_hex": "#4a7aaa",
         "button_text_default_hex": "#1a2a3a",
         "button_text_hover_hex": "#0a1a2a",
+        "dialog_muted_blend_percent": 50,
+        "sidebar_muted_blend_percent": 50,
+        "status_bar_muted_blend_percent": 50,
     }

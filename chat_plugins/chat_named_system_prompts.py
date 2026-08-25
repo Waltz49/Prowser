@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QPlainTextEdit,
     QPushButton,
     QRadioButton,
     QScrollArea,
@@ -40,6 +41,8 @@ from chat_plugins.chat_ui_common import (
     chat_library_edit_button_stylesheet,
     chat_library_trash_button_stylesheet,
     chat_prompt_edit_stylesheet,
+    install_chat_line_edit_on_blur,
+    install_chat_prompt_field_on_blur,
     install_cmd_enter_accept,
 )
 from config import CHAT_DEFAULTS
@@ -159,6 +162,7 @@ class ChatPromptNameEditDialog(QDialog):
         layout.addWidget(QLabel("Name:"))
         self.name_edit = QLineEdit(name)
         layout.addWidget(self.name_edit)
+        install_chat_line_edit_on_blur(self.name_edit)
 
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel
@@ -190,12 +194,15 @@ class ChatPromptAddDialog(QDialog):
         layout.addWidget(QLabel("Name:"))
         self.name_edit = QLineEdit(name)
         layout.addWidget(self.name_edit)
+        install_chat_line_edit_on_blur(self.name_edit)
         layout.addWidget(QLabel("System prompt:"))
-        self.text_edit = QTextEdit()
+        self.text_edit = QPlainTextEdit()
         self.text_edit.setPlainText(text)
+        self.text_edit.setLineWrapMode(QPlainTextEdit.LineWrapMode.WidgetWidth)
         self.text_edit.setMinimumHeight(180)
         self.text_edit.setStyleSheet(chat_prompt_edit_stylesheet())
         layout.addWidget(self.text_edit)
+        install_chat_prompt_field_on_blur(self.text_edit)
 
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel
@@ -264,6 +271,10 @@ class ChatSystemPromptLibraryDialog(QDialog):
         layout.addWidget(QLabel("Active system prompt:"))
 
         self._preview = create_prompt_library_preview_editor(self)
+        install_chat_prompt_field_on_blur(
+            self._preview,
+            on_blur=self._commit_preview_edits,
+        )
         layout.addWidget(self._preview)
 
         scroll = QScrollArea()

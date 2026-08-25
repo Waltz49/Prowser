@@ -7,6 +7,24 @@ from PySide6.QtGui import QColor
 from theme.theme_base import asset_url
 
 
+def blend_text_toward_background(text_hex: str, bg_hex: str, blend_percent: int) -> str:
+    """Blend primary text toward its surface background for muted secondary text.
+
+    blend_percent 0 keeps full text color; 100 matches the background (invisible).
+    """
+    text = QColor(text_hex)
+    bg = QColor(bg_hex)
+    if not text.isValid():
+        return bg.name() if bg.isValid() else text_hex
+    if not bg.isValid():
+        return text.name()
+    p = max(0, min(100, int(blend_percent))) / 100.0
+    r = round(text.red() * (1.0 - p) + bg.red() * p)
+    g = round(text.green() * (1.0 - p) + bg.green() * p)
+    b = round(text.blue() * (1.0 - p) + bg.blue() * p)
+    return QColor(r, g, b).name()
+
+
 def sidebar_header_focus_bg_hex(base_hex: str, *, theme_id: str) -> str:
     """Active pane title bar: brighten on dark/user themes, darken on light."""
     c = QColor(base_hex)
@@ -292,7 +310,7 @@ def push_button_stylesheet(
     }}
     {selector}:disabled {{
         background-color: {t.widget_bg_disabled_hex};
-        color: {t.text_disabled_hex};
+        color: {t.dialog_text_muted_hex()};
         border-color: {disabled_border};
     }}
     """
@@ -316,7 +334,7 @@ def spinbox_stylesheet(t) -> str:
     QSpinBox:disabled, QDoubleSpinBox:disabled {{
         border: 2px solid {t.widget_bg_disabled_hex};
         background-color: {t.dialog_background_hex};
-        color: {t.spinbox_disabled_text_hex};
+        color: {t.dialog_text_muted_hex()};
         border-color: {t.spinbox_disabled_border_hex};
     }}
     """
@@ -339,7 +357,7 @@ def step_spin_box_stylesheet(t) -> str:
     StepSpinBox:disabled {{
         border: 2px solid {t.spinbox_disabled_border_hex};
         background-color: {t.dialog_background_hex};
-        color: {t.spinbox_disabled_text_hex};
+        color: {t.dialog_text_muted_hex()};
     }}
     StepSpinBox QLineEdit#StepSpinEdit {{
         border: none;
@@ -350,7 +368,7 @@ def step_spin_box_stylesheet(t) -> str:
         selection-background-color: {t.accent_color_hex};
     }}
     StepSpinBox:disabled QLineEdit#StepSpinEdit {{
-        color: {t.spinbox_disabled_text_hex};
+        color: {t.dialog_text_muted_hex()};
     }}
     StepSpinBox QWidget#StepSpinButtons {{
         background: transparent;
@@ -1066,7 +1084,7 @@ class ThemeStylesMixin:
         color: {t.status_bar_label_text_hex};
     }}
     QMenu::item:disabled {{
-        color: {t.status_bar_label_disabled_hex};
+        color: {t.status_bar_text_muted_hex()};
         font-weight: 100;
     }}
     QMenu::indicator {{
@@ -1076,13 +1094,52 @@ class ThemeStylesMixin:
     }}
     QMenu::separator {{
         height: 1px;
-        background: {t.status_bar_label_disabled_hex};
+        background: {t.status_bar_text_muted_hex()};
         margin: 5px {sep_margin_h}px;
     }}
     """
 
     def qmenu_stylesheet(self) -> str:
         return self.context_menu_stylesheet(rounded=True)
+
+    def dialog_text_muted_hex(self) -> str:
+        return blend_text_toward_background(
+            self.dialog_text_color_hex,
+            self.dialog_background_hex,
+            self.dialog_muted_blend_percent,
+        )
+
+    def sidebar_text_muted_hex(self) -> str:
+        return blend_text_toward_background(
+            self.sidebar_text_color_hex,
+            self.sidebar_background_color_hex,
+            self.sidebar_muted_blend_percent,
+        )
+
+    def status_bar_text_muted_hex(self) -> str:
+        return blend_text_toward_background(
+            self.status_bar_label_text_hex,
+            self.main_status_bar_bg_hex,
+            self.status_bar_muted_blend_percent,
+        )
+
+    def job_queue_text_muted_hex(self, *, running: bool = False) -> str:
+        """Muted label color for job-queue cells (blend toward cell fill, not sidebar bg)."""
+        from config import (
+            job_queue_cell_background_hex,
+            job_queue_running_cell_background_hex,
+        )
+
+        bg = (
+            job_queue_running_cell_background_hex()
+            if running
+            else job_queue_cell_background_hex()
+        )
+        return blend_text_toward_background(
+            self.sidebar_text_color_hex,
+            bg,
+            self.sidebar_muted_blend_percent,
+        )
 
     def heading_color_hex(self) -> str:
         if self.theme_id == "light":
@@ -1314,7 +1371,7 @@ class ThemeStylesMixin:
         self, focus_bg: str, focus_border: str, focus_text: str, *, dim: bool = False
     ) -> str:
         t = self
-        fg = t.file_tree_nav_button_text_dim_hex if dim else t.file_tree_nav_button_text_hex
+        fg = t.sidebar_text_muted_hex() if dim else t.file_tree_nav_button_text_hex
         btn_bg = t._file_tree_control_surface_hex()
         btn_hover = t._file_tree_control_surface_hover_hex()
         btn_pressed = (
@@ -1411,7 +1468,7 @@ class ThemeStylesMixin:
     def shortcuts_sidebar_note_muted_stylesheet(self) -> str:
         return f"""
             QLabel {{
-                color: {self.shortcuts_note_muted_hex};
+                color: {self.sidebar_text_muted_hex()};
                 font-size: 10pt;
             }}
         """

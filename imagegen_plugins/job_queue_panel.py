@@ -1591,6 +1591,8 @@ class JobQueuePanelWidget(QWidget):
             )
         for card in self._job_cards:
             card._apply_card_style()
+        if self._can_refresh_queue_rows_in_place():
+            self._refresh_queue_rows_in_place()
         if hasattr(self, "_action_bar"):
             self._action_bar.refresh_theme_styles()
         self._active_job_strip.refresh_theme_styles()

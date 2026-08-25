@@ -12,7 +12,11 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QGuiApplication
 from PySide6.QtWidgets import QApplication
 
-from theme.dark_theme_definitions import DEFAULT_DARK_THEME, DarkTheme
+from theme.dark_theme_definitions import (
+    DEFAULT_DARK_THEME,
+    DarkTheme,
+    _finalize_muted_text_fields,
+)
 from theme.theme import ThemeStylesMixin, sidebar_header_focus_bg_hex
 from theme.theme_defaults import (
     default_dark_theme_colors,
@@ -35,6 +39,9 @@ class LightTheme(ThemeStylesMixin):
     current_image_border_width_index: int = 2
     multiselect_border_width_index: int = 2
     view_border_width_px: int = 2
+    dialog_muted_blend_percent: int = 50
+    sidebar_muted_blend_percent: int = 50
+    status_bar_muted_blend_percent: int = 50
 
     default_background_color_hex: str = general_bg_color_hex
     thumbnail_grid_background_color_hex: str = general_bg_color_hex
@@ -188,7 +195,7 @@ class LightTheme(ThemeStylesMixin):
     information_icon_cell_border_muted_hex: str = "#cccccc"
 
 
-DEFAULT_LIGHT_THEME = LightTheme()
+DEFAULT_LIGHT_THEME = _finalize_muted_text_fields(LightTheme())
 
 
 ThemeType = Union[DarkTheme, LightTheme]
@@ -232,6 +239,16 @@ THEME_BORDER_WIDTH_KEYS = (
 # Splitter handles + status bar top (1–8 px), per preset
 VIEW_CHROME_THEME_KEYS = ("view_border_width_px",)
 
+# Muted secondary text blend strength (0–100 % toward surface background)
+THEME_MUTED_BLEND_KEYS = (
+    "dialog_muted_blend_percent",
+    "sidebar_muted_blend_percent",
+    "status_bar_muted_blend_percent",
+)
+
+_MUTED_BLEND_MIN_PCT = 0
+_MUTED_BLEND_MAX_PCT = 100
+
 # Thumbnail grid paint + borders only (no global QSS / settings-dialog chrome refresh needed).
 THEME_THUMBNAIL_ONLY_KEYS = frozenset(
     (
@@ -266,6 +283,9 @@ THEME_APP_WIDE_KEYS = frozenset(
         "button_border_hover_hex",
         "button_text_default_hex",
         "button_text_hover_hex",
+        "dialog_muted_blend_percent",
+        "sidebar_muted_blend_percent",
+        "status_bar_muted_blend_percent",
     )
 )
 
@@ -278,6 +298,9 @@ THEME_CHROME_KEYS = frozenset(
         "status_bar_background_color_hex",
         "status_bar_text_color_hex",
         "default_border_color_hex",
+        "dialog_muted_blend_percent",
+        "sidebar_muted_blend_percent",
+        "status_bar_muted_blend_percent",
         *VIEW_CHROME_THEME_KEYS,
     )
 )
@@ -755,6 +778,30 @@ def _coerce_view_border_width(stored: Any, fallback: int) -> int:
     return max(lo, min(hi, fallback))
 
 
+def _coerce_muted_blend_percent(stored: Any, fallback: int) -> int:
+    lo, hi = _MUTED_BLEND_MIN_PCT, _MUTED_BLEND_MAX_PCT
+    if isinstance(stored, int) and lo <= stored <= hi:
+        return stored
+    if isinstance(stored, str) and stored.strip().isdigit():
+        i = int(stored.strip())
+        if lo <= i <= hi:
+            return i
+    return max(lo, min(hi, fallback))
+
+
+def _merge_muted_blend_percent(out: Dict[str, Any], stored: Optional[Dict[str, Any]]) -> None:
+    legacy_fb: Optional[int] = None
+    if stored and "muted_text_blend_percent" in stored:
+        legacy_fb = _coerce_muted_blend_percent(stored.get("muted_text_blend_percent"), 50)
+    for key in THEME_MUTED_BLEND_KEYS:
+        default_fb = legacy_fb if legacy_fb is not None else 50
+        fb = _coerce_muted_blend_percent(out.get(key), default_fb)
+        if stored and key in stored:
+            out[key] = _coerce_muted_blend_percent(stored.get(key), fb)
+        else:
+            out[key] = fb
+
+
 def _merge_view_border_width(out: Dict[str, Any], stored: Optional[Dict[str, Any]]) -> None:
     fb = _coerce_view_border_width(out.get("view_border_width_px"), 2)
     if stored and "view_border_width_px" in stored:
@@ -822,6 +869,7 @@ def merge_user_theme_colors(stored: Optional[Dict[str, Any]]) -> Dict[str, Any]:
             out[k] = v.strip()
     _merge_border_width_indices(out, stored)
     _merge_view_border_width(out, stored)
+    _merge_muted_blend_percent(out, stored)
     return out
 
 
@@ -836,6 +884,7 @@ def merge_dark_theme_colors(stored: Optional[Dict[str, Any]]) -> Dict[str, Any]:
             out[k] = v.strip()
     _merge_border_width_indices(out, stored)
     _merge_view_border_width(out, stored)
+    _merge_muted_blend_percent(out, stored)
     return out
 
 
@@ -850,6 +899,7 @@ def merge_light_theme_colors(stored: Optional[Dict[str, Any]]) -> Dict[str, Any]
             out[k] = v.strip()
     _merge_border_width_indices(out, stored)
     _merge_view_border_width(out, stored)
+    _merge_muted_blend_percent(out, stored)
     return out
 
 
@@ -876,7 +926,11 @@ def build_user_theme_from_colors(colors: Dict[str, Any]) -> DarkTheme:
     cbw = int(c["current_image_border_width_index"])
     mbw = int(c["multiselect_border_width_index"])
     vbw = int(c["view_border_width_px"])
-    return replace(
+    dialog_blend = int(c["dialog_muted_blend_percent"])
+    sidebar_blend = int(c["sidebar_muted_blend_percent"])
+    status_blend = int(c["status_bar_muted_blend_percent"])
+    return _finalize_muted_text_fields(
+        replace(
         t0,
         theme_id="user",
         general_text_color_hex=text,
@@ -896,6 +950,9 @@ def build_user_theme_from_colors(colors: Dict[str, Any]) -> DarkTheme:
         current_image_border_width_index=cbw,
         multiselect_border_width_index=mbw,
         view_border_width_px=vbw,
+        dialog_muted_blend_percent=dialog_blend,
+        sidebar_muted_blend_percent=sidebar_blend,
+        status_bar_muted_blend_percent=status_blend,
         multiselect_border_color_hex=c["multiselect_border_color_hex"],
         multiselect_background_color_hex=c["multiselect_background_color_hex"],
         sidebar_header_bg_hex=c["sidebar_header_bg_hex"],
@@ -931,6 +988,7 @@ def build_user_theme_from_colors(colors: Dict[str, Any]) -> DarkTheme:
         button_border_hover_hex=c["button_border_hover_hex"],
         button_text_default_hex=c["button_text_default_hex"],
         button_text_hover_hex=c["button_text_hover_hex"],
+        )
     )
 
 
@@ -955,7 +1013,11 @@ def build_dark_theme_from_colors(colors: Dict[str, str]) -> DarkTheme:
     cbw = int(c["current_image_border_width_index"])
     mbw = int(c["multiselect_border_width_index"])
     vbw = int(c["view_border_width_px"])
-    return replace(
+    dialog_blend = int(c["dialog_muted_blend_percent"])
+    sidebar_blend = int(c["sidebar_muted_blend_percent"])
+    status_blend = int(c["status_bar_muted_blend_percent"])
+    return _finalize_muted_text_fields(
+        replace(
         t0,
         theme_id="dark",
         general_text_color_hex=text,
@@ -975,6 +1037,9 @@ def build_dark_theme_from_colors(colors: Dict[str, str]) -> DarkTheme:
         current_image_border_width_index=cbw,
         multiselect_border_width_index=mbw,
         view_border_width_px=vbw,
+        dialog_muted_blend_percent=dialog_blend,
+        sidebar_muted_blend_percent=sidebar_blend,
+        status_bar_muted_blend_percent=status_blend,
         multiselect_border_color_hex=c["multiselect_border_color_hex"],
         multiselect_background_color_hex=c["multiselect_background_color_hex"],
         sidebar_header_bg_hex=c["sidebar_header_bg_hex"],
@@ -1007,6 +1072,7 @@ def build_dark_theme_from_colors(colors: Dict[str, str]) -> DarkTheme:
         button_border_hover_hex=c["button_border_hover_hex"],
         button_text_default_hex=c["button_text_default_hex"],
         button_text_hover_hex=c["button_text_hover_hex"],
+        )
     )
 
 
@@ -1031,7 +1097,11 @@ def build_light_theme_from_colors(colors: Dict[str, str]) -> LightTheme:
     cbw = int(c["current_image_border_width_index"])
     mbw = int(c["multiselect_border_width_index"])
     vbw = int(c["view_border_width_px"])
-    return replace(
+    dialog_blend = int(c["dialog_muted_blend_percent"])
+    sidebar_blend = int(c["sidebar_muted_blend_percent"])
+    status_blend = int(c["status_bar_muted_blend_percent"])
+    return _finalize_muted_text_fields(
+        replace(
         t0,
         theme_id="light",
         general_text_color_hex=text,
@@ -1051,6 +1121,9 @@ def build_light_theme_from_colors(colors: Dict[str, str]) -> LightTheme:
         current_image_border_width_index=cbw,
         multiselect_border_width_index=mbw,
         view_border_width_px=vbw,
+        dialog_muted_blend_percent=dialog_blend,
+        sidebar_muted_blend_percent=sidebar_blend,
+        status_bar_muted_blend_percent=status_blend,
         multiselect_border_color_hex=c["multiselect_border_color_hex"],
         multiselect_background_color_hex=c["multiselect_background_color_hex"],
         sidebar_header_bg_hex=c["sidebar_header_bg_hex"],
@@ -1083,6 +1156,7 @@ def build_light_theme_from_colors(colors: Dict[str, str]) -> LightTheme:
         button_border_hover_hex=c["button_border_hover_hex"],
         button_text_default_hex=c["button_text_default_hex"],
         button_text_hover_hex=c["button_text_hover_hex"],
+        )
     )
 
 
@@ -1172,7 +1246,16 @@ def sync_to_thumbnail_constants(theme: ThemeType) -> None:
     tc.WIDGET_BG_HOVER_HEX = t.widget_bg_hover_hex
     tc.WIDGET_BG_PRESSED_HEX = t.widget_bg_pressed_hex
     tc.WIDGET_BG_DISABLED_HEX = t.widget_bg_disabled_hex
-    tc.TEXT_DISABLED_HEX = t.text_disabled_hex
+    tc.TEXT_DISABLED_HEX = t.dialog_text_muted_hex()
+    tc.DIALOG_TEXT_MUTED_HEX = t.dialog_text_muted_hex()
+    tc.DIALOG_TEXT_MUTED = QColor(tc.DIALOG_TEXT_MUTED_HEX)
+    tc.SIDEBAR_TEXT_MUTED_HEX = t.sidebar_text_muted_hex()
+    tc.SIDEBAR_TEXT_MUTED = QColor(tc.SIDEBAR_TEXT_MUTED_HEX)
+    tc.STATUS_BAR_TEXT_MUTED_HEX = t.status_bar_text_muted_hex()
+    tc.STATUS_BAR_TEXT_MUTED = QColor(tc.STATUS_BAR_TEXT_MUTED_HEX)
+    tc.DIALOG_MUTED_BLEND_PERCENT = int(getattr(t, "dialog_muted_blend_percent", 50))
+    tc.SIDEBAR_MUTED_BLEND_PERCENT = int(getattr(t, "sidebar_muted_blend_percent", 50))
+    tc.STATUS_BAR_MUTED_BLEND_PERCENT = int(getattr(t, "status_bar_muted_blend_percent", 50))
     tc.BORDER_DEFAULT_HEX = t.border_default_hex
     tc.BORDER_HOVER_HEX = t.border_hover_hex
     tc.CHROME_BORDER_HEX = t.chrome_border_hex

@@ -110,10 +110,12 @@ from theme.theme_service import (
     validate_new_theme_display_name,
     USER_THEME_COLOR_KEYS,
     THEME_BORDER_WIDTH_KEYS,
+    THEME_MUTED_BLEND_KEYS,
     VIEW_CHROME_THEME_KEYS,
     theme_apply_scope_for_keys,
     EDITABLE_BUILTIN_THEME_IDS,
 )
+from theme.theme import blend_text_toward_background
 from theme.spin_box import StepSpinBox
 
 
@@ -137,6 +139,12 @@ _THEME_SYNC_CONSTANTS = (
     "BUTTON_DEFAULT_BG_HEX",
     "BUTTON_DEFAULT_BORDER_HEX",
     "TEXT_DISABLED_HEX",
+    "DIALOG_TEXT_MUTED_HEX",
+    "SIDEBAR_TEXT_MUTED_HEX",
+    "STATUS_BAR_TEXT_MUTED_HEX",
+    "DIALOG_MUTED_BLEND_PERCENT",
+    "SIDEBAR_MUTED_BLEND_PERCENT",
+    "STATUS_BAR_MUTED_BLEND_PERCENT",
     "ERROR_COLOR_HEX",
     "VALIDATION_SUCCESS_COLOR_HEX",
     "CURRENT_IMAGE_BACKGROUND_COLOR",
@@ -195,7 +203,7 @@ THEME_COLOR_SWATCH_TOOLTIPS = {
     "dialog_background_hex": "Background for modal and modeless dialog windows.",
     "dialog_text_color_hex": (
         "Text color for dialog labels and general dialog\n"
-        "content."
+        "content. Muted secondary text is derived automatically."
     ),
     "dialog_input_background_hex": (
         "Background for text fields, combo boxes, and other\n"
@@ -215,7 +223,7 @@ THEME_COLOR_SWATCH_TOOLTIPS = {
     ),
     "status_bar_text_color_hex": (
         "Text color for status bar labels, context menus, and\n"
-        "menu-bar dropdown items."
+        "menu-bar dropdown items. Muted/disabled menu text is derived."
     ),
     "sidebar_header_bg_hex": (
         "Background of view title bars (e.g. Favorites, folder\n"
@@ -227,7 +235,7 @@ THEME_COLOR_SWATCH_TOOLTIPS = {
     ),
     "sidebar_text_color_hex": (
         "Text color for sidebar content, titlebar labels, and\n"
-        "tables; section headings are derived automatically."
+        "tables; section headings and muted text are derived."
     ),
     "default_border_color_hex": "Border color around sidebar sections and other chrome dividers.",
     "default_image_color_hex": "Border color around non-selected thumbnails.",
@@ -788,7 +796,7 @@ class SettingsDialog(QDialog):
     THEME_SWATCH_COL_WIDTH = 32
     THEME_SLIDER_COL_MIN_WIDTH = 155
     THEME_INNER_WIDTH_EXTRA = 48  # HBox spacing + vertical scrollbar / frame margin
-    THEME_LIVE_PREVIEW_DEBOUNCE_MS = 120
+    THEME_LIVE_PREVIEW_DEBOUNCE_MS = 250 # DGN - was 120
     
     # Session-only: remember last tab id (not persisted across sessions)
     _last_tab_id = None
@@ -890,7 +898,10 @@ class SettingsDialog(QDialog):
         return tid if tid in EDITABLE_BUILTIN_THEME_IDS else "dark"
 
     def _settings_chrome(self):
-        return settings_chrome_for_preset(self._settings_chrome_preset_id())
+        from dataclasses import replace
+
+        base = settings_chrome_for_preset(self._settings_chrome_preset_id())
+        return replace(base, text_disabled_hex=get_active_theme().dialog_text_muted_hex())
 
     def _merged_custom_themes(self) -> dict:
         if hasattr(self, "current_settings"):
@@ -2787,6 +2798,119 @@ class SettingsDialog(QDialog):
         h.addWidget(third, 1)
         column_layout.addWidget(row)
 
+    def _add_theme_muted_blend_row(
+        self,
+        column_layout,
+        label_text: str,
+        blend_key: str,
+        preview_key: str,
+        *,
+        tooltip: str = "",
+    ):
+        """Slider + preview swatch: blend primary text toward surface for muted secondary text."""
+        row = QWidget()
+        h = QHBoxLayout(row)
+        h.setContentsMargins(0, 3, 0, 3)
+        h.setSpacing(10)
+        lbl = QLabel(label_text)
+        lbl.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        lbl.setWordWrap(True)
+        lbl.setFixedWidth(self.THEME_LABEL_COL_WIDTH)
+        tip = tooltip or (
+            "How much secondary text blends toward its surface background.\n"
+            "0 = primary text color; 100 = background."
+        )
+        lbl.setToolTip(tip)
+        h.addWidget(lbl)
+
+        sw_outer = QWidget()
+        sw_outer.setFixedWidth(self.THEME_SWATCH_COL_WIDTH)
+        sw_l = QHBoxLayout(sw_outer)
+        sw_l.setContentsMargins(0, 0, 0, 0)
+        btn = QPushButton()
+        btn.setEnabled(False)
+        btn.setText("")
+        btn.setFixedSize(28, 28)
+        btn.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        btn.setStyleSheet(
+            "QPushButton { min-height: 28px; min-width: 28px; max-height: 28px; max-width: 28px;"
+            " height: 28px; width: 28px; padding: 0px; margin: 0px; border: 1px solid white; }"
+        )
+        btn.setToolTip("Preview of derived muted text color")
+        self._muted_preview_buttons[preview_key] = btn
+        sw_l.addWidget(btn)
+        sw_l.addStretch()
+        h.addWidget(sw_outer)
+
+        third = QWidget()
+        third_l = QHBoxLayout(third)
+        third_l.setContentsMargins(0, 0, 0, 0)
+        third.setMinimumWidth(self.THEME_SLIDER_COL_MIN_WIDTH)
+        s = QSlider(Qt.Horizontal)
+        s.setRange(0, 100)
+        s.setSingleStep(1)
+        s.setPageStep(5)
+        s.setTickPosition(QSlider.TickPosition.NoTicks)
+        s.setToolTip(tip)
+        s.setFixedHeight(22)
+        s.valueChanged.connect(
+            lambda _v, k=blend_key: self._on_muted_blend_slider_changed(k)
+        )
+        vl = QLabel("50")
+        vl.setFixedWidth(26)
+        vl.setAlignment(Qt.AlignCenter)
+        s.valueChanged.connect(lambda v, lbl=vl: lbl.setText(str(v)))
+        self._border_width_sliders[blend_key] = s
+        self._border_width_value_labels[blend_key] = vl
+        third_l.addWidget(s, 1)
+        third_l.addWidget(vl)
+        h.addWidget(third, 1)
+        column_layout.addWidget(row)
+
+    def _on_muted_blend_slider_changed(self, key: str) -> None:
+        self._update_muted_preview_swatches()
+        self._schedule_user_theme_preview_live(key)
+
+    def _update_muted_preview_swatches(self) -> None:
+        previews = getattr(self, "_muted_preview_buttons", None)
+        if not previews:
+            return
+        colors = self._get_user_theme_colors_from_widgets()
+        mapping = {
+            "dialog_muted_preview": (
+                "dialog_muted_blend_percent",
+                colors.get("dialog_text_color_hex", "#000000"),
+                colors.get("dialog_background_hex", "#ffffff"),
+            ),
+            "sidebar_muted_preview": (
+                "sidebar_muted_blend_percent",
+                colors.get("sidebar_text_color_hex", "#000000"),
+                colors.get("sidebar_background_color_hex", "#ffffff"),
+            ),
+            "status_bar_muted_preview": (
+                "status_bar_muted_blend_percent",
+                colors.get("status_bar_text_color_hex", "#000000"),
+                colors.get("status_bar_background_color_hex", "#ffffff"),
+            ),
+        }
+        btn_size = 28
+        for preview_key, (blend_key, text_hex, bg_hex) in mapping.items():
+            btn = previews.get(preview_key)
+            if not btn:
+                continue
+            blend = int(colors.get(blend_key, 50))
+            hx = blend_text_toward_background(text_hex, bg_hex, blend)
+            c = QColor(hx)
+            if not c.isValid():
+                c = QColor("#888888")
+            btn.setStyleSheet(
+                f"QPushButton {{"
+                f" min-height: {btn_size}px; min-width: {btn_size}px;"
+                f" max-height: {btn_size}px; max-width: {btn_size}px;"
+                f" height: {btn_size}px; width: {btn_size}px; padding: 0px; margin: 0px;"
+                f" background-color: {c.name()}; border: 1px solid white; }}"
+            )
+
     def _add_theme_chrome_border_width_row(self, column_layout):
         """Row: label | spacer | slider for splitter / status bar top border thickness."""
         row = QWidget()
@@ -2873,6 +2997,7 @@ class SettingsDialog(QDialog):
         self._border_width_sliders: dict = {}
         self._border_width_value_labels: dict = {}
         self._theme_collapse_groups: dict[str, CollapsibleThemeGroup] = {}
+        self._muted_preview_buttons: dict = {}
 
         gb_text = CollapsibleThemeGroup("Text & background", state_key="text_background")
         v_text = gb_text.content_layout()
@@ -2892,9 +3017,21 @@ class SettingsDialog(QDialog):
         for label_text, key in (
             ("Dialog background:", "dialog_background_hex"),
             ("Dialog text:", "dialog_text_color_hex"),
-            ("Input backgrounds:", "dialog_input_background_hex"),
         ):
             self._add_theme_color_swatch_row(v_dialogs, label_text, key)
+        self._add_theme_muted_blend_row(
+            v_dialogs,
+            "Dialog muted text:",
+            "dialog_muted_blend_percent",
+            "dialog_muted_preview",
+            tooltip=(
+                "Secondary dialog text (disabled controls, notes) blends\n"
+                "from dialog text toward dialog background."
+            ),
+        )
+        self._add_theme_color_swatch_row(
+            v_dialogs, "Input backgrounds:", "dialog_input_background_hex"
+        )
         outer.addWidget(gb_dialogs)
 
         gb_chrome = CollapsibleThemeGroup("Sidebar, panes and status bar", state_key="sidebar_chrome")
@@ -2905,10 +3042,34 @@ class SettingsDialog(QDialog):
             ("View titlebars bar:", "sidebar_header_bg_hex"),
             ("Sidebar background:", "sidebar_background_color_hex"),
             ("Sidebar text:", "sidebar_text_color_hex"),
+        ):
+            self._add_theme_color_swatch_row(v_chrome, label_text, key)
+        self._add_theme_muted_blend_row(
+            v_chrome,
+            "Sidebar muted text:",
+            "sidebar_muted_blend_percent",
+            "sidebar_muted_preview",
+            tooltip=(
+                "Secondary sidebar text blends from sidebar text\n"
+                "toward sidebar background."
+            ),
+        )
+        for label_text, key in (
             ("Status bar background:", "status_bar_background_color_hex"),
             ("Status bar text:", "status_bar_text_color_hex"),
-            ("View borders:", "default_border_color_hex"),
         ):
+            self._add_theme_color_swatch_row(v_chrome, label_text, key)
+        self._add_theme_muted_blend_row(
+            v_chrome,
+            "Status bar muted text:",
+            "status_bar_muted_blend_percent",
+            "status_bar_muted_preview",
+            tooltip=(
+                "Disabled menu items and secondary status-bar text blend\n"
+                "from status bar text toward status bar background."
+            ),
+        )
+        for label_text, key in (("View borders:", "default_border_color_hex"),):
             self._add_theme_color_swatch_row(v_chrome, label_text, key)
         self._add_theme_chrome_border_width_row(v_chrome)
         outer.addWidget(gb_chrome)
@@ -3421,6 +3582,18 @@ class SettingsDialog(QDialog):
             sl.setEnabled(editable)
             if getattr(self, "_border_width_value_labels", None) and k in self._border_width_value_labels:
                 self._border_width_value_labels[k].setText(str(vw))
+        for k in THEME_MUTED_BLEND_KEYS:
+            sl = self._border_width_sliders.get(k)
+            if not sl:
+                continue
+            blend = int(merged.get(k, 50))
+            sl.blockSignals(True)
+            sl.setValue(blend)
+            sl.blockSignals(False)
+            sl.setEnabled(editable)
+            if getattr(self, "_border_width_value_labels", None) and k in self._border_width_value_labels:
+                self._border_width_value_labels[k].setText(str(blend))
+        self._update_muted_preview_swatches()
         self._update_theme_preset_action_buttons()
 
     def _on_theme_preset_changed(self, *_args):
@@ -3486,6 +3659,7 @@ class SettingsDialog(QDialog):
                 border: 1px solid white;
             }}
         """)
+        self._update_muted_preview_swatches()
 
     def _on_user_theme_color_picker_changed(self, color: QColor):
         """Live updates from the color panel; swatch updates immediately, theme apply is debounced."""
@@ -3636,6 +3810,11 @@ class SettingsDialog(QDialog):
                 out[k] = int(self._border_width_sliders[k].value())
             else:
                 out[k] = int(base.get(k, 2))
+        for k in THEME_MUTED_BLEND_KEYS:
+            if hasattr(self, "_border_width_sliders") and k in self._border_width_sliders:
+                out[k] = int(self._border_width_sliders[k].value())
+            else:
+                out[k] = int(base.get(k, 50))
         return out
 
     def _apply_theme_tab_from_dialog(self):

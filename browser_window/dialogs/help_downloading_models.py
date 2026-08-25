@@ -273,7 +273,7 @@ def build_downloading_models_html(expanded: Set[str]) -> str:
     border_hex = getattr(th, "default_border_color_hex", BORDER_DEFAULT_HEX)
     code_bg = getattr(th, "button_bg_default_hex", BUTTON_BG_DEFAULT_HEX)
     accent_hex = getattr(th, "accent_color_hex", heading_hex)
-    muted_hex = getattr(th, "information_action_icon_muted_hex", text_hex)
+    muted_hex = th.dialog_text_muted_hex()
     hover_hex = getattr(th, "button_border_hover_hex", accent_hex)
 
     def p(body: str) -> str:

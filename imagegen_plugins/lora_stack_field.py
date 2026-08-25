@@ -684,12 +684,34 @@ class LoraStackField(QWidget):
         return [] if pid == "none" else [pid]
 
     def selected_display_text(self) -> str:
-        """Comma-separated display names for the info line under the LoRA pulldown."""
+        """Comma-separated ``name [scale]`` tokens for the info line under the LoRA pulldown."""
         ids = self.selected_ids()
         if not ids:
             return ""
-        names = [self._label_by_id.get(pid, pid) for pid in ids]
-        return ", ".join(names)
+        from imagegen_plugins.image_gen_naming import format_exif_lora_weight
+        from imagegen_plugins.lora_catalog import get_lora_entry, lora_base_display_name
+        from imagegen_plugins.lora_model_registry import lora_model_key_for_plugin
+
+        plugin = self._plugin
+        model_key = lora_model_key_for_plugin(plugin) if plugin is not None else ""
+        scales = self.scales_by_id()
+        parts: List[str] = []
+        for pid in ids:
+            entry = get_lora_entry(pid)
+            if entry is not None:
+                name = lora_base_display_name(entry, model_key=model_key or "")
+            else:
+                name = str(self._label_by_id.get(pid, pid) or pid)
+                trigger_sep = " - Trigger:"
+                if trigger_sep in name:
+                    name = name.split(trigger_sep, 1)[0].strip()
+                if name.endswith(" *"):
+                    name = name[:-2].strip()
+                elif name.endswith("*"):
+                    name = name[:-1].strip()
+            scale = scales.get(pid, 1.0)
+            parts.append(f"{name} [{format_exif_lora_weight(scale)}]")
+        return ", ".join(parts)
 
     def scales_by_id(self) -> Dict[str, float]:
         """Effective weights for selected LoRAs (session overrides, else catalog)."""

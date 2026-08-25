@@ -347,7 +347,7 @@ class ShortcutsSidebar(QWidget):
             if display and os.path.exists(fav):
                 link = f'<a href="favorite:{i}" style="color:{primary}; text-decoration:none; cursor:pointer;">{display}</a>'
                 fav_rows.append(row(f"^ {i + 1}: &nbsp;&nbsp;{link}", value_row=True))
-        _muted = _theme.shortcuts_note_muted_hex
+        _muted = _theme.sidebar_text_muted_hex()
         if not any(fav and os.path.exists(fav) for fav in favorites):
             fav_rows.append(row(f'<span style="color:{_muted};">No valid favorites defined.</span>', value_row=True))
         fav_rows.append(row(""))

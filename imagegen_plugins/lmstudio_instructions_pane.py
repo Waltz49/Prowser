@@ -29,11 +29,19 @@ from thumbnails.thumbnail_constants import (
     BUTTON_BORDER_DEFAULT_HEX,
     BUTTON_BORDER_HOVER_HEX,
     BUTTON_TEXT_HOVER_HEX,
+    DIALOG_TEXT_MUTED_HEX,
     TEXT_DISABLED_HEX,
 )
 from whisper_voice_input import maybe_wrap_plain_text_edit_with_voice_mic
 
 LMSTUDIO_INSTRUCTIONS_LINE_COUNT = 5
+
+
+def _dialog_muted_text_hex() -> str:
+    try:
+        return get_active_theme().dialog_text_muted_hex()
+    except Exception:
+        return DIALOG_TEXT_MUTED_HEX or TEXT_DISABLED_HEX
 
 
 def lmstudio_instructions_button_stylesheet(
@@ -424,11 +432,11 @@ class LmStudioInstructionsPane:
             outer_inactive_label.setSizePolicy(
                 QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed
             )
-            outer_inactive_label.setStyleSheet(f"color: {TEXT_DISABLED_HEX};")
             outer_inactive_label.setVisible(False)
             self._outer_collapse_arrow = outer_collapse_arrow
             self._outer_collapse_title = outer_collapse_title
             self._outer_inactive_label = outer_inactive_label
+            self._apply_outer_inactive_label_style()
             outer_header_layout.addWidget(
                 outer_collapse_arrow,
                 0,
@@ -600,6 +608,13 @@ class LmStudioInstructionsPane:
         if self._on_editor_expanded_changed is not None:
             self._on_editor_expanded_changed()
 
+    def _apply_outer_inactive_label_style(self) -> None:
+        if self._outer_inactive_label is None:
+            return
+        self._outer_inactive_label.setStyleSheet(
+            f"color: {_dialog_muted_text_hex()};"
+        )
+
     def _apply_content_visibility(self) -> None:
         if not self._image_gen_styled:
             vis = self._visible
@@ -634,6 +649,7 @@ class LmStudioInstructionsPane:
                 _EXPANDED_ARROW if section_expanded else _COLLAPSED_ARROW
             )
         if self._outer_inactive_label is not None:
+            self._apply_outer_inactive_label_style()
             self._outer_inactive_label.setVisible(not section_expanded)
         if self._section_body is not None:
             self._section_body.setVisible(section_expanded)

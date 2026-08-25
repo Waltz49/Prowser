@@ -464,11 +464,7 @@ class ChatPaneWidget(QWidget):
 
     def _style_system_prompt_info(self) -> None:
         th = get_active_theme()
-        muted = getattr(
-            th,
-            "information_action_icon_muted_hex",
-            th.shortcuts_note_muted_hex,
-        )
+        muted = th.sidebar_text_muted_hex()
         self._system_prompt_info.setStyleSheet(
             f"color: {muted}; font-size: 11px;"
             f" padding: 0px 8px {CHAT_PROMPT_BOTTOM_PADDING_EXTRA_PX}px 8px;"

@@ -10,6 +10,7 @@ from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QWidget
 
 from imagegen_plugins.image_gen_dialog import connect_import_button_with_option_modifier
 from imagegen_plugins.image_gen_source_nav import open_image_in_browse
+from imagegen_plugins.model_task_queue import refresh_queued_job_status
 from config import (
     job_queue_action_bar_background_hex,
     job_queue_action_bar_background_qcolor,
@@ -95,6 +96,10 @@ def info_html_for_queue_row(
         return controller.get_task_queue_status_info_html(
             omit_live_steps_row=for_sidebar
         )
+    job = controller._queued_job_by_id(row.job_id)
+    if job is not None:
+        refresh_queued_job_status(job)
+        return job.status_html or ""
     return row.status_html or ""
 
 
