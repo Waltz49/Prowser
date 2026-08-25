@@ -11,6 +11,7 @@ from imagegen_plugins.image_gen_registry import ImageGenModelPlugin
 JOB_VALUES_SNAPSHOTTED_KEY = "_job_values_snapshotted"
 LORA_SCALES_BY_ID_KEY = "mflux_lora_scales_by_id"
 LORA_TRIGGER_WORDS_KEY = "mflux_lora_trigger_words"
+JOB_QUEUE_ONLY_SUBMIT_KEYS = frozenset({"series_prompt_refinement"})
 
 
 def job_values_snapshotted(values: Dict[str, Any] | None) -> bool:
@@ -142,6 +143,12 @@ def _normalize_job_source_paths(
             values.pop("_canonical_source_image_paths", None)
 
 
+def strip_dialog_leaked_job_queue_flags(values: Dict[str, Any]) -> None:
+    """Drop job-toolbar flags that must not carry from dialog defaults into new jobs."""
+    for key in JOB_QUEUE_ONLY_SUBMIT_KEYS:
+        values.pop(key, None)
+
+
 def snapshot_job_values_at_submit(
     plugin: ImageGenModelPlugin, values: Dict[str, Any]
 ) -> Dict[str, Any]:
@@ -171,9 +178,11 @@ def snapshot_job_values_at_submit(
 
 
 __all__ = [
+    "JOB_QUEUE_ONLY_SUBMIT_KEYS",
     "JOB_VALUES_SNAPSHOTTED_KEY",
     "LORA_SCALES_BY_ID_KEY",
     "LORA_TRIGGER_WORDS_KEY",
     "job_values_snapshotted",
     "snapshot_job_values_at_submit",
+    "strip_dialog_leaked_job_queue_flags",
 ]

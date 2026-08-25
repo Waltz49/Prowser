@@ -539,11 +539,15 @@ class ImageGenController(QObject):
     def start_generation(
         self, plugin: ImageGenModelPlugin, values: Dict[str, Any]
     ) -> bool:
-        from imagegen_plugins.job_values_snapshot import snapshot_job_values_at_submit
+        from imagegen_plugins.job_values_snapshot import (
+            snapshot_job_values_at_submit,
+            strip_dialog_leaked_job_queue_flags,
+        )
 
         copies = self._normalize_copies(values.get("copies", 1))
         values = dict(values)
         values["copies"] = copies
+        strip_dialog_leaked_job_queue_flags(values)
         from imagegen_plugins.flux_prompt_job import strip_flux_prompt_ai_job_if_ui_inactive
 
         strip_flux_prompt_ai_job_if_ui_inactive(self._imagegen_submit_owner(), values)
@@ -585,11 +589,14 @@ class ImageGenController(QObject):
         from imagegen_plugins.job_values_snapshot import (
             job_values_snapshotted,
             snapshot_job_values_at_submit,
+            strip_dialog_leaked_job_queue_flags,
         )
 
         copies = self._normalize_copies(values.get("copies", 1))
         values = dict(values)
         values["copies"] = copies
+        if not job_values_snapshotted(values):
+            strip_dialog_leaked_job_queue_flags(values)
         from imagegen_plugins.flux_prompt_job import strip_flux_prompt_ai_job_if_ui_inactive
 
         strip_flux_prompt_ai_job_if_ui_inactive(self._imagegen_submit_owner(), values)

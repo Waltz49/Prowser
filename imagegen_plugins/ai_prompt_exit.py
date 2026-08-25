@@ -57,7 +57,10 @@ def apply_image_ai_exit_to_prompt_values(values: dict) -> bool:
 
 def imagegen_values_for_dialog_save(values: dict, panel) -> dict:
     """Persist dialog settings using the user's raw prompt text."""
+    from imagegen_plugins.job_values_snapshot import strip_dialog_leaked_job_queue_flags
+
     out = dict(values)
+    strip_dialog_leaked_job_queue_flags(out)
     getter = getattr(panel, "get_prompt_text", None)
     if getter is not None:
         out["prompt"] = getter()

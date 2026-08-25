@@ -82,6 +82,9 @@ _GLOBAL_DIALOG_PREF_KEYS = frozenset(
         "show_progressive_images",
     }
 )
+
+# Owned by the job-queue toolbar (T>), not generate-dialog field values.
+_JOB_QUEUE_ONLY_DIALOG_KEYS = frozenset({"series_prompt_refinement"})
 _PASS_IMAGE_TO_AI_KEY = "pass_image_to_ai_with_prompt"
 _SHOW_PROGRESSIVE_IMAGES_KEY = "show_progressive_images"
 _FLUX_PROMPT_JOB_WITH_GENERATE_KEY = "flux_prompt_job_with_generate"
@@ -101,6 +104,7 @@ def _sanitize_dialog_values(values: Dict[str, Any]) -> Dict[str, Any]:
         for k, v in dict(values).items()
         if k not in _PLUGIN_SPECIFIC_DIALOG_KEYS
         and k not in _GLOBAL_DIALOG_PREF_KEYS
+        and k not in _JOB_QUEUE_ONLY_DIALOG_KEYS
     }
 
 
