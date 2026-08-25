@@ -441,6 +441,7 @@ class ImageBrowserConfig:
             'imagegen_add_chat_prefix_postfix': True,
             'imagegen_fast_open_action': 'from_text',
             'imagegen_output_format': 'png',
+            'imagegen_low_ram': True,
             'browse_view_actual_size': False,
             # ms on same browse image before recording to Image History (0 = immediate; max 5000; 500 ms steps in UI)
             'browse_image_history_save_after_ms': 3000,
@@ -952,7 +953,6 @@ IMAGEGEN_DEFAULTS = {
                 "mflux_quantize": 4,
                 "seed": 0,
                 "random_seed": True,
-                "low_ram": True,
             },
             "z_image_turbo_sdnq_int8": {
                 "prompt": "",

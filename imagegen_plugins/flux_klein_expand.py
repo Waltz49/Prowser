@@ -30,7 +30,6 @@ _KLEIN_EXPAND_DEFAULTS = {
     "mflux_quantize": 4,
     "seed": 0,
     "random_seed": True,
-    "low_ram": True,
     "overlap_percentage": 2,
     "mflux_lora": "none",
 }

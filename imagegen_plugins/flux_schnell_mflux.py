@@ -25,7 +25,6 @@ FLUX_SCHNELL_MFLUX_PLUGIN = ImageGenModelPlugin(
         "height": 1024,
         "seed": 0,
         "random_seed": True,
-        "low_ram": False,
         "prompt": "",
     },
 )

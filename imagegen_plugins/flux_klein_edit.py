@@ -13,7 +13,6 @@ from imagegen_plugins.hf_model_ids import (
 from imagegen_plugins.image_gen_field_blocks import (
     bool_run_block,
     klein_edit_copies_group,
-    low_ram_bool,
     seed_row_block,
     steps_quant_row_block,
 )
@@ -31,7 +30,6 @@ _KLEIN_EDIT_DEFAULTS = {
     "mflux_quantize": 4,
     "seed": 0,
     "random_seed": True,
-    "low_ram": True,
     "use_custom_size": False,
     "width": 1024,
     "height": 1024,
@@ -75,7 +73,6 @@ def _klein_edit_field_layout(
                 kind="bool",
                 default=bool(values.get("aspect_ratio_test", True)),
             ),
-            low_ram_bool(values, default=True),
         ),
     )
 

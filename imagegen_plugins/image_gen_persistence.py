@@ -73,6 +73,9 @@ _PLUGIN_SPECIFIC_DIALOG_KEYS = frozenset(
 # Shared across all models in a function dialog (e.g. create).
 _SHARED_FUNCTION_KEYS = frozenset({"prompt"})
 
+# Keys that were removed from unified dialogs but may linger in saved settings.
+_DIALOG_DEPRECATED_FIELD_KEYS = frozenset({"low_ram"})
+
 # Global image-gen prefs (not per function, model, or dialog field values).
 _GLOBAL_DIALOG_PREF_KEYS = frozenset(
     {
@@ -105,6 +108,7 @@ def _sanitize_dialog_values(values: Dict[str, Any]) -> Dict[str, Any]:
         if k not in _PLUGIN_SPECIFIC_DIALOG_KEYS
         and k not in _GLOBAL_DIALOG_PREF_KEYS
         and k not in _JOB_QUEUE_ONLY_DIALOG_KEYS
+        and k not in _DIALOG_DEPRECATED_FIELD_KEYS
     }
 
 

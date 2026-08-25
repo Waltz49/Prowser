@@ -270,15 +270,6 @@ def bool_run_block(*specs: FieldSpec) -> FieldGroup:
     return FieldGroup(layout="bool_run", children=specs)
 
 
-def low_ram_bool(values: dict[str, Any], *, default: bool) -> FieldSpec:
-    return FieldSpec(
-        key="low_ram",
-        label="Low RAM mode",
-        kind="bool",
-        default=bool(values.get("low_ram", default)),
-    )
-
-
 def sana_extra_fields(
     values: dict[str, Any],
     *,
@@ -343,7 +334,6 @@ def flux1_t2i_field_layout(
     effective_max_side: int,
     *,
     default_q: int = 3,
-    low_ram_default: bool = False,
 ) -> Tuple[FieldNode, ...]:
     """Shared create layout for FLUX.1 Schnell/Dev MFLUX text-to-image plugins."""
     from imagegen_plugins.image_gen_pipeline_modes import get_pipeline
@@ -386,9 +376,6 @@ def flux1_t2i_field_layout(
             model_defaults=model_defaults,
         ),
         copies_slider_block(values, model_defaults=model_defaults),
-        bool_run_block(
-            low_ram_bool(values, default=low_ram_default),
-        ),
     )
 
 
@@ -426,7 +413,4 @@ def klein_expand_field_layout(
         steps_node,
         copies_slider_block(values, model_defaults=model_defaults),
         overlap_percentage_field(values, model_defaults=model_defaults),
-        bool_run_block(
-            low_ram_bool(values, default=True),
-        ),
     )

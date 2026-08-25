@@ -161,6 +161,32 @@ Fields are declared with `FieldSpec` in `image_gen_fields.py` and composed via `
 
 Common fields (prompt, width, height, steps, guidance, seed, random seed) are added automatically from `PipelineMode`. Pipeline-specific fields are added in per-plugin `field_layout_builder` functions or `field_specs_for_pipeline()`.
 
+**Low RAM mode** is not a dialog field. It is a global preference in **Settings → General → Image Generation** (`imagegen_low_ram` in `settings.json`). At run time, `finalize_run_values()` in `image_gen_pipeline_modes.py` sets `low_ram` on the worker payload when the pipeline’s `PipelineMode` has `supports_low_ram=True`. Models whose backends ignore that key are unaffected.
+
+---
+
+## Global image generation settings (Settings → General)
+
+Several options apply across all unified dialogs and are **not** stored per plugin:
+
+| Setting | `settings.json` key | Applied by |
+|---------|---------------------|------------|
+| Max generation dimension | `imagegen_max_generation_dimension` | `effective_max_for_plugin()` / dim sliders |
+| Series cooldown | `imagegen_series_cooldown_seconds` | `ImageGenController` between copies |
+| Output format (PNG / WebP) | `imagegen_output_format` | `image_gen_output_format.py` |
+| Low RAM mode | `imagegen_low_ram` (default `true`) | `finalize_run_values()` → `low_ram` on payload |
+
+**Low RAM** trades speed for lower memory use in MFLUX-backed pipelines. Pipelines that support it today:
+
+- `flux_schnell_mflux_play`
+- `mflux_fill_expand`, `mflux_fill_infill`
+- `mflux_flux2_klein_create`, `mflux_flux2_klein_edit`, `mflux_flux2_klein_expand`
+- `mflux_z_image_turbo`
+
+To add support for a new backend: set `supports_low_ram=True` on its `PipelineMode`, read `payload["low_ram"]` in `run_from_payload()`, and pass it through to the model loader (see existing `mflux_schnell.py` / `mflux_flux2_klein_create.py`). Do **not** add a `low_ram` `FieldSpec` to the plugin layout.
+
+Other image-gen globals live under the nested `imagegen` object (for example `show_progressive_images`, flux-prompt AI prefs) — see [Settings storage](#settings-storage).
+
 ---
 
 ## LoRA adapters
@@ -198,6 +224,7 @@ Each pipeline module should implement:
    - `output_path` — where to write the PNG
    - `pipeline_id`, `hf_model_id`
    - `random_seed` / `seed`
+   - `low_ram` (optional bool) — set by `finalize_run_values()` when `PipelineMode.supports_low_ram` is true; MFLUX loaders use it to reduce memory
 
    Return value should include:
    - `output_path`
@@ -253,7 +280,7 @@ Create `imagegen_plugins/pipelines/your_backend.py`:
 
 In `imagegen_plugins/image_gen_pipeline_modes.py`:
 
-1. Add a `PipelineMode(...)` entry to `PIPELINE_MODES`.
+1. Add a `PipelineMode(...)` entry to `PIPELINE_MODES` (set `supports_low_ram=True` if the worker accepts `low_ram` on the payload).
 2. Extend `pipeline_is_available()` to call your install check.
 3. Extend `field_specs_for_pipeline()` for any extra dialog fields.
 
@@ -326,6 +353,10 @@ Relevant keys in `~/.prowser/data/settings.json`:
 
 ```json
 {
+  "imagegen_max_generation_dimension": 1024,
+  "imagegen_series_cooldown_seconds": 60,
+  "imagegen_output_format": "png",
+  "imagegen_low_ram": true,
   "imagegen": {
     "last_function": "create",
     "active_plugin_by_function": {
@@ -359,7 +390,7 @@ Relevant keys in `~/.prowser/data/settings.json`:
 
 Per-function dialog values are stored under `imagegen.dialogs.<function>.<plugin_id>`. Legacy flat `imagegen.models` keys are still read for migration. LoRA state migrates from legacy `enabled_ids` / `deleted_ids` to `by_host` / `by_model` with `hidden_ids` on load.
 
-PNG vs WebP for generated files is stored at the top level as `imagegen_output_format` (see `image_gen_output_format.py`).
+Top-level keys `imagegen_max_generation_dimension`, `imagegen_series_cooldown_seconds`, `imagegen_output_format`, and `imagegen_low_ram` are edited in **Settings → General → Image Generation** (not per model). See [Global image generation settings](#global-image-generation-settings-settings--general).
 
 ---
 

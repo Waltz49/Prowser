@@ -35,10 +35,6 @@ _FIELD_TOOLTIPS: dict[str, str] = {
         "Turn on Random seed if you want\n"
         "more than one."
     ),
-    "low_ram": (
-        "Use less computer memory.\n"
-        "May run slower."
-    ),
     "overlap_percentage": "Overlap between expand tiles when blending (percent).",
     "aspect_ratio_test": (
         "When you use several images,\n"

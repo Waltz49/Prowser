@@ -12,7 +12,6 @@ from imagegen_plugins.image_gen_field_blocks import (
     dim_slider_block,
     klein_expand_field_layout,
     klein_edit_copies_group,
-    low_ram_bool,
     model_reset_default,
     seed_row_block,
     steps_quant_row_block,
@@ -41,7 +40,6 @@ _SCENEWORKS_CREATE_DEFAULTS = {
     "seed": 0,
     "random_seed": True,
     "copies": 1,
-    "low_ram": True,
 }
 
 _SCENEWORKS_EDIT_DEFAULTS = {
@@ -50,7 +48,6 @@ _SCENEWORKS_EDIT_DEFAULTS = {
     "mlx_tier": DEFAULT_MLX_TIER,
     "seed": 0,
     "random_seed": True,
-    "low_ram": True,
     "use_custom_size": False,
     "width": 1024,
     "height": 1024,
@@ -66,7 +63,6 @@ _SCENEWORKS_EXPAND_DEFAULTS = {
     "mlx_tier": DEFAULT_MLX_TIER,
     "seed": 0,
     "random_seed": True,
-    "low_ram": True,
     "overlap_percentage": 2,
     "mflux_lora": "none",
 }
@@ -143,9 +139,6 @@ def sceneworks_klein_create_field_layout(
         seed_row_block(values),
         _sceneworks_steps_tier_row(plugin, values, model_defaults=model_defaults),
         copies_slider_block(values, model_defaults=model_defaults),
-        bool_run_block(
-            low_ram_bool(values, default=True),
-        ),
     )
 
 
@@ -175,7 +168,6 @@ def sceneworks_klein_edit_field_layout(
                 kind="bool",
                 default=bool(values.get("aspect_ratio_test", True)),
             ),
-            low_ram_bool(values, default=True),
         ),
     )
 

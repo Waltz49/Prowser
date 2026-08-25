@@ -1449,6 +1449,11 @@ class SettingsDialog(QDialog):
                     if hasattr(self, 'imagegen_output_format_combo')
                     else 'png'
                 ),
+                'imagegen_low_ram': (
+                    self.imagegen_low_ram_checkbox.isChecked()
+                    if hasattr(self, 'imagegen_low_ram_checkbox')
+                    else True
+                ),
             }
         elif tab_widget == self.slideshow_settings_tab:
             return {
@@ -1993,6 +1998,8 @@ class SettingsDialog(QDialog):
                     if self.imagegen_output_format_combo.itemData(i) == 'png':
                         self.imagegen_output_format_combo.setCurrentIndex(i)
                         break
+            if hasattr(self, 'imagegen_low_ram_checkbox'):
+                self.imagegen_low_ram_checkbox.setChecked(True)
         elif tab_widget == self.slideshow_settings_tab:
             self.slideshow_rate_spinbox.setValue(self.DEFAULT_SLIDESHOW_RATE)
             self.transition_speed_spinbox.setValue(self.DEFAULT_TRANSITION_SPEED)
@@ -2203,6 +2210,8 @@ class SettingsDialog(QDialog):
                     if self.imagegen_output_format_combo.itemData(i) == 'png':
                         self.imagegen_output_format_combo.setCurrentIndex(i)
                         break
+            if hasattr(self, 'imagegen_low_ram_checkbox'):
+                self.imagegen_low_ram_checkbox.setChecked(True)
         elif tab_widget == self.slideshow_settings_tab:
             self.slideshow_rate_spinbox.setValue(self.DEFAULT_SLIDESHOW_RATE)
             self.transition_speed_spinbox.setValue(self.DEFAULT_TRANSITION_SPEED)
@@ -2389,18 +2398,6 @@ class SettingsDialog(QDialog):
             f"Debug mode ({SHIFT_SYMBOL}-{CMD_SYMBOL}-D)",
             tooltip="Show key popup overlay for debugging keyboard events.",
             subtitle=f"Enter debug mode. Meaning varies. Use {CTRL_SYMBOL}-L to view log.",
-        )
-
-        self.use_prompt_filter_exits_checkbox = general_panel.add_gear_toggle(
-            "Use prompt filter exits",
-            on_gear_clicked=self._open_exit_scripts_dialog,
-            tooltip=(
-                "When enabled, run external prompt filter scripts\n"
-                "for LM Studio / caption prompts and image generation\n"
-                "prompts before model calls."
-            ),
-            subtitle="Use exit scripts to modify prompt data before model calls.",
-            gear_tooltip="Configure exit scripts",
         )
 
         inner_layout.addWidget(general_group)
@@ -2624,6 +2621,29 @@ class SettingsDialog(QDialog):
             subtitle="Models may impose lower limits.",
         )
 
+        self.imagegen_add_chat_prefix_postfix_checkbox = imagegen_panel.add_gear_toggle(
+            "Add prefix/postfix strings",
+            on_gear_clicked=self._open_chat_prefix_postfix_library,
+            tooltip=(
+                "When enabled, prefix and postfix strings are applied to chat and image\n"
+                "prompts subject to selections."
+            ),
+            subtitle="Apply prefix/postfix rules to chat and image prompts.",
+            gear_tooltip="Edit prefix and postfix rules",
+        )
+
+        self.use_prompt_filter_exits_checkbox = imagegen_panel.add_gear_toggle(
+            "Use prompt filter exits",
+            on_gear_clicked=self._open_exit_scripts_dialog,
+            tooltip=(
+                "When enabled, run external prompt filter scripts\n"
+                "for LM Studio / caption prompts and image generation\n"
+                "prompts before model calls."
+            ),
+            subtitle="Use exit scripts to modify prompt data before model calls.",
+            gear_tooltip="Configure exit scripts",
+        )
+
         cooldown_control = QWidget()
         cooldown_control_layout = QVBoxLayout(cooldown_control)
         cooldown_control_layout.setContentsMargins(0, 0, 0, 0)
@@ -2659,15 +2679,24 @@ class SettingsDialog(QDialog):
             subtitle="Seconds between generations in a series.",
         )
 
-        self.imagegen_add_chat_prefix_postfix_checkbox = imagegen_panel.add_gear_toggle(
-            "Add prefix/postfix strings",
-            on_gear_clicked=self._open_chat_prefix_postfix_library,
-            tooltip=(
-                "When enabled, prefix and postfix strings are applied to chat and image\n"
-                "prompts subject to selections."
-            ),
-            subtitle="Apply prefix/postfix rules to chat and image prompts.",
-            gear_tooltip="Edit prefix and postfix rules",
+        from imagegen_plugins.image_gen_output_format import OUTPUT_FORMAT_CHOICES
+
+        self.imagegen_output_format_combo = SettingsListCombo()
+        for fmt in OUTPUT_FORMAT_CHOICES:
+            self.imagegen_output_format_combo.addItem(
+                fmt.upper(), userData=fmt
+            )
+        configure_settings_list_combo(self.imagegen_output_format_combo)
+        self.imagegen_output_format_combo.setToolTip(
+            "File format for generated images\n"
+            "(imagegen-NNNN in the image creation directory)."
+        )
+        self.imagegen_output_format_combo.setFixedHeight(28)
+        imagegen_panel.add_form_row(
+            "Output format",
+            self.imagegen_output_format_combo,
+            tooltip="PNG or WebP for generated image files.",
+            subtitle="Format for imagegen-NNNN output files.",
         )
 
         self.imagegen_fast_open_action_combo = SettingsListCombo()
@@ -2689,24 +2718,14 @@ class SettingsDialog(QDialog):
             subtitle="Opens image generation dialog\nprimed from the current image.",
         )
 
-        from imagegen_plugins.image_gen_output_format import OUTPUT_FORMAT_CHOICES
-
-        self.imagegen_output_format_combo = SettingsListCombo()
-        for fmt in OUTPUT_FORMAT_CHOICES:
-            self.imagegen_output_format_combo.addItem(
-                fmt.upper(), userData=fmt
-            )
-        configure_settings_list_combo(self.imagegen_output_format_combo)
-        self.imagegen_output_format_combo.setToolTip(
-            "File format for generated images\n"
-            "(imagegen-NNNN in the image creation directory)."
-        )
-        self.imagegen_output_format_combo.setFixedHeight(28)
-        imagegen_panel.add_form_row(
-            "Output format",
-            self.imagegen_output_format_combo,
-            tooltip="PNG or WebP for generated image files.",
-            subtitle="Format for imagegen-NNNN output files.",
+        self.imagegen_low_ram_checkbox = imagegen_panel.add_toggle(
+            "Low RAM mode",
+            tooltip=(
+                "Use less computer memory during image generation.\n"
+                "Applies to all models that support this option.\n"
+                "May run slower."
+            ),
+            subtitle="Global setting for models that support low RAM mode.",
         )
 
         default_dim_index = (
@@ -4023,6 +4042,10 @@ class SettingsDialog(QDialog):
                 if self.imagegen_output_format_combo.itemData(i) == fmt:
                     self.imagegen_output_format_combo.setCurrentIndex(i)
                     break
+        if hasattr(self, 'imagegen_low_ram_checkbox'):
+            self.imagegen_low_ram_checkbox.setChecked(
+                bool(settings.get('imagegen_low_ram', True))
+            )
 
     def _imagegen_max_generation_dimension_px(self) -> int:
         from imagegen_plugins.image_gen_dim_limits import (
@@ -8800,6 +8823,11 @@ class SettingsDialog(QDialog):
                 self.imagegen_output_format_combo.currentData()
                 if hasattr(self, 'imagegen_output_format_combo')
                 else 'png'
+            ),
+            'imagegen_low_ram': (
+                self.imagegen_low_ram_checkbox.isChecked()
+                if hasattr(self, 'imagegen_low_ram_checkbox')
+                else True
             ),
             'filtered_tree': self.original_settings.get('filtered_tree', 'images'),  # UI removed, value set from Tree Filtering menu and persisted
             'filter_pattern': ImageBrowserConfig.normalize_filter_pattern(self.filter_pattern_input.text().strip()),

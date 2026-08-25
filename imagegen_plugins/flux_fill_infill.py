@@ -6,10 +6,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, Tuple
 
 from imagegen_plugins.image_gen_field_blocks import (
-    bool_run_block,
     copies_slider_block,
     guidance_slider_block,
-    low_ram_bool,
     seed_row_block,
     steps_quant_row_block,
 )
@@ -59,9 +57,6 @@ def flux_fill_infill_field_layout(
             model_defaults=model_defaults,
         ),
         copies_slider_block(values, model_defaults=model_defaults),
-        bool_run_block(
-            low_ram_bool(values, default=True),
-        ),
     )
 
 
@@ -82,7 +77,6 @@ FLUX_FILL_INFILL_PLUGIN = ImageGenModelPlugin(
         "mflux_quantize": 4,
         "seed": 0,
         "random_seed": True,
-        "low_ram": True,
         "mflux_lora": "none",
     },
 )

@@ -25,7 +25,6 @@ FLUX_SLDR_NSFW_V2_LORA_PLUGIN = ImageGenModelPlugin(
         "height": 1024,
         "seed": 0,
         "random_seed": True,
-        "low_ram": False,
         "prompt": "",
         "mflux_lora": "sldr_nsfw_v2",
     },

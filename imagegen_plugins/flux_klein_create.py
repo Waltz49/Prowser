@@ -11,10 +11,8 @@ from imagegen_plugins.hf_model_ids import (
     FLUX2_KLEIN_9B_KV,
 )
 from imagegen_plugins.image_gen_field_blocks import (
-    bool_run_block,
     copies_slider_block,
     dim_slider_block,
-    low_ram_bool,
     seed_row_block,
     steps_quant_row_block,
 )
@@ -36,7 +34,6 @@ _KLEIN_CREATE_DEFAULTS = {
     "seed": 0,
     "random_seed": True,
     "copies": 1,
-    "low_ram": True,
 }
 
 
@@ -76,9 +73,6 @@ def _klein_create_field_layout(
             model_defaults=model_defaults,
         ),
         copies_slider_block(values, model_defaults=model_defaults),
-        bool_run_block(
-            low_ram_bool(values, default=True),
-        ),
     )
 
 

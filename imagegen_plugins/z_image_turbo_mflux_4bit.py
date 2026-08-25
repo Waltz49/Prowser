@@ -7,10 +7,8 @@ from typing import TYPE_CHECKING, Any, Tuple
 
 from imagegen_plugins.hf_model_ids import Z_IMAGE_TURBO_MFLUX_4BIT
 from imagegen_plugins.image_gen_field_blocks import (
-    bool_run_block,
     copies_slider_block,
     dim_slider_block,
-    low_ram_bool,
     seed_row_block,
     steps_slider_block,
 )
@@ -58,9 +56,6 @@ def z_image_turbo_mflux_field_layout(
             model_defaults=model_defaults,
         ),
         copies_slider_block(values, model_defaults=model_defaults),
-        bool_run_block(
-            low_ram_bool(values, default=True),
-        ),
     )
 
 
@@ -81,7 +76,6 @@ Z_IMAGE_TURBO_MFLUX_4BIT_PLUGIN = ImageGenModelPlugin(
         "seed": 0,
         "random_seed": True,
         "copies": 1,
-        "low_ram": True,
         "mflux_quantize": 4,
     },
 )

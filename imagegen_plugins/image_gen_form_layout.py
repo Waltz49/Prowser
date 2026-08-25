@@ -2280,7 +2280,7 @@ class ImageGenFieldsPanel:
         control_sections = [
             g for g in self._control_groups if self._section_is_visible(g)
         ]
-        # --- Checkbox sections (Low RAM, etc.) ---
+        # --- Checkbox sections (bools in bool_run layout, etc.) ---
         # NOTE: Included in shared column flow for now. Future: apply separate
         # split_groups_for_balanced_columns() here for an independent checkbox block.
         checkbox_sections = [
@@ -2494,7 +2494,7 @@ class ImageGenFieldsPanel:
         width = self._available_controls_width()
         # --- Control sections (labeled fields, custom size, seed row, etc.) ---
         control_sections = list(self._control_groups)
-        # --- Checkbox sections (Low RAM, etc.) ---
+        # --- Checkbox sections (bools in bool_run layout, etc.) ---
         # NOTE: Included in shared column flow for now. Future: apply separate
         # split_groups_for_balanced_columns() to control_sections and
         # checkbox_sections independently, then lay out each block.

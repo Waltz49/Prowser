@@ -70,6 +70,7 @@ class PipelineMode:
     requires_source_image: bool = False
     supports_optional_source_image: bool = False
     includes_output_dimensions: bool = True
+    supports_low_ram: bool = False
 
 
 PIPELINE_MODES: Dict[str, PipelineMode] = {
@@ -81,6 +82,7 @@ PIPELINE_MODES: Dict[str, PipelineMode] = {
         steps_max=30,
         guidance_default=3.5,
         supports_progressive_images=True,
+        supports_low_ram=True,
     ),
     "sana_sprint_600m": PipelineMode(
         pipeline_id="sana_sprint_600m",
@@ -129,6 +131,7 @@ PIPELINE_MODES: Dict[str, PipelineMode] = {
         dim_step=16,
         supports_negative_prompt=False,
         supports_progressive_images=True,
+        supports_low_ram=True,
     ),
     "sd15_diffusers": PipelineMode(
         pipeline_id="sd15_diffusers",
@@ -182,6 +185,7 @@ PIPELINE_MODES: Dict[str, PipelineMode] = {
         prompt_status_label="Outfill:",
         prompt_required=False,
         requires_source_image=True,
+        supports_low_ram=True,
     ),
     "mflux_fill_infill": PipelineMode(
         pipeline_id="mflux_fill_infill",
@@ -199,6 +203,7 @@ PIPELINE_MODES: Dict[str, PipelineMode] = {
         prompt_required=False,
         requires_source_image=False,
         includes_output_dimensions=False,
+        supports_low_ram=True,
     ),
     "mflux_flux2_klein_create": PipelineMode(
         pipeline_id="mflux_flux2_klein_create",
@@ -219,6 +224,7 @@ PIPELINE_MODES: Dict[str, PipelineMode] = {
         prompt_required=True,
         requires_source_image=False,
         supports_optional_source_image=True,
+        supports_low_ram=True,
     ),
     "mflux_flux2_klein_edit": PipelineMode(
         pipeline_id="mflux_flux2_klein_edit",
@@ -236,6 +242,7 @@ PIPELINE_MODES: Dict[str, PipelineMode] = {
         prompt_required=True,
         requires_source_image=True,
         includes_output_dimensions=False,
+        supports_low_ram=True,
     ),
     "mflux_flux2_klein_expand": PipelineMode(
         pipeline_id="mflux_flux2_klein_expand",
@@ -257,8 +264,21 @@ PIPELINE_MODES: Dict[str, PipelineMode] = {
         prompt_status_label="Outfill:",
         prompt_required=False,
         requires_source_image=True,
+        supports_low_ram=True,
     ),
 }
+
+
+def pipeline_supports_low_ram(pipeline_id: str) -> bool:
+    return get_pipeline(pipeline_id).supports_low_ram
+
+
+def load_imagegen_low_ram() -> bool:
+    """Global Low RAM preference (General settings → Image Generation)."""
+    from config import get_config
+
+    settings = get_config().load_settings()
+    return bool(settings.get("imagegen_low_ram", True))
 
 
 def get_pipeline(pipeline_id: str) -> PipelineMode:
@@ -542,6 +562,10 @@ def finalize_run_values(pipeline_id: str, values: Dict[str, Any]) -> Dict[str, A
             from imagegen_plugins.image_gen_persistence import load_show_progressive_images
 
             out["show_progressive_images"] = load_show_progressive_images()
+    if pipeline_supports_low_ram(pipeline_id):
+        out["low_ram"] = load_imagegen_low_ram()
+    else:
+        out.pop("low_ram", None)
     return out
 
 
@@ -561,7 +585,6 @@ def merge_defaults(
         "seed": 0,
         "random_seed": True,
         "copies": 1,
-        "low_ram": False,
         "mflux_lora": "none",
         "mflux_lora_stack": [],
     }
@@ -572,6 +595,7 @@ def merge_defaults(
     base.update(model_defaults or {})
     if saved:
         base.update(saved)
+    base.pop("low_ram", None)
     if lora_host_for_pipeline(pipeline_id) == HOST_SD15:
         from imagegen_plugins.mflux_lora_presets import strip_lora_payload_keys_for_host
 
