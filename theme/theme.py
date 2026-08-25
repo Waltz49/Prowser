@@ -1527,12 +1527,16 @@ class ThemeStylesMixin:
                 border: none;
                 color: {t.qtooltip_fg_hex};
                 font-size: 11pt;
-                padding: 6px 8px 6px 0px;
+                padding: 0px;
             }}
             QLabel#graphicButtonTooltipIcon {{
                 background: transparent;
                 border: none;
-                padding: 6px 0px 6px 6px;
+                padding: 0px;
+                min-width: 48px;
+                max-width: 48px;
+                min-height: 48px;
+                max-height: 48px;
             }}
         """
 

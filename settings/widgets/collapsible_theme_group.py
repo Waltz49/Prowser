@@ -25,15 +25,56 @@ THEME_COLLAPSE_GROUP_KEYS = (
     "browse_colors",
 )
 
+GENERAL_COLLAPSE_GROUP_KEYS = (
+    "general",
+    "thumbnails",
+    "image_viewing",
+    "image_generation",
+)
+
+DIRECTORIES_COLLAPSE_GROUP_KEYS = (
+    "root_directories",
+    "scanning_options",
+    "depth",
+    "image_creation_temp_files",
+    "ignore_directories",
+)
+
 
 def default_theme_settings_groups_expanded() -> dict[str, bool]:
-    return {key: False for key in THEME_COLLAPSE_GROUP_KEYS}
+    return {key: True for key in THEME_COLLAPSE_GROUP_KEYS}
+
+
+def default_general_settings_groups_expanded() -> dict[str, bool]:
+    return {key: True for key in GENERAL_COLLAPSE_GROUP_KEYS}
+
+
+def default_directories_settings_groups_expanded() -> dict[str, bool]:
+    return {key: True for key in DIRECTORIES_COLLAPSE_GROUP_KEYS}
 
 
 def merge_theme_settings_groups_expanded(saved: dict | None) -> dict[str, bool]:
     merged = default_theme_settings_groups_expanded()
     if isinstance(saved, dict):
         for key in THEME_COLLAPSE_GROUP_KEYS:
+            if key in saved:
+                merged[key] = bool(saved[key])
+    return merged
+
+
+def merge_general_settings_groups_expanded(saved: dict | None) -> dict[str, bool]:
+    merged = default_general_settings_groups_expanded()
+    if isinstance(saved, dict):
+        for key in GENERAL_COLLAPSE_GROUP_KEYS:
+            if key in saved:
+                merged[key] = bool(saved[key])
+    return merged
+
+
+def merge_directories_settings_groups_expanded(saved: dict | None) -> dict[str, bool]:
+    merged = default_directories_settings_groups_expanded()
+    if isinstance(saved, dict):
+        for key in DIRECTORIES_COLLAPSE_GROUP_KEYS:
             if key in saved:
                 merged[key] = bool(saved[key])
     return merged

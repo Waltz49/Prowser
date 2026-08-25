@@ -339,11 +339,15 @@ def settings_dialog_graphic_tooltip_stylesheet(chrome: SettingsDialogChrome) -> 
             border: none;
             color: {c.control_text_hex};
             font-size: 12px;
-            padding: 6px 8px 6px 0px;
+            padding: 0px;
         }}
         QLabel#graphicButtonTooltipIcon {{
             background: transparent;
             border: none;
-            padding: 6px 0px 6px 6px;
+            padding: 0px;
+            min-width: 48px;
+            max-width: 48px;
+            min-height: 48px;
+            max-height: 48px;
         }}
     """

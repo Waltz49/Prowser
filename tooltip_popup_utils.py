@@ -25,6 +25,11 @@ _OFFSET_X = 12
 _OFFSET_Y = 20
 GRAPHIC_TOOLTIP_ICON_PX = 48
 _GRAPHIC_TOOLTIP_TEXT_MAX_WIDTH = 320
+_GRAPHIC_TOOLTIP_MARGIN_LEFT = 6
+_GRAPHIC_TOOLTIP_MARGIN_TOP = 6
+_GRAPHIC_TOOLTIP_MARGIN_RIGHT = 8
+_GRAPHIC_TOOLTIP_MARGIN_BOTTOM = 6
+_GRAPHIC_TOOLTIP_SPACING = 8
 _CSS_IMAGE_URL_RE = re.compile(r"image\s*:\s*url\(([^)]+)\)", re.IGNORECASE)
 _ICON_BUTTON_TYPES = (QPushButton, QToolButton)
 
@@ -113,30 +118,31 @@ def _stylesheet_image_path(stylesheet: str) -> str | None:
     return path or None
 
 
+def _pixmap_for_tooltip(source: QPixmap, size_px: int) -> QPixmap:
+    """Scale to fit within size_px square; normalize DPR for layout sizing."""
+    if source.isNull():
+        return QPixmap()
+    scaled = source.scaled(
+        QSize(size_px, size_px),
+        Qt.AspectRatioMode.KeepAspectRatio,
+        Qt.TransformationMode.SmoothTransformation,
+    )
+    scaled.setDevicePixelRatio(1.0)
+    return scaled
+
+
 def _icon_pixmap(icon: QIcon, size_px: int) -> QPixmap:
     target = QSize(size_px, size_px)
     for mode in (QIcon.Mode.Normal, QIcon.Mode.Active, QIcon.Mode.Selected):
         for state in (QIcon.State.Off, QIcon.State.On):
             pixmap = icon.pixmap(target, mode, state)
             if not pixmap.isNull():
-                return pixmap.scaled(
-                    target,
-                    Qt.AspectRatioMode.KeepAspectRatio,
-                    Qt.TransformationMode.SmoothTransformation,
-                )
+                return _pixmap_for_tooltip(pixmap, size_px)
     return QPixmap()
 
 
 def _pixmap_from_path(path: str, size_px: int) -> QPixmap:
-    pixmap = QPixmap(path)
-    if pixmap.isNull():
-        return QPixmap()
-    return pixmap.scaled(
-        size_px,
-        size_px,
-        Qt.AspectRatioMode.KeepAspectRatio,
-        Qt.TransformationMode.SmoothTransformation,
-    )
+    return _pixmap_for_tooltip(QPixmap(path), size_px)
 
 
 def is_graphic_icon_button(widget: QWidget | None) -> bool:
@@ -214,16 +220,23 @@ class GraphicTooltipPopup(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, True)
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(8)
+        layout.setContentsMargins(
+            _GRAPHIC_TOOLTIP_MARGIN_LEFT,
+            _GRAPHIC_TOOLTIP_MARGIN_TOP,
+            _GRAPHIC_TOOLTIP_MARGIN_RIGHT,
+            _GRAPHIC_TOOLTIP_MARGIN_BOTTOM,
+        )
+        layout.setSpacing(_GRAPHIC_TOOLTIP_SPACING)
         self._icon_label = QLabel(self)
         self._icon_label.setObjectName("graphicButtonTooltipIcon")
         self._icon_label.setFixedSize(GRAPHIC_TOOLTIP_ICON_PX, GRAPHIC_TOOLTIP_ICON_PX)
+        self._icon_label.setContentsMargins(0, 0, 0, 0)
         self._icon_label.setAlignment(
             Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter
         )
         self._text_label = QLabel(self)
         self._text_label.setObjectName("graphicButtonTooltipText")
+        self._text_label.setContentsMargins(0, 0, 0, 0)
         self._text_label.setWordWrap(True)
         self._text_label.setMaximumWidth(_GRAPHIC_TOOLTIP_TEXT_MAX_WIDTH)
         layout.addWidget(self._icon_label)

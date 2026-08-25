@@ -15,7 +15,7 @@ from pathlib import Path
 from exif.exif_image_loader import load_image_with_exif_correction
 from faces.face_engine import compare_faces, get_faces_with_locations_from_path
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 # Third-party imports
 from PySide6.QtCore import Qt, Signal, QTimer, QObject, QEvent, QMutexLocker, QPoint, QRect, QSize
@@ -173,11 +173,16 @@ from settings.widgets.settings_dialog_theme import (
 )
 from settings.widgets.collapsible_theme_group import (
     CollapsibleThemeGroup,
+    DIRECTORIES_COLLAPSE_GROUP_KEYS,
+    GENERAL_COLLAPSE_GROUP_KEYS,
     THEME_COLLAPSE_GROUP_KEYS,
+    merge_directories_settings_groups_expanded,
+    merge_general_settings_groups_expanded,
     merge_theme_settings_groups_expanded,
 )
 from settings.widgets.macos_preferences import (
     MacToggleSwitch,
+    MacPreferencePanel,
     SettingsListCombo,
     build_column_major_toggle_grid,
     configure_settings_list_combo,
@@ -797,6 +802,7 @@ class SettingsDialog(QDialog):
     THEME_SLIDER_COL_MIN_WIDTH = 155
     THEME_INNER_WIDTH_EXTRA = 48  # HBox spacing + vertical scrollbar / frame margin
     THEME_LIVE_PREVIEW_DEBOUNCE_MS = 250 # DGN - was 120
+    COLLAPSIBLE_SECTIONS_TOOLBAR_BUTTON_PX = 16
     
     # Session-only: remember last tab id (not persisted across sessions)
     _last_tab_id = None
@@ -1704,6 +1710,7 @@ class SettingsDialog(QDialog):
             if 'ignore_exif_rotation' in settings:
                 self.ignore_exif_rotation_checkbox.setChecked(not settings['ignore_exif_rotation'])
             self._load_imagegen_general_settings(settings)
+            self._apply_general_collapse_groups_from_settings()
         elif tab_widget == self.slideshow_settings_tab:
             if 'slideshow_rate' in settings:
                 self.slideshow_rate_spinbox.setValue(settings['slideshow_rate'])
@@ -1799,6 +1806,7 @@ class SettingsDialog(QDialog):
                         field.setText("")
                         if hasattr(self, 'ignore_directory_checkboxes'):
                             self.ignore_directory_checkboxes[i].setChecked(False)
+            self._apply_directories_collapse_groups_from_settings()
         elif tab_widget == self.extensions_tab:
             if 'image_extensions' in settings and hasattr(self, 'extension_checkboxes'):
                 extensions_set = set(settings['image_extensions'])
@@ -2340,10 +2348,111 @@ class SettingsDialog(QDialog):
                 self._faces_subjects_at_load = copy.deepcopy(self._faces_subjects)
                 self._faces_rebuild_cards()
 
+    def _add_general_collapsible_section(
+        self,
+        title: str,
+        state_key: str,
+        parent_layout: QVBoxLayout,
+    ) -> tuple[CollapsibleThemeGroup, MacPreferencePanel]:
+        group = CollapsibleThemeGroup(title, state_key=state_key)
+        panel = MacPreferencePanel()
+        panel.setObjectName("macPreferencePanelFlat")
+        content = group.content_layout()
+        content.setContentsMargins(4, 8, 4, 8)
+        content.addWidget(panel)
+        parent_layout.addWidget(group)
+        return group, panel
+
+    def _collapsible_sections_toolbar_button_style(
+        self,
+        icon_stem: str,
+        *,
+        size: int | None = None,
+    ) -> str:
+        if size is None:
+            size = self.COLLAPSIBLE_SECTIONS_TOOLBAR_BUTTON_PX
+        normal_url = f"url({asset_path(f'{icon_stem}.png')})"
+        hover_url = f"url({asset_path(f'{icon_stem}_hover.png')})"
+        c = self._settings_chrome()
+        return f"""
+            QPushButton {{
+                background-color: {c.control_bg_hex};
+                border: 1px solid {BORDER_DEFAULT_HEX};
+                border-radius: 3px;
+                padding: 0px;
+                min-width: {size}px;
+                max-width: {size}px;
+                min-height: {size}px;
+                max-height: {size}px;
+                image: {normal_url};
+            }}
+            QPushButton:focus {{
+                border: 1px solid {CURRENT_IMAGE_BORDER_COLOR_HEX};
+                outline: none;
+            }}
+            QPushButton:hover {{
+                background-color: {TAB_BUTTON_HOVER_BG_HEX};
+                border: 1px solid {TAB_BUTTON_HOVER_BG_HEX};
+                image: {hover_url};
+            }}
+            QPushButton:pressed {{
+                background-color: {SIDEBAR_SPLITTER_HANDLE_HEX};
+            }}
+        """
+
+    def _create_collapsible_sections_toolbar_button(
+        self,
+        icon_stem: str,
+        tooltip: str,
+        on_click: Callable[[], None],
+    ) -> QPushButton:
+        px = self.COLLAPSIBLE_SECTIONS_TOOLBAR_BUTTON_PX
+        btn = QPushButton()
+        btn.setFixedSize(px, px)
+        btn.setIconSize(QSize(px, px))
+        btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn.setToolTip(tooltip)
+        btn.setStyleSheet(self._collapsible_sections_toolbar_button_style(icon_stem))
+        btn.clicked.connect(on_click)
+        return btn
+
+    def _make_collapsible_sections_toolbar(
+        self,
+        on_expand_all: Callable[[], None],
+        on_collapse_all: Callable[[], None],
+    ) -> QWidget:
+        row = QWidget()
+        h = QHBoxLayout(row)
+        h.setContentsMargins(0, 5, 5, 0)
+        h.setSpacing(4)
+        h.addStretch()
+        h.addWidget(
+            self._create_collapsible_sections_toolbar_button(
+                "expandall",
+                "Expand all sections",
+                on_expand_all,
+            )
+        )
+        h.addWidget(
+            self._create_collapsible_sections_toolbar_button(
+                "collapseall",
+                "Collapse all sections",
+                on_collapse_all,
+            )
+        )
+        return row
+
     def setup_app_settings_tab(self):
         """Setup the application settings tab (macOS Preferences pane style)."""
         layout = QVBoxLayout(self.app_settings_tab)
         layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(
+            self._make_collapsible_sections_toolbar(
+                lambda: self._on_general_groups_option_set_all_expanded(True),
+                lambda: self._on_general_groups_option_set_all_expanded(False),
+            )
+        )
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.NoFrame)
@@ -2354,7 +2463,9 @@ class SettingsDialog(QDialog):
         inner_layout.setSpacing(18)
 
         # ----- General -----
-        general_group, general_panel = mac_preference_section("General", inner)
+        gb_general, general_panel = self._add_general_collapsible_section(
+            "General", "general", inner_layout
+        )
 
         self.confirm_delete_checkbox = general_panel.add_toggle(
             f"Delete confirmation on {CMD_SYMBOL}-Delete",
@@ -2400,10 +2511,10 @@ class SettingsDialog(QDialog):
             subtitle=f"Enter debug mode. Meaning varies. Use {CTRL_SYMBOL}-L to view log.",
         )
 
-        inner_layout.addWidget(general_group)
-
         # ----- Thumbnails -----
-        thumb_group, thumb_panel = mac_preference_section("Thumbnails", inner)
+        gb_thumbnails, thumb_panel = self._add_general_collapsible_section(
+            "Thumbnails", "thumbnails", inner_layout
+        )
 
         filter_container = QWidget()
         filter_layout = QVBoxLayout(filter_container)
@@ -2505,10 +2616,10 @@ class SettingsDialog(QDialog):
             subtitle="Warning: This can rename large numbers of files without confirmation.",
         )
 
-        inner_layout.addWidget(thumb_group)
-
         # ----- Browse -----
-        browse_group, browse_panel = mac_preference_section("Image Viewing", inner)
+        gb_image_viewing, browse_panel = self._add_general_collapsible_section(
+            "Image Viewing", "image_viewing", inner_layout
+        )
 
         self.space_mode_combo = SettingsListCombo()
         self.space_mode_combo.addItem("Exit to thumbnails", userData="exit")
@@ -2568,8 +2679,6 @@ class SettingsDialog(QDialog):
             subtitle="For Image History (F3)",
         )
 
-        inner_layout.addWidget(browse_group)
-
         # ----- Image generation -----
         from imagegen_plugins.image_gen_dim_limits import (
             APP_MAX_GENERATION_DIMENSION_CEILING,
@@ -2582,7 +2691,9 @@ class SettingsDialog(QDialog):
             app_series_cooldown_seconds,
         )
 
-        imagegen_group, imagegen_panel = mac_preference_section("Image Generation", inner)
+        gb_imagegen, imagegen_panel = self._add_general_collapsible_section(
+            "Image Generation", "image_generation", inner_layout
+        )
 
         _dim_step = APP_MAX_GENERATION_DIMENSION_STEP
         _dim_slider_max = (
@@ -2742,8 +2853,20 @@ class SettingsDialog(QDialog):
         )
         self._update_imagegen_series_cooldown_label()
 
-        inner_layout.addWidget(imagegen_group)
-        self._imagegen_general_settings_group = imagegen_group
+        self._general_collapse_groups: dict[str, CollapsibleThemeGroup] = {}
+        for key, group in (
+            ("general", gb_general),
+            ("thumbnails", gb_thumbnails),
+            ("image_viewing", gb_image_viewing),
+            ("image_generation", gb_imagegen),
+        ):
+            self._general_collapse_groups[key] = group
+            group.expanded_changed.connect(self._on_general_group_expanded_changed)
+            group.option_set_all_expanded.connect(
+                self._on_general_groups_option_set_all_expanded
+            )
+
+        self._imagegen_general_settings_group = gb_imagegen
 
         inner_layout.addStretch()
         scroll.setWidget(inner)
@@ -2978,6 +3101,12 @@ class SettingsDialog(QDialog):
         """Theme preset: vertical sections, scroll vertically only; per-border width sliders."""
         layout = QVBoxLayout(self.theme_settings_tab)
         layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(
+            self._make_collapsible_sections_toolbar(
+                lambda: self._on_theme_groups_option_set_all_expanded(True),
+                lambda: self._on_theme_groups_option_set_all_expanded(False),
+            )
+        )
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.NoFrame)
@@ -3247,7 +3376,7 @@ class SettingsDialog(QDialog):
             )
         for key, group in self._theme_collapse_groups.items():
             group.blockSignals(True)
-            group.set_expanded(merged.get(key, False))
+            group.set_expanded(merged.get(key, True))
             group.blockSignals(False)
 
     def _on_theme_group_expanded_changed(self, state_key: str, expanded: bool) -> None:
@@ -3284,6 +3413,106 @@ class SettingsDialog(QDialog):
         if hasattr(self, "original_settings"):
             self.original_settings["theme_settings_groups_expanded"] = copy.deepcopy(merged_copy)
         get_config().update_setting("theme_settings_groups_expanded", merged_copy)
+
+    def _apply_general_collapse_groups_from_settings(self) -> None:
+        if not hasattr(self, "_general_collapse_groups"):
+            return
+        if hasattr(self, "current_settings"):
+            merged = merge_general_settings_groups_expanded(
+                self.current_settings.get("general_settings_groups_expanded")
+            )
+        else:
+            merged = merge_general_settings_groups_expanded(
+                get_config().load_settings().get("general_settings_groups_expanded")
+            )
+        for key, group in self._general_collapse_groups.items():
+            group.blockSignals(True)
+            group.set_expanded(merged.get(key, True))
+            group.blockSignals(False)
+
+    def _on_general_group_expanded_changed(self, state_key: str, expanded: bool) -> None:
+        merged = merge_general_settings_groups_expanded(
+            self.current_settings.get("general_settings_groups_expanded")
+            if hasattr(self, "current_settings") else None
+        )
+        merged[state_key] = expanded
+        self._persist_general_collapse_groups(merged)
+
+    def _on_general_groups_option_set_all_expanded(self, expanded: bool) -> None:
+        """Option-click on any General tab section header expands or collapses every group."""
+        if not hasattr(self, "_general_collapse_groups"):
+            return
+        merged = merge_general_settings_groups_expanded(
+            self.current_settings.get("general_settings_groups_expanded")
+            if hasattr(self, "current_settings") else None
+        )
+        for key in GENERAL_COLLAPSE_GROUP_KEYS:
+            merged[key] = expanded
+        for group in self._general_collapse_groups.values():
+            group.blockSignals(True)
+            group.set_expanded(expanded)
+            group.blockSignals(False)
+        self._persist_general_collapse_groups(merged)
+
+    def _persist_general_collapse_groups(self, merged: dict[str, bool]) -> None:
+        merged_copy = copy.deepcopy(merged)
+        if hasattr(self, "current_settings"):
+            self.current_settings["general_settings_groups_expanded"] = merged_copy
+        if hasattr(self, "original_settings"):
+            self.original_settings["general_settings_groups_expanded"] = copy.deepcopy(
+                merged_copy
+            )
+        get_config().update_setting("general_settings_groups_expanded", merged_copy)
+
+    def _apply_directories_collapse_groups_from_settings(self) -> None:
+        if not hasattr(self, "_directories_collapse_groups"):
+            return
+        if hasattr(self, "current_settings"):
+            merged = merge_directories_settings_groups_expanded(
+                self.current_settings.get("directories_settings_groups_expanded")
+            )
+        else:
+            merged = merge_directories_settings_groups_expanded(
+                get_config().load_settings().get("directories_settings_groups_expanded")
+            )
+        for key, group in self._directories_collapse_groups.items():
+            group.blockSignals(True)
+            group.set_expanded(merged.get(key, True))
+            group.blockSignals(False)
+
+    def _on_directories_group_expanded_changed(self, state_key: str, expanded: bool) -> None:
+        merged = merge_directories_settings_groups_expanded(
+            self.current_settings.get("directories_settings_groups_expanded")
+            if hasattr(self, "current_settings") else None
+        )
+        merged[state_key] = expanded
+        self._persist_directories_collapse_groups(merged)
+
+    def _on_directories_groups_option_set_all_expanded(self, expanded: bool) -> None:
+        """Option-click on any Directories tab section header expands or collapses every group."""
+        if not hasattr(self, "_directories_collapse_groups"):
+            return
+        merged = merge_directories_settings_groups_expanded(
+            self.current_settings.get("directories_settings_groups_expanded")
+            if hasattr(self, "current_settings") else None
+        )
+        for key in DIRECTORIES_COLLAPSE_GROUP_KEYS:
+            merged[key] = expanded
+        for group in self._directories_collapse_groups.values():
+            group.blockSignals(True)
+            group.set_expanded(expanded)
+            group.blockSignals(False)
+        self._persist_directories_collapse_groups(merged)
+
+    def _persist_directories_collapse_groups(self, merged: dict[str, bool]) -> None:
+        merged_copy = copy.deepcopy(merged)
+        if hasattr(self, "current_settings"):
+            self.current_settings["directories_settings_groups_expanded"] = merged_copy
+        if hasattr(self, "original_settings"):
+            self.original_settings["directories_settings_groups_expanded"] = copy.deepcopy(
+                merged_copy
+            )
+        get_config().update_setting("directories_settings_groups_expanded", merged_copy)
 
     def _theme_add_button_style(self, size: int = 26) -> str:
         _plus_url = f"url({asset_path('series_plus_icon.png')})"
@@ -5634,6 +5863,12 @@ class SettingsDialog(QDialog):
 
         tab_layout = QVBoxLayout(self.directories_tab)
         tab_layout.setContentsMargins(0, 0, 0, 0)
+        tab_layout.addWidget(
+            self._make_collapsible_sections_toolbar(
+                lambda: self._on_directories_groups_option_set_all_expanded(True),
+                lambda: self._on_directories_groups_option_set_all_expanded(False),
+            )
+        )
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.NoFrame)
@@ -5655,7 +5890,9 @@ class SettingsDialog(QDialog):
             print(f"Failed to list root directories: {e}")
             all_directories = []
 
-        root_group, root_panel = mac_preference_section("Root Directories", inner)
+        gb_root, root_panel = self._add_general_collapsible_section(
+            "Root Directories", "root_directories", layout
+        )
         root_desc = QLabel(
             "Select which root-level directories should be shown in the file tree view."
         )
@@ -5677,10 +5914,11 @@ class SettingsDialog(QDialog):
         )
         root_panel.add_custom_row(dir_grid)
 
-        root_group.layout().insertWidget(0, root_desc)
-        layout.addWidget(root_group)
+        gb_root.content_layout().insertWidget(0, root_desc)
 
-        options_group, options_panel = mac_preference_section("Scanning Options", inner)
+        gb_scanning, options_panel = self._add_general_collapsible_section(
+            "Scanning Options", "scanning_options", layout
+        )
 
         self.show_hidden_directories_checkbox = options_panel.add_toggle(
             "Process hidden directories",
@@ -5714,9 +5952,9 @@ class SettingsDialog(QDialog):
             subtitle="Including system volumes",
         )
 
-        layout.addWidget(options_group)
-
-        depth_group, depth_panel = mac_preference_section("Depth", inner)
+        gb_depth, depth_panel = self._add_general_collapsible_section(
+            "Directory Search Depths", "depth", layout
+        )
 
         self.shift_cmd_depth_spinbox = QSpinBox()
         self.shift_cmd_depth_spinbox.setRange(1, 10)
@@ -5755,9 +5993,11 @@ class SettingsDialog(QDialog):
             tooltip="Maximum depth for recursive directory scans.",
         )
 
-        layout.addWidget(depth_group)
-
-        files_group, files_panel = mac_preference_section("Image Creation & Temporary Files", inner)
+        gb_files, files_panel = self._add_general_collapsible_section(
+            "Image Creation & Temporary Files",
+            "image_creation_temp_files",
+            layout,
+        )
         _default_image_dir = self._path_to_display(os.path.expanduser("~/Downloads"))
         files_note = QLabel(
             "When enabled, newly generated images are saved in the folder below. "
@@ -5834,10 +6074,11 @@ class SettingsDialog(QDialog):
             ),
         )
 
-        files_group.layout().insertWidget(0, files_note)
-        layout.addWidget(files_group)
+        gb_files.content_layout().insertWidget(0, files_note)
 
-        ignore_group, ignore_panel = mac_preference_section("Ignore Directories", inner)
+        gb_ignore, ignore_panel = self._add_general_collapsible_section(
+            "Ignore Directories", "ignore_directories", layout
+        )
 
         self.ignore_directory_input_fields = []
         self.ignore_directory_checkboxes = []
@@ -5876,7 +6117,19 @@ class SettingsDialog(QDialog):
             ignore_panel.add_form_row(f"Ignore path {i + 1}", ignore_control, 
                 subtitle=f"Skipped during scans and file operations")
 
-        layout.addWidget(ignore_group)
+        self._directories_collapse_groups: dict[str, CollapsibleThemeGroup] = {}
+        for key, group in (
+            ("root_directories", gb_root),
+            ("scanning_options", gb_scanning),
+            ("depth", gb_depth),
+            ("image_creation_temp_files", gb_files),
+            ("ignore_directories", gb_ignore),
+        ):
+            self._directories_collapse_groups[key] = group
+            group.expanded_changed.connect(self._on_directories_group_expanded_changed)
+            group.option_set_all_expanded.connect(
+                self._on_directories_groups_option_set_all_expanded
+            )
 
         layout.addStretch()
         scroll.setWidget(inner)
@@ -7922,6 +8175,29 @@ class SettingsDialog(QDialog):
 
             settings = config.load_settings()
             self._load_imagegen_general_settings(settings)
+            general_groups_expanded = merge_general_settings_groups_expanded(
+                settings.get("general_settings_groups_expanded")
+            )
+            self.original_settings["general_settings_groups_expanded"] = copy.deepcopy(
+                general_groups_expanded
+            )
+            if hasattr(self, "current_settings"):
+                self.current_settings["general_settings_groups_expanded"] = copy.deepcopy(
+                    general_groups_expanded
+                )
+            self._apply_general_collapse_groups_from_settings()
+
+            directories_groups_expanded = merge_directories_settings_groups_expanded(
+                settings.get("directories_settings_groups_expanded")
+            )
+            self.original_settings["directories_settings_groups_expanded"] = copy.deepcopy(
+                directories_groups_expanded
+            )
+            if hasattr(self, "current_settings"):
+                self.current_settings["directories_settings_groups_expanded"] = copy.deepcopy(
+                    directories_groups_expanded
+                )
+            self._apply_directories_collapse_groups_from_settings()
                 
             self._load_theme_tab_from_settings()
             cfg = get_config()

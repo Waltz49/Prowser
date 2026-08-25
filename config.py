@@ -618,14 +618,27 @@ class ImageBrowserConfig:
             'settings_dialog_geometry': '',
             'settings_dialog_size': [920, 680],
 
-            # Theme tab collapsible section expanded state (False = collapsed)
+            # Theme / General tab collapsible section expanded state (new profiles: expanded)
             'theme_settings_groups_expanded': {
-                'text_background': False,
-                'dialogs': False,
-                'sidebar_chrome': False,
-                'button_settings': False,
-                'thumbnails_selection': False,
-                'browse_colors': False,
+                'text_background': True,
+                'dialogs': True,
+                'sidebar_chrome': True,
+                'button_settings': True,
+                'thumbnails_selection': True,
+                'browse_colors': True,
+            },
+            'general_settings_groups_expanded': {
+                'general': True,
+                'thumbnails': True,
+                'image_viewing': True,
+                'image_generation': True,
+            },
+            'directories_settings_groups_expanded': {
+                'root_directories': True,
+                'scanning_options': True,
+                'depth': True,
+                'image_creation_temp_files': True,
+                'ignore_directories': True,
             },
 
             # AI Captioning (LMStudio) settings
