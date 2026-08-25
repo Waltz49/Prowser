@@ -464,6 +464,7 @@ class JobCard(QFrame):
         on_reorder_drop: Callable[[str, int], None] | None = None,
         on_drop_hover: Callable[[int], None] | None = None,
         on_drop_hover_clear: Callable[[], None] | None = None,
+        on_drag_auto_scroll: Callable[[QPoint], None] | None = None,
         parent=None,
     ):
         super().__init__(parent)
@@ -480,6 +481,7 @@ class JobCard(QFrame):
         self._on_reorder_drop = on_reorder_drop
         self._on_drop_hover = on_drop_hover
         self._on_drop_hover_clear = on_drop_hover_clear
+        self._on_drag_auto_scroll = on_drag_auto_scroll
         self._selected = False
         self._full_prompt = ""
         self._last_info_html = ""
@@ -513,6 +515,7 @@ class JobCard(QFrame):
         self._refs = _FlowReferenceThumbs(main_window, [])
         self._ensure_content_layout(False)
         card_layout.addWidget(self._content, 1)
+        self._ensure_child_widgets_forward_drops()
         self._apply_card_style()
 
     def job_id(self) -> str:
@@ -526,6 +529,14 @@ class JobCard(QFrame):
 
     def is_active_row(self) -> bool:
         return self._is_active
+
+    def _ensure_child_widgets_forward_drops(self) -> None:
+        """Route drops on text/ref chrome to the card frame."""
+        for widget in (self._content, self._info_browser, self._refs):
+            widget.setAcceptDrops(False)
+        viewport = self._info_browser.viewport()
+        if viewport is not None:
+            viewport.setAcceptDrops(False)
 
     def set_selected(self, selected: bool) -> None:
         selected = bool(selected)
@@ -734,10 +745,16 @@ class JobCard(QFrame):
         insert_after = local_y > (self.height() / 2)
         return self._row_idx + (1 if insert_after else 0)
 
+    def _notify_drag_auto_scroll(self, event) -> None:
+        if self._on_drag_auto_scroll is None:
+            return
+        self._on_drag_auto_scroll(self.mapToGlobal(event.position().toPoint()))
+
     def dragEnterEvent(self, event) -> None:
         if self._reorder_drag_payload(event) is not None:
             if self._on_drop_hover is not None:
                 self._on_drop_hover(self._insert_index_for_drag_y(event.position().y()))
+            self._notify_drag_auto_scroll(event)
             event.acceptProposedAction()
             return
         event.ignore()
@@ -746,6 +763,7 @@ class JobCard(QFrame):
         if self._reorder_drag_payload(event) is not None:
             if self._on_drop_hover is not None:
                 self._on_drop_hover(self._insert_index_for_drag_y(event.position().y()))
+            self._notify_drag_auto_scroll(event)
             event.acceptProposedAction()
             return
         event.ignore()
@@ -762,6 +780,15 @@ class JobCard(QFrame):
 
     def eventFilter(self, obj, event) -> bool:
         if obj is self._info_browser.viewport():
+            if event.type() == QEvent.Type.DragEnter:
+                self.dragEnterEvent(event)  # type: ignore[arg-type]
+                return event.isAccepted()
+            if event.type() == QEvent.Type.DragMove:
+                self.dragMoveEvent(event)  # type: ignore[arg-type]
+                return event.isAccepted()
+            if event.type() == QEvent.Type.Drop:
+                self.dropEvent(event)  # type: ignore[arg-type]
+                return event.isAccepted()
             if event.type() == QEvent.Type.MouseButtonPress:
                 mouse = event  # type: ignore[assignment]
                 if mouse.button() == Qt.MouseButton.LeftButton:
@@ -1031,6 +1058,11 @@ class JobQueuePanelWidget(QWidget):
         self._flyout_button: QPushButton | None = None
         self._drop_indicator_index: int | None = None
         self._drop_line: _JobQueueDropLine | None = None
+        self._drag_hover_viewport_pos: QPoint | None = None
+        self._auto_scroll_timer = QTimer(self)
+        self._auto_scroll_timer.timeout.connect(self._handle_drag_auto_scroll)
+        self._auto_scroll_direction = 0
+        self._auto_scroll_speed = 0.0
         self._setup_ui()
         self._connect_controller()
 
@@ -1313,9 +1345,32 @@ class JobQueuePanelWidget(QWidget):
 
     def _insert_index_at_list_y(self, y: int) -> int:
         for idx, card in enumerate(self._job_cards):
-            if y < card.geometry().center().y():
+            geom = card.geometry()
+            if y < geom.top() + (geom.height() / 2):
                 return idx
         return len(self._job_cards)
+
+    def _list_host_pos_from_viewport_pos(self, vp_pos: QPoint) -> QPoint:
+        viewport = self._scroll.viewport()
+        return self._list_host.mapFromGlobal(viewport.mapToGlobal(vp_pos))
+
+    def _viewport_pos_from_list_host_pos(self, host_pos: QPoint) -> QPoint:
+        viewport = self._scroll.viewport()
+        return viewport.mapFromGlobal(self._list_host.mapToGlobal(host_pos))
+
+    def _resolve_drop_insert_index(self, list_host_y: int | None = None) -> int:
+        if self._drop_indicator_index is not None:
+            return self._drop_indicator_index
+        if list_host_y is not None:
+            return self._insert_index_at_list_y(list_host_y)
+        return len(self._job_cards)
+
+    def _finish_job_reorder_drop(self, payload: str, list_host_y: int | None = None) -> None:
+        if not payload:
+            return
+        insert_index = self._resolve_drop_insert_index(list_host_y)
+        self._clear_drop_indicator()
+        self._on_job_reorder_drop(payload, insert_index)
 
     def _drop_line_geometry(self, insert_index: int) -> tuple[int, int, int]:
         margins = self._list_layout.contentsMargins()
@@ -1361,8 +1416,110 @@ class JobQueuePanelWidget(QWidget):
 
     def _clear_drop_indicator(self) -> None:
         self._drop_indicator_index = None
+        self._drag_hover_viewport_pos = None
         if self._drop_line is not None:
             self._drop_line.hide()
+        self._stop_drag_auto_scroll()
+
+    def _update_drag_auto_scroll_at_global(self, global_pos: QPoint) -> None:
+        viewport = self._scroll.viewport()
+        if viewport is None:
+            self._stop_drag_auto_scroll()
+            return
+        vp_pos = viewport.mapFromGlobal(global_pos)
+        if vp_pos.x() < 0 or vp_pos.x() > viewport.width():
+            self._stop_drag_auto_scroll()
+            return
+        self._drag_hover_viewport_pos = vp_pos
+        self._update_drag_auto_scroll_viewport_y(vp_pos.y())
+
+    def _update_drag_auto_scroll_viewport_y(self, y_in_viewport: float) -> None:
+        scroll_bar = self._scroll.verticalScrollBar()
+        if scroll_bar.maximum() <= 0:
+            self._stop_drag_auto_scroll()
+            return
+
+        viewport = self._scroll.viewport()
+        viewport_height = viewport.height()
+        distance_from_top = max(0.0, y_in_viewport)
+        distance_from_bottom = max(0.0, viewport_height - y_in_viewport)
+
+        scroll_direction = 0
+        scroll_speed = 0.0
+        band_max = tc.DRAG_AUTO_SCROLL_SPEEDS[0][0]
+
+        if distance_from_top < distance_from_bottom:
+            if distance_from_top <= band_max:
+                scroll_direction = -1
+                scroll_speed = self._calculate_drag_auto_scroll_speed(distance_from_top)
+        else:
+            if distance_from_bottom <= band_max:
+                scroll_direction = 1
+                scroll_speed = self._calculate_drag_auto_scroll_speed(distance_from_bottom)
+
+        if scroll_direction != 0 and scroll_speed > 0:
+            if (
+                self._auto_scroll_direction != scroll_direction
+                or self._auto_scroll_speed != scroll_speed
+            ):
+                self._auto_scroll_direction = scroll_direction
+                self._auto_scroll_speed = scroll_speed
+                if not self._auto_scroll_timer.isActive():
+                    self._auto_scroll_timer.start(16)
+        else:
+            self._stop_drag_auto_scroll()
+
+    def _calculate_drag_auto_scroll_speed(self, distance_from_edge: float) -> float:
+        speeds = tc.DRAG_AUTO_SCROLL_SPEEDS
+        if not speeds:
+            return 0.0
+        for i in range(len(speeds)):
+            dist, speed = speeds[i]
+            if distance_from_edge >= dist:
+                if i == 0:
+                    return speed
+                prev_dist, prev_speed = speeds[i - 1]
+                if prev_dist == dist:
+                    return speed
+                ratio = (distance_from_edge - dist) / (prev_dist - dist)
+                return speed + ratio * (prev_speed - speed)
+        return speeds[-1][1]
+
+    def _handle_drag_auto_scroll(self) -> None:
+        if self._auto_scroll_direction == 0 or self._auto_scroll_speed == 0:
+            self._stop_drag_auto_scroll()
+            return
+
+        scroll_bar = self._scroll.verticalScrollBar()
+        viewport = self._scroll.viewport()
+        viewport_height = viewport.height()
+        current_value = scroll_bar.value()
+        max_value = scroll_bar.maximum()
+
+        if self._auto_scroll_direction < 0 and current_value <= 0:
+            self._stop_drag_auto_scroll()
+            return
+        if self._auto_scroll_direction > 0 and current_value >= max_value:
+            self._stop_drag_auto_scroll()
+            return
+
+        scroll_amount = (
+            self._auto_scroll_speed * viewport_height / 100.0
+        ) * (16.0 / 1000.0)
+        new_value = current_value + (self._auto_scroll_direction * scroll_amount)
+        new_value = max(0, min(new_value, max_value))
+        scroll_bar.setValue(int(new_value))
+
+        hover_pos = self._drag_hover_viewport_pos
+        if hover_pos is not None:
+            host_pos = self._list_host_pos_from_viewport_pos(hover_pos)
+            self._show_drop_indicator(self._insert_index_at_list_y(int(host_pos.y())))
+
+    def _stop_drag_auto_scroll(self) -> None:
+        if self._auto_scroll_timer.isActive():
+            self._auto_scroll_timer.stop()
+        self._auto_scroll_direction = 0
+        self._auto_scroll_speed = 0.0
 
     def _on_job_list_scrolled(self, _value: int) -> None:
         if self._drop_indicator_index is not None:
@@ -1668,47 +1825,67 @@ class JobQueuePanelWidget(QWidget):
                 self._refresh_active_job_strip(force=True)
             if self._drop_indicator_index is not None:
                 self._show_drop_indicator(self._drop_indicator_index)
-        if (
-            hasattr(self, "_scroll")
-            and obj is self._scroll.viewport()
-            and event.type() in (QEvent.Type.DragEnter, QEvent.Type.DragMove)
-        ):
-            mime = event.mimeData()  # type: ignore[union-attr]
-            if mime.hasFormat(_JOB_QUEUE_DRAG_MIME):
-                mouse = event  # type: ignore[assignment]
-                host_pos = self._list_host.mapFrom(
-                    self._scroll.viewport(), mouse.position().toPoint()
-                )
-                self._show_drop_indicator(
-                    self._insert_index_at_list_y(int(host_pos.y()))
-                )
-                event.acceptProposedAction()
-                return True
+        if hasattr(self, "_scroll") and obj is self._scroll.viewport():
+            if event.type() in (QEvent.Type.DragEnter, QEvent.Type.DragMove):
+                mime = event.mimeData()  # type: ignore[union-attr]
+                if mime.hasFormat(_JOB_QUEUE_DRAG_MIME):
+                    mouse = event  # type: ignore[assignment]
+                    vp_pos = mouse.position().toPoint()
+                    self._drag_hover_viewport_pos = vp_pos
+                    host_pos = self._list_host_pos_from_viewport_pos(vp_pos)
+                    self._show_drop_indicator(
+                        self._insert_index_at_list_y(int(host_pos.y()))
+                    )
+                    self._update_drag_auto_scroll_viewport_y(vp_pos.y())
+                    event.acceptProposedAction()
+                    return True
+            if event.type() == QEvent.Type.DragLeave:
+                self._stop_drag_auto_scroll()
+            if event.type() == QEvent.Type.Drop:
+                mime = event.mimeData()  # type: ignore[union-attr]
+                if mime.hasFormat(_JOB_QUEUE_DRAG_MIME):
+                    mouse = event  # type: ignore[assignment]
+                    payload = bytes(mime.data(_JOB_QUEUE_DRAG_MIME)).decode("utf-8")
+                    host_pos = self._list_host_pos_from_viewport_pos(
+                        mouse.position().toPoint()
+                    )
+                    self._finish_job_reorder_drop(payload, int(host_pos.y()))
+                    event.acceptProposedAction()
+                    return True
         if hasattr(self, "_list_host") and obj is self._list_host:
             if event.type() == QEvent.Type.DragEnter:
                 if event.mimeData().hasFormat(_JOB_QUEUE_DRAG_MIME):
                     mouse = event  # type: ignore[assignment]
+                    host_pos = mouse.position().toPoint()
+                    vp_pos = self._viewport_pos_from_list_host_pos(host_pos)
+                    self._drag_hover_viewport_pos = vp_pos
                     self._show_drop_indicator(
-                        self._insert_index_at_list_y(int(mouse.position().y()))
+                        self._insert_index_at_list_y(int(host_pos.y()))
                     )
+                    self._update_drag_auto_scroll_viewport_y(vp_pos.y())
                     event.acceptProposedAction()
                     return True
             if event.type() == QEvent.Type.DragMove:
                 if event.mimeData().hasFormat(_JOB_QUEUE_DRAG_MIME):
                     mouse = event  # type: ignore[assignment]
+                    host_pos = mouse.position().toPoint()
+                    vp_pos = self._viewport_pos_from_list_host_pos(host_pos)
+                    self._drag_hover_viewport_pos = vp_pos
                     self._show_drop_indicator(
-                        self._insert_index_at_list_y(int(mouse.position().y()))
+                        self._insert_index_at_list_y(int(host_pos.y()))
                     )
+                    self._update_drag_auto_scroll_viewport_y(vp_pos.y())
                     event.acceptProposedAction()
                     return True
+            if event.type() == QEvent.Type.DragLeave:
+                self._stop_drag_auto_scroll()
             if event.type() == QEvent.Type.Drop:
                 if event.mimeData().hasFormat(_JOB_QUEUE_DRAG_MIME):
+                    mouse = event  # type: ignore[assignment]
                     payload = bytes(
                         event.mimeData().data(_JOB_QUEUE_DRAG_MIME)
                     ).decode("utf-8")
-                    if payload:
-                        self._clear_drop_indicator()
-                        self._on_job_reorder_drop(payload, len(self._job_cards))
+                    self._finish_job_reorder_drop(payload, int(mouse.position().y()))
                     event.acceptProposedAction()
                     return True
         return super().eventFilter(obj, event)
@@ -2256,6 +2433,7 @@ class JobQueuePanelWidget(QWidget):
                 on_reorder_drop=self._on_job_reorder_drop,
                 on_drop_hover=self._show_drop_indicator,
                 on_drop_hover_clear=self._clear_drop_indicator,
+                on_drag_auto_scroll=self._update_drag_auto_scroll_at_global,
             )
             card.set_row_content(
                 info_html=info_html,

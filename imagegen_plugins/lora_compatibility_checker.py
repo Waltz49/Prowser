@@ -52,7 +52,7 @@ from imagegen_plugins.lora_probe_effect import LoraProbeBaselineCache
 DOWNLOADS_LORA_DIR = Path.home() / "Downloads"
 _PENDING_DOWNLOAD_LORA_ID = "__pending_download__"
 # Check LoRAs always renders at this square size with each model's default steps.
-LORA_PROBE_SIZE = 512
+LORA_PROBE_SIZE = 384
 
 MODEL_SCOPE_ALL = "all"
 MODEL_SCOPE_SELECTED = "selected"
