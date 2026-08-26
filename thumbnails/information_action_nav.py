@@ -6,6 +6,7 @@ from __future__ import annotations
 from typing import Dict, Iterable, Optional
 
 from PySide6.QtCore import Qt, QSize, Signal
+from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QHBoxLayout, QPushButton, QWidget
 
 from theme.theme_service import get_active_theme
@@ -162,6 +163,12 @@ class InformationActionNavBar(QWidget):
 
     def button(self, action_id: str) -> Optional[QPushButton]:
         return self._buttons.get(action_id)
+
+    def action_icon(self, action_id: str) -> QIcon:
+        btn = self._buttons.get(action_id)
+        if btn is not None:
+            return btn.icon()
+        return QIcon()
 
     def apply_specs(self, specs: Dict[str, Dict[str, object]]) -> bool:
         """Apply visibility/enabled state. Returns True when any button is visible."""

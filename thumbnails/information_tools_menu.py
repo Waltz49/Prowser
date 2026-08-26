@@ -40,11 +40,16 @@ def _imagegen_edit_ai_available() -> bool:
 
 def _populate_information_menu(menu: QMenu, sidebar) -> None:
     specs = {spec["action_id"]: spec for spec in sidebar.info_action_specs()}
+    nav_bar = getattr(sidebar, "_action_nav_bar", None)
     for action_id in _MENU_ACTION_ORDER:
         spec = specs.get(action_id)
         if spec is None or not spec["visible"]:
             continue
-        action = menu.addAction(spec["label"])
+        icon = nav_bar.action_icon(action_id) if nav_bar is not None else None
+        if icon is not None and not icon.isNull():
+            action = menu.addAction(icon, spec["label"])
+        else:
+            action = menu.addAction(spec["label"])
         action.setEnabled(spec["enabled"])
         action.triggered.connect(
             lambda _checked=False, aid=action_id: sidebar.trigger_info_action(aid)
