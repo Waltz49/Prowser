@@ -79,6 +79,7 @@ from thumbnails.thumbnail_constants import get_image_extensions, clear_image_ext
 from utils import (
     ensure_dialog_fits_screen,
     format_file_size,
+    refresh_visible_cursor,
     restore_dialog_geometry_hex,
     save_dialog_geometry_hex,
     show_scrollable_text_dialog,
@@ -9536,6 +9537,13 @@ class SettingsDialog(QDialog):
 
     def closeEvent(self, event):
         self._persist_settings_dialog_geometry()
+        parent = self.parent()
+
+        def _restore_pointer_after_close() -> None:
+            refresh_visible_cursor(host_window=parent)
+
+        refresh_visible_cursor(host_window=parent)
+        QTimer.singleShot(100, _restore_pointer_after_close)
         super().closeEvent(event)
 
     def on_tab_changed(self, index):

@@ -754,6 +754,81 @@ def dialog_main_window(dialog: QWidget) -> Optional[QWidget]:
     return None
 
 
+def _macos_reset_native_view_cursor(widget: QWidget | None) -> None:
+    if widget is None:
+        return
+    try:
+        from ctypes import c_void_p
+
+        import objc
+
+        wid = widget.winId()
+        if not wid:
+            return
+        view = objc.objc_object(c_void_p=int(wid))
+        view.resetCursorRects()
+        window = view.window()
+        if window is not None:
+            window.invalidateCursorRectsForView_(view)
+    except Exception:
+        pass
+
+
+def _refresh_macos_native_pointer(
+    widget: QWidget | None = None,
+    host_window: QWidget | None = None,
+    *,
+    set_native_arrow: bool = True,
+) -> None:
+    """Re-sync macOS native pointer when Qt already reports the correct cursor shape."""
+    if sys.platform != "darwin":
+        return
+    try:
+        from AppKit import NSCursor
+
+        NSCursor.setHiddenUntilMouseMoves_(False)
+        if set_native_arrow:
+            NSCursor.arrowCursor().set()
+    except Exception:
+        pass
+    if widget is not None:
+        _macos_reset_native_view_cursor(widget)
+    host = host_window
+    if host is None and widget is not None:
+        host = widget.window()
+    if host is not None and host is not widget:
+        _macos_reset_native_view_cursor(host)
+
+
+def refresh_visible_cursor(
+    widget: QWidget | None = None,
+    host_window: QWidget | None = None,
+    *,
+    reset_widget_cursor: bool = True,
+) -> None:
+    """Clear Qt override cursors and restore a visible pointer (macOS native reset)."""
+    app = QApplication.instance()
+    if app is not None:
+        while app.overrideCursor():
+            app.restoreOverrideCursor()
+
+    target = widget
+    if target is None:
+        from PySide6.QtGui import QCursor
+
+        target = QApplication.widgetAt(QCursor.pos())
+
+    if target is not None and reset_widget_cursor:
+        target.unsetCursor()
+        target.setCursor(Qt.CursorShape.ArrowCursor)
+
+    _refresh_macos_native_pointer(
+        target,
+        host_window,
+        set_native_arrow=reset_widget_cursor,
+    )
+
+
 def host_is_macos_space_mode(host: Optional[QWidget]) -> bool:
     """True when the host window is in native macOS fullscreen (Space) mode."""
     if host is not None and hasattr(host, "isFullScreen") and host.isFullScreen():

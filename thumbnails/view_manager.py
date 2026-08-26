@@ -32,6 +32,7 @@ from thumbnails.thumbnail_constants import BASE_MARGIN
 from event_bus import THUMBNAIL_CLICKED
 from utils import (
     normalize_path_for_display,
+    refresh_visible_cursor,
     should_preserve_window_focus,
 )
 
@@ -94,6 +95,15 @@ class CursorManager(QObject):
         mw = self.parent()
         return mw is not None and getattr(mw, "current_view_mode", None) in _CURSOR_HIDE_VIEW_MODES
 
+    def _is_browse_window_active(self) -> bool:
+        """False while a dialog (or other window) holds focus, so hiding must stay off."""
+        if self.widget is None:
+            return False
+        try:
+            return self.widget.isActiveWindow()
+        except RuntimeError:
+            return False
+
     def _install_event_filters(self) -> None:
         self._remove_event_filters()
         if self.widget is None:
@@ -141,6 +151,11 @@ class CursorManager(QObject):
         if self._paused or not self._is_cursor_hide_mode_active():
             return False
 
+        if event.type() == QEvent.WindowDeactivate:
+            # Dialog/other window took focus: show cursor and end the hide loop.
+            self._leave_hide_zone()
+            return False
+
         if obj is self.widget:
             if event.type() == QEvent.Enter:
                 self._enter_hide_zone()
@@ -148,12 +163,15 @@ class CursorManager(QObject):
                 self._leave_hide_zone()
 
         if (
-            self._over_hide_zone
-            and event.type() in self._MOUSE_ACTIVITY_EVENTS
+            event.type() in self._MOUSE_ACTIVITY_EVENTS
             and isinstance(obj, QWidget)
             and obj in self._watched_widgets
         ):
-            self._on_activity_in_zone()
+            if self._over_hide_zone:
+                self._on_activity_in_zone()
+            elif self._is_browse_window_active() and self.widget is not None and self.widget.underMouse():
+                # Re-arm after focus returned (dialog closed) only once the pointer moves again.
+                self._enter_hide_zone()
 
         return False
 
@@ -171,7 +189,10 @@ class CursorManager(QObject):
             self._on_activity_in_zone()
 
     def _hide_cursor(self):
-        """Hide the cursor only while it remains over the browse shell."""
+        """Hide the cursor only while it remains over the browse shell of the active window."""
+        if not self._is_browse_window_active():
+            self._leave_hide_zone()
+            return
         if not self._is_cursor_hide_mode_active() or not self._over_hide_zone:
             if self.is_cursor_hidden:
                 self._show_cursor()
@@ -189,6 +210,11 @@ class CursorManager(QObject):
         if self.cursor_widget is not None:
             self.cursor_widget.setCursor(self.original_cursor)
         self.is_cursor_hidden = False
+        refresh_visible_cursor(
+            self.cursor_widget,
+            host_window=self.parent(),
+            reset_widget_cursor=False,
+        )
 
     def set_cursor(self, cursor):
         """
@@ -2099,7 +2125,8 @@ class ViewManager:
             old_manager.deleteLater()
             self.main_window.cursor_manager = None
 
-        if getattr(self.main_window, "current_view_mode", None) not in _CURSOR_HIDE_VIEW_MODES:
+        view_mode = getattr(self.main_window, "current_view_mode", None)
+        if view_mode not in _CURSOR_HIDE_VIEW_MODES:
             return
 
         hide_widget = getattr(self.main_window, '_browse_view_root_widget', None)

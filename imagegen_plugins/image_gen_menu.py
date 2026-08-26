@@ -50,6 +50,7 @@ from imagegen_plugins.pixelmator_export import (
 from menu_manager import TextSeparator
 from utils import (
     restore_dialog_geometry_hex,
+    refresh_visible_cursor,
     save_dialog_geometry_hex,
     show_styled_information,
     show_styled_warning,
@@ -140,6 +141,14 @@ def start_imagegen_without_closing(
     return bool(controller.start_generation(plugin, values))
 
 
+def _cursor_refresh_target(main_window) -> QWidget | None:
+    container = getattr(main_window, "thumbnail_container", None)
+    canvas = getattr(container, "canvas", None) if container is not None else None
+    if canvas is not None:
+        return canvas
+    return getattr(main_window, "image_container", None)
+
+
 def _on_imagegen_function_dialog_finished(
     main_window,
     controller,
@@ -150,6 +159,13 @@ def _on_imagegen_function_dialog_finished(
     if getattr(main_window, "_imagegen_function_dialog", None) is dlg:
         main_window._imagegen_function_dialog = None
     main_window._imagegen_dialog_open = False
+    refresh_target = _cursor_refresh_target(main_window)
+
+    def _restore_pointer_after_dialog() -> None:
+        refresh_visible_cursor(refresh_target, host_window=main_window)
+
+    refresh_visible_cursor(refresh_target, host_window=main_window)
+    QTimer.singleShot(100, _restore_pointer_after_dialog)
     end_imagegen_dialog_build(main_window)
     if result != QDialog.DialogCode.Accepted:
         return
