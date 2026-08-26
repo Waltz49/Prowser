@@ -1461,6 +1461,11 @@ class SettingsDialog(QDialog):
                     if hasattr(self, 'imagegen_low_ram_checkbox')
                     else True
                 ),
+                'imagegen_include_triggers_in_exif': (
+                    self.imagegen_include_triggers_in_exif_checkbox.isChecked()
+                    if hasattr(self, 'imagegen_include_triggers_in_exif_checkbox')
+                    else False
+                ),
             }
         elif tab_widget == self.slideshow_settings_tab:
             return {
@@ -2009,6 +2014,8 @@ class SettingsDialog(QDialog):
                         break
             if hasattr(self, 'imagegen_low_ram_checkbox'):
                 self.imagegen_low_ram_checkbox.setChecked(True)
+            if hasattr(self, 'imagegen_include_triggers_in_exif_checkbox'):
+                self.imagegen_include_triggers_in_exif_checkbox.setChecked(False)
         elif tab_widget == self.slideshow_settings_tab:
             self.slideshow_rate_spinbox.setValue(self.DEFAULT_SLIDESHOW_RATE)
             self.transition_speed_spinbox.setValue(self.DEFAULT_TRANSITION_SPEED)
@@ -2221,6 +2228,8 @@ class SettingsDialog(QDialog):
                         break
             if hasattr(self, 'imagegen_low_ram_checkbox'):
                 self.imagegen_low_ram_checkbox.setChecked(True)
+            if hasattr(self, 'imagegen_include_triggers_in_exif_checkbox'):
+                self.imagegen_include_triggers_in_exif_checkbox.setChecked(False)
         elif tab_widget == self.slideshow_settings_tab:
             self.slideshow_rate_spinbox.setValue(self.DEFAULT_SLIDESHOW_RATE)
             self.transition_speed_spinbox.setValue(self.DEFAULT_TRANSITION_SPEED)
@@ -2838,6 +2847,16 @@ class SettingsDialog(QDialog):
                 "May run slower."
             ),
             subtitle="Global setting for models that support low RAM mode.",
+        )
+
+        self.imagegen_include_triggers_in_exif_checkbox = imagegen_panel.add_toggle(
+            "Include triggers in final exif data",
+            tooltip=(
+                "When enabled, auto-added LoRA trigger words are included in the\n"
+                "Prompt section of EXIF UserComment on generated images.\n"
+                "Job cards and tooltips always show triggers regardless of this setting."
+            ),
+            subtitle="Write LoRA trigger words into generated-image EXIF prompts.",
         )
 
         default_dim_index = (
@@ -4275,6 +4294,10 @@ class SettingsDialog(QDialog):
         if hasattr(self, 'imagegen_low_ram_checkbox'):
             self.imagegen_low_ram_checkbox.setChecked(
                 bool(settings.get('imagegen_low_ram', True))
+            )
+        if hasattr(self, 'imagegen_include_triggers_in_exif_checkbox'):
+            self.imagegen_include_triggers_in_exif_checkbox.setChecked(
+                bool(settings.get('imagegen_include_triggers_in_exif', False))
             )
 
     def _imagegen_max_generation_dimension_px(self) -> int:
@@ -9105,6 +9128,11 @@ class SettingsDialog(QDialog):
                 self.imagegen_low_ram_checkbox.isChecked()
                 if hasattr(self, 'imagegen_low_ram_checkbox')
                 else True
+            ),
+            'imagegen_include_triggers_in_exif': (
+                self.imagegen_include_triggers_in_exif_checkbox.isChecked()
+                if hasattr(self, 'imagegen_include_triggers_in_exif_checkbox')
+                else False
             ),
             'filtered_tree': self.original_settings.get('filtered_tree', 'images'),  # UI removed, value set from Tree Filtering menu and persisted
             'filter_pattern': ImageBrowserConfig.normalize_filter_pattern(self.filter_pattern_input.text().strip()),

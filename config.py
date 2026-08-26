@@ -442,6 +442,7 @@ class ImageBrowserConfig:
             'imagegen_fast_open_action': 'from_text',
             'imagegen_output_format': 'png',
             'imagegen_low_ram': True,
+            'imagegen_include_triggers_in_exif': False,
             'browse_view_actual_size': False,
             # ms on same browse image before recording to Image History (0 = immediate; max 5000; 500 ms steps in UI)
             'browse_image_history_save_after_ms': 3000,

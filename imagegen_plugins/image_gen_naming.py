@@ -765,6 +765,9 @@ def format_exif_comment_from_mflux_metadata(
             values,
         )
     prompt_text = str(values.get("prompt") or meta.get("prompt") or "").strip()
+    from imagegen_plugins.lora_trigger_prompt_guard import prompt_text_for_exif
+
+    prompt_text = prompt_text_for_exif(values, prompt_text)
     steps = values.get("steps")
     if steps is None:
         steps = meta.get("steps")
@@ -874,6 +877,7 @@ def make_readable_user_comment_before_browse(
         lora_name_for_exif_from_paths_and_scales,
         lora_name_for_exif_from_values,
     )
+    from imagegen_plugins.lora_trigger_prompt_guard import prompt_text_for_exif
 
     pipeline_id = str(values.get("pipeline_id") or "").strip() or None
     lora = lora_name_for_exif_from_values(values, pipeline_id=pipeline_id)
@@ -915,7 +919,7 @@ def make_readable_user_comment_before_browse(
                 seed = None
         comment = format_image_exif_prompt(
             model_name,
-            str(values.get("prompt") or "").strip(),
+            prompt_text_for_exif(values),
             elapsed_seconds=elapsed_seconds,
             seed=seed,
             steps=values.get("steps"),

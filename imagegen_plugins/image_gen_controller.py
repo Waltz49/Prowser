@@ -28,6 +28,7 @@ from imagegen_plugins.image_gen_naming import (
     write_exif_user_comment,
 )
 from imagegen_plugins.image_gen_output_format import output_extension_from_settings
+from imagegen_plugins.lora_trigger_prompt_guard import prompt_text_for_exif
 from imagegen_plugins.generation_timing_stats import (
     build_generation_timing_key,
     lookup_average,
@@ -2825,7 +2826,7 @@ class ImageGenController(QObject):
                         used_seed = None
                 comment = format_image_exif_prompt(
                     plugin.menu_label(values),
-                    values.get("prompt", ""),
+                    prompt_text_for_exif(values),
                     elapsed_seconds=elapsed_seconds,
                     seed=used_seed,
                     steps=values.get("steps"),

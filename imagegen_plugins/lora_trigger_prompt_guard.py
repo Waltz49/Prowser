@@ -109,3 +109,92 @@ def apply_lora_triggers_for_run(values: Dict[str, Any]) -> None:
     """Mutate ``values['prompt']`` in place; does not affect persisted dialog text."""
     prompt = (values.get("prompt") or "").strip()
     values["prompt"] = augment_prompt_with_missing_lora_triggers(prompt, values)
+
+
+def _collect_known_lora_triggers(values: Dict[str, Any]) -> List[str]:
+    from imagegen_plugins.job_values_snapshot import (
+        LORA_TRIGGER_WORDS_KEY,
+        job_values_snapshotted,
+    )
+
+    if job_values_snapshotted(values):
+        snap = values.get(LORA_TRIGGER_WORDS_KEY)
+        if isinstance(snap, list):
+            return [str(item or "").strip() for item in snap if str(item or "").strip()]
+    stack = effective_lora_ids_from_values(values, pop=False)
+    triggers: List[str] = []
+    for lora_id in stack:
+        entry = get_lora_entry(lora_id)
+        if entry is None:
+            continue
+        trigger = (entry.trigger_word or "").strip()
+        if trigger:
+            triggers.append(trigger)
+    return triggers
+
+
+def _is_trigger_block(text: str, triggers: List[str]) -> bool:
+    block = (text or "").strip()
+    if not block or not triggers:
+        return False
+    parts = [part.strip() for part in block.split("\n\n") if part.strip()]
+    if not parts:
+        return False
+    trigger_set = {trigger.lower() for trigger in triggers}
+    return all(part.lower() in trigger_set for part in parts)
+
+
+def strip_auto_added_lora_triggers_from_prompt(
+    prompt: str,
+    values: Dict[str, Any] | None,
+) -> str:
+    """Remove auto-added LoRA trigger blocks from a formatted prompt."""
+    prompt_s = (prompt or "").strip()
+    if not prompt_s or not isinstance(values, dict):
+        return prompt_s
+    user = (values.get("prompt") or "").strip()
+    if prompt_s == user:
+        return user
+    augmented = augment_prompt_with_missing_lora_triggers(user, values)
+    if prompt_s == augmented:
+        return user
+    triggers = _collect_known_lora_triggers(values)
+    if not triggers:
+        return prompt_s
+    sep = TRIGGER_USER_PROMPT_SEPARATOR
+    parts = [part.strip() for part in prompt_s.split(f"\n\n{sep}\n\n")]
+    if len(parts) <= 1:
+        return prompt_s
+    filtered = [part for part in parts if not _is_trigger_block(part, triggers)]
+    if not filtered:
+        return user
+    return "\n\n".join(filtered).strip()
+
+
+def include_triggers_in_exif(settings: Dict[str, Any] | None = None) -> bool:
+    if settings is None:
+        from config import get_config
+
+        settings = get_config().load_settings()
+    return bool(settings.get("imagegen_include_triggers_in_exif", False))
+
+
+def prompt_text_for_exif(
+    values: Dict[str, Any] | None,
+    prompt_override: str | None = None,
+    *,
+    include_triggers: bool | None = None,
+) -> str:
+    """Prompt body for generated-image EXIF UserComment."""
+    prompt = str(
+        prompt_override
+        if prompt_override is not None
+        else (values or {}).get("prompt") or ""
+    ).strip()
+    if not isinstance(values, dict):
+        return prompt
+    if include_triggers is None:
+        include_triggers = include_triggers_in_exif()
+    if include_triggers:
+        return augment_prompt_with_missing_lora_triggers(prompt, values)
+    return strip_auto_added_lora_triggers_from_prompt(prompt, values)
