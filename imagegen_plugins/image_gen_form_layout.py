@@ -320,7 +320,8 @@ def image_gen_prompt_edit_set_plain_text(
         edit.setPlainText(text)
 
 
-_SENTENCE_START_RE = re.compile(r"(^|[.!?]\s+)(\w)")
+# Capitalize after sentence punctuation; hyphen only when spaced (avoids "well-known").
+_SENTENCE_START_RE = re.compile(r"(^|[.!?;:*]\s*|\s-\s*)(\w)")
 _IMAGE_GEN_PROMPT_SENTENCE_CASE_BLUR_ATTR = "_image_gen_prompt_sentence_case_blur"
 _TRAILING_PUNCT_NO_PERIOD = frozenset(".:?!")
 _HORIZONTAL_BLANK_RE = re.compile(r"[ \t]+")
@@ -385,7 +386,7 @@ def prepare_for_sentence_case_lines(text: str) -> str:
 
 
 def sentence_case(text: str) -> str:
-    """Capitalize the first letter of each sentence."""
+    """Capitalize the first letter after start-of-text or .:!?;-* punctuation."""
     text = text.strip()
     if not text:
         return ""
