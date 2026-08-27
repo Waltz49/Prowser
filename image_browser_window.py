@@ -3639,7 +3639,6 @@ class ImageBrowserWindow(QMainWindow):
             
             old_filter = self.filter_pattern
             if old_filter:
-                # self.filter_pattern = "" # DGN testing not clearing this
                 self.config.update_setting('filter_pattern', self.filter_pattern)
                 if self.status_notification:
                     self.status_notification.show_message("New directory opened, filter cleared")
@@ -3696,7 +3695,6 @@ class ImageBrowserWindow(QMainWindow):
             
             old_filter = self.filter_pattern
             if old_filter:
-                # self.filter_pattern = "" # DGN testing not clearing this
                 self.config.update_setting('filter_pattern', self.filter_pattern)
                 if self.status_notification:
                     self.status_notification.show_message("New file opened, filter cleared")
@@ -5352,7 +5350,7 @@ class ImageBrowserWindow(QMainWindow):
         prsort_exists = os.path.exists(self.sorting_manager._get_prsort_file_path(directory))
         if prsort_exists:
             # self.status_notification.show_message("Sort mode set to Custom")
-            pass # DGN
+            pass
         else:
             self.status_notification.show_message("Sort mode set to Custom (no saved order - Used drop or ⌘-S)")
 
@@ -8667,7 +8665,7 @@ class ImageBrowserWindow(QMainWindow):
 
         # --- Determine navigation mode ---
         specific_mode = getattr(self, "specific_files_active", False)
-        images_list = displayed  # DGN seems like an incomplete change to new image (above)
+        images_list = displayed 
 
         # Windowed wrap logic applies only in fullscreen mode with limit, and not in specific files mode
         # Only use windowed wrap if we have a reasonable limit

@@ -1450,7 +1450,6 @@ class SortingManager:
         
         # Show status message
         # self.main_window.status_notification.show_message("Sort mode set to Custom")
-        pass # DGN
     
     def update_sort_menu_checkmarks(self):
         """Update menu checkmarks to reflect current sort mode"""

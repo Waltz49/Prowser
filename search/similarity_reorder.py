@@ -712,7 +712,6 @@ def reorder_images_by_similarity(mw):
         mw.cache_manager.background_loader.start()
     # Trigger thumbnail loading for the new results
     mw.start_background_thumbnail_loading_if_needed()
-    # mw.highlight_image() # DGN try a refresh to fix empty thumbnails
 
 
 

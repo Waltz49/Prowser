@@ -1884,7 +1884,7 @@ class ViewManager:
                 self.main_window.image_container.resize(available_size)
             self._setup_cursor_manager()
             self.main_window.show_image(self.main_window.current_image_path, self.main_window.current_index)
-            self.main_window.start_background_thumbnail_loading_if_needed() # DGN Trying preloading thunbs in background
+            self.main_window.start_background_thumbnail_loading_if_needed() # Trying preloading thunbs in background
 
         else:
             # Reset fullscreen input ready flag initially

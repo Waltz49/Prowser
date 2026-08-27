@@ -844,8 +844,8 @@ class ImageBrowserConfig:
     def normalize_filter_pattern(pattern: Optional[str]) -> Optional[str]:
         """Remove trailing asterisk from filter pattern for storage/display"""
         if not pattern:
-            return '*' # DGN testing returning * if no pattern
-        return f"{pattern.rstrip('*')}*" # DGN testing adding * to pattern if no pattern
+            return '*'  # returning * if no pattern
+        return f"{pattern.rstrip('*')}*" # adding * to pattern if no pattern
     
     @staticmethod
     def get_filter_pattern_for_matching(pattern: Optional[str]) -> Optional[str]:

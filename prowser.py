@@ -1415,7 +1415,7 @@ def main():
                     # Reset filter for this session to show all images
                     window_filter = None
                     configuration['filter_pattern'] =  ImageBrowserConfig.normalize_filter_pattern('*')
-                    config.update_setting('filter_pattern', configuration['filter_pattern']) # DGN persistance may not be necessary
+                    config.update_setting('filter_pattern', configuration['filter_pattern']) 
                     print(f"{YELLOW}Target files don't match current filter pattern. Resetting filter to show all images for this session.{RESET}")
         elif directory:
             # Load directory
@@ -1648,7 +1648,6 @@ def main():
                     _startup_profile_mark("on_startup_refresh_complete")
             
             QTimer.singleShot(100, delayed_refresh)
-            # delayed_refresh()  # DGN This seems to be OK w/o the qtimer.singleShot(500, delayed_refresh)
         else:
             _startup_profile_mark("on_startup_refresh_complete")
         

@@ -4361,7 +4361,7 @@ class FileTreeHandler(QObject):
                 self._add_path_to_priority_paths(dir_path)
             self._expand_initial_tree(current_image_path)
             self._initial_file_loaded = True
-            # DGN 2025-11-13: delay to force hilite
+            # 2025-11-13: delay to force hilite
             QTimer.singleShot(200, lambda: self.main_window.highlight_image())
 
         else:
