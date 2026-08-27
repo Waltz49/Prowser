@@ -2009,12 +2009,13 @@ class FileOperationsManager:
     ):
         """Show a custom dialog for rename prefix, sequence, and sort mode selection."""
         from thumbnails.thumbnail_constants import (
-            BUTTON_BG_DEFAULT_HEX, BUTTON_TEXT_DEFAULT_HEX, BUTTON_BORDER_DEFAULT_HEX,
-            BUTTON_BG_HOVER_HEX, BUTTON_TEXT_HOVER_HEX, BUTTON_BORDER_HOVER_HEX,
+            BUTTON_BG_DEFAULT_HEX, BUTTON_BORDER_DEFAULT_HEX,
+            BUTTON_BG_HOVER_HEX, BUTTON_BORDER_HOVER_HEX,
             BUTTON_BG_PRESSED_HEX, CURRENT_IMAGE_BORDER_COLOR_HEX, TEXT_DISABLED_HEX,
-            ERROR_COLOR_HEX, DEFAULT_BORDER_COLOR_HEX, DIALOG_BACKGROUND_HEX,
+            DEFAULT_BORDER_COLOR_HEX, DIALOG_BACKGROUND_HEX,
             DIALOG_TEXT_COLOR_HEX,
         )
+        from theme.theme_base import asset_path
 
         mw = self.main_window
         dialog = QDialog(mw)
@@ -2030,33 +2031,37 @@ class FileOperationsManager:
         prefix_input = QLineEdit(dialog)
         prefix_input.setText(saved_prefix)
         
-        # Reset button for prefix input
-        prefix_reset_button = QPushButton("X", dialog)
+        # Reset button for prefix input (trash icon, same pattern as other reset controls)
+        _prefix_reset_btn_size = 22
+        _trash_icon_url = f"url({asset_path('trash_icon.png')})"
+        _trash_icon_hover_url = f"url({asset_path('trash_icon_hover.png')})"
+        prefix_reset_button = QPushButton("", dialog)
         prefix_reset_button.setToolTip("Reset to 'image-%d'")
-        prefix_reset_button.setStyleSheet("""
-            QPushButton {
-                background-color: """ + BUTTON_BG_DEFAULT_HEX + """;
-                color: """ + ERROR_COLOR_HEX + """;
-                border: 1px solid """ + BUTTON_BORDER_DEFAULT_HEX + """;
+        prefix_reset_button.setFixedSize(_prefix_reset_btn_size, _prefix_reset_btn_size)
+        prefix_reset_button.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {BUTTON_BG_DEFAULT_HEX};
+                border: 1px solid {BUTTON_BORDER_DEFAULT_HEX};
                 border-radius: 3px;
-                padding: 2px 4px;
-                font-size: 16px;
-                min-width: 14px;
-                max-width: 14px;
-            }
-            QPushButton:focus {
-                border: 1px solid """ + CURRENT_IMAGE_BORDER_COLOR_HEX + """;
-                color: """ + ERROR_COLOR_HEX + """;
+                padding: 0px;
+                min-width: {_prefix_reset_btn_size}px;
+                max-width: {_prefix_reset_btn_size}px;
+                min-height: {_prefix_reset_btn_size}px;
+                max-height: {_prefix_reset_btn_size}px;
+                image: {_trash_icon_url};
+            }}
+            QPushButton:focus {{
+                border: 1px solid {CURRENT_IMAGE_BORDER_COLOR_HEX};
                 outline: none;
-            }
-            QPushButton:hover {
-                background-color: """ + BUTTON_BG_HOVER_HEX + """;
-                border: 1px solid """ + BUTTON_BORDER_HOVER_HEX + """;
-                color: """ + BUTTON_TEXT_HOVER_HEX + """;
-            }
-            QPushButton:pressed {
-                background-color: """ + BUTTON_BG_PRESSED_HEX + """;
-            }
+            }}
+            QPushButton:hover {{
+                background-color: {BUTTON_BG_HOVER_HEX};
+                border: 1px solid {BUTTON_BORDER_HOVER_HEX};
+                image: {_trash_icon_hover_url};
+            }}
+            QPushButton:pressed {{
+                background-color: {BUTTON_BG_PRESSED_HEX};
+            }}
         """)
         prefix_reset_button.clicked.connect(lambda: prefix_input.setText("image-%d"))
         

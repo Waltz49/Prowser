@@ -1762,8 +1762,7 @@ class JobQueuePanelWidget(QWidget):
 
     def _on_task_status_info_changed(self) -> None:
         self._refresh_active_row(force=True)
-        if self._is_single_visible_job():
-            self._refresh_action_bar_if_visible()
+        self._refresh_action_bar_if_visible()
         self._update_jobs_toolbar_state()
 
     def _on_live_refresh_timer(self) -> None:
@@ -2029,6 +2028,7 @@ class JobQueuePanelWidget(QWidget):
         self._update_header_status()
         if self._job_cards and self._can_refresh_queue_rows_in_place():
             self._refresh_queue_rows_in_place()
+            self._refresh_action_bar_if_visible()
             return
         self._schedule_refresh_table()
 

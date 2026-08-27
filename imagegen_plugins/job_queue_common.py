@@ -173,7 +173,7 @@ class JobQueueActionBar(QWidget):
         self._image_refine_btn.setToolTip(
             "Image Based Refinement:\n\n"
             "Base subsequent image copies on previous result image.\n\n"
-            "Other source images keep their order."
+            "Other source images, if any, keep their order."
         )
         _configure_series_toggle_push_button(
             self._image_refine_btn, "series_image_refinement_icon.png"

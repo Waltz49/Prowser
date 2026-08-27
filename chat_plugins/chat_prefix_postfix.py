@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QHeaderView,
     QLabel,
+    QPlainTextEdit,
     QPushButton,
     QTableWidget,
     QTextEdit,
@@ -36,6 +37,7 @@ from chat_plugins.chat_ui_common import (
     chat_library_edit_button_stylesheet,
     chat_library_trash_button_stylesheet,
     chat_prompt_edit_stylesheet,
+    install_chat_prompt_field_on_blur,
     install_cmd_enter_accept,
 )
 from config import get_config
@@ -45,8 +47,8 @@ from utils import get_button_style, get_dialog_shell_stylesheet
 ICON_BTN_SIZE = 22
 _COL_TEXT = 4
 _COL_EDIT = 5
-_COL_DELETE = 6
-_COL_ACTIVE = 7
+_COL_ACTIVE = 6
+_COL_DELETE = 7
 
 
 def _display_text(text: str) -> str:
@@ -224,11 +226,13 @@ class PrefixPostfixTextEditDialog(QDialog):
 
         layout = QVBoxLayout(self)
         layout.addWidget(QLabel("Text to add:"))
-        self.text_edit = QTextEdit()
+        self.text_edit = QPlainTextEdit()
         self.text_edit.setPlainText(text)
+        self.text_edit.setLineWrapMode(QPlainTextEdit.LineWrapMode.WidgetWidth)
         self.text_edit.setMinimumHeight(160)
         self.text_edit.setStyleSheet(chat_prompt_edit_stylesheet())
         layout.addWidget(self.text_edit)
+        install_chat_prompt_field_on_blur(self.text_edit)
 
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel
@@ -301,15 +305,15 @@ class ChatPrefixPostfixDialog(QDialog):
         header.setSectionResizeMode(3, QHeaderView.ResizeMode.Fixed)
         header.setSectionResizeMode(_COL_TEXT, QHeaderView.ResizeMode.Stretch)
         header.setSectionResizeMode(_COL_EDIT, QHeaderView.ResizeMode.Fixed)
-        header.setSectionResizeMode(_COL_DELETE, QHeaderView.ResizeMode.Fixed)
         header.setSectionResizeMode(_COL_ACTIVE, QHeaderView.ResizeMode.Fixed)
+        header.setSectionResizeMode(_COL_DELETE, QHeaderView.ResizeMode.Fixed)
         self._table.setColumnWidth(0, 36)
         self._table.setColumnWidth(1, 36)
         self._table.setColumnWidth(2, 36)
         self._table.setColumnWidth(3, 36)
         self._table.setColumnWidth(_COL_EDIT, ICON_BTN_SIZE + 8)
-        self._table.setColumnWidth(_COL_DELETE, ICON_BTN_SIZE + 8)
         self._table.setColumnWidth(_COL_ACTIVE, 48)
+        self._table.setColumnWidth(_COL_DELETE, ICON_BTN_SIZE + 8)
         self._table.verticalHeader().setVisible(False)
         self._table.setShowGrid(False)
         self._table.setFrameShape(QFrame.Shape.NoFrame)
@@ -402,6 +406,14 @@ class ChatPrefixPostfixDialog(QDialog):
             )
             self._table.setCellWidget(row, _COL_EDIT, _center_widget(edit_btn))
 
+            active_switch = MacToggleSwitch()
+            active_switch.setChecked(entry.active)
+            active_switch.setToolTip(
+                "Use this text when on.\n"
+                "When off, T / I / < / > settings are ignored."
+            )
+            self._table.setCellWidget(row, _COL_ACTIVE, _center_widget(active_switch))
+
             del_btn = QPushButton()
             del_btn.setFixedSize(ICON_BTN_SIZE, ICON_BTN_SIZE)
             del_btn.setToolTip("Delete")
@@ -410,14 +422,6 @@ class ChatPrefixPostfixDialog(QDialog):
                 lambda _=False, eid=entry.id: self._delete_entry(eid)
             )
             self._table.setCellWidget(row, _COL_DELETE, _center_widget(del_btn))
-
-            active_switch = MacToggleSwitch()
-            active_switch.setChecked(entry.active)
-            active_switch.setToolTip(
-                "Use this text when on.\n"
-                "When off, T / I / < / > settings are ignored."
-            )
-            self._table.setCellWidget(row, _COL_ACTIVE, _center_widget(active_switch))
 
             row_widgets = _PrefixPostfixRowWidgets(
                 entry.id,
