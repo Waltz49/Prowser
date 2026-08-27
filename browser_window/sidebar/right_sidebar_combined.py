@@ -618,6 +618,27 @@ class RightSidebarCombinedWidget(QWidget):
         self._jobs_geometry_refit_pending = False
         self.ensure_jobs_pane_fits_content()
 
+    def grow_jobs_pane_for_action_bar(self, extra_content_height: int) -> None:
+        """Grow the jobs pane when a selected-row action bar first appears."""
+        extra = int(extra_content_height)
+        if extra <= 0 or not self._pane_visibility()[2] or self.jobs_widget is None:
+            return
+        if self._jobs_is_sole_visible_pane():
+            return
+        if self._adjusting_jobs_geometry:
+            self._request_jobs_pane_geometry_refit()
+            return
+        self._adjusting_jobs_geometry = True
+        try:
+            sizes = self.splitter.sizes()
+            current = sizes[2] if len(sizes) > 2 else 0
+            self._resize_pane_to_height(2, current + extra)
+            mode = self.jobs_widget.queue_size_mode()
+            if mode == QUEUE_SIZE_ONE:
+                self._sync_jobs_mode_geometry(mode)
+        finally:
+            self._adjusting_jobs_geometry = False
+
     def ensure_jobs_pane_fits_content(self) -> None:
         """Grow or refit the jobs pane when queue/strip content changes."""
         self._restore_jobs_pane_size_mode_if_pending()

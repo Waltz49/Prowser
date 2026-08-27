@@ -1351,7 +1351,77 @@ class JobQueuePanelWidget(QWidget):
             return
         self._action_bar.update_for_row(row_idx)
 
+    def _is_action_bar_embedded_on_card(self) -> bool:
+        if self._action_bar is None or not self._action_bar.isVisible():
+            return False
+        return any(card.has_action_bar() for card in self._job_cards)
+
+    def _action_bar_embedded_growth_height(self) -> int:
+        """Extra job-card height when the shared action bar is embedded."""
+        for card in self._job_cards:
+            if card.has_action_bar():
+                h = card._action_bar_block_height()
+                if h > 0:
+                    return h
+        if self._action_bar is None:
+            return 0
+        bar_h = self._action_bar.height()
+        if bar_h <= 0:
+            bar_h = self._action_bar.sizeHint().height()
+        if bar_h <= 0:
+            bar_h = _ACTION_BAR_HEIGHT
+        return 2 + bar_h
+
+    def _grow_pane_for_action_bar(self) -> None:
+        extra = self._action_bar_embedded_growth_height()
+        if extra <= 0:
+            return
+        mode = self._queue_size_mode
+        uses_fixed_content = mode in (QUEUE_SIZE_ONE, QUEUE_SIZE_STRIP) or (
+            mode == QUEUE_SIZE_ALL
+            and (self.should_shrink_wrap_client() or self.queue_job_count() <= 1)
+        )
+        if uses_fixed_content:
+            if self._job_cards and mode in (QUEUE_SIZE_ONE, QUEUE_SIZE_ALL):
+                self._apply_one_job_scroll_height()
+            self._sync_fixed_panel_geometry()
+
+        sidebar = getattr(self.main_window, "right_sidebar", None)
+        grow_method = (
+            getattr(sidebar, "grow_jobs_pane_for_action_bar", None)
+            if sidebar is not None
+            else None
+        )
+        if callable(grow_method):
+            if (
+                mode == QUEUE_SIZE_ALL
+                and not self.should_shrink_wrap_client()
+                and self.queue_job_count() > 1
+            ):
+                grow_method(extra)
+            elif uses_fixed_content and hasattr(
+                sidebar, "ensure_jobs_pane_fits_content"
+            ):
+                sidebar.ensure_jobs_pane_fits_content()
+            else:
+                grow_method(extra)
+        else:
+            self._notify_shell_geometry_changed()
+
+        if mode == QUEUE_SIZE_ONE:
+            QTimer.singleShot(0, self._deferred_action_bar_geometry_sync)
+
+    def _deferred_action_bar_geometry_sync(self) -> None:
+        if not self._is_action_bar_embedded_on_card():
+            return
+        if self._queue_size_mode != QUEUE_SIZE_ONE:
+            return
+        self._apply_one_job_scroll_height()
+        self._sync_fixed_panel_geometry()
+        self._notify_sidebar_geometry_if_needed()
+
     def _sync_action_bar_from_selection(self) -> None:
+        was_embedded = self._is_action_bar_embedded_on_card()
         if self._is_single_visible_job():
             self._ensure_single_job_auto_selection()
         if self._should_show_action_bar():
@@ -1362,10 +1432,9 @@ class JobQueuePanelWidget(QWidget):
         else:
             self._detach_action_bar()
             self._action_bar.hide()
-        if self._queue_size_mode == QUEUE_SIZE_ONE:
-            self._apply_one_job_scroll_height()
-            self._sync_fixed_panel_geometry()
-            self._notify_sidebar_geometry_if_needed()
+        if not was_embedded and self._is_action_bar_embedded_on_card():
+            self._grow_pane_for_action_bar()
+        # When removing the action bar, intentionally do not shrink the pane.
 
     def _detach_action_bar(self) -> None:
         """Remove the shared action bar from any host card or list layout."""
