@@ -6607,7 +6607,7 @@ class SettingsDialog(QDialog):
         from utils import get_button_focus_colors
         from widgets.icon_hover_swap import attach_icon_hover_swap
 
-        focus_bg, focus_border, focus_text = get_button_focus_colors()
+        focus_bg, _focus_border, focus_text = get_button_focus_colors()
         theme = get_active_theme()
         btn = QPushButton()
         btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
@@ -6617,7 +6617,7 @@ class SettingsDialog(QDialog):
         btn.setCheckable(True)
         btn.setChecked(False)
         btn.setStyleSheet(
-            filter_toolbar_button_stylesheet(theme, focus_bg, focus_border, focus_text)
+            filter_toolbar_button_stylesheet(theme, focus_bg, focus_text)
         )
         btn.clicked.connect(self._toggle_lora_uninstalled_visibility)
         self._lora_hide_uninstalled_icon_swap = attach_icon_hover_swap(btn, QIcon(), QIcon())

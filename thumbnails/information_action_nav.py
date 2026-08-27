@@ -46,14 +46,9 @@ _IMAGE_ICON_PATHS = {
 }
 
 
-def info_action_button_stylesheet(*, highlighted: bool = False, text_button: bool = False) -> str:
-    """Shared chrome for File Information action buttons (edit-style hover border)."""
+def info_action_button_stylesheet(*, text_button: bool = False) -> str:
+    """Shared chrome for File Information and pane toolbar action buttons."""
     th = get_active_theme()
-    border = (
-        getattr(th, "button_border_hover_hex", th.accent_color_hex)
-        if highlighted
-        else th.information_icon_cell_border_muted_hex
-    )
     hover_border = getattr(th, "button_border_hover_hex", th.accent_color_hex)
     px = INFO_ACTION_BTN_PX
     text_rules = ""
@@ -70,7 +65,7 @@ def info_action_button_stylesheet(*, highlighted: bool = False, text_button: boo
     return f"""
         QPushButton {{
             background-color: {th.information_action_chip_bg_hex};
-            border: 1px solid {border};
+            border: 0px;
             border-radius: 6px;
             padding: 0px;
             opacity: 1;
@@ -80,16 +75,12 @@ def info_action_button_stylesheet(*, highlighted: bool = False, text_button: boo
             min-height: {px}px;
             max-height: {px}px;
         }}
-        QPushButton:hover {{
-            border: 1px solid {hover_border};
-        }}
         QPushButton:hover:enabled {{
             opacity: 1;
         }}
         {hover_text_rules}
         QPushButton:disabled {{
             opacity: 0.35;
-            border-color: {th.information_icon_cell_border_muted_hex};
         }}
         QPushButton:hover:disabled {{
             opacity: 0.35;
@@ -115,7 +106,6 @@ class InformationActionNavBar(QWidget):
         self._action_order = tuple(action_order)
         self._include_stretch = include_stretch
         self._buttons: Dict[str, QPushButton] = {}
-        self._speak_highlighted = False
         self._icon_hovers: Dict[str, IconHoverSwap] = {}
         pinned_ids = (
             right_pinned_action_ids
@@ -183,14 +173,12 @@ class InformationActionNavBar(QWidget):
         return any_visible
 
     def set_speak_highlighted(self, highlighted: bool) -> None:
-        self._speak_highlighted = bool(highlighted)
-        self.refresh_theme_styles()
+        """No-op: speak-active affordance is icon-based; buttons are borderless."""
 
     def refresh_theme_styles(self) -> None:
         th = get_active_theme()
         self.setStyleSheet(th.file_tree_nav_container_stylesheet())
         for action_id, btn in self._buttons.items():
-            highlighted = self._speak_highlighted if action_id == "speak" else False
             if action_id in _IMAGE_ACTION_IDS:
                 normal_name, hover_name = _IMAGE_ICON_PATHS[action_id]
                 normal, hover = icon_pair_from_assets(normal_name, hover_name)
@@ -201,6 +189,4 @@ class InformationActionNavBar(QWidget):
                     )
                 else:
                     swap.set_icons(normal, hover)
-            btn.setStyleSheet(
-                info_action_button_stylesheet(highlighted=highlighted)
-            )
+            btn.setStyleSheet(info_action_button_stylesheet())

@@ -72,10 +72,10 @@ def create_tree_filter_icon(mode: str, selected: bool, *, hover: bool = False) -
 
 
 def filter_toolbar_button_stylesheet(
-    theme: Any, focus_bg: str, focus_border: str, focus_text: str
+    theme: Any, focus_bg: str, focus_text: str
 ) -> str:
     base = theme.file_tree_nav_icon_button_stylesheet(
-        focus_bg, focus_border, focus_text, dim=False
+        focus_bg, focus_text, dim=False
     )
     pressed = (
         QColor(theme._file_tree_control_surface_hex()).darker(112).name()
@@ -83,19 +83,14 @@ def filter_toolbar_button_stylesheet(
         else QColor(theme._file_tree_control_surface_hex()).lighter(108).name()
     )
     hover = theme._file_tree_control_surface_hover_hex()
-    hover_border = getattr(theme, "button_border_hover_hex", theme.current_image_border_color_hex)
     return (
         base
         + f"""
-            QPushButton:hover {{
-                border: 1px solid {hover_border};
-            }}
             QPushButton:checked {{
                 background-color: {pressed};
             }}
             QPushButton:checked:hover {{
                 background-color: {hover};
-                border: 1px solid {hover_border};
             }}
         """
     )
@@ -118,17 +113,10 @@ class FileTreeToolbar(QWidget):
     def _nav_button_stylesheet(self) -> str:
         from utils import get_button_focus_colors
 
-        focus_bg, focus_border, focus_text = get_button_focus_colors()
-        th = get_active_theme()
-        hover_border = getattr(th, "button_border_hover_hex", th.current_image_border_color_hex)
-        base = th.file_tree_nav_icon_button_stylesheet(
-            focus_bg, focus_border, focus_text, dim=False
+        focus_bg, _focus_border, focus_text = get_button_focus_colors()
+        return get_active_theme().file_tree_nav_icon_button_stylesheet(
+            focus_bg, focus_text, dim=False
         )
-        return base + f"""
-            QPushButton:hover {{
-                border: 1px solid {hover_border};
-            }}
-        """
 
     def _make_icon_button(
         self,
@@ -220,9 +208,9 @@ class FileTreeToolbar(QWidget):
         from utils import get_button_focus_colors
 
         theme = get_active_theme()
-        focus_bg, focus_border, focus_text = get_button_focus_colors()
+        focus_bg, _focus_border, focus_text = get_button_focus_colors()
         filter_btn_ss = filter_toolbar_button_stylesheet(
-            theme, focus_bg, focus_border, focus_text
+            theme, focus_bg, focus_text
         )
 
         current_mode = "images"
@@ -279,9 +267,9 @@ class FileTreeToolbar(QWidget):
         nav_ss = self._nav_button_stylesheet()
         from utils import get_button_focus_colors
 
-        focus_bg, focus_border, focus_text = get_button_focus_colors()
+        focus_bg, _focus_border, focus_text = get_button_focus_colors()
         filter_btn_ss = filter_toolbar_button_stylesheet(
-            theme, focus_bg, focus_border, focus_text
+            theme, focus_bg, focus_text
         )
         for btn in (
             self.collapse_all_button,

@@ -144,16 +144,7 @@ class JobPaneToolbar(QWidget):
         inter_btn = self._buttons.get("intermediate_images")
         inter_checked = bool(inter_btn.isChecked()) if inter_btn is not None else False
         for action_id, btn in self._buttons.items():
-            highlighted = (
-                (action_id == "hold_queue" and hold_checked)
-                or (action_id == "intermediate_images" and inter_checked)
-            )
-            btn.setStyleSheet(
-                info_action_button_stylesheet(
-                    highlighted=highlighted,
-                    text_button=False,
-                )
-            )
+            btn.setStyleSheet(info_action_button_stylesheet())
         for action_id, normal_name, hover_name, _tooltip, _checkable in _TOOLBAR_ACTIONS:
             normal, hover = icon_pair_from_assets(normal_name, hover_name)
             swap = self._icon_hovers.get(action_id)

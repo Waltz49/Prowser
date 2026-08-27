@@ -135,16 +135,8 @@ class ChatPaneToolbar(QWidget):
     def refresh_theme_styles(self) -> None:
         th = get_active_theme()
         self.setStyleSheet(th.file_tree_nav_container_stylesheet())
-        copy_btn = self._buttons.get("copy_images")
-        copy_checked = bool(copy_btn.isChecked()) if copy_btn is not None else False
         for action_id, btn in self._buttons.items():
-            highlighted = action_id == "copy_images" and copy_checked
-            btn.setStyleSheet(
-                info_action_button_stylesheet(
-                    highlighted=highlighted,
-                    text_button=False,
-                )
-            )
+            btn.setStyleSheet(info_action_button_stylesheet())
         for action_id, normal_name, hover_name, _tooltip, _checkable in _TOOLBAR_ACTIONS:
             normal, hover = icon_pair_from_assets(normal_name, hover_name)
             swap = self._icon_hovers.get(action_id)

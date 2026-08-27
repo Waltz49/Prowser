@@ -75,9 +75,9 @@ def tree_toolbar_gear_button_stylesheet() -> str:
     from utils import get_button_focus_colors
 
     t = get_active_theme()
-    focus_bg, focus_border, focus_text = get_button_focus_colors()
+    focus_bg, _focus_border, focus_text = get_button_focus_colors()
     base = t.file_tree_nav_icon_button_stylesheet(
-        focus_bg, focus_border, focus_text, dim=False
+        focus_bg, focus_text, dim=False
     )
     sz = TREE_TOOLBAR_GEAR_BTN_SIZE
     return (

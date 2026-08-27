@@ -1368,7 +1368,7 @@ class ThemeStylesMixin:
         """
 
     def file_tree_nav_icon_button_stylesheet(
-        self, focus_bg: str, focus_border: str, focus_text: str, *, dim: bool = False
+        self, focus_bg: str, focus_text: str, *, dim: bool = False
     ) -> str:
         t = self
         fg = t.sidebar_text_muted_hex() if dim else t.file_tree_nav_button_text_hex
@@ -1383,7 +1383,7 @@ class ThemeStylesMixin:
             QPushButton {{
                 background-color: {btn_bg};
                 color: {fg};
-                border: 1px solid {t.file_tree_nav_button_border_hex};
+                border: 0px;
                 border-radius: 3px;
                 padding: 2px;
                 font-size: 12px;
@@ -1393,7 +1393,6 @@ class ThemeStylesMixin:
             QPushButton:pressed {{ background-color: {btn_pressed}; }}
             QPushButton:focus {{
                 background-color: {focus_bg};
-                border: 1px solid {focus_border};
                 color: {focus_text};
             }}
         """
