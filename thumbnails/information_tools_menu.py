@@ -63,7 +63,8 @@ def _populate_information_menu(menu: QMenu, sidebar) -> None:
 
 
 def show_information_tools_menu(sidebar, anchor: QPushButton) -> None:
-    menu = QMenu(anchor)
+    # Parentless menu avoids macOS popup warnings on embedded sidebar widgets.
+    menu = QMenu()
     t = get_active_theme()
     menu.setStyleSheet(t.status_bar_context_menu_stylesheet())
     _populate_information_menu(menu, sidebar)
@@ -71,7 +72,8 @@ def show_information_tools_menu(sidebar, anchor: QPushButton) -> None:
 
 
 def show_information_context_menu(sidebar, global_pos) -> None:
-    menu = QMenu(sidebar)
+    # Parentless menu avoids macOS popup warnings on embedded sidebar widgets.
+    menu = QMenu()
     t = get_active_theme()
     menu.setStyleSheet(t.status_bar_context_menu_stylesheet())
     _populate_information_menu(menu, sidebar)

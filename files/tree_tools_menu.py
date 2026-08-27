@@ -50,7 +50,8 @@ def _populate_tree_menu(menu: QMenu, handler) -> None:
 
 
 def show_tree_tools_menu(handler, anchor: QPushButton) -> None:
-    menu = QMenu(anchor)
+    # Parentless menu avoids macOS popup warnings on embedded sidebar widgets.
+    menu = QMenu()
     t = get_active_theme()
     menu.setStyleSheet(t.status_bar_context_menu_stylesheet())
     _populate_tree_menu(menu, handler)
@@ -58,6 +59,7 @@ def show_tree_tools_menu(handler, anchor: QPushButton) -> None:
 
 
 def show_tree_context_menu(handler, global_pos) -> None:
+    # Parentless menu avoids macOS popup warnings on embedded sidebar widgets.
     menu = QMenu()
     t = get_active_theme()
     menu.setStyleSheet(t.status_bar_context_menu_stylesheet())

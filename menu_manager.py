@@ -443,12 +443,18 @@ class MenuManager:
             menu = top_action.menu()
             if menu is None:
                 continue
+            saved_parent = menu.parent()
             try:
                 menu.aboutToShow.emit()
+                # Reparent to the main window so popup() does not use the embedded
+                # QMenuBar QWidgetWindow as transient parent (Qt warns on macOS).
+                menu.setParent(self.main_window)
                 menu.popup(QPoint(-20000, -20000))
                 menu.hide()
             except (RuntimeError, AttributeError):
                 pass
+            finally:
+                menu.setParent(saved_parent)
             break
     
     def _setup_file_menu(self, menubar):

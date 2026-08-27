@@ -993,6 +993,8 @@ def try_start_frameless_system_resize(
     margin: int = FRAMELESS_RESIZE_EDGE_MARGIN,
 ) -> bool:
     """Begin a native edge resize on a frameless top-level window."""
+    if not widget.isWindow():
+        return False
     wh = widget.windowHandle()
     if wh is None:
         return False
@@ -1005,6 +1007,8 @@ def try_start_frameless_system_resize(
 
 def try_start_frameless_system_move(widget: QWidget, global_pos) -> bool:
     """Begin a native window drag on a frameless top-level window."""
+    if not widget.isWindow():
+        return False
     wh = widget.windowHandle()
     if wh is None:
         return False

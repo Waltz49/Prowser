@@ -14,7 +14,6 @@ from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QLabel,
-    QMenu,
     QPushButton,
     QScrollArea,
     QSizePolicy,
@@ -118,58 +117,6 @@ def jobs_header_status_text(controller) -> str:
     if waiting > 0:
         return f"+{waiting} "
     return ""
-
-
-def show_jobs_tools_menu(
-    main_window,
-    controller,
-    anchor: QPushButton,
-    *,
-    job_queue_dialog=None,
-) -> None:
-    menu = QMenu(anchor)
-    t = get_active_theme()
-    menu.setStyleSheet(t.status_bar_context_menu_stylesheet())
-
-    inter_action = menu.addAction("Intermediate Images")
-    inter_action.setCheckable(True)
-    prog_state = controller.get_show_progressive_images_menu_state()
-    if prog_state is None:
-        inter_action.setEnabled(False)
-        inter_action.setChecked(False)
-    else:
-        _supported, enabled = prog_state
-        inter_action.setChecked(bool(enabled))
-        inter_action.triggered.connect(
-            lambda checked: controller.set_show_progressive_images(bool(checked))
-        )
-
-    hold_action = menu.addAction("Hold Job Queue")
-    hold_action.setCheckable(True)
-    hold_action.setChecked(controller.hold_job_queue())
-    hold_action.triggered.connect(
-        lambda checked: controller.set_hold_job_queue(bool(checked))
-    )
-
-    if job_queue_dialog is not None and hasattr(
-        job_queue_dialog, "is_job_queue_always_on_top"
-    ):
-        menu.addSeparator()
-        top_action = menu.addAction("Always on Top")
-        top_action.setCheckable(True)
-        top_action.setChecked(job_queue_dialog.is_job_queue_always_on_top())
-        top_action.triggered.connect(
-            lambda checked: job_queue_dialog.set_job_queue_always_on_top(bool(checked))
-        )
-
-    skip_copy_action = menu.addAction("Skip This Copy")
-    skip_copy_action.setEnabled(controller.can_skip_active_series_copy())
-    skip_copy_action.setToolTip(
-        "End the current copy and start the next one in this series."
-    )
-    skip_copy_action.triggered.connect(controller.skip_active_series_copy)
-
-    menu.exec(anchor.mapToGlobal(QPoint(0, anchor.height())))
 
 
 def _disable_tab_focus(root: QWidget) -> None:
@@ -1063,6 +1010,9 @@ class JobQueuePanelWidget(QWidget):
         self._auto_scroll_timer.timeout.connect(self._handle_drag_auto_scroll)
         self._auto_scroll_direction = 0
         self._auto_scroll_speed = 0.0
+        settings = main_window.config.load_settings()
+        self._show_toolbar = bool(settings.get("jobs_show_toolbar", True))
+        self._toolbar = None
         self._setup_ui()
         self._connect_controller()
 
@@ -1165,8 +1115,121 @@ class JobQueuePanelWidget(QWidget):
         event.accept()
         return True
 
+    def _job_queue_dialog_for_menu(self):
+        window = self.window()
+        if hasattr(window, "is_job_queue_always_on_top"):
+            return window
+        return None
+
+    def _show_jobs_pane_context_menu(self, global_pos) -> None:
+        from imagegen_plugins.jobs_tools_menu import show_jobs_context_menu
+
+        show_jobs_context_menu(
+            self,
+            global_pos,
+            job_queue_dialog=self._job_queue_dialog_for_menu(),
+        )
+
+    def is_jobs_toolbar_visible(self) -> bool:
+        return bool(self._show_toolbar)
+
+    def set_jobs_toolbar_visible(self, visible: bool) -> None:
+        visible = bool(visible)
+        if self._show_toolbar == visible:
+            return
+        self._show_toolbar = visible
+        self.main_window.config.update_setting("jobs_show_toolbar", visible)
+        if self._toolbar is not None:
+            self._toolbar.set_toolbar_visible(visible)
+        QTimer.singleShot(0, self._refit_after_toolbar_visibility_change)
+
+    def _refit_after_toolbar_visibility_change(self) -> None:
+        self._sync_fixed_panel_geometry()
+        self._notify_sidebar_geometry_if_needed()
+
+    def jobs_toolbar_action_specs(self) -> list[dict[str, object]]:
+        prog_state = self._controller.get_show_progressive_images_menu_state()
+        if prog_state is None:
+            inter_enabled = False
+            inter_checked = False
+        else:
+            _supported, inter_checked = prog_state
+            inter_enabled = True
+        return [
+            {
+                "action_id": "intermediate_images",
+                "label": "Intermediate Images",
+                "visible": True,
+                "enabled": inter_enabled,
+                "checkable": True,
+                "checked": bool(inter_checked),
+            },
+            {
+                "action_id": "hold_queue",
+                "label": "Hold Job Queue",
+                "visible": True,
+                "enabled": True,
+                "checkable": True,
+                "checked": self._controller.hold_job_queue(),
+            },
+            {
+                "action_id": "skip_copy",
+                "label": "Skip This Copy",
+                "visible": True,
+                "enabled": self._controller.can_skip_active_series_copy(),
+                "tooltip": "End the current copy and start the next one in this series.",
+            },
+        ]
+
+    def trigger_jobs_toolbar_action(
+        self, action_id: str, checked: bool | None = None
+    ) -> None:
+        if action_id == "intermediate_images":
+            if checked is None:
+                btn = None if self._toolbar is None else self._toolbar.button(
+                    "intermediate_images"
+                )
+                checked = btn.isChecked() if btn is not None else False
+            self._controller.set_show_progressive_images(bool(checked))
+        elif action_id == "hold_queue":
+            if checked is None:
+                btn = None if self._toolbar is None else self._toolbar.button("hold_queue")
+                checked = btn.isChecked() if btn is not None else (
+                    not self._controller.hold_job_queue()
+                )
+            self._controller.set_hold_job_queue(bool(checked))
+        elif action_id == "skip_copy":
+            self._controller.skip_active_series_copy()
+        self._update_jobs_toolbar_state()
+
+    def _update_jobs_toolbar_state(self) -> None:
+        if self._toolbar is None:
+            return
+        specs = {spec["action_id"]: spec for spec in self.jobs_toolbar_action_specs()}
+        for action_id in ("intermediate_images", "hold_queue", "skip_copy"):
+            spec = specs.get(action_id)
+            if spec is None:
+                continue
+            self._toolbar.set_action_enabled(action_id, bool(spec["enabled"]))
+            if spec.get("checkable"):
+                if action_id == "intermediate_images":
+                    self._toolbar.set_intermediate_checked(bool(spec.get("checked")))
+                elif action_id == "hold_queue":
+                    self._toolbar.set_hold_checked(bool(spec.get("checked")))
+        self._toolbar.refresh_theme_styles()
+
+    def _toolbar_block_height(self) -> int:
+        if self._toolbar is None or not self._show_toolbar:
+            return 0
+        h = self._toolbar.height()
+        if h <= 0:
+            h = self._toolbar.sizeHint().height()
+        return max(0, h)
+
     def attach_header_tools(self) -> None:
         """Wire titlebar tools menu and flyout button on the bound header (if any)."""
+        from imagegen_plugins.jobs_tools_menu import show_jobs_tools_menu
+
         header = self._jobs_header()
         if header is None:
             return
@@ -1174,14 +1237,9 @@ class JobQueuePanelWidget(QWidget):
         btn.setToolTip("Job queue tools")
         btn.clicked.connect(
             lambda: show_jobs_tools_menu(
-                self.main_window,
-                self._controller,
+                self,
                 btn,
-                job_queue_dialog=(
-                    self.window()
-                    if hasattr(self.window(), "is_job_queue_always_on_top")
-                    else None
-                ),
+                job_queue_dialog=self._job_queue_dialog_for_menu(),
             )
         )
         if hasattr(header, "set_tools_button"):
@@ -1599,7 +1657,7 @@ class JobQueuePanelWidget(QWidget):
         return self._empty_label
 
     def empty_state_height_hint(self) -> int:
-        return empty_queue_label_height_px(self._empty_label)
+        return empty_queue_label_height_px(self._empty_label) + self._toolbar_block_height()
 
     def prepare_expand_layout(self) -> None:
         """Reflow cards and progress strip before sizing to fit content."""
@@ -1617,6 +1675,11 @@ class JobQueuePanelWidget(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
         layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+
+        from imagegen_plugins.jobs_toolbar import JobPaneToolbar
+
+        self._toolbar = JobPaneToolbar(self)
+        self._toolbar.set_toolbar_visible(self._show_toolbar)
 
         self._empty_label = QLabel("No jobs in the queue.")
         self._empty_label.setAlignment(
@@ -1665,10 +1728,22 @@ class JobQueuePanelWidget(QWidget):
         self._scroll.verticalScrollBar().valueChanged.connect(
             self._on_job_list_scrolled
         )
+        self._scroll.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self._scroll.customContextMenuRequested.connect(
+            lambda pos: self._show_jobs_pane_context_menu(
+                self._scroll.viewport().mapToGlobal(pos)
+            )
+        )
         self._panel_layout = layout
+        layout.addWidget(self._toolbar, 0)
         layout.addWidget(self._active_job_strip)
         layout.addWidget(self._empty_label)
         layout.addWidget(self._scroll, 0)
+        self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.customContextMenuRequested.connect(
+            lambda pos: self._show_jobs_pane_context_menu(self.mapToGlobal(pos))
+        )
+        self._update_jobs_toolbar_state()
         _disable_tab_focus(self)
 
     def _connect_controller(self) -> None:
@@ -1689,6 +1764,7 @@ class JobQueuePanelWidget(QWidget):
         self._refresh_active_row(force=True)
         if self._is_single_visible_job():
             self._refresh_action_bar_if_visible()
+        self._update_jobs_toolbar_state()
 
     def _on_live_refresh_timer(self) -> None:
         if self._imagegen_dialog_building_active():
@@ -1709,6 +1785,7 @@ class JobQueuePanelWidget(QWidget):
             if abs(new_strip_h - prev_strip_h) > 1:
                 self._on_active_strip_content_height_changed()
         self._controller.mark_task_status_display_refreshed()
+        self._update_jobs_toolbar_state()
 
     def pause_live_refresh(self) -> None:
         """Pause periodic refresh while image-gen dialog builds on the GUI thread."""
@@ -1731,6 +1808,7 @@ class JobQueuePanelWidget(QWidget):
             header.set_title_suffix(self._controller.jobs_pane_title_suffix())
         if hasattr(header, "set_status_text"):
             header.set_status_text(jobs_header_status_text(self._controller))
+        self._update_jobs_toolbar_state()
 
     def refresh_header_status(self) -> None:
         self._update_header_status()
@@ -1752,6 +1830,8 @@ class JobQueuePanelWidget(QWidget):
             self._refresh_queue_rows_in_place()
         if hasattr(self, "_action_bar"):
             self._action_bar.refresh_theme_styles()
+        if hasattr(self, "_toolbar") and self._toolbar is not None:
+            self._toolbar.refresh_theme_styles()
         self._active_job_strip.refresh_theme_styles()
         header = self._jobs_header()
         if header is not None:
@@ -1982,6 +2062,7 @@ class JobQueuePanelWidget(QWidget):
         """Resize compact / single-job views when the progress strip appears."""
         self._refresh_active_job_strip(force=True)
         self._apply_queue_size_layout()
+        self._update_jobs_toolbar_state()
         self._notify_sidebar_geometry_if_needed()
         QTimer.singleShot(0, self._deferred_generation_geometry_sync)
 
@@ -2183,10 +2264,10 @@ class JobQueuePanelWidget(QWidget):
             self._active_job_strip.refresh(force=True)
         strip_h = self._active_job_strip.content_height()
         if strip_h > 0:
-            return strip_h
+            return strip_h + self._toolbar_block_height()
         if not self._job_cards:
             return self.empty_state_height_hint()
-        return MIN_JOBS_QUEUE_CONTENT_HEIGHT
+        return MIN_JOBS_QUEUE_CONTENT_HEIGHT + self._toolbar_block_height()
 
     def _measure_first_job_card_height(self) -> int:
         if not self._job_cards:
@@ -2219,8 +2300,8 @@ class JobQueuePanelWidget(QWidget):
         total = self._active_strip_block_height()
         if not self._job_cards:
             if self._controller.is_running():
-                return total
-            return total + self.empty_state_height_hint()
+                return total + self._toolbar_block_height()
+            return self.empty_state_height_hint()
         margins = self._list_layout.contentsMargins()
         if quick:
             card_h = self._card_layout_height(self._job_cards[0])
@@ -2228,7 +2309,13 @@ class JobQueuePanelWidget(QWidget):
             card_h = self._measure_first_job_card_height()
         if card_h <= 0:
             card_h = self._job_cards[0].minimumHeight()
-        return total + margins.top() + margins.bottom() + card_h
+        return (
+            total
+            + margins.top()
+            + margins.bottom()
+            + card_h
+            + self._toolbar_block_height()
+        )
 
     def content_height_for_size_mode(
         self, mode: str | None = None, *, quick: bool = False
@@ -2368,8 +2455,8 @@ class JobQueuePanelWidget(QWidget):
             total += strip_h if strip_h > 0 else self._active_job_strip.sizeHint().height()
         if not self._job_cards:
             if self._controller.is_running():
-                return total
-            return total + self.empty_state_height_hint()
+                return total + self._toolbar_block_height()
+            return self.empty_state_height_hint()
         self._ensure_single_job_auto_selection()
         margins = self._list_layout.contentsMargins()
         total += margins.top() + margins.bottom()
@@ -2379,7 +2466,7 @@ class JobQueuePanelWidget(QWidget):
                 if row_idx > 0:
                     total += spacing
                 total += self._card_layout_height(card)
-            return total
+            return total + self._toolbar_block_height()
         info_w = self._info_content_width()
         width = self._viewport_width()
         rows = self._controller.queue_snapshot()
@@ -2409,7 +2496,7 @@ class JobQueuePanelWidget(QWidget):
                 continue
             card.reflow_refs(width)
             total += self._card_layout_height(card)
-        return total
+        return total + self._toolbar_block_height()
 
     def refresh_table(self) -> None:
         rows = self._controller.queue_snapshot()

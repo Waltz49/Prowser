@@ -1,21 +1,24 @@
 #!/usr/bin/env python3
-"""Chat pane header tools and context menu."""
+"""Job Control pane header tools and context menu."""
 
 from __future__ import annotations
 
 from PySide6.QtCore import QPoint
 from PySide6.QtWidgets import QMenu, QPushButton
 
-from chat_plugins.chat_persistence import is_preserve_chat_across_sessions
-from chat_plugins.chat_tips_dialog import show_chat_tips_dialog
 from theme.theme_service import get_active_theme
 
-_MENU_ACTION_ORDER = ("system_prompt", "copy_images", "clear_chat")  # clear last
+_MENU_ACTION_ORDER = ("intermediate_images", "hold_queue", "skip_copy")
 
 
-def _populate_chat_menu(menu: QMenu, chat_pane) -> None:
-    specs = {spec["action_id"]: spec for spec in chat_pane.chat_toolbar_action_specs()}
-    toolbar = getattr(chat_pane, "_toolbar", None)
+def _populate_jobs_menu(
+    menu: QMenu,
+    panel,
+    *,
+    job_queue_dialog=None,
+) -> None:
+    specs = {spec["action_id"]: spec for spec in panel.jobs_toolbar_action_specs()}
+    toolbar = getattr(panel, "_toolbar", None)
     for action_id in _MENU_ACTION_ORDER:
         spec = specs.get(action_id)
         if spec is None or not spec["visible"]:
@@ -26,49 +29,64 @@ def _populate_chat_menu(menu: QMenu, chat_pane) -> None:
         else:
             action = menu.addAction(str(spec["label"]))
         action.setEnabled(bool(spec["enabled"]))
+        if spec.get("tooltip"):
+            action.setToolTip(str(spec["tooltip"]))
         if spec.get("checkable"):
             action.setCheckable(True)
             action.setChecked(bool(spec.get("checked")))
             action.toggled.connect(
-                lambda checked, aid=action_id: chat_pane.trigger_chat_toolbar_action(
+                lambda checked, aid=action_id: panel.trigger_jobs_toolbar_action(
                     aid, checked
                 )
             )
         else:
             action.triggered.connect(
-                lambda _checked=False, aid=action_id: chat_pane.trigger_chat_toolbar_action(
+                lambda _checked=False, aid=action_id: panel.trigger_jobs_toolbar_action(
                     aid
                 )
             )
 
-    menu.addSeparator()
-    preserve_action = menu.addAction("Preserve Chat Across Sessions")
-    preserve_action.setCheckable(True)
-    preserve_action.setChecked(is_preserve_chat_across_sessions())
-    preserve_action.toggled.connect(chat_pane.set_preserve_chat_across_sessions)
-    tips_action = menu.addAction("Tips…")
-    tips_action.triggered.connect(lambda: show_chat_tips_dialog(chat_pane))
+    if job_queue_dialog is not None and hasattr(
+        job_queue_dialog, "is_job_queue_always_on_top"
+    ):
+        menu.addSeparator()
+        top_action = menu.addAction("Always on Top")
+        top_action.setCheckable(True)
+        top_action.setChecked(job_queue_dialog.is_job_queue_always_on_top())
+        top_action.toggled.connect(
+            lambda checked: job_queue_dialog.set_job_queue_always_on_top(bool(checked))
+        )
 
     menu.addSeparator()
     show_bar = menu.addAction("Show Toolbar")
     show_bar.setCheckable(True)
-    show_bar.setChecked(chat_pane.is_chat_toolbar_visible())
-    show_bar.toggled.connect(chat_pane.set_chat_toolbar_visible)
+    show_bar.setChecked(panel.is_jobs_toolbar_visible())
+    show_bar.toggled.connect(panel.set_jobs_toolbar_visible)
 
 
-def show_chat_tools_menu(chat_pane, anchor: QPushButton) -> None:
+def show_jobs_tools_menu(
+    panel,
+    anchor: QPushButton,
+    *,
+    job_queue_dialog=None,
+) -> None:
     # Parentless menu avoids macOS popup warnings on embedded sidebar widgets.
     menu = QMenu()
     t = get_active_theme()
     menu.setStyleSheet(t.status_bar_context_menu_stylesheet())
-    _populate_chat_menu(menu, chat_pane)
+    _populate_jobs_menu(menu, panel, job_queue_dialog=job_queue_dialog)
     menu.exec(anchor.mapToGlobal(QPoint(0, anchor.height())))
 
 
-def show_chat_context_menu(chat_pane, global_pos) -> None:
+def show_jobs_context_menu(
+    panel,
+    global_pos,
+    *,
+    job_queue_dialog=None,
+) -> None:
     # Parentless menu avoids macOS popup warnings on embedded sidebar widgets.
     menu = QMenu()
     t = get_active_theme()
     menu.setStyleSheet(t.status_bar_context_menu_stylesheet())
-    _populate_chat_menu(menu, chat_pane)
+    _populate_jobs_menu(menu, panel, job_queue_dialog=job_queue_dialog)
     menu.exec(global_pos)

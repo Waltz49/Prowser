@@ -499,6 +499,7 @@ class ImageBrowserConfig:
             'chat_visible': False,  # Default to hiding chat pane
             'chat_show_toolbar': True,  # Chat pane action toolbar
             'jobs_visible': True,  # Default to showing jobs pane in right combined sidebar
+            'jobs_show_toolbar': True,  # Job Control pane action toolbar
             'jobs_display_mode': 'pane',  # 'pane' (sidebar) or 'panel' (floating dialog)
             'sidebar_width': 300,  # Default width for combined sidebar (tree + preview)
             'right_sidebar_width': 300,  # Default width for right sidebar (info panel)
