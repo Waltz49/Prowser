@@ -21,7 +21,8 @@ import shutil
 import fnmatch
 from pathlib import Path
 from typing import Optional, Callable, List, Any, Set, Dict, Union, Tuple
-from PySide6.QtCore import (QDir, QEventLoop, QTimer, QItemSelectionModel, Qt, QModelIndex, QSortFilterProxyModel, QSize, QObject, QEvent, QPoint, QMutexLocker
+from PySide6.QtCore import (QDir, QEventLoop, QTimer, QItemSelectionModel, Qt, QModelIndex, QPersistentModelIndex,
+    QSortFilterProxyModel, QSize, QObject, QEvent, QPoint, QRect, QMutexLocker
 )
 from files.tree_image_discovery import (
     TreeImageDiscoveryService,
@@ -183,6 +184,58 @@ class CustomTreeView(QTreeView):
     def get_last_drop_location(self) -> Optional[str]:
         """Get the last drop location, or None if no drop has occurred"""
         return self._last_drop_location
+
+    @staticmethod
+    def _same_tree_row(a: Optional[Union[QModelIndex, QPersistentModelIndex]],
+                        b: Optional[Union[QModelIndex, QPersistentModelIndex]]) -> bool:
+        if a is None and b is None:
+            return True
+        if a is None or b is None:
+            return False
+        if not a.isValid() or not b.isValid():
+            return a.isValid() == b.isValid()
+        return a.model() == b.model() and a.row() == b.row() and a.parent() == b.parent()
+
+    def is_drag_highlight_index(self, index: QModelIndex) -> bool:
+        hi = self.highlighted_index
+        if hi is None or not index.isValid():
+            return False
+        if not hi.isValid():
+            self.highlighted_index = None
+            return False
+        return self._same_tree_row(hi, index)
+
+    def paint_drag_highlight_item(self, painter: QPainter, option: QStyleOptionViewItem,
+                                  index: QModelIndex, delegate: QStyledItemDelegate) -> None:
+        """Paint drag-drop target row; manual draw so QTreeView stylesheet cannot override it."""
+        opt = QStyleOptionViewItem(option)
+        delegate.initStyleOption(opt, index)
+        th = get_active_theme()
+        bg = QColor(th.file_tree_delegate_drag_bg_hex)
+        fg = QColor(th.file_tree_delegate_drag_text_hex)
+        style = self.style()
+
+        painter.save()
+        painter.fillRect(opt.rect, bg)
+
+        # Render icon/text into a local pixmap so layout matches the style (incl. item
+        # padding) while drawPixmap() places it at the correct viewport position.
+        pixmap = QPixmap(opt.rect.size())
+        pixmap.fill(Qt.GlobalColor.transparent)
+        content_painter = QPainter(pixmap)
+        content_opt = QStyleOptionViewItem(opt)
+        content_opt.rect = QRect(0, 0, opt.rect.width(), opt.rect.height())
+        content_opt.backgroundBrush = QBrush(Qt.BrushStyle.NoBrush)
+        content_opt.state &= ~QStyle.StateFlag.State_Selected
+        bold_font = QFont(content_opt.font)
+        bold_font.setBold(True)
+        content_opt.font = bold_font
+        content_opt.palette.setColor(QPalette.ColorRole.Text, fg)
+        content_opt.palette.setColor(QPalette.ColorRole.HighlightedText, fg)
+        style.drawControl(QStyle.ControlElement.CE_ItemViewItem, content_opt, content_painter, self)
+        content_painter.end()
+        painter.drawPixmap(opt.rect.topLeft(), pixmap)
+        painter.restore()
 
     def drawRow(self, painter: QPainter, option: QStyleOptionViewItem, index: QModelIndex) -> None:
         super().drawRow(painter, option, index)
@@ -1736,16 +1789,21 @@ class CustomTreeView(QTreeView):
             event.ignore()
 
         # Update highlight if it changed
-        if self.highlighted_index != new_highlight_index:
+        persistent_highlight = (
+            QPersistentModelIndex(new_highlight_index)
+            if new_highlight_index is not None and new_highlight_index.isValid()
+            else None
+        )
+        if not self._same_tree_row(self.highlighted_index, persistent_highlight):
             # Clear old highlight
             if self.highlighted_index is not None and self.highlighted_index.isValid():
                 old_rect = self.visualRect(self.highlighted_index)
                 self.viewport().update(old_rect)
 
             # Set new highlight
-            self.highlighted_index = new_highlight_index
-            if new_highlight_index is not None and new_highlight_index.isValid():
-                new_rect = self.visualRect(new_highlight_index)
+            self.highlighted_index = persistent_highlight
+            if persistent_highlight is not None and persistent_highlight.isValid():
+                new_rect = self.visualRect(persistent_highlight)
                 self.viewport().update(new_rect)
 
         # Auto-scroll when cursor near top/bottom edge during drag
@@ -3643,23 +3701,11 @@ class FileTreeHandler(QObject):
         class HighlightDelegate(QStyledItemDelegate):
             def paint(delegate_self, painter: QPainter, option: QStyleOptionViewItem, index: QModelIndex) -> None:
                 try:
-                    opt = QStyleOptionViewItem(option)
-                    delegate_self.initStyleOption(opt, index)
-                    # Check for drag highlight
-                    if hasattr(parent_self, 'file_tree') and hasattr(parent_self.file_tree, 'highlighted_index'):
-                        if parent_self.file_tree.highlighted_index is not None and parent_self.file_tree.highlighted_index == index:
-                            # Apply drag highlight styling (theme-aware)
-                            th = get_active_theme()
-                            opt.backgroundBrush = QBrush(QColor(th.file_tree_delegate_drag_bg_hex))
-                            bold_font = QFont(opt.font)
-                            bold_font.setBold(True)
-                            opt.font = bold_font
-                            pal = QPalette(opt.palette)
-                            tc = QColor(th.file_tree_delegate_drag_text_hex)
-                            pal.setColor(QPalette.Text, tc)
-                            pal.setColor(QPalette.HighlightedText, tc)
-                            opt.palette = pal
-                    QApplication.style().drawControl(QStyle.CE_ItemViewItem, opt, painter, opt.widget)
+                    file_tree = getattr(parent_self, 'file_tree', None)
+                    if file_tree is not None and file_tree.is_drag_highlight_index(index):
+                        file_tree.paint_drag_highlight_item(painter, option, index, delegate_self)
+                        return
+                    super(HighlightDelegate, delegate_self).paint(painter, option, index)
                 except Exception:
                     super(HighlightDelegate, delegate_self).paint(painter, option, index)
         self.file_tree.setItemDelegate(HighlightDelegate(self.file_tree))
