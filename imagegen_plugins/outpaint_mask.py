@@ -109,3 +109,30 @@ def composite_masked_regions_for_klein_edit(
         m = m.resize(bg.size, Image.Resampling.LANCZOS)
     fill = Image.new("RGB", bg.size, fill_rgb)
     return Image.composite(fill, bg, m)
+
+
+def apply_expand_keep_mask(
+    generated: Image.Image,
+    background: Image.Image,
+    mask: Image.Image,
+) -> Image.Image:
+    """Paste keep regions (mask black) from background onto generated output."""
+    gen = generated.convert("RGB")
+    bg = background.convert("RGB")
+    m = mask.convert("L")
+    if m.size != gen.size:
+        m = m.resize(gen.size, Image.Resampling.LANCZOS)
+    if bg.size != gen.size:
+        bg = bg.resize(gen.size, Image.Resampling.LANCZOS)
+    keep = m.point(lambda v: 255 if v < 128 else 0, mode="L")
+    return Image.composite(bg, gen, keep)
+
+
+def mask_generate_fraction(mask: Image.Image) -> float:
+    """Fraction of mask pixels marked generate (white)."""
+    m = mask.convert("L")
+    pixels = m.getdata()
+    if not pixels:
+        return 0.0
+    white = sum(1 for value in pixels if value >= 128)
+    return white / len(pixels)

@@ -20,6 +20,7 @@ from imagegen_plugins.image_gen_pipeline_modes import MFLUX_FLOW_MATCH_MIN_STEPS
 from imagegen_plugins.image_gen_output_format import mflux_temp_suffix_for_output_path
 from imagegen_plugins.image_gen_dim_limits import payload_max_generation_dimension
 from imagegen_plugins.outpaint_mask import (
+    apply_expand_keep_mask,
     composite_masked_regions_for_klein_edit,
     fit_edit_output_dims,
     prepare_image_and_mask_at_rect,
@@ -130,13 +131,18 @@ def _run_klein_expand_from_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     finally:
         image.close()
 
+    output_path = str(payload["output_path"])
     composite_path = prowser_mkstemp_path(
         prefix="imagegen-klein-expand-", suffix=".png"
     )
-    try:
-        os.unlink(composite_path)
-    except OSError:
-        pass
+    klein_output_path = prowser_mkstemp_path(
+        prefix="imagegen-klein-expand-out-", suffix=".png"
+    )
+    for path in (composite_path, klein_output_path):
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
     try:
         composite.save(composite_path)
         run_payload = dict(payload)
@@ -144,13 +150,20 @@ def _run_klein_expand_from_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
         run_payload["source_image_paths"] = [composite_path]
         run_payload["width"] = w
         run_payload["height"] = h
-        return _run_klein_edit_from_payload(run_payload)
+        run_payload["output_path"] = klein_output_path
+        result = _run_klein_edit_from_payload(run_payload)
+        with Image.open(klein_output_path) as klein_out:
+            final = apply_expand_keep_mask(klein_out, background, mask)
+            final.save(output_path)
+        result["output_path"] = output_path
+        return result
     finally:
-        try:
-            if os.path.isfile(composite_path):
-                os.unlink(composite_path)
-        except OSError:
-            pass
+        for path in (composite_path, klein_output_path):
+            try:
+                if os.path.isfile(path):
+                    os.unlink(path)
+            except OSError:
+                pass
 
 
 def run_from_payload(payload: Dict[str, Any]) -> Dict[str, Any]:

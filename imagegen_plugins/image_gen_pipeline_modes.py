@@ -37,7 +37,10 @@ _MFLUX_PIPELINE_IDS = frozenset(
     }
 )
 
-_KLEIN_EXPAND_PROMPT_PREFIX = "Expand this image.\n"
+_KLEIN_EXPAND_PROMPT_PREFIX = (
+    "Extend the image only into the gray border areas; "
+    "preserve the existing center content.\n"
+)
 
 
 def klein_expand_prompt(user_prompt: str) -> str:
@@ -169,7 +172,7 @@ PIPELINE_MODES: Dict[str, PipelineMode] = {
         pipeline_id="mflux_fill_expand",
         worker_script="mflux_fill_expand.py",
         steps_min=8,
-        steps_max=30,
+        steps_max=40, # DGN was 30
         steps_default=20,
         guidance_min=1.0,
         guidance_max=50.0,

@@ -51,7 +51,9 @@ from imagegen_plugins.image_gen_function_switcher import (
 from imagegen_plugins.image_gen_form_layout import (
     ImageGenFieldsPanel,
     IMAGE_GEN_PERSISTENT_OUTER_FIELD_COUNT,
+    create_image_gen_truncating_info_label,
     mount_image_gen_fields_in_scroll,
+    set_image_gen_truncating_info_text,
 )
 from imagegen_plugins.image_gen_parameter_panel import (
     ImageGenParameterPanel,
@@ -292,6 +294,9 @@ class ImageGenExpandDialog(ImageGenPanelMixin, ImageGenDimensionAspectMixin, QDi
         )
         self._source_nav.set_center_widget(self._canvas)
         canvas_host_layout.addWidget(self._source_nav)
+        self._expand_mask_note_label = create_image_gen_truncating_info_label(canvas_host)
+        canvas_host_layout.addWidget(self._expand_mask_note_label)
+        self._sync_expand_mask_note()
         splitter.add_preview_pane(canvas_host)
 
         scroll = QScrollArea()
@@ -430,6 +435,24 @@ class ImageGenExpandDialog(ImageGenPanelMixin, ImageGenDimensionAspectMixin, QDi
         refresh_image_gen_footer_keyboard_shortcuts(self)
         self._connect_panel_dirty_tracking()
 
+    def _sync_expand_mask_note(self) -> None:
+        label = getattr(self, "_expand_mask_note_label", None)
+        plugin = self.plugin
+        if label is None or plugin is None:
+            return
+        if plugin.pipeline_id == "mflux_flux2_klein_expand":
+            text = (
+                "Klein expand uses edit-style outfill with placement preserved "
+                "after generation. For mask-constrained expansion, select "
+                "FLUX.1-Fill-dev."
+            )
+        elif plugin.pipeline_id == "mflux_fill_expand":
+            text = "Uses mask-constrained outfill (FLUX Fill)."
+        else:
+            text = ""
+        set_image_gen_truncating_info_text(label, text)
+        label.setVisible(bool(text))
+
     def _connect_panel_dirty_tracking(self) -> None:
         self.connect_panel_dirty_tracking()
 
@@ -454,6 +477,7 @@ class ImageGenExpandDialog(ImageGenPanelMixin, ImageGenDimensionAspectMixin, QDi
         self.plugin = new_plugin
         self._load_plugin_state(saved_override=incoming)
         sync_model_comment_label(self._model_comment_label, new_plugin)
+        self._sync_expand_mask_note()
         self._populate_field_rows()
         self.set_prompt_text(preserved_prompt)
         refresh_dialog_mflux_lora_combo(self)

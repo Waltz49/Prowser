@@ -374,7 +374,7 @@ def run_from_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
         int(payload["height"]),
         max_side=payload_max_generation_dimension(payload),
     )
-    steps = max(8, min(30, int(payload.get("steps", 20))))
+    steps = max(8, min(40, int(payload.get("steps", 20)))) # DGN was 30
     guidance = max(1.0, min(50.0, float(payload.get("guidance_scale", 30.0))))
     quantize = int(payload.get("mflux_quantize", 4))
     if quantize not in _MFLUX_ALLOWED_QUANT:
