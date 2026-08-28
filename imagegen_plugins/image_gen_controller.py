@@ -3107,12 +3107,36 @@ class ImageGenController(QObject):
                 flush=True,
             )
 
+    @staticmethod
+    def _progressive_image_readable(output_path: str) -> bool:
+        ext = os.path.splitext(output_path)[1].lower()
+        if ext not in (".png", ".webp", ".jpg", ".jpeg", ".tif", ".tiff"):
+            return True
+        try:
+            from PIL import Image
+
+            with Image.open(output_path) as img:
+                img.verify()
+            return True
+        except Exception:
+            return False
+
     def _refresh_progressive_image(
         self, output_path: str, *, force_fullscreen: bool = False
     ) -> None:
         if not output_path or not os.path.isfile(output_path):
             return
         mw = self.main_window
+        if not self._progressive_image_readable(output_path):
+            if getattr(mw, "debug_mode", False):
+                from debug_log import debug_timestamp
+
+                print(
+                    f"{debug_timestamp()} [imagegen] skip progressive refresh "
+                    f"(unreadable path={output_path})",
+                    flush=True,
+                )
+            return
         if self._slideshow_is_active():
             if getattr(mw, "debug_mode", False):
                 from debug_log import debug_timestamp

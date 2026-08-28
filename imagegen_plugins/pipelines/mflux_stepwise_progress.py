@@ -3,17 +3,19 @@
 
 from __future__ import annotations
 
-import json
 import os
 import re
 import shutil
+import tempfile
 import threading
-
-from prowser_temp_files import prowser_mkdtemp, prowser_mkstemp_path
 import time
 from typing import Any, Callable, Dict, Optional, Set, Tuple
 
+from prowser_temp_files import prowser_mkdtemp
+
 _MFLUX_STEPWISE_RE = re.compile(r"^seed_(\d+)_step(\d+)of(\d+)\.png$", re.IGNORECASE)
+_PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
+_MIN_PNG_SIZE = 64
 
 
 def emit_mflux_progress(
@@ -35,17 +37,85 @@ def emit_mflux_progress(
 
 
 def atomic_copy2(src: str, dst: str) -> None:
-    """Copy src to dst using a temp file under the configured Prowser temp directory."""
-    tmp_path = prowser_mkstemp_path(prefix="imagegen-progress-", suffix=".png")
+    """Copy src to dst atomically via a temp file in dst's directory."""
+    dst_dir = os.path.dirname(os.path.abspath(dst)) or "."
+    os.makedirs(dst_dir, exist_ok=True)
+    suffix = os.path.splitext(dst)[1] or ".png"
+    fd, tmp_path = tempfile.mkstemp(
+        prefix=".imagegen-progress-",
+        suffix=suffix,
+        dir=dst_dir,
+    )
+    os.close(fd)
+    replaced = False
     try:
         shutil.copy2(src, tmp_path)
-        shutil.copy2(tmp_path, dst)
+        os.replace(tmp_path, dst)
+        replaced = True
     finally:
+        if not replaced:
+            try:
+                if os.path.isfile(tmp_path):
+                    os.unlink(tmp_path)
+            except OSError:
+                pass
+
+
+def _png_looks_complete(path: str) -> bool:
+    try:
+        size = os.path.getsize(path)
+    except OSError:
+        return False
+    if size < _MIN_PNG_SIZE:
+        return False
+    try:
+        with open(path, "rb") as f:
+            if f.read(8) != _PNG_MAGIC:
+                return False
+            f.seek(size - 8)
+            return f.read(4) == b"IEND"
+    except OSError:
+        return False
+
+
+def _wait_for_stable_png(
+    path: str,
+    *,
+    stable_secs: float = 0.2,
+    poll: float = 0.05,
+    timeout: float = 10.0,
+    stop_event: threading.Event | None = None,
+) -> bool:
+    deadline = time.monotonic() + timeout
+    last_size = -1
+    stable_since: float | None = None
+    while time.monotonic() < deadline:
+        if stop_event is not None and stop_event.is_set():
+            return False
         try:
-            if os.path.isfile(tmp_path):
-                os.unlink(tmp_path)
+            size = os.path.getsize(path)
+        except FileNotFoundError:
+            last_size = -1
+            stable_since = None
+            time.sleep(poll)
+            continue
         except OSError:
-            pass
+            return False
+        if not _png_looks_complete(path):
+            last_size = -1
+            stable_since = None
+            time.sleep(poll)
+            continue
+        if size != last_size:
+            last_size = size
+            stable_since = time.monotonic()
+        elif (
+            stable_since is not None
+            and time.monotonic() - stable_since >= stable_secs
+        ):
+            return True
+        time.sleep(poll)
+    return False
 
 
 def _parse_stepwise_name(name: str) -> Optional[Tuple[int, int, int]]:
@@ -80,12 +150,20 @@ def watch_stepwise_to_output(
             if file_seed != seed or step_num > total:
                 continue
             full = os.path.join(stepwise_dir, name)
-            if not os.path.isfile(full) or os.path.getsize(full) < 64:
+            if not os.path.isfile(full):
                 continue
-            seen.add(name)
+            if not _png_looks_complete(full):
+                continue
+            if not _wait_for_stable_png(
+                full,
+                stop_event=stop_event,
+                timeout=2.0,
+            ):
+                continue
             try:
                 if output_path:
                     atomic_copy2(full, output_path)
+                seen.add(name)
                 emit_mflux_progress(
                     output_path if output_path else None,
                     step=step_num,
@@ -96,10 +174,29 @@ def watch_stepwise_to_output(
         time.sleep(poll_interval)
 
 
-def stepwise_dirs_for_run(steps: int, output_path: str) -> tuple[str | None, str | None]:
-    """Return (stepwise_dir, progressive_output_path) when steps > 1."""
+def show_progressive_from_payload(payload: Dict[str, Any]) -> bool:
+    if "show_progressive_images" in payload:
+        return bool(payload.get("show_progressive_images"))
+    from imagegen_plugins.image_gen_persistence import load_show_progressive_images
+
+    return load_show_progressive_images()
+
+
+def stepwise_dirs_for_run(
+    steps: int,
+    output_path: str,
+    *,
+    show_progressive: bool = True,
+) -> tuple[str | None, str | None]:
+    """Return (stepwise_dir, progressive_output_path) when steps > 1.
+
+    stepwise_dir is always created for steps > 1 so MFLUX callbacks and step
+    progress still run. progressive_output_path is set only when intermediate
+    image files should be written to the final output location.
+    """
     if steps > 1:
-        return prowser_mkdtemp(prefix="imagegen-mflux-stepwise-"), output_path
+        progressive_output = output_path if show_progressive else None
+        return prowser_mkdtemp(prefix="imagegen-mflux-stepwise-"), progressive_output
     return None, None
 
 

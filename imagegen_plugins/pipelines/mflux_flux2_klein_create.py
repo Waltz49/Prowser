@@ -22,6 +22,7 @@ from imagegen_plugins.pipelines.mflux_stepwise_progress import (
     cleanup_stepwise_dir,
     finalize_stepwise_progress,
     run_with_stepwise_watcher,
+    show_progressive_from_payload,
     stepwise_dirs_for_run,
 )
 
@@ -124,7 +125,11 @@ def run_from_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     if lora_scales and not isinstance(lora_scales, list):
         lora_scales = [float(lora_scales)]
 
-    stepwise_dir, progressive_output_path = stepwise_dirs_for_run(steps, output_path)
+    stepwise_dir, progressive_output_path = stepwise_dirs_for_run(
+        steps,
+        output_path,
+        show_progressive=show_progressive_from_payload(payload),
+    )
 
     if os.path.isfile(output_path):
         try:

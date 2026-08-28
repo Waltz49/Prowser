@@ -27,6 +27,7 @@ from imagegen_plugins.pipelines.mflux_stepwise_progress import (
     cleanup_stepwise_dir,
     finalize_stepwise_progress,
     run_with_stepwise_watcher,
+    show_progressive_from_payload,
     stepwise_dirs_for_run,
 )
 
@@ -208,8 +209,13 @@ def _run_fill_generation(
     low_ram: bool,
     lora_paths: list[str] | None,
     lora_scales: list[float] | None,
+    show_progressive: bool = True,
 ) -> float:
-    stepwise_dir, progressive_output_path = stepwise_dirs_for_run(steps, output_path)
+    stepwise_dir, progressive_output_path = stepwise_dirs_for_run(
+        steps,
+        output_path,
+        show_progressive=show_progressive,
+    )
     if os.path.isfile(output_path):
         try:
             os.unlink(output_path)
@@ -341,6 +347,7 @@ def _run_infill_from_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
             low_ram=low_ram,
             lora_paths=lora_paths,
             lora_scales=lora_scales,
+            show_progressive=show_progressive_from_payload(payload),
         )
     finally:
         background.close()
@@ -438,6 +445,7 @@ def run_from_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
             low_ram=low_ram,
             lora_paths=lora_paths,
             lora_scales=lora_scales,
+            show_progressive=show_progressive_from_payload(payload),
         )
     finally:
         for p in (img_path, mask_path):
